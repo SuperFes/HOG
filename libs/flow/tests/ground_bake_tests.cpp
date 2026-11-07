@@ -1,4 +1,4 @@
-#include <hog/server/ground_bake.hpp>
+#include <hog/flow/ground_bake.hpp>
 
 #include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
@@ -13,8 +13,8 @@
 
 using Catch::Approx;
 using hog::DVec3;
-using hog::server::GroundBake;
-using hog::server::RainRecord;
+using hog::flow::GroundBake;
+using hog::flow::RainRecord;
 
 namespace {
 
@@ -33,7 +33,7 @@ DVec3 on_land(const Earth& earth) {
 } // namespace
 
 TEST_CASE("the tiles due round a place are its own first, then outward, never twice",
-          "[server][bake]") {
+          "[flow][bake]") {
     const Earth earth;
     const DVec3 up = on_land(earth);
     GroundBake bake;
@@ -48,7 +48,7 @@ TEST_CASE("the tiles due round a place are its own first, then outward, never tw
     CHECK(std::ranges::find(after, due.front()) == after.end());
 }
 
-TEST_CASE("the baked tiles are kept and read back", "[server][bake]") {
+TEST_CASE("the baked tiles are kept and read back", "[flow][bake]") {
     GroundBake bake;
     bake.mark({.face = 2, .i = 7, .j = 300});
     bake.mark({.face = 5, .i = 0, .j = 1});
@@ -62,7 +62,7 @@ TEST_CASE("the baked tiles are kept and read back", "[server][bake]") {
     CHECK_FALSE(again.restore(cut));
 }
 
-TEST_CASE("a tile's bricks hold its ground", "[server][bake]") {
+TEST_CASE("a tile's bricks hold its ground", "[flow][bake]") {
     const Earth earth;
     const DVec3 up = on_land(earth);
     const GroundBake::Tile tile = GroundBake::tile_at(earth.store, up);
@@ -80,7 +80,7 @@ TEST_CASE("a tile's bricks hold its ground", "[server][bake]") {
 }
 
 TEST_CASE("the rain a place gets is the mean of what the weather let fall there",
-          "[server][bake]") {
+          "[flow][bake]") {
     RainRecord rain{3, 0.6};
     const DVec3 up = glm::normalize(DVec3{1.0, 0.2, 0.1});
     CHECK(rain.at(up) == 0.6);
@@ -91,7 +91,7 @@ TEST_CASE("the rain a place gets is the mean of what the weather let fall there"
 }
 
 TEST_CASE("baking a tile under rain fills a hollow dug in it with water voxels or silt",
-          "[server][bake]") {
+          "[flow][bake]") {
     Earth earth;
     const DVec3 up = on_land(earth);
     const hog::globe::Layers& layers = earth.generator.layers();
@@ -129,7 +129,7 @@ TEST_CASE("baking a tile under rain fills a hollow dug in it with water voxels o
 }
 
 TEST_CASE("baking a tile weathers the rock under its ground into loose layers",
-          "[server][bake]") {
+          "[flow][bake]") {
     Earth earth;
     const DVec3 up = on_land(earth);
     const GroundBake::Tile tile = GroundBake::tile_at(earth.store, up);
@@ -191,7 +191,7 @@ std::optional<GroundBake::Tile> tile_on_river(const Planet& earth, const RainRec
 
 } // namespace
 
-TEST_CASE("a river's course runs tile by tile across its drainage cell", "[server][bake]") {
+TEST_CASE("a river's course runs tile by tile across its drainage cell", "[flow][bake]") {
     const Worn earth;
     const RainRecord rain{3, 1.0};
     const auto tile = tile_on_river(earth, rain);
@@ -214,7 +214,7 @@ TEST_CASE("a river's course runs tile by tile across its drainage cell", "[serve
     }
 }
 
-TEST_CASE("baking a tile on a river's course lays a river in it", "[server][bake]") {
+TEST_CASE("baking a tile on a river's course lays a river in it", "[flow][bake]") {
     const Worn earth;
     const RainRecord rain{3, 1.0};
     const auto tile = tile_on_river(earth, rain);
@@ -241,7 +241,7 @@ TEST_CASE("baking a tile on a river's course lays a river in it", "[server][bake
     CHECK(deepest >= hog::globe::Voxel::full / 2);
 }
 
-TEST_CASE("springs are seeded now and then, in the tile they're for", "[server][bake]") {
+TEST_CASE("springs are seeded now and then, in the tile they're for", "[flow][bake]") {
     std::size_t with = 0;
     for (std::uint32_t i = 0; i < 400; ++i) {
         const GroundBake::Tile tile{.face = 1, .i = i, .j = 77};

@@ -42,6 +42,9 @@ constexpr std::size_t chunks_per_tick = 4;
 constexpr std::size_t chunk_queue = 256 * 1'024;
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
+// Where the baked tiles are kept in a save.
+constexpr save::SectionId bake_section = save::section_id("BAKE");
+constexpr std::uint16_t bake_section_version = 1;
 
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
@@ -205,8 +208,8 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         }
     }
     if (const save::Section* kept =
-            loaded->snapshot ? loaded->snapshot->find(server::GroundBake::section) : nullptr;
-        kept != nullptr && kept->version == server::GroundBake::section_version) {
+            loaded->snapshot ? loaded->snapshot->find(bake_section) : nullptr;
+        kept != nullptr && kept->version == bake_section_version) {
         if (auto restored = server->baked_.restore(kept->bytes); !restored) {
             log::warn(save_log, "baking the ground afresh: {}", restored.error().message);
         } else {
@@ -295,7 +298,7 @@ void Server::bake_ground() {
         if (!baking_->done()) {
             return;
         }
-        const std::vector<server::GroundBake::Baked> written = baking_->take();
+        const std::vector<flow::GroundBake::Baked> written = baking_->take();
         baking_.reset();
         const std::vector<globe::BrickSite> since = voxels_.changed_since(baking_from_);
         const bool clashed = std::ranges::any_of(written, [&](const auto& baked) {
@@ -303,7 +306,7 @@ void Server::bake_ground() {
         });
         // Ground changed under the bake is baked again from what it is now.
         if (!clashed) {
-            for (const server::GroundBake::Baked& baked : written) {
+            for (const flow::GroundBake::Baked& baked : written) {
                 if (baked.brick) {
                     voxels_.put(baked.site, *baked.brick);
                 } else {
@@ -326,21 +329,21 @@ void Server::start_bake() {
     for (const WorldPosition& at : joined_.placed()) {
         places.push_back(glm::normalize(at.metres()));
     }
-    const std::vector<server::GroundBake::Tile> due = baked_.due(voxels_, places, reach);
+    const std::vector<flow::GroundBake::Tile> due = baked_.due(voxels_, places, reach);
     if (due.empty()) {
         return;
     }
-    const server::GroundBake::Tile tile = due.front();
+    const flow::GroundBake::Tile tile = due.front();
     // Open water gives back about a metre a year where it's warm, less where it's cold.
     const double kelvin =
         generator_.column(places.front(), globe::voxel_lod(generator_)).surface_temperature();
     const double evaporation = std::clamp(0.06 * (kelvin - 268.0), 0.1, 2.0);
     baking_tile_ = tile;
     baking_from_ = voxels_.revision();
-    baking_ = std::make_unique<jobs::Async<std::vector<server::GroundBake::Baked>>>(
-        jobs_, [generator = &generator_, held = server::GroundBake::held_in(voxels_, tile), tile,
+    baking_ = std::make_unique<jobs::Async<std::vector<flow::GroundBake::Baked>>>(
+        jobs_, [generator = &generator_, held = flow::GroundBake::held_in(voxels_, tile), tile,
                 rain = rain_, evaporation] {
-            return server::GroundBake::bake(*generator, held, tile, rain, evaporation);
+            return flow::GroundBake::bake(*generator, held, tile, rain, evaporation);
         });
 }
 
@@ -765,8 +768,8 @@ void Server::submit() {
                       .version = skies::WeatherKeeper::section_version,
                       .bytes = weather_->saved()});
     }
-    snapshot.add({.id = server::GroundBake::section,
-                  .version = server::GroundBake::section_version,
+    snapshot.add({.id = bake_section,
+                  .version = bake_section_version,
                   .bytes = baked_.saved()});
     writer_.submit(std::move(snapshot));
 }

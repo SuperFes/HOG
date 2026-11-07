@@ -5,7 +5,6 @@
 #include <hog/flow/region.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/save/snapshot.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +14,7 @@
 #include <span>
 #include <vector>
 
-namespace hog::server {
+namespace hog::flow {
 
 class RainRecord;
 
@@ -24,8 +23,6 @@ class RainRecord;
 // the world, so it's done once for everyone.
 class GroundBake {
 public:
-    static constexpr save::SectionId section = save::section_id("BAKE");
-    static constexpr std::uint16_t section_version = 1;
     // Brick stacks along each side of a tile.
     static constexpr std::uint32_t tile_side = 16;
 
@@ -49,14 +46,14 @@ public:
 
     // A drainage's river through the cells of the generator's drainage, as it crosses the tiles
     // in one: the river each tile on its course takes in, over the edge it comes in by.
-    using Course = std::map<Tile, flow::Region::River>;
+    using Course = std::map<Tile, Region::River>;
     // The course of the river through the drainage cell the tile lies in: from its edge towards
     // the cell upstream that gives it most, to its edge towards the cell it drains into, along
     // the lowest of the tiles' ground; none where too little drains through to be a river.
     [[nodiscard]] static Course course(const globe::World& world, Tile tile,
                                        const RainRecord& rain);
     // Springs seeded in the tile: now and then one, at a column picked by the tile.
-    [[nodiscard]] static std::vector<flow::Region::Spring> springs(Tile tile);
+    [[nodiscard]] static std::vector<Region::Spring> springs(Tile tile);
 
     // A brick a bake wrote, or none where it came out as generated.
     struct Baked {
@@ -116,4 +113,4 @@ void RainRecord::add(const Falling& falling, double hours) {
     }
 }
 
-} // namespace hog::server
+} // namespace hog::flow
