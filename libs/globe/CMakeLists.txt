@@ -73,3 +73,7 @@ hog_add_tests(hog_globe
     tests/volume_tests.cpp
     tests/weathering_tests.cpp
     tests/world_tests.cpp)
+
+if(TARGET hog_globe_tests)
+    target_compile_definitions(hog_globe_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()

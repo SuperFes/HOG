@@ -83,7 +83,9 @@ public:
     // bits as sample() at each point. Chunks are filled a column at a time through this.
     class Column {
     public:
-        [[nodiscard]] Sample sample(double radius) const noexcept;
+        // Without `caves`, as though none were near: for radii outside the stretches caves()
+        // gives, where none can be.
+        [[nodiscard]] Sample sample(double radius, bool caves = true) const noexcept;
         // Metres from the centre to the ground before caves open it; no solid stands above it.
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
@@ -106,6 +108,19 @@ public:
         // with none near is cheap.
         [[nodiscard]] std::vector<std::pair<double, double>> caves(double lowest, double highest,
                                                                    double within) const;
+        // A stretch of radius, from its bottom to its top, and whether a cave may be in it.
+        struct Change {
+            double bottom = 0.0;
+            double top = 0.0;
+            bool cave = false;
+            friend constexpr auto operator<=>(const Change&, const Change&) noexcept = default;
+        };
+        // The stretches of radius between `lowest` and `highest`, lowest first, where samples may
+        // differ from one radius to the next but for their temperature: about the ground, open
+        // water, the water table, the beds' edges and caves, each `margin` wider either way.
+        // Outside them, samples are alike all the way to the next, and no cave is near.
+        [[nodiscard]] std::vector<Change> changes(double lowest, double highest,
+                                                  double margin) const;
 
     private:
         friend class Generator;

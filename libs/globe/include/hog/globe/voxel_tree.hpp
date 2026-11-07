@@ -72,6 +72,16 @@ public:
         return tree;
     }
 
+    // Builds from the top down: `whole(x, y, z, across)` gives what every voxel of the cube
+    // `across` wide from that corner is, where it can tell, and `voxel_at` the rest one by one.
+    // The same tree as building from every voxel.
+    template <typename Whole, typename VoxelAt>
+    [[nodiscard]] static VoxelTree build_down(int side, const Whole& whole,
+                                              const VoxelAt& voxel_at) {
+        VoxelTree tree{side};
+        tree.root_ = tree.made(0, 0, 0, side, whole, voxel_at);
+        return tree;
+    }
     [[nodiscard]] int side() const noexcept { return side_; }
     [[nodiscard]] Cube at(int x, int y, int z) const;
     // Sets one voxel, splitting any larger cube it's in, and joining cubes back that come alike.
@@ -113,6 +123,26 @@ private:
     Id intern(const Node& node);
     [[nodiscard]] Id leaf_of(const Cube& voxel);
     [[nodiscard]] Id with(Id node, int side, int x, int y, int z, const Cube& voxel);
+
+    template <typename Whole, typename VoxelAt>
+    [[nodiscard]] Id made(int x, int y, int z, int across, const Whole& whole,
+                          const VoxelAt& voxel_at) {
+        if (const auto all = whole(x, y, z, across)) {
+            return leaf_of(*all);
+        }
+        if (across == 1) {
+            return leaf_of(voxel_at(x, y, z));
+        }
+        const int half = across / 2;
+        std::array<Id, 8> children{};
+        for (std::size_t k = 0; k < 8; ++k) {
+            children.at(k) = made(x + (half * static_cast<int>(k & 1U)),
+                                  y + (half * static_cast<int>((k >> 1U) & 1U)),
+                                  z + (half * static_cast<int>((k >> 2U) & 1U)), half, whole,
+                                  voxel_at);
+        }
+        return joined(children);
+    }
 
     // The leaf the eight children are, if they are all one; else a node of them.
     [[nodiscard]] Id joined(const std::array<Id, 8>& children);

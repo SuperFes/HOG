@@ -28,6 +28,8 @@ public:
     void remove(Site site) { set(site, {}); }
 
     [[nodiscard]] std::size_t tiles() const noexcept { return tiles_.size(); }
+    // The tile holding `site`; none where it's all air.
+    [[nodiscard]] const VoxelTree* tile_at(Site site) const;
     // Puts the tile holding `site`, none where it's all air.
     void put_tile(Site site, VoxelTree tile);
     // Takes in the other's tiles, over any of its own in the same places.
