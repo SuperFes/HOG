@@ -28,6 +28,7 @@ add_library(hog_globe
     src/cube.cpp
     src/voxel.cpp
     src/voxel_tree.cpp
+    src/volume.cpp
     src/voxel_store.cpp
     src/world.cpp)
 add_library(hog::globe ALIAS hog_globe)
@@ -68,5 +69,6 @@ hog_add_tests(hog_globe
     tests/cube_tests.cpp
     tests/voxel_tests.cpp
     tests/voxel_tree_tests.cpp
+    tests/volume_tests.cpp
     tests/weathering_tests.cpp
     tests/world_tests.cpp)
