@@ -45,6 +45,9 @@ public:
     [[nodiscard]] std::optional<std::uint32_t> floor(Site site) const;
     void set_floor(Site site, std::uint32_t layer);
     [[nodiscard]] bool made(Site site) const;
+    // The layer over the highest tile held up the tile column through `site`; its floor where it
+    // holds none, and 0 where it isn't made.
+    [[nodiscard]] std::uint32_t held_top(Site site) const;
     // The highest layer holding matter in the column through `site`; none where it holds none.
     [[nodiscard]] std::optional<std::uint32_t> top(Site site) const;
 

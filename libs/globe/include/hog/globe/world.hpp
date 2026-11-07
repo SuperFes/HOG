@@ -60,6 +60,7 @@ public:
     // voxels all through the voxels it stands for; none to read nothing more. The cache must
     // outlive the world and its copies.
     void read_coarse(const ColumnCache* cache) noexcept { coarse_ = cache; }
+    [[nodiscard]] const ColumnCache* coarse() const noexcept { return coarse_; }
 
     // Air where nothing is made; solid rock under a made column's floor.
     [[nodiscard]] Voxel at(Site site) const;

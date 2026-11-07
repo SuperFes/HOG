@@ -60,6 +60,19 @@ bool Volume::made(Site site) const {
     return lowest && site.layer >= *lowest;
 }
 
+std::uint32_t Volume::held_top(Site site) const {
+    const Column column = column_of(site);
+    const auto past =
+        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX});
+    if (past != tiles_.begin()) {
+        const Key& last = std::prev(past)->first;
+        if (last.face == column.face && last.i == column.i && last.j == column.j) {
+            return (last.k + 1) * side;
+        }
+    }
+    return floor(site).value_or(0);
+}
+
 std::optional<std::uint32_t> Volume::top(Site site) const {
     const Column column = column_of(site);
     auto past =

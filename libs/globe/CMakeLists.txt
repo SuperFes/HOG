@@ -31,6 +31,7 @@ add_library(hog_globe
     src/volume.cpp
     src/volume_build.cpp
     src/volume_archive.cpp
+    src/voxel_mesh.cpp
     src/world.cpp)
 add_library(hog::globe ALIAS hog_globe)
 
@@ -70,6 +71,7 @@ hog_add_tests(hog_globe
     tests/voxel_tests.cpp
     tests/voxel_tree_tests.cpp
     tests/volume_tests.cpp
+    tests/voxel_mesh_tests.cpp
     tests/weathering_tests.cpp
     tests/world_tests.cpp)
 
