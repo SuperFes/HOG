@@ -628,6 +628,11 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(sampler).error());
     }
     ocean.shore_sampler_ = std::move(sampler).value();
+    auto blurring = make_blurring_sampler(device);
+    if (!blurring) {
+        return std::unexpected(std::move(blurring).error());
+    }
+    ocean.blurring_sampler_ = std::move(blurring).value();
     auto calm = CalmSea::create(device);
     if (!calm) {
         return std::unexpected(std::move(calm).error());
@@ -1090,14 +1095,14 @@ Result<> Ocean::bind(VkCommandBuffer commands, VkExtent2D extent, const OceanVie
         push_sampled_image(commands, pipeline, behind_binding + 2,
                            view.behind->environment != VK_NULL_HANDLE ? view.behind->environment
                                                                       : calm_.environment(),
-                           shore_sampler_.handle());
+                           blurring_sampler_.handle());
     } else if (air_) {
         // Over the water, what it mirrors.
         push_sampled_image(commands, pipeline, behind_binding + 2,
                            view.behind && view.behind->environment != VK_NULL_HANDLE
                                ? view.behind->environment
                                : calm_.environment(),
-                           shore_sampler_.handle());
+                           blurring_sampler_.handle());
     }
     vkCmdPushConstants(commands, pipeline.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),
