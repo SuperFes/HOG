@@ -37,6 +37,7 @@ std::optional<std::uint32_t> Volume::floor(Site site) const {
 
 void Volume::set_floor(Site site, std::uint32_t layer) {
     floors_.insert_or_assign(column_of(site), layer);
+    unsaved_.insert(column_of(site));
 }
 
 bool Volume::made(Site site) const {
@@ -64,10 +65,22 @@ bool Volume::set(Site site, const Cube& voxel) {
         found = tiles_.emplace(key, VoxelTree{tile_side}).first;
     }
     VoxelTree& tile = found->second;
+    if (tile.at(within(site.i), within(site.j), within(site.layer)) == voxel) {
+        return true;
+    }
     tile.set(within(site.i), within(site.j), within(site.layer), voxel);
     if (all_air(tile)) {
         tiles_.erase(found);
     }
+    // Runs of sets within a brick are logged once, at the last.
+    const BrickSite brick = brick_of(site);
+    ++revision_;
+    if (!log_.empty() && log_.back().second == brick) {
+        log_.back().first = revision_;
+    } else {
+        log_.emplace_back(revision_, brick);
+    }
+    unsaved_.insert(column_of(site));
     return true;
 }
 
@@ -85,6 +98,7 @@ const VoxelTree* Volume::tile_at(Site site) const {
 }
 
 void Volume::put_tile(Site site, VoxelTree tile) {
+    unsaved_.insert(column_of(site));
     if (all_air(tile)) {
         tiles_.erase(key_of(site));
         return;
@@ -248,6 +262,7 @@ Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) 
         tiles_.insert_or_assign(key, std::move(tree));
     }
     floors_.insert_or_assign(column, static_cast<std::uint32_t>(*lowest));
+    unsaved_.erase(column);
     return {};
 }
 
@@ -261,6 +276,23 @@ bool Volume::same_as(const Volume& other) const {
         }
     }
     return true;
+}
+
+std::vector<BrickSite> Volume::changed_since(std::uint64_t revision) const {
+    std::set<BrickSite> bricks;
+    for (auto entry = log_.rbegin(); entry != log_.rend() && entry->first > revision; ++entry) {
+        bricks.insert(entry->second);
+    }
+    return {bricks.begin(), bricks.end()};
+}
+
+std::vector<Site> Volume::unsaved() const {
+    std::vector<Site> corners;
+    corners.reserve(unsaved_.size());
+    for (const Column& column : unsaved_) {
+        corners.push_back({.face = column.face, .i = column.i * side, .j = column.j * side});
+    }
+    return corners;
 }
 
 } // namespace hog::globe

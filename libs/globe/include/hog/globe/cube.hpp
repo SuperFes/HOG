@@ -1,6 +1,8 @@
 #pragma once
 
+#include <hog/globe/layers.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/planet.hpp>
 #include <hog/globe/voxel.hpp>
 
 #include <cstdint>
@@ -34,5 +36,9 @@ struct Cube {
 [[nodiscard]] Cube cube_of(const Voxel& voxel, double baseline) noexcept;
 // The voxel a cube stands for: amounts at its steps, and a temperature of `baseline` and its heat.
 [[nodiscard]] Voxel voxel_of(const Cube& cube, double baseline) noexcept;
+
+// What the place gives a voxel, the baseline its heat is told over: the open air's mean
+// temperature at its middle. Ground and water are never colder than the air at their height.
+[[nodiscard]] double place_temperature(const Planet& planet, const Layers& layers, Site site);
 
 } // namespace hog::globe

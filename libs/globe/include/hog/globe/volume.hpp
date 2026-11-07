@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/result.hpp>
+#include <hog/globe/brick.hpp>
 #include <hog/globe/cube.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_tree.hpp>
@@ -9,7 +10,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -58,6 +61,16 @@ public:
 
     [[nodiscard]] bool same_as(const Volume& other) const;
 
+    // Each voxel set to something else counts a revision: the bricks changed since one, in order,
+    // each once.
+    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
+    [[nodiscard]] std::vector<BrickSite> changed_since(std::uint64_t revision) const;
+
+    // The tile columns changed since they were last saved, as their corners, in order: set, given
+    // a floor or a tile. Those decoded or merged in are as saved.
+    [[nodiscard]] std::vector<Site> unsaved() const;
+    void saved(Site site) { unsaved_.erase(column_of(site)); }
+
 private:
     struct Key {
         std::uint8_t face = 0;
@@ -77,6 +90,9 @@ private:
 
     std::map<Column, std::uint32_t> floors_;
     std::map<Key, VoxelTree> tiles_;
+    std::uint64_t revision_ = 0;
+    std::vector<std::pair<std::uint64_t, BrickSite>> log_; // revision and brick, in order
+    std::set<Column> unsaved_;
 };
 
 } // namespace hog::globe
