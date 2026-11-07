@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <bit>
 #include <format>
+#include <iterator>
+#include <optional>
 #include <utility>
 
 namespace hog::globe {
@@ -12,7 +14,7 @@ Result<void> MemoryVolumeArchive::write(std::span<const std::byte> header,
                                         std::span<const SavedColumn> columns) {
     header_.assign(header.begin(), header.end());
     for (const SavedColumn& column : columns) {
-        columns_.insert_or_assign({column.face, column.i, column.j}, column.bytes);
+        columns_.insert_or_assign({column.face, column.i, column.j, column.level}, column.bytes);
     }
     return {};
 }
@@ -22,20 +24,23 @@ Result<std::vector<std::byte>> MemoryVolumeArchive::header() const {
 }
 
 Result<std::optional<SavedColumn>> MemoryVolumeArchive::column(std::uint8_t face, std::uint32_t i,
-                                                               std::uint32_t j) const {
-    const auto found = columns_.find({face, i, j});
+                                                               std::uint32_t j,
+                                                               std::uint8_t level) const {
+    const auto found = columns_.find({face, i, j, level});
     if (found == columns_.end()) {
         return std::nullopt;
     }
-    return SavedColumn{.face = face, .i = i, .j = j, .bytes = found->second};
+    return SavedColumn{.face = face, .i = i, .j = j, .level = level, .bytes = found->second};
 }
 
 Result<std::vector<SavedColumn>> MemoryVolumeArchive::columns() const {
     std::vector<SavedColumn> all;
     all.reserve(columns_.size());
     for (const auto& [place, bytes] : columns_) {
-        const auto& [face, i, j] = place;
-        all.push_back({.face = face, .i = i, .j = j, .bytes = bytes});
+        const auto& [face, i, j, level] = place;
+        if (level == 0) {
+            all.push_back({.face = face, .i = i, .j = j, .level = 0, .bytes = bytes});
+        }
     }
     return all;
 }
@@ -133,6 +138,25 @@ Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive,
     return save_columns(volume, archive, origin, volume.unsaved());
 }
 
+std::vector<SavedColumn> saved_levels(const TileColumn& column, std::uint8_t face, std::uint32_t i,
+                                      std::uint32_t j) {
+    std::vector<SavedColumn> levels;
+    levels.reserve(coarsest_level + 1);
+    levels.push_back({.face = face, .i = i, .j = j, .level = 0, .bytes = column.encode()});
+    TileColumn coarser = column.halved();
+    for (int level = 1; level <= coarsest_level; ++level) {
+        levels.push_back({.face = face,
+                          .i = i,
+                          .j = j,
+                          .level = static_cast<std::uint8_t>(level),
+                          .bytes = coarser.encode()});
+        if (level < coarsest_level) {
+            coarser = coarser.halved();
+        }
+    }
+    return levels;
+}
+
 Result<std::vector<Site>> load_columns(Volume& volume, const VolumeArchive& archive,
                                        std::span<const Site> corners) {
     constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
@@ -141,7 +165,7 @@ Result<std::vector<Site>> load_columns(Volume& volume, const VolumeArchive& arch
         if (volume.floor(corner)) {
             continue;
         }
-        const auto column = archive.column(corner.face, corner.i / side, corner.j / side);
+        const auto column = archive.column(corner.face, corner.i / side, corner.j / side, 0);
         if (!column) {
             return std::unexpected(column.error());
         }
@@ -172,12 +196,14 @@ Result<std::size_t> save_columns(Volume& volume, VolumeArchive& archive, const V
     }
     constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
     std::vector<SavedColumn> columns;
-    columns.reserve(unsaved.size());
+    columns.reserve(unsaved.size() * (coarsest_level + 1));
     for (const Site corner : unsaved) {
-        columns.push_back({.face = corner.face,
-                           .i = corner.i / side,
-                           .j = corner.j / side,
-                           .bytes = volume.encode_column(corner)});
+        const std::optional<TileColumn> column = volume.column(corner);
+        if (!column) {
+            continue;
+        }
+        std::ranges::move(saved_levels(*column, corner.face, corner.i / side, corner.j / side),
+                          std::back_inserter(columns));
     }
     if (auto written = archive.write(volume_header(origin), columns); !written) {
         return std::unexpected(written.error());

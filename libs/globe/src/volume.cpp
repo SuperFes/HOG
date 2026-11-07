@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -216,43 +217,34 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
     return volume;
 }
 
-std::vector<std::byte> Volume::encode_column(Site site) const {
-    const std::optional<std::uint32_t> lowest = floor(site);
-    if (!lowest) {
-        return {};
-    }
-    const Column column = column_of(site);
-    const auto first = tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j});
-    const auto last =
-        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX});
+std::vector<std::byte> TileColumn::encode() const {
     ByteWriter out;
-    out.write_varint(*lowest);
-    out.write_varint(static_cast<std::uint64_t>(std::distance(first, last)));
-    for (auto at = first; at != last; ++at) {
-        const std::vector<std::byte> bytes = at->second.encode();
-        out.write_varint(at->first.k);
+    out.write_varint(floor);
+    out.write_varint(tiles.size());
+    for (const auto& [k, tree] : tiles) {
+        const std::vector<std::byte> bytes = tree.encode();
+        out.write_varint(k);
         out.write_varint(bytes.size());
         out.write_bytes(bytes);
     }
     return std::move(out).take();
 }
 
-Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) {
+Result<TileColumn> TileColumn::decode(std::span<const std::byte> bytes, int across) {
     const auto fail = [](std::string_view why) {
         return make_error(ErrorCode::InvalidArgument, std::string{why});
     };
     ByteReader in{bytes};
     const auto lowest = in.read_varint();
     const auto count = in.read_varint();
-    if (!lowest || !count || *count > bytes.size()) {
+    if (!lowest || !count || *count > bytes.size() || *lowest > UINT32_MAX) {
         return fail("a tile column's bytes are cut short or out of range");
     }
-    const Column column = column_of(site);
-    std::vector<std::pair<Key, VoxelTree>> found;
+    TileColumn column{.floor = static_cast<std::uint32_t>(*lowest), .tiles = {}};
     for (std::uint64_t n = 0; n < *count; ++n) {
         const auto k = in.read_varint();
         const auto size = in.read_varint();
-        if (!k || !size) {
+        if (!k || !size || *k > UINT32_MAX) {
             return fail("a tile column's bytes are cut short");
         }
         const auto tree_bytes = in.read_bytes(*size);
@@ -263,25 +255,61 @@ Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) 
         if (!tree) {
             return std::unexpected(tree.error());
         }
-        if (tree->side() != tile_side) {
+        if (tree->side() != across) {
             return fail("a tile column's tile is the wrong size");
         }
-        found.emplace_back(Key{.face = column.face,
-                               .i = column.i,
-                               .j = column.j,
-                               .k = static_cast<std::uint32_t>(*k)},
-                           std::move(*tree));
+        column.tiles.emplace_back(static_cast<std::uint32_t>(*k), std::move(*tree));
     }
     if (in.remaining() != 0) {
         return fail("a tile column's bytes run on past its tiles");
     }
+    return column;
+}
+
+TileColumn TileColumn::halved() const {
+    TileColumn half{.floor = floor / 2, .tiles = {}};
+    half.tiles.reserve(tiles.size());
+    for (const auto& [k, tree] : tiles) {
+        half.tiles.emplace_back(k, globe::halved(tree));
+    }
+    return half;
+}
+
+std::optional<TileColumn> Volume::column(Site site) const {
+    const std::optional<std::uint32_t> lowest = floor(site);
+    if (!lowest) {
+        return std::nullopt;
+    }
+    const Column at = column_of(site);
+    TileColumn column{.floor = *lowest, .tiles = {}};
+    for (auto tile = tiles_.lower_bound({.face = at.face, .i = at.i, .j = at.j});
+         tile != tiles_.end() && tile->first.face == at.face && tile->first.i == at.i &&
+         tile->first.j == at.j;
+         ++tile) {
+        column.tiles.emplace_back(tile->first.k, tile->second);
+    }
+    return column;
+}
+
+std::vector<std::byte> Volume::encode_column(Site site) const {
+    const std::optional<TileColumn> found = column(site);
+    return found ? found->encode() : std::vector<std::byte>{};
+}
+
+Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) {
+    auto decoded = TileColumn::decode(bytes, tile_side);
+    if (!decoded) {
+        return std::unexpected(std::move(decoded).error());
+    }
+    const Column column = column_of(site);
     tiles_.erase(
         tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j}),
         tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX}));
-    for (auto& [key, tree] : found) {
-        tiles_.insert_or_assign(key, std::move(tree));
+    for (auto& [k, tree] : decoded->tiles) {
+        tiles_.insert_or_assign({.face = column.face, .i = column.i, .j = column.j, .k = k},
+                                std::move(tree));
     }
-    floors_.insert_or_assign(column, static_cast<std::uint32_t>(*lowest));
+    floors_.insert_or_assign(column, decoded->floor);
     unsaved_.erase(column);
     return {};
 }

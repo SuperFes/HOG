@@ -17,6 +17,19 @@
 
 namespace hog::globe {
 
+// A tile column's floor and tiles as they're stored and sent. Halved, its tiles are each half as
+// wide and its floor counted in voxels twice as tall.
+struct TileColumn {
+    std::uint32_t floor = 0;
+    std::vector<std::pair<std::uint32_t, VoxelTree>> tiles; // by tile up the column, bottom up
+
+    [[nodiscard]] std::vector<std::byte> encode() const;
+    // Fails, saying why, on bytes that aren't one with tiles `across` voxels wide.
+    [[nodiscard]] static Result<TileColumn> decode(std::span<const std::byte> bytes, int across);
+    // Precondition: its tiles are wider than one voxel.
+    [[nodiscard]] TileColumn halved() const;
+};
+
 // The world's voxels, held where they are: tiles `tile_side` voxels across along a face and up
 // through the layers, each a VoxelTree. Air is never held; a tile of nothing else is no tile.
 // Each tile column is made down to its floor only; below that nothing is made yet, not even air.
@@ -55,7 +68,9 @@ public:
     // Fails, saying why, on bytes that aren't a volume.
     [[nodiscard]] static Result<Volume> decode(std::span<const std::byte> bytes);
 
-    // The tile column holding `site`, its floor and tiles, as bytes; empty where it isn't made.
+    // The tile column holding `site`; none where it isn't made.
+    [[nodiscard]] std::optional<TileColumn> column(Site site) const;
+    // The same as bytes; empty where it isn't made.
     [[nodiscard]] std::vector<std::byte> encode_column(Site site) const;
     // Puts back the tile column holding `site` from its bytes, in place of what was there; fails,
     // changing nothing, on bytes that aren't one.

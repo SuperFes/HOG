@@ -162,6 +162,35 @@ TEST_CASE("a tile column let go is as if never made, its neighbour left as it wa
     CHECK(volume.at({.face = 2, .i = 64, .j = 5, .layer = 70}).solid == Material::Granite);
 }
 
+TEST_CASE("a tile column halved is half as fine, its floor counted in its taller voxels",
+          "[globe][volume]") {
+    Volume volume = rock_to(70);
+    volume.set_floor({.face = 2, .i = 0, .j = 5}, 12);
+    REQUIRE(volume.column({.face = 2, .i = 63, .j = 5}));
+    const hog::globe::TileColumn column =
+        volume.column({.face = 2, .i = 63, .j = 5}).value_or(hog::globe::TileColumn{});
+    CHECK(column.floor == 12);
+    REQUIRE(column.tiles.size() == 2);
+    CHECK(column.encode() == volume.encode_column({.face = 2, .i = 63, .j = 5}));
+    CHECK_FALSE(volume.column({.face = 2, .i = 300, .j = 5}));
+
+    const hog::globe::TileColumn half = column.halved();
+    CHECK(half.floor == 6);
+    REQUIRE(half.tiles.size() == 2);
+    CHECK(half.tiles[1].first == 1);
+    CHECK(half.tiles[1].second.side() == Volume::tile_side / 2);
+    // Rock to layer 70 is up to 35 of the halved; i 60 to 63 is 30 to 31.
+    CHECK(half.tiles[1].second.at(30, 2, 35 - 32).solid == Material::Granite);
+    CHECK(half.tiles[1].second.at(30, 2, 36 - 32) == Cube{});
+    CHECK(half.tiles[1].second.at(29, 2, 0) == Cube{});
+
+    const auto back = hog::globe::TileColumn::decode(half.encode(), Volume::tile_side / 2);
+    REQUIRE(back);
+    CHECK(back->floor == 6);
+    CHECK(back->tiles[1].second.same_as(half.tiles[1].second));
+    CHECK_FALSE(hog::globe::TileColumn::decode(half.encode(), Volume::tile_side));
+}
+
 TEST_CASE("a volume tells the bricks changed since a revision, each once", "[globe][volume]") {
     Volume volume = rock_to(70);
     const std::uint64_t before = volume.revision();
@@ -233,8 +262,9 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     REQUIRE(archive.write(header, std::span{&saved, 1}));
     CHECK(archive.header() == header);
     CHECK(hog::globe::origin_from(*archive.header()) == origin);
-    CHECK(archive.column(4, 7, 9) == saved);
-    CHECK(archive.column(4, 7, 10) == std::nullopt);
+    CHECK(archive.column(4, 7, 9, 0) == saved);
+    CHECK(archive.column(4, 7, 10, 0) == std::nullopt);
+    CHECK(archive.column(4, 7, 9, 1) == std::nullopt);
 
     std::vector<std::byte> other = header;
     other.front() = std::byte{99};

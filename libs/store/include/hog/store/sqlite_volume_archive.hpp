@@ -13,7 +13,7 @@
 
 namespace hog::store {
 
-// A world's volume kept in its SQLite file, a row a tile column.
+// A world's volume kept in its SQLite file, a row a tile column at each level.
 class SqliteVolumeArchive final : public globe::VolumeArchive {
 public:
     // Opens the database at `path`, creating it if missing. The path ":memory:" opens a private
@@ -24,7 +24,7 @@ public:
                        std::span<const globe::SavedColumn> columns) override;
     [[nodiscard]] Result<std::vector<std::byte>> header() const override;
     [[nodiscard]] Result<std::optional<globe::SavedColumn>>
-    column(std::uint8_t face, std::uint32_t i, std::uint32_t j) const override;
+    column(std::uint8_t face, std::uint32_t i, std::uint32_t j, std::uint8_t level) const override;
     [[nodiscard]] Result<std::vector<globe::SavedColumn>> columns() const override;
 
 private:

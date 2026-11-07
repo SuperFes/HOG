@@ -184,4 +184,9 @@ private:
     std::unordered_map<Node, Id, Hash, Equal> ids_;
 };
 
+// The tree half as wide, each voxel standing for the eight it covers: of each of its solid, grain
+// and liquid, as much as the eight hold on average, of the material holding most of it; their
+// heat on average, and the condition of the least whole. Precondition: wider than one voxel.
+[[nodiscard]] VoxelTree halved(const VoxelTree& tree);
+
 } // namespace hog::globe

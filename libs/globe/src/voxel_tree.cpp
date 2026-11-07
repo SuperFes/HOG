@@ -4,10 +4,14 @@
 #include <hog/globe/voxel_tree.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
 
 namespace hog::globe {
 
@@ -357,6 +361,78 @@ bool VoxelTree::same_as(const VoxelTree& other) const {
         }
     }
     return true;
+}
+
+namespace {
+
+// One of a cube's matters over eight voxels: the material holding most of it, and its average.
+struct Share {
+    std::array<std::uint32_t, material_count> by{};
+
+    void add(Material material, std::uint16_t amount) {
+        by.at(static_cast<std::size_t>(material)) += amount;
+    }
+    [[nodiscard]] std::pair<Material, std::uint16_t> taken() const {
+        // Air holds nothing of a matter, so is never the most of one.
+        std::size_t most = 1;
+        std::uint32_t total = 0;
+        for (std::size_t k = 1; k < by.size(); ++k) {
+            total += by.at(k);
+            if (by.at(k) > by.at(most)) {
+                most = k;
+            }
+        }
+        const auto amount = static_cast<std::uint16_t>((total + 4) / 8);
+        return amount == 0 ? std::pair{Material::Air, std::uint16_t{0}}
+                           : std::pair{static_cast<Material>(most), amount};
+    }
+};
+
+Cube summed(const std::array<Cube, 8>& eight) {
+    Share solid;
+    Share grain;
+    Share liquid;
+    std::uint32_t heat = 0;
+    std::uint8_t condition = Voxel::sound;
+    for (const Cube& cube : eight) {
+        solid.add(cube.solid, cube.solid_amount);
+        grain.add(cube.grain, cube.grain_amount);
+        liquid.add(cube.liquid, cube.liquid_amount);
+        heat += cube.heat;
+        condition = std::min(condition, cube.condition);
+    }
+    Cube out;
+    std::tie(out.solid, out.solid_amount) = solid.taken();
+    std::tie(out.grain, out.grain_amount) = grain.taken();
+    std::tie(out.liquid, out.liquid_amount) = liquid.taken();
+    out.heat = static_cast<std::uint8_t>((heat + 4) / 8);
+    out.condition = out.solid == Material::Air ? Voxel::sound : condition;
+    return out;
+}
+
+} // namespace
+
+VoxelTree halved(const VoxelTree& tree) {
+    HOG_ASSERT(tree.side() > 1, "a tree wider than one voxel");
+    // A cube within one leaf of the finer tree is that leaf's voxel all through.
+    const auto whole = [&](int x, int y, int z, int across) -> std::optional<Cube> {
+        if (tree.leaf_side(2 * x, 2 * y, 2 * z) >= 2 * across) {
+            std::array<Cube, 8> eight;
+            eight.fill(tree.at(2 * x, 2 * y, 2 * z));
+            return summed(eight);
+        }
+        return std::nullopt;
+    };
+    const auto voxel_at = [&](int x, int y, int z) {
+        std::array<Cube, 8> eight;
+        for (std::size_t k = 0; k < eight.size(); ++k) {
+            eight.at(k) = tree.at((2 * x) + static_cast<int>(k & 1U),
+                                  (2 * y) + static_cast<int>((k >> 1U) & 1U),
+                                  (2 * z) + static_cast<int>((k >> 2U) & 1U));
+        }
+        return summed(eight);
+    };
+    return VoxelTree::build_down(tree.side() / 2, whole, voxel_at);
 }
 
 } // namespace hog::globe

@@ -72,14 +72,24 @@ TEST_CASE("a build writes each tile column once, as the generator makes it", "[b
     CHECK(hog::globe::origin_from(*archive.header()) == hog::globe::origin_of(generator));
     for (std::uint32_t j = area.j; j < area.j + 2; ++j) {
         for (std::uint32_t i = area.i; i < area.i + 2; ++i) {
-            const auto saved = archive.column(area.face, i, j);
+            const auto saved = archive.column(area.face, i, j, 0);
             REQUIRE(saved);
             const hog::globe::SavedColumn column = saved->value_or(hog::globe::SavedColumn{});
             REQUIRE_FALSE(column.bytes.empty());
             const hog::globe::Site corner{
                 .face = area.face, .i = i * Volume::tile_side, .j = j * Volume::tile_side};
-            CHECK(column.bytes ==
-                  hog::globe::generate_tiles(generator, area.face, i, j).encode_column(corner));
+            const Volume made = hog::globe::generate_tiles(generator, area.face, i, j);
+            CHECK(column.bytes == made.encode_column(corner));
+            // And each coarser level of it.
+            hog::globe::TileColumn coarser = made.column(corner).value_or(hog::globe::TileColumn{});
+            for (int level = 1; level <= hog::globe::coarsest_level; ++level) {
+                coarser = coarser.halved();
+                const auto at_level =
+                    archive.column(area.face, i, j, static_cast<std::uint8_t>(level));
+                REQUIRE(at_level);
+                REQUIRE(at_level->has_value());
+                CHECK(at_level->value_or(hog::globe::SavedColumn{}).bytes == coarser.encode());
+            }
         }
     }
 
@@ -99,5 +109,5 @@ TEST_CASE("a build refuses a world made from another planet", "[build_world]") {
     hog::jobs::JobSystem jobs{1};
     const Area area = hog::globe::around(generator, {0.3, -0.2, 0.93}, 1);
     CHECK_FALSE(hog::build_world::build(generator, archive, jobs, {area}));
-    CHECK(archive.column(area.face, area.i, area.j) == std::nullopt);
+    CHECK(archive.column(area.face, area.i, area.j, 0) == std::nullopt);
 }
