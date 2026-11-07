@@ -1,8 +1,7 @@
 #include <hog/chat/filter.hpp>
 #include <hog/chunks/globe_stream.hpp>
-#include <hog/chunks/mesh_codec.hpp>
 #include <hog/client/chat.hpp>
-#include <hog/client/chunk_cache.hpp>
+#include <hog/client/column_meshes.hpp>
 #include <hog/client/cutaway.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
@@ -22,7 +21,10 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
+#include <hog/globe/cell.hpp>
+#include <hog/globe/column_cache.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
@@ -633,23 +635,9 @@ public:
         return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
     }
 
-    // Tells the server how fast the client wants detail to fall off with distance, once in.
-    void set_view_detail(const protocol::ViewDetail& detail) {
-        if (session_) {
-            session_->set_view_detail(detail);
-        }
-    }
-
-    // Asks the server for chunks of its plan.
-    void ask_chunks(std::span<const std::uint64_t> keys) {
-        if (session_) {
-            session_->ask_chunks(keys);
-        }
-    }
-
-    // The surfaces the server sent to show since last asked.
-    [[nodiscard]] std::vector<client::Session::ChunkEvent> take_chunks() {
-        return session_ ? session_->take_chunks() : std::vector<client::Session::ChunkEvent>{};
+    // The tile columns the server sent since last asked.
+    [[nodiscard]] std::vector<protocol::SentColumn> take_columns() {
+        return session_ ? session_->take_columns() : std::vector<protocol::SentColumn>{};
     }
 
     // Answers the server and the login service, with nothing yet to say of where the player is.
@@ -1120,65 +1108,68 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     return {};
 }
 
-// Takes in what the server sent of the planet's surface, asks it for what the plan needs that isn't
-// held, and has the scene draw the plan from what is.
-void show_streamed(Connection& connection, client::Scene& scene, client::ChunkCache& cache,
-                   MonotonicClock::time_point now) {
-    HOG_ZONE("chunks");
-    for (client::Session::ChunkEvent& event : connection.take_chunks()) {
-        if (auto* part = std::get_if<protocol::Chunk>(&event)) {
-            cache.receive(std::move(*part));
-        } else {
-            cache.plan(std::get<protocol::ChunkPlan>(event));
+// Metres from the eye the client keeps the ground it's sent: a little past what the server sends.
+constexpr double kept_ground = 9'000.0;
+
+// The ground the server sends, held as it comes: voxels alone, over the planet and its layers.
+struct StreamedGround {
+    StreamedGround(const globe::Planet& planet, const globe::Layers& layers, jobs::JobSystem& jobs)
+        : planet{planet}, world{this->planet, layers, volume}, meshes{world, jobs} {
+        world.read_coarse(&held);
+    }
+    StreamedGround(const StreamedGround&) = delete;
+    StreamedGround& operator=(const StreamedGround&) = delete;
+    StreamedGround(StreamedGround&&) = delete;
+    StreamedGround& operator=(StreamedGround&&) = delete;
+    ~StreamedGround() = default;
+
+    globe::Planet planet;
+    globe::Volume volume;
+    globe::World world;
+    globe::ColumnCache held{volume};
+    client::ColumnMeshes meshes;
+    std::optional<globe::Site> over; // the tile column last kept about
+};
+
+// Takes in the tile columns the server sent, once the columns being meshed from the world are
+// done, and has those they changed meshed again. Lets go those far off as the eye moves on.
+void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye) {
+    HOG_ZONE("ground");
+    const std::vector<protocol::SentColumn> sent = connection.take_columns();
+    globe::ColumnCache& held = ground.held;
+    std::optional<globe::Site>& over = ground.over;
+    const globe::Layers& layers = ground.world.layers();
+    const globe::Cell cell = globe::cell_under(glm::normalize(eye), layers.level);
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    const globe::Site under{
+        .face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
+    if (sent.empty() && over == under) {
+        return;
+    }
+    ground.meshes.finish();
+    for (const protocol::SentColumn& column : sent) {
+        if (auto taken = held.take(column.face, column.i, column.j, column.level, column.bytes);
+            !taken) {
+            log::warn(connection_log, "can't hold a tile column sent: {}", taken.error());
         }
     }
-    const std::vector<std::uint64_t> asked = cache.to_ask(now);
-    if (!asked.empty()) {
-        connection.ask_chunks(asked);
+    if (over != under) {
+        over = under;
+        held.keep_near(layers, eye, kept_ground);
     }
-    chunks::GlobeStream::Changes changes = cache.changes();
-    if (!changes.empty()) {
+    ground.meshes.changed(held.take_changed());
+    if (chunks::GlobeStream::Changes changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_chunks(std::move(changes));
-    }
-    // How long the ground takes to fill in, each time it does.
-    static MonotonicClock::time_point filling_since = now;
-    static bool filled = false;
-    if (cache.complete() != filled) {
-        filled = cache.complete();
-        if (filled) {
-            log::info(connection_log, "the ground has filled in: {} chunks in {:.1f} s",
-                      cache.planned(), std::chrono::duration<double>(now - filling_since).count());
-        } else {
-            filling_since = now;
-        }
-    }
-    // Now and then, how the ground is filling in.
-    static MonotonicClock::time_point reported = now;
-    if (now - reported >= std::chrono::seconds{5}) {
-        reported = now;
-        const client::Session* session = connection.session();
-        const std::optional<net::Stats> link = session != nullptr ? session->stats() : std::nullopt;
-        log::debug(
-            connection_log,
-            "{} chunks planned, {} held, {} drawn; in {:.0f} B/s out {:.0f} B/s, ping {} ms, "
-            "delivered here {:.2f} there {:.2f}, {} queued",
-            cache.planned(), cache.held(), cache.drawn(), link ? link->bytes_in_per_second : -1.0F,
-            link ? link->bytes_out_per_second : -1.0F, link ? link->ping.count() : -1,
-            link ? link->delivered_here : -1.0F, link ? link->delivered_there : -1.0F,
-            link ? link->queued_bytes : 0);
     }
 }
 
-// Chunks of the planet's surface the client holds at most.
-constexpr std::size_t most_held_chunks = 2'000;
-
-// Flies over the surfaces the server streams until the window closes or it's time to quit. The
-// client holds no ground of its own: the server says how high it stands and sends what to draw.
-Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock,
-                          const globe::Planet& planet, client::Flight flight,
-                          Connection& connection, const client::Options& options,
-                          const render::Device& device, render::Presenter& presenter,
-                          SDL_Window* window) {
+// Flies over the ground the server streams until the window closes or it's time to quit, drawing
+// it from the tile columns held.
+Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, StreamedGround& ground,
+                          client::Flight flight, Connection& connection,
+                          const client::Options& options, const render::Device& device,
+                          render::Presenter& presenter, SDL_Window* window) {
+    const globe::Planet& planet = ground.planet;
     const double radius = planet.radius;
     Controls controls;
     controls.timings = options.timings;
@@ -1191,10 +1182,6 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock,
     std::optional<client::Player> player; // never: walking waits for the server's ground
     client::Forecast forecast{radius};
     ChatBox chat;
-    client::ChunkCache cache{most_held_chunks};
-    connection.set_view_detail({.ratio = static_cast<float>(options.detail),
-                                .near = 1'000.0F,
-                                .slope = static_cast<float>(options.falloff)});
     bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
@@ -1219,7 +1206,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock,
         shaders.look(device, now);
         controls.walking = false;
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        show_streamed(connection, scene, cache, now);
+        take_ground(connection, ground, scene, flight.eye.metres());
         // Where the server remembers the player, unless they said where to start.
         if (const auto placed = connection.take_placed(); placed && !options.start) {
             const WorldPosition at = protocol::to_world(placed->at);
@@ -1227,8 +1214,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock,
                                           glm::length(at.metres()) - radius, planet::north_pole);
         }
         const client::Session* session = connection.session();
-        const double ground_height =
-            session != nullptr ? static_cast<double>(session->ground().value_or(0.0F)) : 0.0;
+        const double ground_height = chunks::globe_ground(ground.world, flight.eye.metres());
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds}, radius,
@@ -1527,8 +1513,18 @@ int show_streamed_world(const client::Options& options, const planet::PlanetConf
         return EXIT_FAILURE;
     }
     scene->set_system(config.system);
+    // The planet only as it's laid out in voxel layers; its ground is the server's to send.
+    const client::Session* session = connection->session();
+    const auto origin = session != nullptr ? globe::origin_from(session->ground_origin())
+                                           : Result<globe::VolumeOrigin>{make_error(
+                                                 ErrorCode::Io, "no session to be welcomed by")};
+    if (!origin) {
+        std::cerr << std::format("{}: the server's voxel layers: {}\n", program, origin.error());
+        return EXIT_FAILURE;
+    }
+    StreamedGround ground{*planet, origin->layers, jobs};
     startup("ready");
-    const Result<void> flown = fly_streamed(*scene, clock, *planet, flight, *connection, options,
+    const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
                                             device, presenter, window);
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
