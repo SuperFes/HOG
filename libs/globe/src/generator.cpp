@@ -744,7 +744,54 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     return found;
 }
 
-Sample Generator::Column::sample(double radius) const noexcept {
+std::vector<Generator::Column::Change> Generator::Column::changes(double lowest, double highest,
+                                                                 double margin) const {
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    std::vector<Change> found;
+    const auto add = [&](double bottom, double top, bool cave = false) {
+        bottom -= margin;
+        top += margin;
+        if (top >= lowest && bottom <= highest) {
+            found.push_back({.bottom = bottom, .top = top, .cave = cave});
+        }
+    };
+    // The surface is a slope's width deep, and caves open it from a reach over it.
+    const double across = (lod_ / 2.0) * std::sqrt(1.0 + (slope_ * slope_));
+    add(ground_ - across, std::max(ground_ + across, ground_ + cave_surface_reach), true);
+    if (rock_) {
+        const double reach = std::max({rock_->axes.x, rock_->axes.y, rock_->axes.z});
+        const double middle = glm::length(rock_->middle);
+        add(middle - reach, middle + reach);
+    }
+    for (const double level : {water_, table_}) {
+        if (level > 0.0) {
+            add(level - (lod_ / 2.0), level + (lod_ / 2.0));
+        }
+    }
+    // A voxel shows the matter at its top, half a lod over its middle.
+    const double shown = lod_ / 2.0;
+    const double base = ground_ - strata_.cover;
+    add(base - shown, base - shown);
+    const double low = std::max(lowest, base);
+    const double high = std::min(highest, ground_);
+    if (low < high) {
+        const std::int64_t first = terms::bed_at(context, strata_, low + shown);
+        const std::int64_t last = terms::bed_at(context, strata_, high + shown);
+        for (std::int64_t bed = first; bed <= last + 1; ++bed) {
+            const double edge = terms::bed_bottom(context, strata_, bed) - shown;
+            add(edge, edge);
+        }
+    }
+    for (const auto& [bottom, top] : caves(lowest, std::min(highest, ground_), margin)) {
+        add(bottom, top + cave_surface_reach, true);
+    }
+    std::ranges::sort(found);
+    return found;
+}
+
+Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     const Planet& planet = generator_->planet_;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
     const double slope = slope_ * planet.radius / radius;
@@ -756,7 +803,7 @@ Sample Generator::Column::sample(double radius) const noexcept {
     const double depth = ground_ - radius;
 
     // A cave takes its voxels out of the rock, and opens the ground where it reaches it.
-    if (sample.distance < cave_surface_reach) {
+    if (caves && sample.distance < cave_surface_reach) {
         // The rock between the point and the open air over the ground.
         const double cover = std::max(0.0, -sample.distance);
         sample.distance = std::max(

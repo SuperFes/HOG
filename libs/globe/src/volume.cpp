@@ -57,6 +57,11 @@ bool Volume::put_on(Site below, const Cube& voxel) {
     return true;
 }
 
+const VoxelTree* Volume::tile_at(Site site) const {
+    const auto found = tiles_.find(key_of(site));
+    return found == tiles_.end() ? nullptr : &found->second;
+}
+
 void Volume::put_tile(Site site, VoxelTree tile) {
     if (all_air(tile)) {
         tiles_.erase(key_of(site));

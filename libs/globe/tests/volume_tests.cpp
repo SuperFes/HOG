@@ -5,7 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -13,6 +15,7 @@ using hog::globe::Cube;
 using hog::globe::Material;
 using hog::globe::Site;
 using hog::globe::Volume;
+using hog::globe::VoxelTree;
 using hog::globe::bed::earth;
 using hog::globe::bed::somewhere;
 using hog::globe::Cell;
@@ -87,8 +90,33 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
     const Cell cell = hog::globe::cell_under(somewhere(3), layers.level);
     const auto i = cell.i / Volume::tile_side;
     const auto j = cell.j / Volume::tile_side;
+    static_cast<void>(hog::globe::generate_tiles(generator, cell.face, i + 1, j));
+    const auto t0 = std::chrono::steady_clock::now();
     const Volume volume = hog::globe::generate_tiles(generator, cell.face, i, j);
+    std::fprintf(stderr, "tile column %.3f s, %zu tiles, %zu bytes, %d layers\n",
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
+                 volume.tiles(), volume.encode().size(), layers.count);
     REQUIRE(volume.tiles() > 0);
+    // The tile the ground lies in, as building from every one of its voxels gives it.
+    const std::vector<Generator::Column> columns =
+        generator.columns({.level = static_cast<std::uint8_t>(layers.level),
+                           .face = cell.face,
+                           .i = i * Volume::tile_side,
+                           .j = j * Volume::tile_side},
+                          Volume::tile_side, hog::globe::voxel_lod(generator));
+    const auto bottom = static_cast<std::uint32_t>(layers.layer_at(columns.front().ground())) /
+                        Volume::tile_side * Volume::tile_side;
+    const VoxelTree every = VoxelTree::build(Volume::tile_side, [&](int x, int y, int z) {
+        const hog::globe::Voxel made = hog::globe::generated_at(
+            columns[(static_cast<std::size_t>(y) * Volume::tile_side) + static_cast<std::size_t>(x)],
+            layers, bottom + static_cast<std::uint32_t>(z));
+        return hog::globe::cube_of(made, made.temperature / 8.0);
+    });
+    const VoxelTree* built = volume.tile_at(
+        {.face = cell.face, .i = i * Volume::tile_side, .j = j * Volume::tile_side, .layer = bottom});
+    REQUIRE(built != nullptr);
+    CHECK(built->same_as(every));
+    CHECK(built->leaves() < every.unshared_nodes());
     VoxelStore store{layers};
     const World world{generator, store};
     for (std::uint32_t a = 0; a < 64; a += 21) {
@@ -102,4 +130,26 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
             CHECK(volume.at(site) == hog::globe::cube_of(made, made.temperature / 8.0));
         }
     }
+}
+
+TEST_CASE("the working world's tile columns, timed and sized", "[.time]") {
+    auto planet = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
+    REQUIRE(planet);
+    const Generator generator{*planet};
+    const hog::globe::Layers& layers = generator.layers();
+    const Cell cell = hog::globe::cell_under(somewhere(3), layers.level);
+    constexpr std::uint32_t count = 8;
+    double seconds = 0.0;
+    std::size_t tiles = 0;
+    std::size_t bytes = 0;
+    for (std::uint32_t n = 0; n < count; ++n) {
+        const auto started = std::chrono::steady_clock::now();
+        const Volume volume = hog::globe::generate_tiles(
+            generator, cell.face, (cell.i / Volume::tile_side) + n, cell.j / Volume::tile_side);
+        seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        tiles += volume.tiles();
+        bytes += volume.encode().size();
+    }
+    std::printf("%d layers: %.3f s, %zu tiles and %zu bytes a tile column\n", layers.count,
+                seconds / count, tiles / count, bytes / count);
 }
