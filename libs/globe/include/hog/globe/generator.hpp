@@ -31,15 +31,15 @@ struct Sample {
     // the ground is soaked through, under the sea.
     double water = 0.0;
     Material liquid = Material::Air; // what that liquid is
-    double temperature = 0.0; // kelvin
+    double temperature = 0.0;        // kelvin
 };
 
 // What lies under the ground in one column, top down: sedimentary beds, then the crust's own rock.
 struct Strata {
-    double cover = 0.0;           // sedimentary rock's base, metres below the ground
-    double fold = 0.0;            // metres the beds are lifted here
-    DVec3 fold_tilt{0.0};         // how much more, per metre across
-    DVec3 cover_tilt{0.0};        // how much more `cover`, per metre across
+    double cover = 0.0;    // sedimentary rock's base, metres below the ground
+    double fold = 0.0;     // metres the beds are lifted here
+    DVec3 fold_tilt{0.0};  // how much more, per metre across
+    DVec3 cover_tilt{0.0}; // how much more `cover`, per metre across
     Material basement = Material::Basalt;
 };
 
@@ -94,9 +94,9 @@ public:
         // flooded; 0 where the planet has no drainage.
         [[nodiscard]] double table() const noexcept { return table_; }
         // Kelvin, the mean the year round at the planet's reference level.
-        [[nodiscard]] double surface_temperature() const noexcept {
-            return surface_temperature_;
-        }
+        [[nodiscard]] double surface_temperature() const noexcept { return surface_temperature_; }
+        // Rise per metre across the ground.
+        [[nodiscard]] double slope() const noexcept { return slope_; }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;
@@ -109,18 +109,18 @@ public:
         [[nodiscard]] std::vector<std::pair<double, double>> caves(double lowest, double highest,
                                                                    double within) const;
         // A stretch of radius, from its bottom to its top, and whether a cave may be in it.
-        struct Change {
+        struct Boundary {
             double bottom = 0.0;
             double top = 0.0;
             bool cave = false;
-            friend constexpr auto operator<=>(const Change&, const Change&) noexcept = default;
+            friend constexpr auto operator<=>(const Boundary&, const Boundary&) noexcept = default;
         };
-        // The stretches of radius between `lowest` and `highest`, lowest first, where samples may
-        // differ from one radius to the next but for their temperature: about the ground, open
+        // The stretches of radius between `lowest` and `highest`, lowest first, where voxels may
+        // differ from one layer to the next but for their temperature: about the ground, open
         // water, the water table, the beds' edges and caves, each `margin` wider either way.
-        // Outside them, samples are alike all the way to the next, and no cave is near.
-        [[nodiscard]] std::vector<Change> changes(double lowest, double highest,
-                                                  double margin) const;
+        // Outside them, voxels are alike all the way to the next, and no cave reaches them.
+        [[nodiscard]] std::vector<Boundary> boundaries(double lowest, double highest,
+                                                       double margin) const;
 
     private:
         friend class Generator;
