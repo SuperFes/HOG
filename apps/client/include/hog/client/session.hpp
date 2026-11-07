@@ -84,10 +84,10 @@ public:
     // The chat heard since last asked, oldest first.
     [[nodiscard]] std::vector<ChatLine> take_chat() noexcept { return std::exchange(chat_, {}); }
 
-    // Bricks of the voxel world the server sent since last asked, oldest first, to hold in
-    // place of the generator's.
-    [[nodiscard]] std::vector<protocol::SentBrick> take_bricks() noexcept {
-        return std::exchange(bricks_, {});
+    // Tile columns of the voxel world the server sent since last asked, oldest first, each to
+    // hold in place of what was held of it.
+    [[nodiscard]] std::vector<protocol::SentColumn> take_columns() noexcept {
+        return std::exchange(columns_, {});
     }
 
     // The grain the server has in flight near the player.
@@ -153,7 +153,7 @@ private:
     std::optional<protocol::Placed> placed_;
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
-    std::vector<protocol::SentBrick> bricks_;
+    std::vector<protocol::SentColumn> columns_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;
