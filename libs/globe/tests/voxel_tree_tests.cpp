@@ -329,3 +329,65 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                     static_cast<double>(brick_bytes) / static_cast<double>(tree_bytes));
     }
 }
+
+TEST_CASE("a tree halved stands each voxel for the eight it covers", "[globe][voxel_tree]") {
+    // Ground up to half way, water over it in one corner.
+    const VoxelTree tree = VoxelTree::build(8, [](int x, int y, int z) {
+        if (z < 4) {
+            return rock();
+        }
+        return x < 2 && y < 2 && z < 6 ? water() : Cube{};
+    });
+    const VoxelTree half = hog::globe::halved(tree);
+    REQUIRE(half.side() == 4);
+    CHECK(half.at(3, 3, 1) == rock());
+    CHECK(half.at(0, 0, 2) == water());
+    CHECK(half.at(3, 3, 2) == Cube{});
+    CHECK(half.at(0, 0, 3) == Cube{});
+    // Alike voxels still make big leaves.
+    CHECK(half.leaf_side(0, 0, 0) == 2);
+
+    // Three of eight granite and one basalt: as much solid as they hold, of the most of it.
+    const Cube basalt{.solid = Material::Basalt, .solid_amount = Voxel::full};
+    const VoxelTree mixed = VoxelTree::build(2, [&](int x, int y, int z) {
+        const int k = x + (2 * y) + (4 * z);
+        if (k < 3) {
+            return rock();
+        }
+        return k == 3 ? basalt : Cube{};
+    });
+    const Cube one = hog::globe::halved(mixed).at(0, 0, 0);
+    CHECK(one.solid == Material::Granite);
+    CHECK(one.solid_amount == Voxel::full / 2);
+    // A trace too small to count is none.
+    const VoxelTree trace = VoxelTree::build(2, [](int x, int y, int z) {
+        return x + y + z == 0 ? Cube{.grain = Material::Sand, .grain_amount = 3} : Cube{};
+    });
+    CHECK(hog::globe::halved(trace).at(0, 0, 0) == Cube{});
+}
+
+TEST_CASE("a tree halved from its big leaves is the tree halved voxel by voxel",
+          "[globe][voxel_tree]") {
+    const VoxelTree tree = VoxelTree::build(16, [](int x, int y, int z) {
+        if (z < 5) {
+            return rock();
+        }
+        return z < 9 ? scattered(x, y, z) : Cube{};
+    });
+    const VoxelTree half = hog::globe::halved(tree);
+    const VoxelTree by_voxel = VoxelTree::build(8, [&](int x, int y, int z) {
+        std::array<Cube, 8> eight;
+        for (std::size_t k = 0; k < 8; ++k) {
+            eight.at(k) = tree.at((2 * x) + static_cast<int>(k & 1U),
+                                  (2 * y) + static_cast<int>((k >> 1U) & 1U),
+                                  (2 * z) + static_cast<int>((k >> 2U) & 1U));
+        }
+        return hog::globe::halved(VoxelTree::build(2,
+                                                   [&](int a, int b, int c) {
+                                                       const int k = a + (2 * b) + (4 * c);
+                                                       return eight.at(static_cast<std::size_t>(k));
+                                                   }))
+            .at(0, 0, 0);
+    });
+    CHECK(half.same_as(by_voxel));
+}

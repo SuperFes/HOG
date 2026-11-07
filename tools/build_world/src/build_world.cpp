@@ -1,9 +1,11 @@
 #include <hog/build_world/build_world.hpp>
 #include <hog/globe/volume.hpp>
+#include <hog/globe/volume_archive.hpp>
 #include <hog/globe/volume_build.hpp>
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <utility>
@@ -28,7 +30,7 @@ Result<std::vector<globe::SavedColumn>> wanted_in(const globe::VolumeArchive& ar
     for (const Area& area : areas) {
         for (std::uint32_t j = area.j; j < area.j + area.across; ++j) {
             for (std::uint32_t i = area.i; i < area.i + area.across; ++i) {
-                const auto held = archive.column(area.face, i, j);
+                const auto held = archive.column(area.face, i, j, 0);
                 if (!held) {
                     return std::unexpected(held.error());
                 }
@@ -43,18 +45,30 @@ Result<std::vector<globe::SavedColumn>> wanted_in(const globe::VolumeArchive& ar
     return wanted;
 }
 
-void make(const globe::Generator& generator, jobs::JobSystem& jobs,
-          std::span<globe::SavedColumn> columns) {
+// Each tile column at every level, one after another.
+std::vector<globe::SavedColumn> make(const globe::Generator& generator, jobs::JobSystem& jobs,
+                                     std::span<const globe::SavedColumn> columns) {
+    std::vector<std::vector<globe::SavedColumn>> made(columns.size());
     jobs.parallel_for(
         static_cast<std::uint32_t>(columns.size()), 1, [&](jobs::Range range, std::uint32_t) {
             for (std::uint32_t k = range.begin; k < range.end; ++k) {
-                globe::SavedColumn& column = columns[k];
-                column.bytes = globe::generate_tiles(generator, column.face, column.i, column.j)
-                                   .encode_column({.face = column.face,
-                                                   .i = column.i * globe::Volume::tile_side,
-                                                   .j = column.j * globe::Volume::tile_side});
+                const globe::SavedColumn& column = columns[k];
+                const std::optional<globe::TileColumn> tiles =
+                    globe::generate_tiles(generator, column.face, column.i, column.j)
+                        .column({.face = column.face,
+                                 .i = column.i * globe::Volume::tile_side,
+                                 .j = column.j * globe::Volume::tile_side});
+                if (tiles) {
+                    made[k] = globe::saved_levels(*tiles, column.face, column.i, column.j);
+                }
             }
         });
+    std::vector<globe::SavedColumn> all;
+    all.reserve(columns.size() * (globe::coarsest_level + 1));
+    for (std::vector<globe::SavedColumn>& levels : made) {
+        std::ranges::move(levels, std::back_inserter(all));
+    }
+    return all;
 }
 
 } // namespace
@@ -80,16 +94,15 @@ Result<Built> build(const globe::Generator& generator, globe::VolumeArchive& arc
     }
     batch = std::max<std::size_t>(batch, 1);
     for (std::size_t first = 0; first < wanted->size(); first += batch) {
-        const std::span<globe::SavedColumn> some{wanted->begin() +
-                                                     static_cast<std::ptrdiff_t>(first),
-                                                 std::min(batch, wanted->size() - first)};
-        make(generator, jobs, some);
-        if (auto saved = archive.write(header, some); !saved) {
+        const std::span<const globe::SavedColumn> some{wanted->begin() +
+                                                           static_cast<std::ptrdiff_t>(first),
+                                                       std::min(batch, wanted->size() - first)};
+        const std::vector<globe::SavedColumn> levels = make(generator, jobs, some);
+        if (auto saved = archive.write(header, levels); !saved) {
             return std::unexpected(saved.error());
         }
-        for (globe::SavedColumn& column : some) {
+        for (const globe::SavedColumn& column : levels) {
             built.bytes += column.bytes.size();
-            column.bytes = {};
         }
         built.made += some.size();
         if (progress) {

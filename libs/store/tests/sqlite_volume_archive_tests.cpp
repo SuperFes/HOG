@@ -48,7 +48,7 @@ SavedColumn rock(std::uint8_t face, std::uint32_t i, std::uint32_t j, std::uint3
         volume.set({.face = face, .i = corner.i + 5, .j = corner.j, .layer = layer},
                    {.solid = Material::Basalt, .solid_amount = Voxel::full});
     }
-    return {.face = face, .i = i, .j = j, .bytes = volume.encode_column(corner)};
+    return {.face = face, .i = i, .j = j, .level = 0, .bytes = volume.encode_column(corner)};
 }
 
 } // namespace
@@ -68,12 +68,12 @@ TEST_CASE("tile columns saved to the world's file load back after it's reopened"
     const auto header = archive.header();
     REQUIRE(header);
     CHECK(hog::globe::origin_from(*header) == origin);
-    CHECK(archive.column(0, 1, 2) == low);
-    CHECK(archive.column(5, 255, 255) == last);
-    CHECK(archive.column(0, 2, 1) == std::nullopt);
+    CHECK(archive.column(0, 1, 2, 0) == low);
+    CHECK(archive.column(5, 255, 255, 0) == last);
+    CHECK(archive.column(0, 2, 1, 0) == std::nullopt);
 
     Volume volume;
-    const auto saved = archive.column(5, 255, 255);
+    const auto saved = archive.column(5, 255, 255, 0);
     REQUIRE(saved);
     const SavedColumn column = saved->value_or(SavedColumn{});
     REQUIRE_FALSE(column.bytes.empty());
@@ -81,6 +81,21 @@ TEST_CASE("tile columns saved to the world's file load back after it's reopened"
     CHECK(volume.floor({.face = 5, .i = 255 * 64, .j = 255 * 64}) == 10U);
     CHECK(volume.at({.face = 5, .i = (255 * 64) + 5, .j = 255 * 64, .layer = 300}).solid ==
           Material::Basalt);
+}
+
+TEST_CASE("a tile column's coarser levels are kept apart from it", "[store][volume]") {
+    const TemporaryFile file;
+    SqliteVolumeArchive archive = opened(file);
+    const SavedColumn own = rock(3, 4, 5, 0, 70);
+    SavedColumn coarse = rock(3, 4, 5, 0, 30);
+    coarse.level = 2;
+    REQUIRE(archive.write(hog::globe::volume_header(origin), std::vector{own, coarse}));
+    CHECK(archive.column(3, 4, 5, 0) == own);
+    CHECK(archive.column(3, 4, 5, 2) == coarse);
+    CHECK(archive.column(3, 4, 5, 1) == std::nullopt);
+    const auto all = archive.columns();
+    REQUIRE(all);
+    CHECK(*all == std::vector{own});
 }
 
 TEST_CASE("a tile column written again replaces the one before", "[store][volume]") {
@@ -91,7 +106,7 @@ TEST_CASE("a tile column written again replaces the one before", "[store][volume
     const SavedColumn again = rock(2, 3, 4, 0, 90);
     REQUIRE(archive.write(header, std::vector{again}));
     CHECK(query(file.path(), "SELECT count(*) FROM volume_columns") == 1);
-    CHECK(archive.column(2, 3, 4) == again);
+    CHECK(archive.column(2, 3, 4, 0) == again);
 }
 
 TEST_CASE("a volume write that fails leaves the file as it was", "[store][volume]") {
@@ -103,5 +118,5 @@ TEST_CASE("a volume write that fails leaves the file as it was", "[store][volume
                         "BEGIN SELECT RAISE(ABORT, 'refused'); END;");
     CHECK_FALSE(archive.write(header, std::vector{rock(1, 1, 2, 0, 5), rock(1, 1, 3, 0, 5)}));
     CHECK(query(file.path(), "SELECT count(*) FROM volume_columns") == 1);
-    CHECK(archive.column(1, 1, 2) == std::nullopt);
+    CHECK(archive.column(1, 1, 2, 0) == std::nullopt);
 }

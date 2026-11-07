@@ -19,7 +19,9 @@ Result<void> write_locked(sqlite3* database, std::span<const std::byte> header,
     Statement set_header{database, "INSERT OR REPLACE INTO volume_header (id, data) VALUES (0, ?)"};
     Statement put{database,
                   "INSERT OR REPLACE INTO volume_columns (face, i, j, data) VALUES (?, ?, ?, ?)"};
-    if (!set_header.ok() || !put.ok()) {
+    Statement put_coarse{database, "INSERT OR REPLACE INTO volume_coarse (face, i, j, level, data) "
+                                   "VALUES (?, ?, ?, ?, ?)"};
+    if (!set_header.ok() || !put.ok() || !put_coarse.ok()) {
         return failure(database, "preparing a volume write");
     }
     bind_bytes(set_header, 1, header);
@@ -27,12 +29,17 @@ Result<void> write_locked(sqlite3* database, std::span<const std::byte> header,
         return failure(database, "writing the volume header");
     }
     for (const globe::SavedColumn& column : columns) {
-        put.reset();
-        sqlite3_bind_int(put.get(), 1, column.face);
-        sqlite3_bind_int64(put.get(), 2, column.i);
-        sqlite3_bind_int64(put.get(), 3, column.j);
-        bind_bytes(put, 4, column.bytes);
-        if (put.step() != SQLITE_DONE) {
+        Statement& into = column.level == 0 ? put : put_coarse;
+        into.reset();
+        sqlite3_bind_int(into.get(), 1, column.face);
+        sqlite3_bind_int64(into.get(), 2, column.i);
+        sqlite3_bind_int64(into.get(), 3, column.j);
+        int next = 4;
+        if (column.level > 0) {
+            sqlite3_bind_int(into.get(), next++, column.level);
+        }
+        bind_bytes(into, next, column.bytes);
+        if (into.step() != SQLITE_DONE) {
             return failure(database, "writing a tile column");
         }
     }
@@ -83,19 +90,29 @@ Result<std::vector<std::byte>> SqliteVolumeArchive::header() const {
     return std::vector<std::byte>{};
 }
 
-Result<std::optional<globe::SavedColumn>>
-SqliteVolumeArchive::column(std::uint8_t face, std::uint32_t i, std::uint32_t j) const {
+Result<std::optional<globe::SavedColumn>> SqliteVolumeArchive::column(std::uint8_t face,
+                                                                      std::uint32_t i,
+                                                                      std::uint32_t j,
+                                                                      std::uint8_t level) const {
     sqlite3* database = database_.get();
-    Statement read{database, "SELECT data FROM volume_columns WHERE face = ? AND i = ? AND j = ?"};
+    Statement read{database,
+                   level == 0
+                       ? "SELECT data FROM volume_columns WHERE face = ? AND i = ? AND j = ?"
+                       : "SELECT data FROM volume_coarse WHERE face = ? AND i = ? AND j = ? AND "
+                         "level = ?"};
     if (!read.ok()) {
         return failure(database, "preparing a tile column read");
     }
     sqlite3_bind_int(read.get(), 1, face);
     sqlite3_bind_int64(read.get(), 2, i);
     sqlite3_bind_int64(read.get(), 3, j);
+    if (level > 0) {
+        sqlite3_bind_int(read.get(), 4, level);
+    }
     const int found = read.step();
     if (found == SQLITE_ROW) {
-        return globe::SavedColumn{.face = face, .i = i, .j = j, .bytes = column_bytes(read, 0)};
+        return globe::SavedColumn{
+            .face = face, .i = i, .j = j, .level = level, .bytes = column_bytes(read, 0)};
     }
     if (found != SQLITE_DONE) {
         return failure(database, "reading a tile column");
@@ -115,6 +132,7 @@ Result<std::vector<globe::SavedColumn>> SqliteVolumeArchive::columns() const {
         all.push_back({.face = static_cast<std::uint8_t>(sqlite3_column_int(read.get(), 0)),
                        .i = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 1)),
                        .j = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 2)),
+                       .level = 0,
                        .bytes = column_bytes(read, 3)});
     }
     if (step != SQLITE_DONE) {
