@@ -152,3 +152,53 @@ TEST_CASE("how tall each landform stands", "[.survey]") {
         report("crater floors, depth under ground", std::move(found.floors));
     }
 }
+
+TEST_CASE("what running water cut from the ground changes smoothly over the drainage's cells",
+          "[globe][generator]") {
+    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    planet.radius = 4'000.0;
+    planet.floor_depth = 100.0;
+    planet.sky_height = 500.0;
+    planet.wear = 0.03;
+    const hog::globe::Generator world{planet};
+    const terms::Context context{
+        .planet = &world.planet(), .derived = &world.derived(), .shape = &world.shape()};
+    const double fine = hog::globe::voxel_lod(world);
+    const int cut_level = world.shape().cut_level;
+    // Cut is what the column's ground lies under the terms' own height.
+    const auto cut_at = [&](DVec3 direction) {
+        return terms::column(context, direction, fine).height.value -
+               (world.column(direction, fine).ground() - world.planet().radius +
+                world.shape().datum);
+    };
+    double worst = 0.0;
+    double spread = 0.0;
+    for (std::uint64_t k = 0; k < 40; ++k) {
+        const hog::globe::Cell cell =
+            hog::globe::cell_at_index(cut_level, (k * 2'654'435'761ULL) %
+                                                     hog::globe::cells_at(cut_level));
+        for (const auto& [di, dj] : {std::pair{1, 0}, std::pair{0, 1}, std::pair{1, 1}}) {
+            const auto next = hog::globe::next_to(cell, di, dj);
+            if (!next) {
+                continue;
+            }
+            // From one middle to the other, over the edge between, in steps about a metre long.
+            const DVec3 from = hog::globe::center(cell);
+            const DVec3 to = hog::globe::center(*next);
+            const int steps = static_cast<int>(glm::length(to - from) * planet.radius);
+            double before = cut_at(from);
+            for (int step = 1; step <= steps; ++step) {
+                const double share = static_cast<double>(step) / static_cast<double>(steps);
+                const double here = cut_at(glm::normalize(from + ((to - from) * share)));
+                worst = std::max(worst, std::abs(here - before));
+                spread = std::max(spread, std::abs(here - cut_at(from)));
+                before = here;
+            }
+        }
+    }
+    CAPTURE(worst, spread);
+    // The cut differs from cell to cell by metres, but a step of a metre changes it by a small
+    // share of that, never jumping at an edge.
+    CHECK(spread > 1.0);
+    CHECK(worst < 0.02 * spread);
+}
