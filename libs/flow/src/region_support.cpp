@@ -39,7 +39,7 @@ void Region::disturb(globe::BrickSite site, double weathered) {
 }
 
 std::vector<globe::Site> Region::weather(globe::BrickSite site, double seconds) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     std::vector<globe::Site> gone;
     const std::uint64_t round = ++weathering_;
     for (std::uint32_t l = 0; l < globe::brick_side; ++l) {
@@ -100,9 +100,9 @@ std::vector<globe::Site> Region::weather(globe::BrickSite site, double seconds) 
 }
 
 void Region::inspect_support(double seconds, Stepped& stepped) {
-    const std::uint32_t across = world_->store().bricks_across();
-    const auto up = static_cast<std::uint32_t>(
-        (world_->store().layers().count + globe::brick_side - 1) / globe::brick_side);
+    const std::uint32_t across = globe::bricks_across(world_->layers());
+    const auto up = static_cast<std::uint32_t>((world_->layers().count + globe::brick_side - 1) /
+                                               globe::brick_side);
     std::vector<Fresh> waiting;
     std::size_t looked = 0;
     for (Fresh& queued : inspect_) {
@@ -151,7 +151,7 @@ void Region::inspect_support(double seconds, Stepped& stepped) {
 
 bool Region::check_support(globe::BrickSite site, double seconds, Stepped& stepped) {
     constexpr int side = box_bricks * globe::brick_side;
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const std::uint32_t i0 = (site.i - 1) * globe::brick_side;
     const std::uint32_t j0 = (site.j - 1) * globe::brick_side;
     const std::uint32_t l0 = (site.layer - 1) * globe::brick_side;
@@ -198,7 +198,7 @@ bool Region::check_support(globe::BrickSite site, double seconds, Stepped& stepp
 }
 
 void Region::fall(const std::vector<globe::Site>& sites, Stepped& stepped) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     std::map<std::tuple<std::uint8_t, std::uint32_t, std::uint32_t, std::uint32_t>, std::size_t>
         index;
     for (std::size_t k = 0; k < sites.size(); ++k) {

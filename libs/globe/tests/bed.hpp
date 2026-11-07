@@ -8,8 +8,8 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <algorithm>
@@ -31,9 +31,9 @@ using hog::DVec3;
 
 using hog::globe::Cell;
 using hog::globe::Generator;
+using hog::globe::MadeWorld;
 using hog::globe::Material;
 using hog::globe::SurfaceMesh;
-using hog::globe::VoxelStore;
 using hog::globe::World;
 
 inline const Generator& earth() {
@@ -69,6 +69,24 @@ inline DVec3 ground_between(const Generator& generator, double low, double high)
                 .empty()) {
             return direction;
         }
+    }
+}
+
+// Makes the tile columns under each chunk and a tile round it.
+inline void cover_chunks(MadeWorld& made, std::span<const Cell> chunks) {
+    const hog::globe::Layers& layers = made.world().layers();
+    constexpr auto tile = static_cast<std::uint32_t>(hog::globe::Volume::tile_side);
+    const std::uint32_t side = hog::globe::tiles_across(made.world().generator());
+    for (const Cell chunk : chunks) {
+        const int shift = layers.level - chunk.level;
+        const std::uint32_t wide = 1U << static_cast<std::uint32_t>(shift);
+        // Tiles under the chunk, from a tile before it to a tile after it.
+        const auto first = [&](std::uint32_t at) { return std::max(at * wide / tile, 1U) - 1; };
+        const std::uint32_t across = std::min(((wide + tile - 1) / tile) + 2, side);
+        made.cover({.face = chunk.face,
+                    .i = std::min(first(chunk.i), side - across),
+                    .j = std::min(first(chunk.j), side - across),
+                    .across = across});
     }
 }
 

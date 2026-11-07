@@ -28,6 +28,8 @@ public:
     [[nodiscard]] std::optional<std::uint32_t> floor(Site site) const;
     void set_floor(Site site, std::uint32_t layer);
     [[nodiscard]] bool made(Site site) const;
+    // The highest layer holding matter in the column through `site`; none where it holds none.
+    [[nodiscard]] std::optional<std::uint32_t> top(Site site) const;
 
     // Air wherever nothing is held, made or not: ask `made` first.
     [[nodiscard]] Cube at(Site site) const;

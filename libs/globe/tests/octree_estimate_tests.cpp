@@ -2,7 +2,6 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -137,8 +136,6 @@ void report(const char* label, const char* what, const std::vector<Runs>& column
 // as it would be stored.
 void measure(const Generator& generator, const char* label, hog::DVec3 at, int across) {
     const Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    const World world{generator, store};
     const Cell centre = cell_under(at, layers.level);
     std::vector<Runs> material;
     std::vector<Runs> voxels;
@@ -153,7 +150,12 @@ void measure(const Generator& generator, const char* label, hog::DVec3 at, int a
                                  static_cast<std::uint32_t>(b)};
             const std::vector<Generator::Column> columns{
                 generator.column(center(cell), voxel_lod(generator))};
-            const std::vector<Voxel> filled = world.fill(std::array{cell}, columns, 0, layers.count, 1);
+            std::vector<Voxel> filled;
+            filled.reserve(static_cast<std::size_t>(layers.count));
+            for (int layer = 0; layer < layers.count; ++layer) {
+                filled.push_back(
+                    generated_at(columns[0], layers, static_cast<std::uint32_t>(layer)));
+            }
             Runs by_material;
             Runs by_voxel;
             for (int layer = 0; layer < layers.count; ++layer) {

@@ -3,6 +3,7 @@
 #include <hog/globe/volume.hpp>
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/volume_build.hpp>
+#include <hog/globe/voxel.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -23,16 +24,15 @@ using hog::globe::Generator;
 using hog::globe::Material;
 using hog::globe::Site;
 using hog::globe::Volume;
-using hog::globe::VoxelStore;
+using hog::globe::Voxel;
 using hog::globe::VoxelTree;
-using hog::globe::World;
 using hog::globe::bed::earth;
 using hog::globe::bed::somewhere;
 
 namespace {
 
 Cube full_of(Material material) {
-    return {.solid = material, .solid_level = Cube::levels};
+    return {.solid = material, .solid_amount = Voxel::full};
 }
 
 // Rock up to `top` across a few tiles, either side of a tile edge, made from the bottom.
@@ -77,6 +77,22 @@ TEST_CASE("dirt is put on the rock as a voxel on top, and taken off by removing 
     volume.remove(over);
     CHECK(volume.at(over) == Cube{});
     CHECK(volume.at(rock).solid == Material::Granite);
+}
+
+TEST_CASE("a column's top is its highest voxel holding matter, whatever its tile holds",
+          "[globe][volume]") {
+    Volume volume = rock_to(70);
+    CHECK(volume.top({.face = 2, .i = 63, .j = 5}) == 70U);
+    // A voxel high in a tile of its own tops only its own column.
+    volume.set({.face = 2, .i = 61, .j = 5, .layer = 200}, full_of(Material::Snow));
+    CHECK(volume.top({.face = 2, .i = 61, .j = 5}) == 200U);
+    CHECK(volume.top({.face = 2, .i = 62, .j = 5}) == 70U);
+    // Warm air over the ground is no matter.
+    volume.set({.face = 2, .i = 62, .j = 5, .layer = 90}, Cube{.heat = 3});
+    CHECK(volume.top({.face = 2, .i = 62, .j = 5}) == 70U);
+    // Where the tile over the ground holds nothing in this column, the one under it says.
+    CHECK(volume.top({.face = 2, .i = 60, .j = 5, .layer = 300}) == 70U);
+    CHECK_FALSE(volume.top({.face = 2, .i = 59, .j = 5}).has_value());
 }
 
 TEST_CASE("nothing is put or taken under a tile column's floor", "[globe][volume]") {
@@ -185,7 +201,7 @@ TEST_CASE("a voxel's heat is told over the open air's warmth where it is", "[glo
     CHECK(at(equator, sea + 400) < at(equator, sea));
     CHECK(at(north, sea) < at(equator, sea));
     CHECK(at(equator, sea - 20) == Catch::Approx(at(equator, sea)));
-    const Cube warm{.solid = Material::Basalt, .solid_level = Cube::levels, .heat = 3};
+    const Cube warm{.solid = Material::Basalt, .solid_amount = Voxel::full, .heat = 3};
     const double baseline = at(equator, sea);
     CHECK(hog::globe::kelvin(hog::globe::voxel_of(warm, baseline).temperature) ==
           Catch::Approx(baseline + (3 * Cube::heat_step)).margin(0.125));
@@ -273,8 +289,6 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
         CHECK(built->leaves() < expected.unshared_nodes());
     }
 
-    VoxelStore store{layers};
-    const World world{generator, store};
     const auto matches_world = [&](const Volume& made_volume) {
         for (std::uint32_t a = 0; a < 64; a += 21) {
             for (std::uint32_t layer = 0; std::cmp_less(layer, layers.count); layer += 37) {
@@ -285,7 +299,10 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
                 if (!made_volume.made(site)) {
                     continue;
                 }
-                const hog::globe::Voxel made = world.at(site);
+                const hog::globe::Voxel made = hog::globe::generated_at(
+                    generator.columns(hog::globe::column_of(site, layers), 1,
+                                      hog::globe::voxel_lod(generator))[0],
+                    layers, site.layer);
                 CAPTURE(a, layer);
                 CHECK(made_volume.at(site) == hog::globe::cube_of(made, made.temperature / 8.0));
             }

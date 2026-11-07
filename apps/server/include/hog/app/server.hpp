@@ -5,12 +5,11 @@
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
-#include <hog/flow/ground_bake.hpp>
 #include <hog/flow/simulation.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/vents.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
@@ -29,9 +28,9 @@
 #include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
 #include <hog/skies/weather_keeper.hpp>
-#include <hog/store/sqlite_brick_archive.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
+#include <hog/store/sqlite_volume_archive.hpp>
 
 #include <flecs.h>
 
@@ -65,7 +64,7 @@ public:
                                                               GameTime now);
     Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
            store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
-           store::SqliteBrickArchive bricks);
+           store::SqliteVolumeArchive volumes);
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -96,10 +95,10 @@ public:
     [[nodiscard]] std::uint64_t world_id() const noexcept { return world_id_; }
     [[nodiscard]] server::Persistence& persistence() noexcept { return persistence_; }
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
-    // The voxel world: the generator over the bricks changed, which only the server writes.
+    // The voxel world, read from the world's file, which only the server writes.
     [[nodiscard]] globe::World globe() noexcept { return globe_; }
     [[nodiscard]] const globe::Generator& generator() const noexcept { return generator_; }
-    [[nodiscard]] const globe::VoxelStore& voxels() const noexcept { return voxels_; }
+    [[nodiscard]] const globe::Volume& volume() const noexcept { return volume_; }
     // Null without a players' port, or when it couldn't be opened.
     [[nodiscard]] const net::Server* players() const noexcept {
         return players_ ? &*players_ : nullptr;
@@ -154,16 +153,11 @@ private:
     void hurry_clock(Loop& loop);
     // Gives the flow the vents near players that it hasn't got yet.
     void wake_vents();
-    // Lets the weather's long work settle once on each tile of ground near players, a tile at a
-    // time on the jobs: takes in a finished bake where nothing it changed was changed meanwhile,
-    // and starts the next.
-    void bake_ground();
-    void start_bake();
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
     globe::Generator generator_;
-    globe::VoxelStore voxels_;
+    globe::Volume volume_;
     globe::World globe_;
     flow::Simulation flow_;
     // The planet's vents, and which the flow has been given: those near someone are.
@@ -172,7 +166,7 @@ private:
     // Game time gone by since the ground was last wetted.
     GameDuration unwetted_{};
     GameDuration swept_{};
-    store::SqliteBrickArchive bricks_;
+    store::SqliteVolumeArchive volumes_;
     // Players last sent some grain in flight, who need telling when there's none.
     std::set<net::ConnectionId> grains_told_;
     store::SqliteSnapshotStore snapshots_;
@@ -197,14 +191,6 @@ private:
     server::Players joined_;
     // Made once the world's time is known.
     std::optional<skies::WeatherKeeper> weather_;
-    // The rain the weather has let fall, and the game time it was last told of.
-    flow::RainRecord rain_;
-    std::optional<GameTime> rained_;
-    flow::GroundBake baked_;
-    // The tile being baked on the jobs, and the store's revision it started from.
-    std::unique_ptr<jobs::Async<std::vector<flow::GroundBake::Baked>>> baking_;
-    flow::GroundBake::Tile baking_tile_{};
-    std::uint64_t baking_from_ = 0;
     // The ground near players, to check their moves against.
     physics::Space space_;
     physics::Ground ground_;

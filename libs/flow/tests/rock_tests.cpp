@@ -3,12 +3,11 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -89,16 +88,17 @@ TEST_CASE("a rock the ground holds up stays where it lies", "[flow][rocks]") {
     const Found found;
     REQUIRE(found.rock.has_value());
     const Rock& rock = *found.rock;
-    hog::globe::VoxelStore store{found.generator.layers()};
-    hog::globe::World world{found.generator, store};
+    hog::globe::MadeWorld made{found.generator};
+    hog::globe::World& world = made.world();
+    made.cover(glm::normalize(rock.middle));
     hog::flow::Region region{world, false};
-    hold_about(region, store.layers(), rock.middle, 14.0);
+    hold_about(region, world.layers(), rock.middle, 14.0);
 
     for (int step = 0; step < 5; ++step) {
         region.step(tick);
     }
     CHECK(region.parcels().empty());
-    CHECK(solid_at(region, store.layers(), rock.middle));
+    CHECK(solid_at(region, world.layers(), rock.middle));
 }
 
 TEST_CASE("a rock with the ground dug from under it rolls into the hollow and rests there",
@@ -106,19 +106,20 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
     const Found found;
     REQUIRE(found.rock.has_value());
     const Rock& rock = *found.rock;
-    hog::globe::VoxelStore store{found.generator.layers()};
-    hog::globe::World world{found.generator, store};
+    hog::globe::MadeWorld made{found.generator};
+    hog::globe::World& world = made.world();
+    made.cover(glm::normalize(rock.middle));
     // A ball taking the ground under the whole footprint, stopping short of the rock's middle.
     const double hollow = (0.75 * std::max(rock.axes.x, rock.axes.y)) + 1.0;
     hog::globe::dig(world, rock.middle - (rock.up * (rock.axes.z + 1.5)), hollow);
     hog::flow::Region region{world, false};
-    hold_about(region, store.layers(), rock.middle, 14.0);
+    hold_about(region, world.layers(), rock.middle, 14.0);
 
     region.step(tick);
     REQUIRE(region.parcels().size() == 1);
     CHECK(region.parcels().front().radius > 0.5);
     // Taken out of the ground it lay in.
-    CHECK_FALSE(solid_at(region, store.layers(), rock.middle));
+    CHECK_FALSE(solid_at(region, world.layers(), rock.middle));
 
     DVec3 last = region.parcels().front().at;
     double radius = region.parcels().front().radius;
@@ -129,5 +130,5 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
     REQUIRE(region.parcels().empty());
     // It came down into the hollow, and was built into the ground where it stopped.
     CHECK(glm::length(last) < glm::length(rock.middle) - 0.5);
-    CHECK(solid_at(region, store.layers(), last - (glm::normalize(last) * 0.4 * radius)));
+    CHECK(solid_at(region, world.layers(), last - (glm::normalize(last) * 0.4 * radius)));
 }

@@ -75,7 +75,7 @@ add_library(hog_play src/play.cpp)
 add_library(hog::play ALIAS hog_play)
 target_include_directories(hog_play PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_play PUBLIC hog::chat hog::client hog::jobs hog::login hog::net
-    hog::planet hog::protocol hog::skies hog::window)
+    hog::planet hog::protocol hog::skies hog::store hog::window)
 hog_target_defaults(hog_play)
 
 # The game client: connects to a server and draws its world.

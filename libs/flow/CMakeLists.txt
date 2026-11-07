@@ -1,7 +1,6 @@
 add_library(hog_flow
     src/creep.cpp
     src/glacier.cpp
-    src/ground_bake.cpp
     src/region.cpp
     src/region_creep.cpp
     src/region_glacier.cpp
@@ -31,7 +30,6 @@ hog_add_tests(hog_flow
     tests/creep_probe_tests.cpp
     tests/creep_tests.cpp
     tests/glacier_tests.cpp
-    tests/ground_bake_tests.cpp
     tests/lava_tests.cpp
     tests/network_cost_bench.cpp
     tests/region_tests.cpp

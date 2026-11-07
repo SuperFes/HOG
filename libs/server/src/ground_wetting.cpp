@@ -1,9 +1,9 @@
-#include <hog/server/ground_wetting.hpp>
-
 #include <hog/globe/cell.hpp>
+#include <hog/server/ground_wetting.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <unordered_set>
 
 namespace hog::server {
@@ -17,8 +17,7 @@ flow::Sky GroundWetting::sky_of(const protocol::CellWeather& weather) {
 
 std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::World& world,
                                                             std::span<const Place> places) {
-    const globe::Generator& generator = world.generator();
-    const globe::Layers& layers = generator.layers();
+    const globe::Layers& layers = world.layers();
     constexpr int side = (2 * reach) + 1;
     std::vector<flow::Simulation::Wetted> wetted;
     std::unordered_set<std::uint64_t> taken;
@@ -35,7 +34,6 @@ std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::World& 
                                  .face = under.face,
                                  .i = first(under.i),
                                  .j = first(under.j)};
-        const std::vector<globe::Generator::Column> columns = generator.columns(corner, side, globe::voxel_lod(generator));
         for (int k = 0; k < side * side; ++k) {
             const std::uint32_t i = corner.i + static_cast<std::uint32_t>(k % side);
             const std::uint32_t j = corner.j + static_cast<std::uint32_t>(k / side);
@@ -44,15 +42,14 @@ std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::World& 
                 continue;
             }
             const globe::Cell cell{.level = corner.level, .face = corner.face, .i = i, .j = j};
-            const int layer =
-                globe::highest_layer(world, cell, columns[static_cast<std::size_t>(k)]);
-            if (layer < 0) {
+            const std::optional<int> layer = globe::highest_layer(world, cell);
+            if (!layer) {
                 continue;
             }
             wetted.push_back({.column = {.face = corner.face,
                                          .i = i,
                                          .j = j,
-                                         .layer = static_cast<std::uint32_t>(layer)},
+                                         .layer = static_cast<std::uint32_t>(*layer)},
                               .sky = place.sky});
         }
     }

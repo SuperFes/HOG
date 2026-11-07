@@ -3,7 +3,7 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/protocol/messages.hpp>
@@ -25,11 +25,12 @@ using namespace hog;
 TEST_CASE("how far off the ground each level of detail is, in pixels, to look at",
           "[.look][chunks]") {
     const globe::Generator generator{globe::Planet{}};
-    globe::VoxelStore store{generator.layers()};
-    const globe::World world{generator, store};
+    globe::MadeWorld made{generator};
+    const globe::World& world = made.world();
     jobs::JobSystem jobs{3};
     const double radius = generator.planet().radius;
     const DVec3 up = globe::center(globe::cell_at_index(7, 4'321));
+    made.cover(up, 9);
     const DVec3 eye = up * (radius + chunks::globe_ground(world, up) + 2.0);
     // A 1080-line picture across a 60 degree view.
     const double pixels_per_radian = 1080.0 / (2.0 * std::tan(std::numbers::pi / 6.0));
@@ -90,12 +91,13 @@ TEST_CASE("how far off the ground each level of detail is, in pixels, to look at
 // Prints how long the chunks round a mountain take to mesh, and to ready for sending, to look at.
 TEST_CASE("how long the chunks round a mountain take to mesh, to look at", "[.look][chunks]") {
     const globe::Generator generator{globe::Planet{}};
-    globe::VoxelStore store{generator.layers()};
-    const globe::World world{generator, store};
+    globe::MadeWorld made{generator};
+    const globe::World& world = made.world();
     constexpr double degree = std::numbers::pi / 180.0;
     const DVec3 up{glm::normalize(DVec3{std::cos(27.927653 * degree) * std::cos(-2.869545 * degree),
                                         std::cos(27.927653 * degree) * std::sin(-2.869545 * degree),
                                         std::sin(27.927653 * degree)})};
+    made.cover(up, 9);
     const DVec3 eye = up * (generator.planet().radius + chunks::globe_ground(world, up) + 3.0);
     const auto seconds = [](auto from) {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();

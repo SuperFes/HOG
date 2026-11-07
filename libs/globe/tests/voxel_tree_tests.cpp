@@ -5,7 +5,6 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/voxel_tree.hpp>
 #include <hog/globe/world.hpp>
 
@@ -21,18 +20,19 @@
 #include <span>
 #include <vector>
 
-using hog::globe::Material;
 using hog::globe::Cube;
+using hog::globe::Material;
+using hog::globe::Voxel;
 using hog::globe::VoxelTree;
 
 namespace {
 
 Cube rock() {
-    return {.solid = Material::Granite, .solid_level = Cube::levels};
+    return {.solid = Material::Granite, .solid_amount = Voxel::full};
 }
 
 Cube water() {
-    return {.liquid = Material::Water, .liquid_level = Cube::levels};
+    return {.liquid = Material::Water, .liquid_amount = Voxel::full};
 }
 
 // A cube's voxels by place, x fastest.
@@ -47,7 +47,7 @@ std::size_t place(int x, int y, int z, int side) {
 Cube scattered(int x, int y, int z) {
     const std::uint64_t h = hog::hash_values(7, x, y, z);
     return {.solid = static_cast<Material>(h % 5),
-            .solid_level = static_cast<std::uint8_t>((h >> 40U) % (Cube::levels + 1))};
+            .solid_amount = static_cast<std::uint16_t>((h >> 40U) % (Voxel::full + 1))};
 }
 
 } // namespace
@@ -136,8 +136,6 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
     using namespace hog::globe;
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    const World world{generator, store};
     // Land: the highest ground over a coarse sweep.
     hog::DVec3 land{0.0, 0.0, 1.0};
     double top = 0.0;
@@ -162,11 +160,10 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
                             .j = centre.j + static_cast<std::uint32_t>(y)};
             const std::vector<Generator::Column> columns{
                 generator.column(center(cell), voxel_lod(generator))};
-            const std::vector<hog::globe::Voxel> column =
-                world.fill(std::array{cell}, columns, low, side, 1);
             for (int z = 0; z < side; ++z) {
                 {
-                    const auto& voxel = column[static_cast<std::size_t>(z)];
+                    const hog::globe::Voxel voxel =
+                        generated_at(columns[0], layers, static_cast<std::uint32_t>(low + z));
                     voxels[place(x, y, z, side)] = cube_of(voxel, hog::globe::kelvin(voxel.temperature));
                 }
             }
@@ -258,8 +255,6 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
     using namespace hog::globe;
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    const World world{generator, store};
     const double sea = generator.sea_level().value_or(generator.planet().radius);
     hog::DVec3 peak{0.0, 0.0, 1.0};
     hog::DVec3 coast{0.0, 0.0, 1.0};
@@ -305,7 +300,7 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                                     .i = (base_i + static_cast<std::uint32_t>(bi * side)) / brick_side + static_cast<std::uint32_t>(ci),
                                     .j = (base_j + static_cast<std::uint32_t>(bj * side)) / brick_side + static_cast<std::uint32_t>(cj),
                                     .layer = static_cast<std::uint32_t>(layer0 / brick_side + cl)};
-                                const BrickVoxels held = world.brick(brick);
+                                const BrickVoxels held = generated(generator, brick);
                                 packed += Brick::pack(held).bytes();
                                 for (int index = 0; index < brick_voxels; ++index) {
                                     const Site site = site_in(brick, index);

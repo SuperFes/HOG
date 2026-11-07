@@ -130,35 +130,17 @@ std::optional<Cell> lattice_cell(Cell corner, int a, int b, int step) {
     return base;
 }
 
-// The layers of bricks held under a chunk's columns.
-std::set<int> held_layers(const VoxelStore& store, Cell chunk, int apart) {
+// The layers of bricks changed under a chunk's columns.
+std::set<int> changed_layers(const World& world, Cell chunk, int apart) {
     const auto bricks_across =
         static_cast<std::uint32_t>(chunk_side / brick_side) * static_cast<std::uint32_t>(apart);
     const std::uint32_t first_i = chunk.i * bricks_across;
     const std::uint32_t first_j = chunk.j * bricks_across;
-    const auto under = [&](const BrickSite& site) {
-        return site.face == chunk.face && site.i - first_i < bricks_across &&
-               site.j - first_j < bricks_across;
-    };
     std::set<int> layers;
-    // By what's held, where that's fewer than the chunk's bricks a layer.
-    if (store.size() < std::size_t{bricks_across} * bricks_across) {
-        for (const BrickSite& site : store.sites()) {
-            if (under(site)) {
-                layers.insert(static_cast<int>(site.layer));
-            }
-        }
-        return layers;
-    }
-    for (std::uint32_t layer = 0; layer < store.bricks_up(); ++layer) {
-        for (std::uint32_t j = 0; j < bricks_across; ++j) {
-            for (std::uint32_t i = 0; i < bricks_across; ++i) {
-                if (store.brick(
-                        {.face = chunk.face, .i = first_i + i, .j = first_j + j, .layer = layer}) !=
-                    nullptr) {
-                    layers.insert(static_cast<int>(layer));
-                }
-            }
+    for (const BrickSite& site : world.changed_since(0)) {
+        if (site.face == chunk.face && site.i - first_i < bricks_across &&
+            site.j - first_j < bricks_across) {
+            layers.insert(static_cast<int>(site.layer));
         }
     }
     return layers;
@@ -209,8 +191,8 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
     if (sight && sight->lowest < sight->highest) {
         bands.emplace_back(layers.layer_at(sight->lowest), layers.layer_at(sight->highest) + 1);
     }
-    // Changes held next to a band widen it, a brick at a time.
-    const std::set<int> held = held_layers(world.store(), chunk, apart);
+    // Changes next to a band widen it, a brick at a time.
+    const std::set<int> held = changed_layers(world, chunk, apart);
     const auto held_in = [&](int brick_layer) { return held.contains(brick_layer); };
     // The last layer of the lattice under the ceiling.
     const int ceiling = ((layers.count - 1) / coarsest) * coarsest;
@@ -630,7 +612,6 @@ private:
             }
             const std::vector<Generator::Column> made =
                 generator.columns(cells, voxel_lod(generator) * apart, apart);
-            group_columns_[apart] = made;
             for (std::size_t k = 0; k < group.size(); ++k) {
                 filled_.push_back(group[k]);
                 generated_.push_back(made[k]);
@@ -647,8 +628,7 @@ private:
         for (const std::size_t at : group) {
             cells.push_back(columns_[at].cell);
         }
-        return world_->fill(cells, group_columns_.at(apart), bottom, ((top - bottom) / apart) + 1,
-                            apart);
+        return world_->fill(cells, bottom, ((top - bottom) / apart) + 1, apart);
     }
 
     // Appends a group's voxels, a run of `up` a column, and notes where each column's begin.
@@ -809,7 +789,6 @@ private:
     bool overlapped_ = false;
     std::vector<Footprint> footprints_;
     std::map<int, std::vector<std::size_t>> groups_;
-    std::map<int, std::vector<Generator::Column>> group_columns_;
     std::vector<std::size_t> filled_;
     std::vector<Generator::Column> generated_;
     std::vector<std::pair<int, int>> places_;
@@ -920,9 +899,7 @@ struct Liquid {
         return Material::Air;
     }
     static float wetness(const Grid& /*grid*/, std::span<const Point> /*corners*/) { return 0.0F; }
-    static bool standing(const Grid& /*grid*/, std::span<const Point> /*corners*/) {
-        return false;
-    }
+    static bool standing(const Grid& /*grid*/, std::span<const Point> /*corners*/) { return false; }
     static float glow(const Grid& grid, std::span<const Point> corners) {
         float shines = 0.0F;
         for (const Point corner : corners) {
@@ -1606,8 +1583,8 @@ void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const D
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
     Grid grid{world, chunk, drawn, mesh.origin};
-    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.apart(),
-                                              grid.coarsest(), sight)) {
+    for (const auto& [bottom, top] :
+         bands_of(world, chunk, grid.generated(), grid.apart(), grid.coarsest(), sight)) {
         grid.fill(bottom, top);
         VoxelFaces{grid, mesh}.add();
     }
@@ -1632,8 +1609,8 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& d
                std::format("boxes of chunks beside each other overlap, at chunk level {} face {} "
                            "i {} j {}",
                            chunk.level, chunk.face, chunk.i, chunk.j));
-    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.apart(),
-                                              grid.coarsest(), sight)) {
+    for (const auto& [bottom, top] :
+         bands_of(world, chunk, grid.generated(), grid.apart(), grid.coarsest(), sight)) {
         grid.fill(bottom, top);
         Net<Ground>{grid, mesh}.add();
         Net<Liquid>{grid, mesh}.add();

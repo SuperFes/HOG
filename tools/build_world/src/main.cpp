@@ -126,7 +126,7 @@ int run(std::span<const std::string_view> arguments) {
     const std::vector<hog::build_world::Area> areas =
         options.all
             ? hog::build_world::whole(generator)
-            : std::vector{hog::build_world::around(
+            : std::vector{hog::globe::around(
                   generator, direction_of(options.at->first, options.at->second), options.across)};
     hog::jobs::JobSystem jobs{options.threads};
     const auto started = std::chrono::steady_clock::now();

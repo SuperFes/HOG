@@ -161,10 +161,9 @@ TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its co
 
 namespace {
 
-// Keys shown, as changes come in.
+// Keys shown, as changes come in. Chunks over ground not made show nothing.
 void apply(std::set<std::uint64_t>& shown, const hog::chunks::GlobeStream::Changes& changes) {
     for (const auto& [key, ground, water] : changes.shown) {
-        CHECK_FALSE(ground->indices.empty());
         shown.insert(key);
     }
     for (const std::uint64_t key : changes.gone) {
@@ -183,18 +182,27 @@ std::set<std::uint64_t> keys_of(std::span<const hog::globe::Cell> chunks) {
 } // namespace
 
 TEST_CASE("the globe's surfaces follow the eye, coarser further off", "[client][globe]") {
-    const hog::client::GlobeWorld globe{hog::globe::Planet{}};
+    hog::client::GlobeWorld globe{hog::globe::Planet{}};
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    globe.volume =
+        hog::globe::generate_area(globe.generator, hog::globe::around(globe.generator, up, 3));
     hog::jobs::JobSystem jobs{3};
     hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
     const double radius = globe.generator.planet().radius;
-    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
     const auto eye_over = [&](DVec3 at, double height) {
         return at * (radius + hog::chunks::globe_ground(globe.world, at) + height);
     };
     std::set<std::uint64_t> shown;
     stream.follow(eye_over(up, 0.0));
     CHECK(stream.in_flight());
-    apply(shown, stream.finish());
+    const hog::chunks::GlobeStream::Changes first = stream.finish();
+    // The ground under the eye is drawn.
+    const std::uint64_t under =
+        hog::chunks::globe_key(hog::globe::chunk_under(up, globe.generator.layers(), 0));
+    CHECK(std::ranges::any_of(first.shown, [&](const auto& change) {
+        return change.key == under && !change.ground->indices.empty();
+    }));
+    apply(shown, first);
     CHECK_FALSE(stream.in_flight());
     // Every chunk wanted is shown, at more than one detail.
     CHECK(shown == keys_of(stream.wanted()));
@@ -248,10 +256,12 @@ TEST_CASE("every chunk round the client's start meshes", "[.gate][client][globe]
 TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no others",
           "[client][globe]") {
     hog::client::GlobeWorld globe{hog::globe::Planet{}};
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    globe.volume =
+        hog::globe::generate_area(globe.generator, hog::globe::around(globe.generator, up, 3));
     hog::jobs::JobSystem jobs{3};
     hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
     const double radius = globe.generator.planet().radius;
-    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
     const double ground = hog::chunks::globe_ground(globe.world, up);
     stream.follow(up * (radius + ground + 2.0));
     std::set<std::uint64_t> shown;
@@ -259,9 +269,9 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
     const std::size_t drawn = shown.size();
     REQUIRE(drawn > 4);
     // Dug under the eye, the chunk there is meshed again, and the few beside it.
-    const std::uint64_t before = globe.store.revision();
+    const std::uint64_t before = globe.world.revision();
     hog::globe::dig(globe.world, up * (radius + ground), 1.5);
-    const std::vector<hog::globe::BrickSite> changed = globe.store.changed_since(before);
+    const std::vector<hog::globe::BrickSite> changed = globe.world.changed_since(before);
     REQUIRE_FALSE(changed.empty());
     for (const hog::globe::BrickSite brick : changed) {
         stream.changed(brick);

@@ -1,6 +1,7 @@
 #include <hog/client/cutaway.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -39,11 +40,13 @@ TEST_CASE("the cutaway is the ground's inside seen from within, made of the voxe
     const double voxel = GENERATE(from_range(voxels));
     CAPTURE(voxel);
     const hog::globe::Generator generator = world(voxel);
-    hog::globe::VoxelStore store{generator.layers()};
-    hog::globe::World voxels_now{generator, store};
+    hog::globe::MadeWorld made{generator};
+    hog::globe::World& voxels_now = made.world();
     const DVec3 up = glm::normalize(DVec3{1.0, 0.3, 0.2});
     const double ground = generator.column(up, hog::globe::voxel_lod(generator)).ground();
     constexpr double radius = 12.0;
+    // Made as deep as the shell goes, as digging there would make it.
+    made.cover_down(up, generator.layers().layer_at(ground - 60.0 - (2.0 * radius)));
 
     // Deep in the rock, all round is ground.
     const hog::terrain::BlockMesh inside =

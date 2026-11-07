@@ -2,7 +2,6 @@ add_library(hog_server
     src/ice_bake.cpp
     src/ice_climate.cpp
     src/chunk_sharing.cpp
-    src/brick_sharing.cpp
     src/grain_sharing.cpp
     src/ground_wetting.cpp
     src/move_check.cpp
@@ -29,7 +28,6 @@ hog_add_tests(hog_server
     tests/glacier_look_tests.cpp
     tests/chunk_sending_tests.cpp
     tests/chunk_sharing_tests.cpp
-    tests/brick_sharing_tests.cpp
     tests/catch_up_tests.cpp
     tests/grain_sharing_tests.cpp
     tests/ground_wetting_tests.cpp

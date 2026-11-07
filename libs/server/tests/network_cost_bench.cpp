@@ -1,10 +1,9 @@
 // What the network carries for some everyday happenings, in encoded bytes, from the real
 // messages and the real world. Run: hog_server_tests "[.network]"
-#include <hog/core/bytes.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/protocol/messages.hpp>
 
@@ -52,11 +51,11 @@ TEST_CASE("what the network carries for everyday happenings", "[.network]") {
     grains.flying.assign(50, {});
     std::printf("Grains, fifty lumps in flight:                 %zu bytes\n", size_of(grains));
 
-    // A hole dug in real generated ground, a ball 1.5 m across at a time, going down: the bricks
-    // the server sends back, as the store codes them.
+    // A hole dug in real generated ground, a ball 1.5 m across at a time, going down: the tile
+    // columns changed, as the volume codes them.
     const globe::Generator generator{globe::Planet{}};
-    globe::VoxelStore store{generator.layers()};
-    globe::World world{generator, store};
+    globe::MadeWorld made{generator};
+    globe::World& world = made.world();
     const double sea = generator.sea_level().value_or(generator.planet().radius);
     DVec3 up{};
     for (std::uint64_t k = 0;; ++k) {
@@ -66,29 +65,22 @@ TEST_CASE("what the network carries for everyday happenings", "[.network]") {
             break;
         }
     }
+    made.cover(up, 1);
     const double ground = globe::ground_below(generator, up, 0.5).value_or(0.0);
     std::size_t total = 0;
     std::printf("\nDigging a hole, a ball 1.5 m across each time, going down 0.5 m a dig:\n");
     for (int dig = 0; dig < 8; ++dig) {
-        const std::uint64_t before = store.revision();
+        const std::uint64_t before = world.revision();
         globe::dig(world, up * (ground - (0.5 * dig)), 0.75);
-        protocol::Bricks message;
-        std::size_t raw = 0;
-        for (const globe::BrickSite site : store.changed_since(before)) {
-            const globe::Brick* brick = store.brick(site);
-            if (brick == nullptr) {
-                continue;
-            }
-            ByteWriter out;
-            brick->write(out);
-            auto bytes = std::move(out).take();
-            raw += bytes.size();
-            message.bricks.push_back({.key = 0, .bytes = std::move(bytes)});
+        const std::size_t bricks = world.changed_since(before).size();
+        std::size_t sent = 0;
+        for (const globe::Site corner : made.volume().unsaved()) {
+            sent += made.volume().encode_column(corner).size();
+            made.volume().saved(corner);
         }
-        const std::size_t sent = size_of(message);
         total += sent;
-        std::printf("  dig %d: %zu bricks changed, %zu bytes of bricks, %zu bytes sent\n", dig + 1,
-                    message.bricks.size(), raw, sent);
+        std::printf("  dig %d: %zu bricks changed, %zu bytes of tile columns\n", dig + 1, bricks,
+                    sent);
     }
     std::printf("  eight digs: %zu bytes sent in all\n", total);
     CHECK(total > 0);

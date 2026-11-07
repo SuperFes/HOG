@@ -25,6 +25,7 @@ public:
     [[nodiscard]] Result<std::vector<std::byte>> header() const override;
     [[nodiscard]] Result<std::optional<globe::SavedColumn>>
     column(std::uint8_t face, std::uint32_t i, std::uint32_t j) const override;
+    [[nodiscard]] Result<std::vector<globe::SavedColumn>> columns() const override;
 
 private:
     explicit SqliteVolumeArchive(Database database);

@@ -29,11 +29,11 @@ const Generator& planet() {
 
 TEST_CASE("an area about a place holds it and stays on its side of the planet", "[build_world]") {
     const Generator& generator = planet();
-    const std::uint32_t side = hog::build_world::tiles_across(generator);
+    const std::uint32_t side = hog::globe::tiles_across(generator);
     REQUIRE(side > 8);
     for (const hog::DVec3 direction :
          {hog::DVec3{0.3, -0.2, 0.93}, hog::DVec3{1.0, 1.0, 1.0}, hog::DVec3{1.0, -1.0, -1.0}}) {
-        const Area area = hog::build_world::around(generator, direction, 6);
+        const Area area = hog::globe::around(generator, direction, 6);
         const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
         CAPTURE(direction.x, direction.y, direction.z);
         CHECK(area.face == cell.face);
@@ -45,7 +45,7 @@ TEST_CASE("an area about a place holds it and stays on its side of the planet", 
         CHECK(cell.j / Volume::tile_side >= area.j);
         CHECK(cell.j / Volume::tile_side < area.j + area.across);
     }
-    CHECK(hog::build_world::around(generator, {0.0, 0.0, 1.0}, side * 2).across == side);
+    CHECK(hog::globe::around(generator, {0.0, 0.0, 1.0}, side * 2).across == side);
     const std::vector<Area> all = hog::build_world::whole(generator);
     REQUIRE(all.size() == 6);
     for (std::uint8_t face = 0; face < 6; ++face) {
@@ -57,7 +57,7 @@ TEST_CASE("a build writes each tile column once, as the generator makes it", "[b
     const Generator& generator = planet();
     MemoryVolumeArchive archive;
     hog::jobs::JobSystem jobs{2};
-    const Area area = hog::build_world::around(generator, {0.3, -0.2, 0.93}, 2);
+    const Area area = hog::globe::around(generator, {0.3, -0.2, 0.93}, 2);
     std::vector<std::size_t> reported;
     const auto built = hog::build_world::build(generator, archive, jobs, {area}, 3,
                                                [&](std::size_t done, std::size_t total) {
@@ -97,7 +97,7 @@ TEST_CASE("a build refuses a world made from another planet", "[build_world]") {
     ++other.seed;
     REQUIRE(archive.write(hog::globe::volume_header(other), {}));
     hog::jobs::JobSystem jobs{1};
-    const Area area = hog::build_world::around(generator, {0.3, -0.2, 0.93}, 1);
+    const Area area = hog::globe::around(generator, {0.3, -0.2, 0.93}, 1);
     CHECK_FALSE(hog::build_world::build(generator, archive, jobs, {area}));
     CHECK(archive.column(area.face, area.i, area.j) == std::nullopt);
 }

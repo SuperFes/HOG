@@ -67,7 +67,7 @@ Ball icosphere() {
 } // namespace
 
 terrain::BlockMesh cutaway_shell(const globe::World& world, WorldPosition centre, double radius) {
-    const globe::Layers& layers = world.store().layers();
+    const globe::Layers& layers = world.layers();
     const Ball ball = icosphere();
     // Each brick the ball passes through, read once.
     std::map<globe::BrickSite, globe::BrickVoxels> bricks;

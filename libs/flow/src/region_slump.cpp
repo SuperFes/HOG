@@ -61,7 +61,7 @@ std::optional<Key> across(int level, const Key& key, int di, int dj) {
 } // namespace
 
 void Region::slump(Stepped& stepped) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double thickness = layers.thickness;
     const double gravity = world_->generator().planet().gravity;
 
@@ -241,7 +241,7 @@ void Region::slump(Stepped& stepped) {
 
 std::optional<Region::Scan> Region::scan(std::uint8_t face, std::uint32_t i, std::uint32_t j,
                                          std::uint32_t start, std::uint32_t reach) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const auto lookup = [&](std::uint32_t layer) { return voxel({face, i, j, layer}); };
     std::optional<globe::Surface> surface =
         globe::surface_below(start, reach, tallest, layers.thickness, lookup);
@@ -286,8 +286,8 @@ void Region::throw_grain(DVec3 at, DVec3 velocity, Material material, std::int64
 // The lean of the grain's own surface at a column, from the heights of the columns about it, for
 // where it has no neighbours to read it from, `fallback`.
 DVec3 Region::heap_normal(const globe::Cell& column, std::uint32_t layer, DVec3 fallback) {
-    const globe::Layers& layers = world_->store().layers();
-    const std::uint32_t across = world_->store().bricks_across() * globe::brick_side;
+    const globe::Layers& layers = world_->layers();
+    const std::uint32_t across = globe::bricks_across(world_->layers()) * globe::brick_side;
     if (column.i == 0 || column.j == 0 || column.i + 1 >= across || column.j + 1 >= across) {
         return fallback;
     }
@@ -320,7 +320,7 @@ DVec3 Region::heap_normal(const globe::Cell& column, std::uint32_t layer, DVec3 
 }
 
 std::optional<Ground> Region::ground_under(DVec3 at) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double radius = glm::length(at);
     const int layer = layers.layer_at(radius);
     if (layer < 0 || layer >= layers.count) {
@@ -342,7 +342,7 @@ std::optional<Ground> Region::ground_under(DVec3 at) {
 }
 
 bool Region::land(const Parcel& parcel, Stepped& stepped) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double radius = glm::length(parcel.at);
     const int layer = layers.layer_at(radius);
     if (layer < 0 || layer >= layers.count) {
@@ -367,7 +367,7 @@ bool Region::land(const Parcel& parcel, Stepped& stepped) {
 }
 
 std::optional<globe::BrickSite> Region::unheld_below(DVec3 at) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double radius = glm::length(at);
     const int start = layers.layer_at(radius);
     if (start < 0 || start >= layers.count) {
@@ -392,7 +392,7 @@ std::optional<globe::BrickSite> Region::unheld_below(DVec3 at) {
 }
 
 void Region::fly(double seconds, Stepped& stepped) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double gravity = world_->generator().planet().gravity;
     std::vector<Parcel> flying;
     flying.reserve(parcels_.size());
@@ -441,7 +441,7 @@ void Region::fly(double seconds, Stepped& stepped) {
 }
 
 bool Region::drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j, const Scan& floor) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     bool dropped = false;
     bool gap = false;
     for (std::uint32_t up = 0; up < floor.surface.open; ++up) {

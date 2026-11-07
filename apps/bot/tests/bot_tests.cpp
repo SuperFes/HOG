@@ -1,11 +1,15 @@
 #include <hog/app/server.hpp>
 #include <hog/bot/bot.hpp>
+#include <hog/build_world/build_world.hpp>
 #include <hog/client/session.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/net/server.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/tangent_frame.hpp>
+#include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
@@ -14,6 +18,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -52,6 +57,16 @@ std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory
     std::unreachable();
 }
 
+// Builds the ground about `direction` into the server's world file, as hog-build-world does.
+void build_ground(const hog::globe::Generator& generator, const std::filesystem::path& directory,
+                  DVec3 direction) {
+    auto archive = hog::store::SqliteVolumeArchive::open(directory / "var" / "world.db");
+    REQUIRE(archive);
+    hog::jobs::JobSystem jobs{2};
+    REQUIRE(hog::build_world::build(generator, *archive, jobs,
+                                    {hog::globe::around(generator, direction, 3)}));
+}
+
 // Real time, visited between the server's sleeps.
 class Visited {
 public:
@@ -73,10 +88,15 @@ private:
 
 TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     const hog::testing::TemporaryDirectory directory;
+    DVec3 middle{0.0};
+    {
+        const auto unbuilt = serving(directory.path());
+        const hog::globe::Generator& generator = unbuilt->generator();
+        middle = hog::globe::land_near(generator, hog::planet::start_direction)
+                     .value_or(hog::planet::start_direction);
+        build_ground(generator, directory.path(), middle);
+    }
     const auto server = serving(directory.path());
-    const hog::globe::Generator& generator = server->generator();
-    const DVec3 middle = hog::globe::land_near(generator, hog::planet::start_direction)
-                             .value_or(hog::planet::start_direction);
     const hog::globe::World world = server->globe();
     auto bot = hog::bot::Bot::start(world, std::format("127.0.0.1:{}", server->players()->port()),
                                     {}, middle, 7);
@@ -99,5 +119,9 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     REQUIRE(server->run(timer, [] { return start; }, stop));
     CHECK(bot->session().state() == hog::client::Session::State::Welcomed);
     CHECK(glm::length(bot->feet() - began) >= 5.0);
+    // On the ground built, not falling through where none is.
+    const DVec3 feet = bot->feet().metres();
+    const double ground = hog::globe::top_of(world, glm::normalize(feet)).value_or(0.0);
+    CHECK(std::abs(glm::length(feet) - ground) < 2.0);
     CHECK(server->players() != nullptr);
 }

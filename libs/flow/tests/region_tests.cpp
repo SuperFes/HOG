@@ -5,8 +5,8 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -32,7 +32,7 @@ using hog::flow::testing::tick;
 using hog::globe::BrickSite;
 using hog::globe::BrickVoxels;
 using hog::globe::Generator;
-using hog::globe::VoxelStore;
+using hog::globe::MadeWorld;
 using hog::globe::World;
 
 TEST_CASE("liquid poured into the air falls to the floor, and nothing is lost", "[flow][region]") {
@@ -176,11 +176,12 @@ TEST_CASE("the world as generated is at rest: a step moves nothing and writes no
           "[flow][region]") {
     const Generator& generator = earth();
     const hog::globe::Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    World world{generator, store};
+    MadeWorld made{generator};
+    World& world = made.world();
     Region region{world};
     for (std::uint64_t k = 1; k <= 4; ++k) {
         const hog::globe::Cell cell = hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304);
+        made.cover(hog::globe::center(cell));
         const double ground =
             hog::globe::ground_below(generator, hog::globe::center(cell), 0.5).value_or(0.0);
         const hog::globe::Cell column =
@@ -205,7 +206,7 @@ TEST_CASE("the world as generated is at rest: a step moves nothing and writes no
     CHECK(stepped.changed == 0);
     CHECK(stepped.from_sea == 0);
     CHECK(region.flush().empty());
-    CHECK(store.size() == 0);
+    CHECK(world.revision() == 0);
 }
 
 TEST_CASE("a puddle soaks into the ground as fast as the ground lets it: sand within the hour, "
@@ -534,7 +535,7 @@ TEST_CASE("a lump thrown onto a heap's flank rolls off down it instead of droppi
     }
     REQUIRE(resting);
     const std::int64_t before = block.region().grain();
-    const auto& layers = block.store().layers();
+    const auto& layers = block.world().layers();
     block.region().throw_grain(hog::globe::middle_of(block.at(12, 12, 5), layers), {},
                                Material::Granite, full);
 

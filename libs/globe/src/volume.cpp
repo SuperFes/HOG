@@ -45,6 +45,26 @@ bool Volume::made(Site site) const {
     return lowest && site.layer >= *lowest;
 }
 
+std::optional<std::uint32_t> Volume::top(Site site) const {
+    const Column column = column_of(site);
+    auto past =
+        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX});
+    for (; past != tiles_.begin(); --past) {
+        const auto& [key, tree] = *std::prev(past);
+        if (key.face != column.face || key.i != column.i || key.j != column.j) {
+            break;
+        }
+        for (int layer = Volume::tile_side - 1; layer >= 0; --layer) {
+            const Cube cube = tree.at(within(site.i), within(site.j), layer);
+            if (cube.solid != Material::Air || cube.grain != Material::Air ||
+                cube.liquid != Material::Air) {
+                return (key.k * side) + static_cast<std::uint32_t>(layer);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 Cube Volume::at(Site site) const {
     const auto found = tiles_.find(key_of(site));
     return found == tiles_.end()

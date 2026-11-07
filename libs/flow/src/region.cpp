@@ -140,7 +140,7 @@ Voxel* Region::voxel(Site site) {
 }
 
 std::optional<Site> Region::beside(Site site, int di, int dj) const {
-    const std::int64_t side = std::int64_t{1} << world_->store().layers().level;
+    const std::int64_t side = std::int64_t{1} << world_->layers().level;
     const std::int64_t i = std::int64_t{site.i} + di;
     const std::int64_t j = std::int64_t{site.j} + dj;
     // The cube's edges count as the edge of what's held until the flow crosses faces.
@@ -356,7 +356,7 @@ void Region::walk_all(const Column& column, const Each& each) {
 
 bool Region::open_to_sea(Site site) const {
     const std::optional<double> sea = world_->generator().sea_level();
-    return sea && world_->store().layers().middle(static_cast<int>(site.layer)) < *sea;
+    return sea && world_->layers().middle(static_cast<int>(site.layer)) < *sea;
 }
 
 bool Region::at_edge(Site site) {
@@ -641,7 +641,7 @@ void Region::want_around(Site site, std::set<std::uint64_t>& wanted) {
 }
 
 void Region::settle(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     std::set<std::uint64_t> wanted;
     for (const Column& column : columns) {
         std::size_t next = column.first;
@@ -774,7 +774,7 @@ std::int64_t Region::dithered(double value, Site site, std::uint64_t salt) const
 }
 
 std::int64_t Region::seeped(double rate, double seconds, Site site) const {
-    return dithered(rate * seconds / world_->store().layers().thickness * full, site, 0);
+    return dithered(rate * seconds / world_->layers().thickness * full, site, 0);
 }
 
 // Liquid moves `seconds` of seepage from `over` into `under`: down into the ground at what it
@@ -886,7 +886,7 @@ Stepped Region::step(double seconds) {
 }
 
 void Region::carry(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const double gravity = world_->generator().planet().gravity;
     for (const Column& column : columns) {
         std::size_t next = column.first;
@@ -951,7 +951,7 @@ void Region::wear(Section& section, const Bed& bed, double shear, double seconds
     if (room <= 0) {
         return;
     }
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     std::int64_t units = 0;
     if (loose != nullptr) {
         units = std::min({dithered(rate * seconds / thickness * full, bed.site, 1),
@@ -1014,7 +1014,7 @@ void Region::drop(Section& section, const Bed& bed, double depth, double seconds
 }
 
 void Region::scour(Site bed, int mm) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     dig_units(bed, std::llround(static_cast<double>(mm) / (thickness * 1000.0) *
                                 static_cast<double>(full)));
 }

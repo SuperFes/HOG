@@ -4,17 +4,17 @@
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cmath>
 #include <cstdlib>
-#include <array>
 
 using hog::flow::Simulation;
 using hog::flow::testing::Block;
@@ -22,7 +22,7 @@ using hog::flow::testing::earth;
 using hog::flow::testing::floor_above_sea;
 using hog::flow::testing::full;
 using hog::flow::testing::tick;
-using hog::globe::VoxelStore;
+using hog::globe::MadeWorld;
 using hog::globe::World;
 
 namespace {
@@ -188,11 +188,12 @@ TEST_CASE("the world as generated is at rest wherever it's touched: seabed, shor
           Landform{.name = "mountain", .low = 1'500.0, .high = 9'000.0}}) {
         for (int nth = 0; nth < 2; ++nth) {
             INFO(landform.name << " " << nth);
-            VoxelStore store{generator.layers()};
-            World world{generator, store};
+            MadeWorld made{generator};
+            World& world = made.world();
+            const hog::DVec3 up = ground_between(generator, landform.low, landform.high, nth);
+            made.cover(up);
             Simulation simulation{world};
-            simulation.touched(ground_brick(
-                generator, ground_between(generator, landform.low, landform.high, nth)));
+            simulation.touched(ground_brick(generator, up));
             std::int64_t moved = 0;
             std::int64_t eroded = 0;
             std::size_t most_held = 0;
@@ -210,7 +211,7 @@ TEST_CASE("the world as generated is at rest wherever it's touched: seabed, shor
             // along the sea nor stays awake.
             CHECK(moved == 0);
             CHECK(eroded == 0);
-            CHECK(store.size() == 0);
+            CHECK(world.revision() == 0);
             CHECK(most_held <= 7);
             CHECK(steps == Simulation::rest);
         }
@@ -219,14 +220,15 @@ TEST_CASE("the world as generated is at rest wherever it's touched: seabed, shor
 
 TEST_CASE("the world as generated is left as it is", "[flow][simulation]") {
     const hog::globe::Generator& generator = earth();
-    VoxelStore store{generator.layers()};
-    World world{generator, store};
+    MadeWorld made{generator};
+    World& world = made.world();
     Simulation simulation{world};
     const hog::globe::Cell cell = hog::globe::cell_at_index(7, 2'654'435'761ULL % 98'304);
     const double ground =
         hog::globe::ground_below(generator, hog::globe::center(cell), 0.5).value_or(0.0);
     const hog::globe::Cell column =
         hog::globe::cell_under(hog::globe::center(cell), generator.layers().level);
+    made.cover(hog::globe::center(cell));
     simulation.touched(hog::globe::brick_of(
         {.face = column.face,
          .i = column.i,
@@ -235,7 +237,7 @@ TEST_CASE("the world as generated is left as it is", "[flow][simulation]") {
     const Ran ran = run(simulation, 2 * Simulation::rest);
     CHECK(ran.steps == Simulation::rest + 1);
     CHECK(ran.most_held == 7);
-    CHECK(store.size() == 0);
+    CHECK(world.revision() == 0);
 }
 
 TEST_CASE("rain wets ground the flow does not hold, and a film on it wakes the brick",
@@ -323,8 +325,9 @@ TEST_CASE("ice laid over a column lies on its ground and is written to the world
             up = d;
         }
     }
-    VoxelStore store{generator.layers()};
-    World world{generator, store};
+    MadeWorld made{generator};
+    World& world = made.world();
+    made.cover(up);
     Simulation simulation{world};
     const hog::globe::Cell cell = hog::globe::cell_under(up, generator.layers().level);
     const std::vector<Simulation::Laid> laid{

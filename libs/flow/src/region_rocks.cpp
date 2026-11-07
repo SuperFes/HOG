@@ -26,7 +26,7 @@ double rolling_radius(const globe::Rock& rock) {
 
 std::optional<globe::BrickSite> Region::reshape(DVec3 centre, double reach,
                                                 const Distance& distance, const Change& change) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     // A voxel's amount tells a surface only within half its thickness.
     const double band = layers.thickness;
     std::optional<globe::BrickSite> missing;
@@ -48,7 +48,7 @@ std::optional<globe::BrickSite> Region::reshape(DVec3 centre, double reach,
 }
 
 std::optional<bool> Region::solid_at(DVec3 point) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double radius = glm::length(point);
     const int layer = layers.layer_at(radius);
     if (layer < 0 || layer >= layers.count) {
@@ -67,7 +67,7 @@ std::optional<bool> Region::solid_at(DVec3 point) {
 
 void Region::loosen(const globe::Rock& rock) {
     const double reach = std::max({rock.axes.x, rock.axes.y, rock.axes.z});
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     reshape(rock.middle, reach,
             [&](DVec3 at) {
                 DVec3 outward{0.0};
@@ -86,7 +86,7 @@ void Region::loosen(const globe::Rock& rock) {
 }
 
 std::size_t Region::loosen_unsupported(DVec3 point, std::size_t& unjudged) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     std::size_t freed = 0;
     for (const globe::Rock& rock :
          world_->generator().rocks_near(point, globe::voxel_lod(world_->generator()))) {
@@ -126,7 +126,7 @@ std::size_t Region::loosen_unsupported(DVec3 point, std::size_t& unjudged) {
 }
 
 void Region::loosen_fresh() {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     std::vector<Fresh> waiting;
     for (Fresh& fresh : fresh_) {
         const globe::Site middle{.face = fresh.site.face,
@@ -147,7 +147,7 @@ std::optional<globe::BrickSite> Region::settle_boulder(const Parcel& parcel) {
     const DVec3 up = glm::normalize(parcel.at);
     const DVec3 centre = parcel.at - (up * (settles_in * parcel.radius));
     // Held in full or not at all, so a block is never half built.
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     for (const auto& [brick, indices] :
          globe::sites_near(layers, centre, parcel.radius + layers.thickness)) {
         if (held(brick) == nullptr) {

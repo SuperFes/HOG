@@ -2,7 +2,6 @@
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/text_file.hpp>
-#include <hog/globe/brick_archive.hpp>
 #include <hog/globe/grip.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
@@ -42,9 +41,6 @@ constexpr std::size_t chunks_per_tick = 4;
 constexpr std::size_t chunk_queue = 256 * 1'024;
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
-// Where the baked tiles are kept in a save.
-constexpr save::SectionId bake_section = save::section_id("BAKE");
-constexpr std::uint16_t bake_section_version = 1;
 
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
@@ -69,16 +65,15 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
                store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
-               store::SqliteBrickArchive bricks)
+               store::SqliteVolumeArchive volumes)
     : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
-      voxels_(generator_.layers()), globe_(generator_, voxels_), flow_(globe_),
-      vent_sites_(globe::vent_sites(generator_)), vented_(vent_sites_.size(), false),
-      bricks_(std::move(bricks)), snapshots_(std::move(snapshots)), places_(std::move(places)),
+      globe_(generator_, volume_), flow_(globe_), vent_sites_(globe::vent_sites(generator_)),
+      vented_(vent_sites_.size(), false), volumes_(std::move(volumes)),
+      snapshots_(std::move(snapshots)), places_(std::move(places)),
       writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
       persistence_(entities_), chunks_(globe_, jobs_),
-      joined_(entities_, globe.radius, config.net.view), rain_(config.weather.level),
-      ground_(space_, globe_),
+      joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -136,9 +131,9 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (!places) {
         return context(world_file, places.error());
     }
-    auto bricks = store::SqliteBrickArchive::open(config.world);
-    if (!bricks) {
-        return context(world_file, bricks.error());
+    auto volumes = store::SqliteVolumeArchive::open(config.world);
+    if (!volumes) {
+        return context(world_file, volumes.error());
     }
     // The voxel world is Earth-like at the planet's seed and size, as the client's is by default.
     globe::Planet globe;
@@ -164,14 +159,20 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     }
 
     auto server = std::make_unique<Server>(Opened{}, config, globe, std::move(*snapshots),
-                                           std::move(*places), std::move(*bricks));
-    auto voxels = globe::load(server->generator_.layers(), server->bricks_);
-    if (!voxels) {
-        return context("voxels", voxels.error());
+                                           std::move(*places), std::move(*volumes));
+    auto volume = globe::load_volume(server->volumes_, globe::origin_of(server->generator_));
+    if (!volume) {
+        return context(world_file, volume.error());
     }
-    server->voxels_ = std::move(*voxels);
-    log::info(server_log, "world {:016x} in {}: {} bricks changed", server->world_id_, world_file,
-              server->voxels_.size());
+    server->volume_ = std::move(*volume);
+    server->chunks_.reload();
+    if (server->volume_.tiles() == 0) {
+        log::warn(server_log, "world {:016x} in {} has no ground built: run hog-build-world",
+                  server->world_id_, world_file);
+    } else {
+        log::info(server_log, "world {:016x} in {}: {} tiles", server->world_id_, world_file,
+                  server->volume_.tiles());
+    }
 
     const GameTime first = config.debug.start.value_or(now);
     for (const Error& skipped : loaded->skipped) {
@@ -205,15 +206,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
             } else {
                 log::info(save_log, "restored the air");
             }
-        }
-    }
-    if (const save::Section* kept =
-            loaded->snapshot ? loaded->snapshot->find(bake_section) : nullptr;
-        kept != nullptr && kept->version == bake_section_version) {
-        if (auto restored = server->baked_.restore(kept->bytes); !restored) {
-            log::warn(save_log, "baking the ground afresh: {}", restored.error().message);
-        } else {
-            log::info(save_log, "{} tiles of ground baked", server->baked_.size());
         }
     }
     server->open_players();
@@ -266,7 +258,6 @@ void Server::simulate(GameTime from, GameDuration step) {
         }
         swept_ = {};
         wake_vents();
-        bake_ground();
     }
     wet_ground(step);
     if (weather_) {
@@ -277,74 +268,8 @@ void Server::simulate(GameTime from, GameDuration step) {
                 skies::WeatherSettings{}.interval / std::max<std::uint32_t>(clock_scale_, 1)));
         if (const auto made = weather_->poll(from + step, fade)) {
             tell_weather(*made);
-            // What falls now counts for the time since the weather was last made.
-            const GameTime now = from + step;
-            const double hours =
-                rained_ ? std::chrono::duration<double, std::ratio<3'600>>(now - *rained_).count()
-                        : 1.0;
-            rain_.add([&](DVec3 up) -> std::optional<float> {
-                const auto here = weather_->at(up);
-                return here ? std::optional<float>{here->falling} : std::nullopt;
-            },
-                      hours);
-            rained_ = now;
         }
     }
-}
-
-void Server::bake_ground() {
-    HOG_ZONE("bake ground");
-    if (baking_) {
-        if (!baking_->done()) {
-            return;
-        }
-        const std::vector<flow::GroundBake::Baked> written = baking_->take();
-        baking_.reset();
-        const std::vector<globe::BrickSite> since = voxels_.changed_since(baking_from_);
-        const bool clashed = std::ranges::any_of(written, [&](const auto& baked) {
-            return std::ranges::binary_search(since, baked.site);
-        });
-        // Ground changed under the bake is baked again from what it is now.
-        if (!clashed) {
-            for (const flow::GroundBake::Baked& baked : written) {
-                if (baked.brick) {
-                    voxels_.put(baked.site, *baked.brick);
-                } else {
-                    voxels_.erase(baked.site);
-                }
-                flow_.reload(baked.site);
-            }
-            baked_.mark(baking_tile_);
-            log::info(server_log, "baked tile {} {} {}: {} bricks changed", baking_tile_.face,
-                      baking_tile_.i, baking_tile_.j, written.size());
-        }
-    }
-    start_bake();
-}
-
-void Server::start_bake() {
-    // A tile's own and the eight about it, so ground is settled before anyone reaches it.
-    constexpr int reach = 1;
-    std::vector<DVec3> places;
-    for (const WorldPosition& at : joined_.placed()) {
-        places.push_back(glm::normalize(at.metres()));
-    }
-    const std::vector<flow::GroundBake::Tile> due = baked_.due(voxels_, places, reach);
-    if (due.empty()) {
-        return;
-    }
-    const flow::GroundBake::Tile tile = due.front();
-    // Open water gives back about a metre a year where it's warm, less where it's cold.
-    const double kelvin =
-        generator_.column(places.front(), globe::voxel_lod(generator_)).surface_temperature();
-    const double evaporation = std::clamp(0.06 * (kelvin - 268.0), 0.1, 2.0);
-    baking_tile_ = tile;
-    baking_from_ = voxels_.revision();
-    baking_ = std::make_unique<jobs::Async<std::vector<flow::GroundBake::Baked>>>(
-        jobs_, [generator = &generator_, held = flow::GroundBake::held_in(voxels_, tile), tile,
-                rain = rain_, evaporation] {
-            return flow::GroundBake::bake(*generator, held, tile, rain, evaporation);
-        });
 }
 
 void Server::wet_ground(GameDuration step) {
@@ -619,9 +544,9 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
         return;
     }
     chunks_.edited();
-    const std::uint64_t before = voxels_.revision();
+    const std::uint64_t before = globe_.revision();
     globe::dig(globe_, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
-    for (const globe::BrickSite brick : voxels_.changed_since(before)) {
+    for (const globe::BrickSite brick : globe_.changed_since(before)) {
         ground_.changed(brick);
         flow_.touched(brick);
         flow_.disturbed(brick);
@@ -640,10 +565,10 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
         return;
     }
     chunks_.edited();
-    const std::uint64_t before = voxels_.revision();
+    const std::uint64_t before = globe_.revision();
     globe::build(globe_, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
                  material);
-    for (const globe::BrickSite brick : voxels_.changed_since(before)) {
+    for (const globe::BrickSite brick : globe_.changed_since(before)) {
         ground_.changed(brick);
         flow_.touched(brick);
         flow_.disturbed(brick);
@@ -768,9 +693,6 @@ void Server::submit() {
                       .version = skies::WeatherKeeper::section_version,
                       .bytes = weather_->saved()});
     }
-    snapshot.add({.id = bake_section,
-                  .version = bake_section_version,
-                  .bytes = baked_.saved()});
     writer_.submit(std::move(snapshot));
 }
 
@@ -785,13 +707,13 @@ Result<void> Server::save() {
         log::error(save_log, "saving failed: {}", flushed.error().message);
         return flushed;
     }
-    auto bricks = globe::save(voxels_, bricks_);
-    if (!bricks) {
-        log::error(save_log, "saving bricks failed: {}", bricks.error().message);
-        return std::unexpected(std::move(bricks).error());
+    auto columns = globe::save_volume(volume_, volumes_, globe::origin_of(generator_));
+    if (!columns) {
+        log::error(save_log, "saving the ground failed: {}", columns.error().message);
+        return std::unexpected(std::move(columns).error());
     }
-    if (*bricks > 0) {
-        log::info(save_log, "saved {} bricks", *bricks);
+    if (*columns > 0) {
+        log::info(save_log, "saved {} tile columns", *columns);
     }
     return {};
 }

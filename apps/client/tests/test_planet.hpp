@@ -2,6 +2,7 @@
 
 #include <hog/client/globe_view.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -21,10 +22,16 @@ inline const planet::PlanetConfig& planet() {
     return config;
 }
 
-// The voxel world the client draws in place of the planet, as --globe makes it by default.
+// The voxel world the client draws in place of the planet, as --globe makes it by default, its
+// ground made about the land nearest the start.
 inline const GlobeWorld& globe() {
-    static const GlobeWorld made{
-        globe_planet(std::nullopt, planet().seed, planet().radius).value()};
+    static const GlobeWorld& made = [] -> const GlobeWorld& {
+        static GlobeWorld world{globe_planet(std::nullopt, planet().seed, planet().radius).value()};
+        const DVec3 land = globe::land_near(world.generator, planet::start_direction).value();
+        world.volume =
+            globe::generate_area(world.generator, globe::around(world.generator, land, 5));
+        return world;
+    }();
     return made;
 }
 

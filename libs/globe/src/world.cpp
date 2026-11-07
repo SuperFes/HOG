@@ -2,13 +2,12 @@
 #include <hog/globe/world.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <span>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,76 +36,89 @@ BrickVoxels generated(const Generator& generator, BrickSite site) {
     return voxels;
 }
 
-World::World(const Generator& generator, VoxelStore& store)
-    : generator_{&generator}, store_{&store} {
-    HOG_ASSERT(store.layers() == generator.layers(), "the store stands on other layers");
+std::uint32_t bricks_across(const Layers& layers) noexcept {
+    return (std::uint32_t{1} << static_cast<unsigned>(layers.level)) / brick_side;
+}
+
+std::uint32_t bricks_up(const Layers& layers) noexcept {
+    return static_cast<std::uint32_t>((layers.count + brick_side - 1) / brick_side);
+}
+
+bool in_layers(const Layers& layers, BrickSite site) noexcept {
+    return site.face < 6 && site.i < bricks_across(layers) && site.j < bricks_across(layers) &&
+           site.layer < bricks_up(layers);
+}
+
+World::World(const Generator& generator, Volume& volume)
+    : generator_{&generator}, volume_{&volume} {}
+
+void World::column(Site base, int bottom, int count, int apart, std::span<Voxel> out,
+                   std::size_t stride) const {
+    const Planet& planet = generator_->planet();
+    const Layers& layers = generator_->layers();
+    const DVec3 up = center(column_of(base, layers));
+    const std::optional<std::uint32_t> lowest = volume_->floor(base);
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    const auto x = static_cast<int>(base.i % side);
+    const auto y = static_cast<int>(base.j % side);
+    const VoxelTree* tile = nullptr;
+    std::optional<std::uint32_t> tile_k;
+    for (int step = 0; step < count; ++step) {
+        const auto layer = static_cast<std::uint32_t>(bottom + (step * apart));
+        Cube cube;
+        if (lowest && layer < *lowest) {
+            // Under a column's floor nothing is made yet: deep ground, taken as the crust's rock.
+            cube = {.solid = planet.high.rock, .solid_amount = Voxel::full};
+        } else {
+            if (tile_k != layer / side) {
+                tile_k = layer / side;
+                tile =
+                    volume_->tile_at({.face = base.face, .i = base.i, .j = base.j, .layer = layer});
+            }
+            if (tile != nullptr) {
+                cube = tile->at(x, y, static_cast<int>(layer % side));
+            }
+        }
+        out[static_cast<std::size_t>(step) * stride] =
+            voxel_of(cube, place_temperature(planet, up, layers.middle(static_cast<int>(layer))));
+    }
 }
 
 Voxel World::at(Site site) const {
-    if (const auto held = store_->at(site)) {
-        return *held;
-    }
-    const Layers& layers = generator_->layers();
-    return generated_at(generator_->columns(column_of(site, layers), 1, voxel_lod(*generator_))[0],
-                        layers, site.layer);
+    Voxel voxel;
+    column(site, static_cast<int>(site.layer), 1, 1, std::span{&voxel, 1}, 1);
+    return voxel;
 }
 
 BrickVoxels World::brick(BrickSite site) const {
-    if (const Brick* held = store_->brick(site)) {
-        BrickVoxels voxels{};
-        held->unpack(voxels);
-        return voxels;
+    BrickVoxels voxels{};
+    constexpr std::size_t layer_stride = static_cast<std::size_t>(brick_side) * brick_side;
+    for (int index = 0; index < brick_side * brick_side; ++index) {
+        column(site_in(site, index), static_cast<int>(site.layer) * brick_side, brick_side, 1,
+               std::span{voxels}.subspan(static_cast<std::size_t>(index)), layer_stride);
     }
-    return generated(*generator_, site);
+    return voxels;
 }
 
-std::vector<Voxel> World::fill(std::span<const Cell> cells,
-                               std::span<const Generator::Column> columns, int bottom, int count,
+std::vector<Voxel> World::fill(std::span<const Cell> cells, int bottom, int count,
                                int apart) const {
     const Layers& layers = generator_->layers();
-    HOG_ASSERT(cells.size() == columns.size(), "a column for each cell");
     HOG_ASSERT(apart > 0 && bottom >= 0 && count >= 0 &&
                    (count == 0 || bottom + ((count - 1) * apart) < layers.count),
                "layers out of range");
     std::vector<Voxel> voxels(cells.size() * static_cast<std::size_t>(count));
-    std::unordered_map<std::uint64_t, BrickVoxels> held;
     for (std::size_t k = 0; k < cells.size(); ++k) {
         HOG_ASSERT(std::cmp_equal(cells[k].level, layers.level), "cells of the voxels' level");
-        // The voxels' run up the column, `apart` layers between each.
-        const auto voxel_at = [&](int step) -> Voxel& {
-            return voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
-        };
-        const auto layer_of = [&](int step) { return bottom + (step * apart); };
-        for (int step = 0; step < count;) {
-            const Site site{.face = cells[k].face,
-                            .i = cells[k].i,
-                            .j = cells[k].j,
-                            .layer = static_cast<std::uint32_t>(layer_of(step))};
-            const BrickSite in = brick_of(site);
-            // The steps whose layers lie in the same brick.
-            int end = step + 1;
-            while (end < count && std::cmp_less(layer_of(end), (in.layer + 1) * brick_side)) {
-                ++end;
-            }
-            const Brick* stored = store_->brick(in);
-            if (stored == nullptr) {
-                for (; step < end; ++step) {
-                    voxel_at(step) = generated_at(
-                        columns[k], layers, static_cast<std::uint32_t>(layer_of(step)), apart);
-                }
-                continue;
-            }
-            const auto [found, added] = held.try_emplace(brick_key(in));
-            if (added) {
-                stored->unpack(found->second);
-            }
-            for (; step < end; ++step) {
-                const Site at{.face = site.face,
-                              .i = site.i,
-                              .j = site.j,
-                              .layer = static_cast<std::uint32_t>(layer_of(step))};
-                Voxel& voxel = voxel_at(step);
-                voxel = found->second[static_cast<std::size_t>(index_in_brick(at))];
+        if (count == 0) {
+            continue;
+        }
+        const std::span<Voxel> out = std::span{voxels}.subspan(k * static_cast<std::size_t>(count),
+                                                               static_cast<std::size_t>(count));
+        column({.face = cells[k].face, .i = cells[k].i, .j = cells[k].j}, bottom, count, apart, out,
+               1);
+        if (apart > 1) {
+            for (int step = 0; step < count; ++step) {
+                Voxel& voxel = out[static_cast<std::size_t>(step)];
                 voxel.solid_amount = amount_at(distance_of(voxel.solid_amount, layers.thickness),
                                                layers.thickness * apart);
             }
@@ -116,30 +128,39 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells,
 }
 
 void World::write(BrickSite site, const BrickVoxels& voxels) {
-    if (voxels == generated(*generator_, site)) {
-        store_->erase(site);
-    } else {
-        store_->put(site, Brick::pack(voxels));
+    const Planet& planet = generator_->planet();
+    const Layers& layers = generator_->layers();
+    for (int index = 0; index < brick_side * brick_side; ++index) {
+        const Site base = site_in(site, index);
+        const DVec3 up = center(column_of(base, layers));
+        for (int up_by = 0; up_by < brick_side; ++up_by) {
+            const int at = index + (up_by * brick_side * brick_side);
+            const Site there = site_in(site, at);
+            volume_->set(there,
+                         cube_of(voxels[static_cast<std::size_t>(at)],
+                                 place_temperature(planet, up,
+                                                   layers.middle(static_cast<int>(there.layer)))));
+        }
     }
 }
 
-int highest_layer(const World& world, Cell cell, const Generator::Column& column) {
-    const Layers& layers = world.store().layers();
-    int highest = layers.layer_at(column.top()) + 1;
-    const Site at{.face = cell.face, .i = cell.i, .j = cell.j, .layer = 0};
-    if (const auto held = world.store().highest_held(brick_of(at))) {
-        highest = std::max(highest, ((static_cast<int>(*held) + 1) * brick_side) - 1);
+std::optional<int> highest_layer(const World& world, Cell cell) {
+    const std::optional<std::uint32_t> top =
+        world.volume().top({.face = cell.face, .i = cell.i, .j = cell.j, .layer = 0});
+    if (!top) {
+        return std::nullopt;
     }
-    return std::min(highest, layers.count - 1);
+    return std::min(static_cast<int>(*top), world.layers().count - 1);
 }
 
 std::optional<double> surface_under(const World& world, DVec3 direction, double from) {
-    const Generator& generator = world.generator();
-    const Layers& layers = generator.layers();
+    const Layers& layers = world.layers();
     const Cell cell = cell_under(direction, layers.level);
-    const std::vector<Generator::Column> columns =
-        generator.columns(std::span{&cell, 1}, voxel_lod(generator));
-    const int start = std::min(layers.layer_at(from), highest_layer(world, cell, columns[0]));
+    const std::optional<int> highest = highest_layer(world, cell);
+    if (!highest) {
+        return std::nullopt;
+    }
+    const int start = std::min(layers.layer_at(from), *highest);
     const auto in_ground = [](const Voxel& voxel) {
         return voxel.solid != Material::Air || voxel.grain_amount >= Voxel::full / 2;
     };
@@ -148,19 +169,17 @@ std::optional<double> surface_under(const World& world, DVec3 direction, double 
     Voxel above{};
     for (int top = start; top >= 0; top -= stretch) {
         const int bottom = std::max(0, top - stretch + 1);
-        const std::vector<Voxel> voxels = world.fill(std::span{&cell, 1}, columns, bottom,
-                                                     top - bottom + 1);
+        const std::vector<Voxel> voxels = world.fill(std::span{&cell, 1}, bottom, top - bottom + 1);
         for (int layer = top; layer >= bottom; --layer) {
             const Voxel& voxel = voxels[static_cast<std::size_t>(layer - bottom)];
             if (!in_ground(voxel)) {
                 above = voxel;
                 continue;
             }
-            double surface = voxel.solid != Material::Air
-                                 ? layers.middle(layer) +
-                                       ((share(voxel.solid_amount) - 0.5) * layers.thickness)
-                                 : layers.bottom(layer) + (share(voxel.grain_amount) *
-                                                           layers.thickness);
+            double surface =
+                voxel.solid != Material::Air
+                    ? layers.middle(layer) + ((share(voxel.solid_amount) - 0.5) * layers.thickness)
+                    : layers.bottom(layer) + (share(voxel.grain_amount) * layers.thickness);
             // Grain piled in the open voxel over it stands on it.
             if (above.grain_amount > 0) {
                 surface = std::max(surface, layers.bottom(layer + 1) +
@@ -173,11 +192,11 @@ std::optional<double> surface_under(const World& world, DVec3 direction, double 
 }
 
 std::optional<double> top_of(const World& world, DVec3 direction) {
-    return surface_under(world, direction, world.generator().layers().ceiling());
+    return surface_under(world, direction, world.layers().ceiling());
 }
 
-std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
-                                                 double reach, double height) {
+std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre, double reach,
+                                                 double height) {
     const double from = glm::length(centre);
     const double up = height < 0.0 ? reach : height;
     const int lowest = std::max(0, layers.layer_at(from - up));
@@ -240,7 +259,7 @@ namespace {
 // voxel's amount tells a surface only within half its thickness, across its diagonal at most.
 void reshape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
              const auto& change) {
-    const Layers& layers = world.store().layers();
+    const Layers& layers = world.layers();
     const double band = layers.thickness;
     for (const auto& [brick, indices] : sites_near(layers, centre, reach + band, height + band)) {
         BrickVoxels voxels = world.brick(brick);
@@ -261,15 +280,14 @@ Shape ball(DVec3 centre, double radius) {
 } // namespace
 
 void dig_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape) {
-    const double thickness = world.generator().layers().thickness;
-    reshape(world, centre, reach, height, shape, [thickness](Voxel& voxel, double to_shape) {
-        dig_voxel(voxel, to_shape, thickness);
-    });
+    const double thickness = world.layers().thickness;
+    reshape(world, centre, reach, height, shape,
+            [thickness](Voxel& voxel, double to_shape) { dig_voxel(voxel, to_shape, thickness); });
 }
 
 void build_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
                  Material material) {
-    const double thickness = world.generator().layers().thickness;
+    const double thickness = world.layers().thickness;
     reshape(world, centre, reach, height, shape, [&](Voxel& voxel, double to_shape) {
         build_voxel(voxel, to_shape, material, thickness);
     });

@@ -22,15 +22,18 @@ struct Run {
 
 // The open stretches under matter in the column through `cell`, between the layers `lowest` and
 // `highest`, as its voxels now are.
-void open_runs(const World& world, Cell cell, const Generator::Column& column, int lowest,
-               int highest, std::vector<std::pair<double, double>>& found) {
-    const Layers& layers = world.store().layers();
-    highest = std::min(highest, highest_layer(world, cell, column));
+void open_runs(const World& world, Cell cell, int lowest, int highest,
+               std::vector<std::pair<double, double>>& found) {
+    const Layers& layers = world.layers();
+    const std::optional<int> held = highest_layer(world, cell);
+    if (!held) {
+        return;
+    }
+    highest = std::min(highest, *held);
     if (highest < lowest) {
         return;
     }
-    const std::vector<Voxel> voxels =
-        world.fill(std::span{&cell, 1}, std::span{&column, 1}, lowest, highest - lowest + 1);
+    const std::vector<Voxel> voxels = world.fill(std::span{&cell, 1}, lowest, highest - lowest + 1);
     const auto in_ground = [](const Voxel& voxel) {
         return voxel.solid != Material::Air || voxel.grain_amount >= Voxel::full / 2;
     };
@@ -95,10 +98,8 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
                         }
                         const DVec3 direction = glm::normalize((up * planet.radius) + across);
                         const Cell cell = cell_under(direction, layers.level);
-                        const Generator::Column column =
-                            generator.columns(std::span{&cell, 1}, lod)[0];
                         found.clear();
-                        open_runs(world, cell, column, std::max(0, layers.layer_at(floor)),
+                        open_runs(world, cell, std::max(0, layers.layer_at(floor)),
                                   std::min(layers.count - 1, layers.layer_at(ceiling)), found);
                         for (const auto& [bottom, top] : found) {
                             // Within range of the eye, not only along the ground and up or down.

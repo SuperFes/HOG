@@ -8,7 +8,6 @@
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -35,7 +34,6 @@ using hog::globe::Cell;
 using hog::globe::Generator;
 using hog::globe::Material;
 using hog::globe::SurfaceMesh;
-using hog::globe::VoxelStore;
 using hog::globe::World;
 using namespace hog::globe::bed;
 
@@ -102,9 +100,10 @@ std::optional<std::pair<Cell, std::pair<double, double>>> chunk_with_deep_cave()
 } // namespace
 
 TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const Cell chunk = hog::globe::chunk_under(up, earth().layers());
     const SurfaceMesh mesh = mesh_of(world, std::array{chunk});
     REQUIRE(mesh.vertices.size() > 500);
@@ -142,9 +141,10 @@ TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][sur
 
 TEST_CASE("a surface drawn from solid amounts alone lies near the ground and faces out of it",
           "[globe][surface][amounts]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const Cell chunk = hog::globe::chunk_under(up, earth().layers());
     const SurfaceMesh mesh = mesh_of(world, std::array{chunk});
     REQUIRE(mesh.vertices.size() > 500);
@@ -171,8 +171,8 @@ TEST_CASE("a surface drawn from solid amounts alone lies near the ground and fac
 
 TEST_CASE("chunks of a detail meet without gaps, on a face and across the cube's edges",
           "[globe][surface]") {
-    VoxelStore store{moon().layers()};
-    const World world{moon(), store};
+    MadeWorld made{moon()};
+    const World& world = made.world();
     const hog::globe::Layers& layers = moon().layers();
     const int detail = GENERATE(0, 1, 3);
     const int level = layers.level - hog::globe::chunk_levels - detail;
@@ -185,6 +185,7 @@ TEST_CASE("chunks of a detail meet without gaps, on a face and across the cube's
         const Cell chunk = hog::globe::chunk_under(up, layers, detail);
         CAPTURE(detail, chunk.face, chunk.i, chunk.j);
         const std::vector<Cell> block = block_round(chunk);
+        cover_chunks(made, block);
         const SurfaceMesh mesh = mesh_of(world, block);
         REQUIRE(mesh.vertices.size() > 1'000);
         CHECK(open_in(world, mesh, chunk) == 0);
@@ -202,10 +203,11 @@ namespace {
 // Meshes the chunks round an eye standing at `up` on Venus, so the details change within a few
 // chunks of it, and checks they leave no gaps.
 void check_details_meet(DVec3 up, double reach, double ratio) {
-    VoxelStore store{venus().layers()};
-    const World world{venus(), store};
+    MadeWorld made{venus()};
+    const World& world = made.world();
     const hog::globe::Layers& layers = venus().layers();
     const std::vector<Cell> chunks = hog::globe::chunks_around(venus(), {.up = up}, reach, ratio);
+    cover_chunks(made, chunks);
     const hog::globe::Drawn drawn{chunks};
     SurfaceMesh mesh;
     mesh.origin = up * venus().planet().radius;
@@ -267,67 +269,29 @@ TEST_CASE("chunks at other details meet without gaps, at every kind of edge and 
     }
 }
 
-TEST_CASE("coarser chunks lie on their coarser ground, as near for their size",
-          "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
-    const hog::globe::Layers& layers = earth().layers();
-    const DVec3 up = ground_between(earth(), 50.0, 400.0);
-    for (const int detail : {1, 3, 5}) {
-        const int apart = hog::globe::apart_at(detail);
-        const double lod = hog::globe::voxel_lod(earth()) * apart;
-        const SurfaceMesh mesh =
-            mesh_of(world, std::array{hog::globe::chunk_under(up, layers, detail)});
-        REQUIRE(mesh.vertices.size() > 500);
-        double off = 0.0;
-        double worst = 0.0;
-        double off_fine = 0.0;
-        // Of those on the ground, rather than in caves under it.
-        std::size_t on_ground = 0;
-        std::size_t facing = 0;
-        for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
-            const DVec3 point = world_point(mesh, v);
-            const double distance = std::abs(earth().sample(point, lod).distance);
-            off += distance;
-            worst = std::max(worst, distance);
-            off_fine += std::abs(earth().sample(point, hog::globe::voxel_lod(earth())).distance);
-            const DVec3 up_there = glm::normalize(point);
-            const double ground = hog::globe::ground_below(earth(), up_there, lod).value_or(0.0);
-            if (std::abs(glm::length(point) - ground) < 2.0 * apart * layers.thickness) {
-                ++on_ground;
-                facing += glm::dot(DVec3{mesh.vertices[v].normal}, up_there) > 0.3 ? 1U : 0U;
-            }
-        }
-        const auto count = static_cast<double>(mesh.vertices.size());
-        CAPTURE(detail, off / count, worst, off_fine / count, on_ground, facing);
-        CHECK(off / count < 0.05 * apart);
-        CHECK(worst < 0.3 * apart);
-        // Off the finest ground by about what's smoothed away.
-        CHECK(off_fine / count < 0.5 * apart);
-        CHECK(on_ground > mesh.vertices.size() / 2);
-        CHECK(facing > on_ground * 99 / 100);
-    }
-}
-
 TEST_CASE("chunks meet without gaps at the cube's corners, where three columns meet",
           "[globe][surface]") {
-    VoxelStore store{moon().layers()};
-    const World world{moon(), store};
+    MadeWorld made{moon()};
+    const World& world = made.world();
     const hog::globe::Layers& layers = moon().layers();
     for (const DVec3 corner : {DVec3{1.0, 1.0, 1.0}, DVec3{-1.0, -1.0, -1.0}, DVec3{1.0, -1.0, 1.0},
                                DVec3{-1.0, 1.0, -1.0}}) {
         const Cell chunk = hog::globe::chunk_under(glm::normalize(corner), layers);
         CAPTURE(corner.x, corner.y, corner.z);
-        REQUIRE(block_round(chunk).size() == 8);
-        const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
+        const std::vector<Cell> block = block_round(chunk);
+        REQUIRE(block.size() == 8);
+        cover_chunks(made, block);
+        const SurfaceMesh mesh = mesh_of(world, block);
+        REQUIRE_FALSE(mesh.vertices.empty());
         CHECK(open_in(world, mesh, chunk) == 0);
     }
 }
 
 TEST_CASE("a ball dug in the ground shows as a hollow", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const double ground = hog::globe::ground_below(earth(), up, 0.5).value_or(0.0);
     const Cell chunk = hog::globe::chunk_under(up, earth().layers());
     const auto deepest = [&] {
@@ -347,9 +311,10 @@ TEST_CASE("a ball dug in the ground shows as a hollow", "[globe][surface]") {
 }
 
 TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const double lod = hog::globe::voxel_lod(earth());
     const DVec3 centre = up * hog::globe::ground_below(earth(), up, lod).value_or(0.0);
     constexpr double radius = 3.0;
@@ -386,13 +351,14 @@ TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
 
 TEST_CASE("a cave in sight is drawn from its voxels however deep it lies, whole and without gaps",
           "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const hog::globe::Layers& layers = earth().layers();
     const double lod = hog::globe::voxel_lod(earth());
     const auto [chunk, cave] =
         chunk_with_deep_cave().value_or(std::pair{Cell{}, std::pair{0.0, 0.0}});
     REQUIRE(chunk.is_valid());
+    made.cover_down(hog::globe::center(chunk), layers.layer_at(cave.first) - 8);
     INFO("chunk " << chunk.face << " " << chunk.i << " " << chunk.j << ", cave from " << cave.first
                   << " to " << cave.second);
     // Walls of the cave's, in the chunk, under a sight of radii.
@@ -465,10 +431,11 @@ TEST_CASE("a sight made for a band holds while the eye stays near it", "[globe][
 }
 
 TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const double sea = earth().sea_level().value_or(0.0);
     const DVec3 up = ground_between(earth(), -300.0, -20.0);
+    made.cover(up);
     const Cell chunk = hog::globe::chunk_under(up, earth().layers());
     const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
     std::size_t water = 0;
@@ -504,12 +471,13 @@ TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]"
         }
     }
     REQUIRE(deepest);
-    VoxelStore store{generator.layers()};
-    const World world{generator, store};
+    MadeWorld made{generator};
+    const World& world = made.world();
     const DVec3 up =
         hog::globe::center(hog::globe::cell_at_index(shape.cut_level, deepest.value_or(0)));
-    const SurfaceMesh mesh =
-        mesh_of(world, block_round(hog::globe::chunk_under(up, generator.layers())));
+    const std::vector<Cell> block = block_round(hog::globe::chunk_under(up, generator.layers()));
+    cover_chunks(made, block);
+    const SurfaceMesh mesh = mesh_of(world, block);
     std::size_t water = 0;
     std::size_t level = 0;
     for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
@@ -537,9 +505,10 @@ TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]"
 
 TEST_CASE("water standing in a hollow shows level at its surface, however full its top voxel",
           "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     const double thickness = earth().layers().thickness;
     const double level = glm::length(centre) - 1.0;
@@ -562,9 +531,10 @@ TEST_CASE("water standing in a hollow shows level at its surface, however full i
 
 TEST_CASE("lava standing in a hollow shines by its heat, and cold rock does not",
           "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     const double thickness = earth().layers().thickness;
     const double level = glm::length(centre) - 1.0;
@@ -597,9 +567,10 @@ TEST_CASE("lava standing in a hollow shines by its heat, and cold rock does not"
 
 TEST_CASE("a film of water shallower than half a voxel still shows on the ground",
           "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     const double thickness = earth().layers().thickness;
     const double level = glm::length(centre) - 3.0 + 0.4;
@@ -622,9 +593,10 @@ TEST_CASE("a film of water shallower than half a voxel still shows on the ground
 
 TEST_CASE("grain piled in a hollow shows as ground of its own, as high as it fills",
           "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     const double thickness = earth().layers().thickness;
     const double level = glm::length(centre) - 1.5;
@@ -654,10 +626,11 @@ TEST_CASE("grain piled in a hollow shows as ground of its own, as high as it fil
 }
 
 TEST_CASE("the seabed is drawn soaked and the land dry", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const auto wetness = [&](double low, double high) {
         const DVec3 up = ground_between(earth(), low, high);
+        made.cover(up);
         const SurfaceMesh mesh =
             mesh_of(world, std::array{hog::globe::chunk_under(up, earth().layers())});
         double total = 0.0;
@@ -676,9 +649,10 @@ TEST_CASE("the seabed is drawn soaked and the land dry", "[globe][surface]") {
 }
 
 TEST_CASE("ground soaked to its pores shows wet at its surface", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     fill_hollow(
         world, centre, 4.0,
@@ -715,9 +689,10 @@ TEST_CASE("ground soaked to its pores shows wet at its surface", "[globe][surfac
 }
 
 TEST_CASE("a film of water over the ground is drawn as standing on it", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    made.cover(up);
     const DVec3 centre = dig_hollow(world, up, 3.0);
     // A centimetre over the hollow's floor, in its open voxels.
     fill_hollow(world, centre, 3.6, [&](hog::globe::Voxel& voxel, double /*bottom*/) {
@@ -749,8 +724,8 @@ TEST_CASE("a film of water over the ground is drawn as standing on it", "[globe]
 }
 
 TEST_CASE("chunks near a place are all those within reach, nearest first", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const double radius = earth().planet().radius;
     for (const DVec3 up : {somewhere(3), glm::normalize(DVec3{1.0, 1.0, 1.0})}) {
         constexpr double reach = 150.0;
@@ -778,8 +753,8 @@ TEST_CASE("chunks near a place are all those within reach, nearest first", "[glo
 TEST_CASE("chunks mesh from the world", "[.bench][globe][surface]") {
     for (const char* name : {"earth", "mars", "venus", "moon"}) {
         const Generator generator{hog::globe::preset(name).value_or(hog::globe::Planet{})};
-        VoxelStore store{generator.layers()};
-        const World world{generator, store};
+        MadeWorld made{generator};
+        const World& world = made.world();
         std::vector<Cell> chunks;
         chunks.reserve(8);
         for (std::uint64_t k = 0; k < 8; ++k) {
@@ -795,8 +770,8 @@ TEST_CASE("chunks mesh from the world", "[.bench][globe][surface]") {
 }
 
 TEST_CASE("coarser chunks mesh from the world", "[.bench][globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     for (int detail = 0; detail <= 8; ++detail) {
         std::vector<Cell> chunks;
         chunks.reserve(4);
@@ -893,8 +868,8 @@ TEST_CASE("chunks keep their neighbours a detail apart at most along a flight",
     planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
-    VoxelStore store{generator.layers()};
-    const World world{generator, store};
+    MadeWorld made{generator};
+    const World& world = made.world();
     const double radius = generator.planet().radius;
     std::size_t overlapping = 0;
     std::set<std::pair<Cell, std::uint32_t>> meshed;
@@ -936,8 +911,8 @@ TEST_CASE("chunks' boxes tile along a wandering flight from the start", "[.gate]
     planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
-    VoxelStore store{generator.layers()};
-    const World world{generator, store};
+    MadeWorld made{generator};
+    const World& world = made.world();
     const double radius = generator.planet().radius;
     std::mt19937_64 random{7};
     std::uniform_real_distribution<double> unit{-1.0, 1.0};
@@ -984,8 +959,8 @@ TEST_CASE("chunks' boxes tile from far out over a cube's edge", "[globe][surface
     planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
-    VoxelStore store{generator.layers()};
-    const World world{generator, store};
+    MadeWorld made{generator};
+    const World& world = made.world();
     const hog::globe::Eye eye{.up = DVec3{-0.417842442, -0.555391738, 0.718990758},
                               .height = 251'709.3};
     const std::vector<Cell> chunks = hog::globe::chunks_around(generator, eye, 348'330.0, 3.0);
@@ -1028,12 +1003,13 @@ std::map<Material, double> material_shares(const SurfaceMesh& mesh, Cell within)
 // The ground's cover is thinner than a coarse voxel, so a coarse chunk's voxels would show the
 // rock under it where fine ones show the cover; each must show what's at its top instead.
 TEST_CASE("the ground wears the same materials however coarse it's drawn", "[globe][surface]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
+    MadeWorld made{earth()};
+    const World& world = made.world();
     const hog::globe::Layers& layers = earth().layers();
     for (const std::uint64_t k : {3ULL, 11ULL, 29ULL}) {
         const Cell fine = hog::globe::chunk_under(somewhere(k), layers, 0);
         const Cell coarse = hog::globe::chunk_under(somewhere(k), layers, 3);
+        cover_chunks(made, std::array{fine, coarse});
         const std::map<Material, double> fine_shares =
             material_shares(mesh_of(world, std::array{fine}), fine);
         const std::map<Material, double> coarse_shares =

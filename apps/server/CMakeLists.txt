@@ -21,5 +21,5 @@ hog_add_tests(hog_app
     tests/server_tests.cpp)
 if(TARGET hog_app_tests)
     target_compile_definitions(hog_app_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    target_link_libraries(hog_app_tests PRIVATE hog::chat)
+    target_link_libraries(hog_app_tests PRIVATE hog::build_world hog::chat)
 endif()

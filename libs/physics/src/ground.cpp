@@ -70,12 +70,23 @@ Ground& Ground::operator=(Ground&& other) noexcept {
     return *this;
 }
 
+std::size_t Ground::size() const noexcept {
+    return static_cast<std::size_t>(std::ranges::count_if(
+        chunks_, [](const auto& held) { return held.second.body.has_value(); }));
+}
+
+void Ground::drop(const Held& held) noexcept {
+    if (held.body) {
+        space_->remove(*held.body);
+    }
+}
+
 void Ground::clear() noexcept {
     if (space_ == nullptr) {
         return;
     }
     for (const auto& [chunk, held] : chunks_) {
-        space_->remove(held.body);
+        drop(held);
     }
     chunks_.clear();
 }
@@ -109,7 +120,7 @@ Result<> Ground::keep(std::span<const WorldPosition> around) {
             ++held;
             continue;
         }
-        space_->remove(held->second.body);
+        drop(held->second);
         held = chunks_.erase(held);
     }
     for (const globe::Cell chunk : wanted) {
@@ -122,12 +133,13 @@ Result<> Ground::keep(std::span<const WorldPosition> around) {
             if (globe::sight_holds(held->second.band, at)) {
                 continue;
             }
-            space_->remove(held->second.body);
+            drop(held->second);
             chunks_.erase(held);
         }
         const std::uint64_t band = globe::sight_band(at);
         const std::optional<Mesh> mesh = mesh_of(world_, chunk, band);
         if (!mesh) {
+            chunks_.emplace(chunk, Held{.body = std::nullopt, .band = band});
             continue;
         }
         auto body = space_->add(*mesh);
@@ -167,7 +179,7 @@ void Ground::changed(globe::BrickSite brick) {
         }
     }
     for (const globe::Cell chunk : gone) {
-        space_->remove(chunks_.at(chunk).body);
+        drop(chunks_.at(chunk));
         chunks_.erase(chunk);
     }
 }
