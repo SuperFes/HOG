@@ -2,8 +2,8 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/surface_mesh.hpp>
 #include <hog/globe/volume_build.hpp>
+#include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/physics/ground.hpp>
 #include <hog/physics/space.hpp>
@@ -51,13 +51,16 @@ DVec3 land() {
     return globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
 }
 
-globe::Cell chunk_under(WorldPosition at) {
-    return globe::chunk_under(glm::normalize(at.metres()), earth().layers(), 0);
+// The corner of the tile column under a place.
+globe::Site column_under(WorldPosition at) {
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    const globe::Cell cell = globe::cell_under(glm::normalize(at.metres()), earth().layers().level);
+    return {.face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
 }
 
 } // namespace
 
-TEST_CASE("the ground is where it's drawn", "[physics][ground]") {
+TEST_CASE("the ground is where its voxels are drawn", "[physics][ground]") {
     globe::MadeWorld made{earth()};
     const globe::World& world = made.world();
     made.cover(land());
@@ -66,21 +69,27 @@ TEST_CASE("the ground is where it's drawn", "[physics][ground]") {
     const WorldPosition standing = over(land());
     const std::array around{standing};
     REQUIRE(ground.keep(around));
-    const globe::Cell chunk = chunk_under(standing);
-    REQUIRE(ground.holds(chunk));
-    globe::SurfaceMesh drawn;
-    drawn.origin = globe::center(chunk) * earth().planet().radius;
-    globe::add_chunk(drawn, world, chunk);
-    // Through the middles of triangles: Jolt's rays can slip between them at a vertex.
-    std::size_t checked = 0;
-    for (std::size_t corner = 0; corner + 2 < drawn.indices.size() && checked < 3;
-         corner += drawn.indices.size() / 7 * 3) {
-        DVec3 middle{0.0};
-        for (std::size_t k = 0; k < 3; ++k) {
-            middle += DVec3{drawn.vertices[drawn.indices[corner + k]].position} / 3.0;
+    const globe::Site column = column_under(standing);
+    REQUIRE(ground.holds(column));
+    const globe::VoxelMesh drawn = globe::mesh_tile_column(world, column, 0);
+    // Through the middles of the tops of boxes, where the ground is walked on: Jolt's rays can
+    // slip between triangles at a vertex.
+    std::vector<std::size_t> tops;
+    for (std::size_t corner = 0; corner + 2 < drawn.indices.size(); corner += 3) {
+        const globe::VoxelVertex& first = drawn.vertices[drawn.indices[corner]];
+        const DVec3 at = drawn.origin + DVec3{first.position};
+        if (first.material != globe::Material::Water &&
+            glm::dot(DVec3{first.normal}, glm::normalize(at)) > 0.99) {
+            tops.push_back(corner);
         }
-        if (drawn.vertices[drawn.indices[corner]].material == globe::Material::Water) {
-            continue;
+    }
+    REQUIRE(tops.size() >= 3);
+    std::size_t checked = 0;
+    for (std::size_t k = 0; k < tops.size(); k += tops.size() / 3) {
+        const std::size_t corner = tops[k];
+        DVec3 middle{0.0};
+        for (std::size_t n = 0; n < 3; ++n) {
+            middle += DVec3{drawn.vertices[drawn.indices[corner + n]].position} / 3.0;
         }
         const WorldPosition on = WorldPosition{drawn.origin} + middle;
         const DVec3 up = glm::normalize(on.metres());
@@ -102,7 +111,7 @@ TEST_CASE("the ground is kept near the points, and let go far from them", "[phys
     const WorldPosition here = over(land());
     const std::array around{here};
     REQUIRE(ground.keep(around));
-    const globe::Cell under = chunk_under(here);
+    const globe::Site under = column_under(here);
     CHECK(ground.holds(under));
     const std::size_t held = ground.size();
     CHECK(held >= 4);
@@ -119,7 +128,7 @@ TEST_CASE("the ground is kept near the points, and let go far from them", "[phys
     const std::array away{over(there)};
     REQUIRE(ground.keep(away));
     CHECK_FALSE(ground.holds(under));
-    CHECK(ground.holds(chunk_under(away[0])));
+    CHECK(ground.holds(column_under(away[0])));
     CHECK(space.size() == ground.size());
 }
 
@@ -130,7 +139,7 @@ TEST_CASE("ground not made is kept as none, adding nothing to the space", "[phys
     Ground ground{space, world, {.reach = 30.0}};
     const std::array around{over(land())};
     REQUIRE(ground.keep(around));
-    CHECK(ground.holds(chunk_under(around[0])));
+    CHECK(ground.holds(column_under(around[0])));
     CHECK(ground.size() == 0);
     CHECK(space.size() == 0);
 }
@@ -146,9 +155,9 @@ TEST_CASE("the ground over a cube face's edge is kept on both faces", "[physics]
     REQUIRE(ground.keep(around));
     std::set<int> faces;
     for (const DVec3 side : {DVec3{1.0, 0.9999, 0.3}, DVec3{0.9999, 1.0, 0.3}}) {
-        const globe::Cell chunk = chunk_under(WorldPosition{glm::normalize(side)});
-        if (ground.holds(chunk)) {
-            faces.insert(chunk.face);
+        const globe::Site corner = column_under(WorldPosition{glm::normalize(side)});
+        if (ground.holds(corner)) {
+            faces.insert(corner.face);
         }
     }
     CHECK(faces.size() == 2);
@@ -187,7 +196,8 @@ TEST_CASE("a brick dug lets go of the ground over it, which comes back with the 
         return glm::length(cast.value_or(Hit{}).at - standing);
     };
     const double before = drop();
-    CHECK(before == Approx(10.0).margin(1.0));
+    // Ground drawn as whole voxels stands within one of the generator's own height.
+    CHECK(before == Approx(10.0).margin(earth().layers().thickness));
     const std::uint64_t revision = world.revision();
     globe::dig(world, standing.metres() - (up * 10.0), 3.0);
     const std::vector<globe::BrickSite> changed = world.changed_since(revision);
@@ -195,9 +205,9 @@ TEST_CASE("a brick dug lets go of the ground over it, which comes back with the 
     for (const globe::BrickSite brick : changed) {
         ground.changed(brick);
     }
-    CHECK_FALSE(ground.holds(chunk_under(standing)));
+    CHECK_FALSE(ground.holds(column_under(standing)));
     REQUIRE(ground.keep(around));
-    CHECK(ground.holds(chunk_under(standing)));
+    CHECK(ground.holds(column_under(standing)));
     CHECK(drop() > before + 1.5);
 }
 

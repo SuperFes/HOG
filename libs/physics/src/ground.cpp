@@ -1,11 +1,13 @@
-#include <hog/globe/detail.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
-#include <hog/globe/surface_mesh.hpp>
+#include <hog/globe/voxel_mesh.hpp>
 #include <hog/physics/ground.hpp>
 
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <set>
@@ -16,26 +18,23 @@ namespace hog::physics {
 
 namespace {
 
-// A chunk's ground as drawn, seeing as far under it as `band` reaches, the liquid's surface left
-// out: it isn't walked on.
-std::optional<Mesh> mesh_of(const globe::World& world, globe::Cell chunk, std::uint64_t band) {
-    globe::SurfaceMesh drawn;
-    drawn.origin = globe::center(chunk) * world.planet().radius;
-    globe::add_chunk(drawn, world, chunk, globe::Drawn{}, globe::sight_of(band));
+constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+
+// A tile column's ground as the world holds it at its own level, the liquid's surface left out:
+// it isn't walked on.
+std::optional<Mesh> mesh_of(const globe::World& world, globe::Site corner) {
+    const globe::VoxelMesh drawn = globe::mesh_tile_column(world, corner, 0);
     Mesh mesh{.origin = WorldPosition{drawn.origin}, .vertices = {}, .triangles = {}};
     mesh.vertices.reserve(drawn.vertices.size());
-    for (const globe::SurfaceVertex& vertex : drawn.vertices) {
+    for (const globe::VoxelVertex& vertex : drawn.vertices) {
         mesh.vertices.push_back(vertex.position);
     }
-    for (std::size_t corner = 0; corner + 2 < drawn.indices.size(); corner += 3) {
-        const std::array<std::uint32_t, 3> triangle{
-            drawn.indices[corner], drawn.indices[corner + 1], drawn.indices[corner + 2]};
-        if (std::ranges::all_of(triangle, [&](std::uint32_t index) {
-                return drawn.vertices[index].material == globe::Material::Water;
-            })) {
+    for (std::size_t corner_at = 0; corner_at + 2 < drawn.indices.size(); corner_at += 3) {
+        if (drawn.vertices[drawn.indices[corner_at]].material == globe::Material::Water) {
             continue;
         }
-        mesh.triangles.push_back(triangle);
+        mesh.triangles.push_back(
+            {drawn.indices[corner_at], drawn.indices[corner_at + 1], drawn.indices[corner_at + 2]});
     }
     if (mesh.triangles.empty()) {
         return std::nullopt;
@@ -54,8 +53,8 @@ Ground::~Ground() {
 
 Ground::Ground(Ground&& other) noexcept
     : space_(std::exchange(other.space_, nullptr)), world_(other.world_),
-      settings_(other.settings_), chunks_(std::move(other.chunks_)) {
-    other.chunks_.clear();
+      settings_(other.settings_), columns_(std::move(other.columns_)) {
+    other.columns_.clear();
 }
 
 Ground& Ground::operator=(Ground&& other) noexcept {
@@ -64,123 +63,107 @@ Ground& Ground::operator=(Ground&& other) noexcept {
         space_ = std::exchange(other.space_, nullptr);
         world_ = other.world_;
         settings_ = other.settings_;
-        chunks_ = std::move(other.chunks_);
-        other.chunks_.clear();
+        columns_ = std::move(other.columns_);
+        other.columns_.clear();
     }
     return *this;
 }
 
 std::size_t Ground::size() const noexcept {
-    return static_cast<std::size_t>(std::ranges::count_if(
-        chunks_, [](const auto& held) { return held.second.body.has_value(); }));
+    return static_cast<std::size_t>(
+        std::ranges::count_if(columns_, [](const auto& held) { return held.second.has_value(); }));
 }
 
-void Ground::drop(const Held& held) noexcept {
-    if (held.body) {
-        space_->remove(*held.body);
+void Ground::let_go(globe::Site corner) noexcept {
+    const auto held = columns_.find(corner);
+    if (held == columns_.end()) {
+        return;
     }
+    if (held->second) {
+        space_->remove(*held->second);
+    }
+    columns_.erase(held);
 }
 
 void Ground::clear() noexcept {
     if (space_ == nullptr) {
         return;
     }
-    for (const auto& [chunk, held] : chunks_) {
-        drop(held);
+    for (const auto& [corner, body] : columns_) {
+        if (body) {
+            space_->remove(*body);
+        }
     }
-    chunks_.clear();
+    columns_.clear();
 }
 
 Result<> Ground::keep(std::span<const WorldPosition> around) {
-    const double radius = world_.planet().radius;
-    std::set<globe::Cell> wanted;
+    std::set<globe::Site> wanted;
+    std::set<globe::Site> near;
     for (const WorldPosition point : around) {
-        const DVec3 direction = glm::normalize(point.metres());
-        // Any chunk that lies within reach, not only one whose middle does: where a chunk is
-        // wider than the reach, the one under the feet may have its middle farther than that.
-        const globe::Cell under = globe::chunk_under(direction, world_.layers());
-        const double half_across =
-            glm::length(globe::corners(under)[0] - globe::center(under)) * radius;
-        for (const globe::Cell chunk :
-             globe::chunks_near(world_, direction, settings_.reach + half_across)) {
-            wanted.insert(chunk);
+        for (const globe::Site corner :
+             globe::tile_columns_near(world_.layers(), point.metres(), settings_.reach)) {
+            wanted.insert(corner);
+        }
+        for (const globe::Site corner :
+             globe::tile_columns_near(world_.layers(), point.metres(), 2.0 * settings_.reach)) {
+            near.insert(corner);
         }
     }
-    // Chunks farther than twice the reach, and their own width, from every point are let go.
-    for (auto held = chunks_.begin(); held != chunks_.end();) {
-        const globe::Cell chunk = held->first;
-        const std::array<DVec3, 4> corners = globe::corners(chunk);
-        const double across = glm::length(corners[1] - corners[0]) * radius;
-        const DVec3 middle = globe::center(chunk) * radius;
-        const bool near = std::ranges::any_of(around, [&](WorldPosition point) {
-            return glm::length((glm::normalize(point.metres()) * radius) - middle) <=
-                   (2.0 * settings_.reach) + across;
-        });
-        if (near || wanted.contains(chunk)) {
-            ++held;
+    std::vector<globe::Site> far;
+    for (const auto& [corner, body] : columns_) {
+        if (!near.contains(corner)) {
+            far.push_back(corner);
+        }
+    }
+    for (const globe::Site corner : far) {
+        let_go(corner);
+    }
+    for (const globe::Site corner : wanted) {
+        if (columns_.contains(corner)) {
             continue;
         }
-        drop(held->second);
-        held = chunks_.erase(held);
-    }
-    for (const globe::Cell chunk : wanted) {
-        // Seeing under the ground as far as the point nearest it does.
-        const DVec3 middle = globe::center(chunk) * radius;
-        const WorldPosition nearest = *std::ranges::min_element(
-            around, {}, [&](WorldPosition point) { return glm::length(point.metres() - middle); });
-        const double at = glm::length(nearest.metres());
-        if (const auto held = chunks_.find(chunk); held != chunks_.end()) {
-            if (globe::sight_holds(held->second.band, at)) {
-                continue;
-            }
-            drop(held->second);
-            chunks_.erase(held);
-        }
-        const std::uint64_t band = globe::sight_band(at);
-        const std::optional<Mesh> mesh = mesh_of(world_, chunk, band);
+        const std::optional<Mesh> mesh = mesh_of(world_, corner);
         if (!mesh) {
-            chunks_.emplace(chunk, Held{.body = std::nullopt, .band = band});
+            columns_.emplace(corner, std::nullopt);
             continue;
         }
         auto body = space_->add(*mesh);
         if (!body) {
             return std::unexpected(body.error());
         }
-        chunks_.emplace(chunk, Held{.body = *body, .band = band});
+        columns_.emplace(corner, *body);
     }
     return {};
 }
 
 void Ground::changed(globe::BrickSite brick) {
-    // A chunk's mesh reaches a margin of columns into the chunks beside it.
-    constexpr std::int64_t margin = 8;
-    const auto touches = [&](globe::Cell chunk) {
-        if (chunk.face != brick.face) {
-            return false;
-        }
-        const std::int64_t i0 = (std::int64_t{chunk.i} * globe::chunk_side) - margin;
-        const std::int64_t j0 = (std::int64_t{chunk.j} * globe::chunk_side) - margin;
-        const std::int64_t bi = std::int64_t{brick.i} * globe::brick_side;
-        const std::int64_t bj = std::int64_t{brick.j} * globe::brick_side;
-        return bi + globe::brick_side > i0 && bi < i0 + globe::chunk_side + (2 * margin) &&
-               bj + globe::brick_side > j0 && bj < j0 + globe::chunk_side + (2 * margin);
+    constexpr std::uint32_t across = side / globe::brick_side;
+    const globe::Cell column{
+        .level = static_cast<std::uint8_t>(world_.layers().level - std::countr_zero(side)),
+        .face = brick.face,
+        .i = brick.i / across,
+        .j = brick.j / across};
+    const auto corner_of = [](globe::Cell cell) {
+        return globe::Site{.face = cell.face, .i = cell.i * side, .j = cell.j * side};
     };
-    std::set<globe::Cell> gone;
-    for (const auto& [chunk, held] : chunks_) {
-        if (!touches(chunk)) {
+    let_go(corner_of(column));
+    // Its faces on the column's edge are drawn by the column beside it too.
+    const auto edge = [](std::uint32_t at) {
+        if (at % across == 0) {
+            return -1;
+        }
+        return at % across == across - 1 ? 1 : 0;
+    };
+    const int di = edge(brick.i);
+    const int dj = edge(brick.j);
+    for (const auto [step_i, step_j] : {std::pair{di, 0}, std::pair{0, dj}}) {
+        if (step_i == 0 && step_j == 0) {
             continue;
         }
-        gone.insert(chunk);
-        const globe::CellNeighbors near = globe::around(chunk);
-        for (const globe::Cell next : near.all()) {
-            if (next.face != chunk.face && chunks_.contains(next)) {
-                gone.insert(next);
-            }
+        if (const std::optional<globe::Cell> beside = globe::next_to(column, step_i, step_j)) {
+            let_go(corner_of(*beside));
         }
-    }
-    for (const globe::Cell chunk : gone) {
-        drop(chunks_.at(chunk));
-        chunks_.erase(chunk);
     }
 }
 

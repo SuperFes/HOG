@@ -129,6 +129,7 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     const DVec3 feet = bot->feet().metres();
     const double ground = hog::globe::top_of(bot->world(), glm::normalize(feet)).value_or(0.0);
     CHECK(ground == hog::globe::top_of(server->globe(), glm::normalize(feet)).value_or(-1.0));
-    CHECK(std::abs(glm::length(feet) - ground) < 2.0);
+    // Ground walked on is whole voxels, so within one of the surface its matter makes.
+    CHECK(std::abs(glm::length(feet) - ground) < bot->world().layers().thickness);
     CHECK(server->players() != nullptr);
 }
