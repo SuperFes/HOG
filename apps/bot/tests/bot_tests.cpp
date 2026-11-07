@@ -25,6 +25,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -98,14 +99,10 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
         build_ground(generator, directory.path(), middle);
     }
     const auto server = serving(directory.path());
-    // The bot reads the server's own world, which holds ground only where someone is.
-    const std::vector<DVec3> start_place{middle * server->generator().planet().radius};
-    server->hold(start_place);
-    const hog::globe::World world = server->globe();
-    auto bot = hog::bot::Bot::start(world, std::format("127.0.0.1:{}", server->players()->port()),
-                                    {}, middle, 7);
+    auto bot = hog::bot::Bot::start(
+        server->generator(), std::format("127.0.0.1:{}", server->players()->port()), {}, middle, 7);
     REQUIRE(bot);
-    const hog::WorldPosition began = bot->feet();
+    std::optional<hog::WorldPosition> began;
 
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 60s;
@@ -115,17 +112,23 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
         const double seconds = std::min(std::chrono::duration<double>(now - last).count(), 0.1);
         last = now;
         bot->update(now, seconds);
+        // It stands once the ground under it is sent.
+        if (!began && bot->standing()) {
+            began = bot->feet();
+        }
         // Far enough that only taken moves get there: the server isn't sending it back.
-        if (glm::length(bot->feet() - began) >= 5.0 || now >= give_up) {
+        if ((began && glm::length(bot->feet() - *began) >= 5.0) || now >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     CHECK(bot->session().state() == hog::client::Session::State::Welcomed);
-    CHECK(glm::length(bot->feet() - began) >= 5.0);
-    // On the ground built, not falling through where none is.
+    REQUIRE(began);
+    CHECK(glm::length(bot->feet() - began.value_or(bot->feet())) >= 5.0);
+    // On the ground it was sent, which is the ground built, not falling through where none is.
     const DVec3 feet = bot->feet().metres();
-    const double ground = hog::globe::top_of(world, glm::normalize(feet)).value_or(0.0);
+    const double ground = hog::globe::top_of(bot->world(), glm::normalize(feet)).value_or(0.0);
+    CHECK(ground == hog::globe::top_of(server->globe(), glm::normalize(feet)).value_or(-1.0));
     CHECK(std::abs(glm::length(feet) - ground) < 2.0);
     CHECK(server->players() != nullptr);
 }

@@ -24,6 +24,7 @@ add_library(hog_globe
     src/surface_mesh.cpp
     src/vents.cpp
     src/volcanoes.cpp
+    src/column_cache.cpp
     src/cube.cpp
     src/voxel.cpp
     src/voxel_tree.cpp
@@ -64,6 +65,7 @@ hog_add_tests(hog_globe
     tests/octree_estimate_tests.cpp
     tests/voxel_faces_tests.cpp
     tests/temperature_tests.cpp
+    tests/column_cache_tests.cpp
     tests/cube_tests.cpp
     tests/voxel_tests.cpp
     tests/voxel_tree_tests.cpp

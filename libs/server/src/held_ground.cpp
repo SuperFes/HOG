@@ -89,18 +89,4 @@ std::vector<globe::Site> HeldGround::corners_of(std::span<const globe::BrickSite
     return corners;
 }
 
-std::vector<globe::BrickSite> HeldGround::footprint(globe::Site corner) {
-    constexpr std::uint32_t across = side / globe::brick_side;
-    std::vector<globe::BrickSite> bricks;
-    bricks.reserve(std::size_t{across} * across);
-    for (std::uint32_t j = 0; j < across; ++j) {
-        for (std::uint32_t i = 0; i < across; ++i) {
-            bricks.push_back({.face = corner.face,
-                              .i = (corner.i / globe::brick_side) + i,
-                              .j = (corner.j / globe::brick_side) + j});
-        }
-    }
-    return bricks;
-}
-
 } // namespace hog::server

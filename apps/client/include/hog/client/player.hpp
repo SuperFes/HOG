@@ -32,6 +32,8 @@ public:
 
     // Puts the feet somewhere, at rest, as the server says.
     void place(WorldPosition feet);
+    // The world's ground changed in the brick: walked on as it is now.
+    void changed(globe::BrickSite brick) { ground_.changed(brick); }
 
     [[nodiscard]] WorldPosition feet() const { return character_.feet(); }
     [[nodiscard]] bool standing() const { return character_.standing(); }

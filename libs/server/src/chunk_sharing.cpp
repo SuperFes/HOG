@@ -1,7 +1,6 @@
 #include <hog/chunks/mesh_codec.hpp>
 #include <hog/core/log.hpp>
 #include <hog/server/chunk_sharing.hpp>
-#include <hog/server/held_ground.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -85,7 +84,7 @@ void ChunkSharing::step() {
         } else {
             copy_.drop_column(corner);
         }
-        for (const globe::BrickSite site : HeldGround::footprint(corner)) {
+        for (const globe::BrickSite site : globe::brick_footprint(corner)) {
             for (auto& [id, player] : players_) {
                 player->stream.changed(site);
             }

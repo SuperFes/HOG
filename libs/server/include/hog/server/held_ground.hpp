@@ -38,9 +38,6 @@ public:
     // The corners of the tile columns the bricks are in, in order, each once.
     [[nodiscard]] static std::vector<globe::Site>
     corners_of(std::span<const globe::BrickSite> bricks);
-    // A brick at the foot of each column of bricks in the tile column at `corner`: for whoever
-    // looks at the ground from above.
-    [[nodiscard]] static std::vector<globe::BrickSite> footprint(globe::Site corner);
 
 private:
     [[nodiscard]] std::vector<globe::Site> under(std::span<const DVec3> places) const;
