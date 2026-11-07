@@ -4,6 +4,7 @@
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/volume_build.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -128,6 +129,66 @@ TEST_CASE("a tile column comes back from its bytes, in place of what was there",
     cut.pop_back();
     CHECK_FALSE(other.decode_column(column, cut));
     CHECK(other.floor(column) == 12U);
+}
+
+TEST_CASE("a volume tells the bricks changed since a revision, each once", "[globe][volume]") {
+    Volume volume = rock_to(70);
+    const std::uint64_t before = volume.revision();
+    const Site a{.face = 2, .i = 60, .j = 5, .layer = 71};
+    const Site b{.face = 2, .i = 61, .j = 5, .layer = 71};
+    const Site c{.face = 2, .i = 69, .j = 5, .layer = 71};
+    volume.set(a, full_of(Material::Clay));
+    volume.set(c, full_of(Material::Clay));
+    const std::uint64_t middle = volume.revision();
+    // A brick changed again after a follower last looked is told again.
+    volume.set(b, full_of(Material::Clay));
+    volume.set(a, full_of(Material::Soil));
+    CHECK(volume.changed_since(before) ==
+          std::vector{hog::globe::brick_of(a), hog::globe::brick_of(c)});
+    CHECK(volume.changed_since(middle) == std::vector{hog::globe::brick_of(a)});
+    // Setting what's already there changes nothing; nor does what's refused under the floor.
+    const std::uint64_t now = volume.revision();
+    volume.set(a, full_of(Material::Soil));
+    volume.set({.face = 2, .i = 60, .j = 900, .layer = 1}, full_of(Material::Soil));
+    CHECK(volume.revision() == now);
+    CHECK(volume.changed_since(now).empty());
+}
+
+TEST_CASE("a volume tells the tile columns not saved since they changed", "[globe][volume]") {
+    Volume volume = rock_to(70);
+    CHECK(volume.unsaved() ==
+          std::vector<Site>{{.face = 2, .i = 0, .j = 0}, {.face = 2, .i = 64, .j = 0}});
+    volume.saved({.face = 2, .i = 10, .j = 20});
+    volume.saved({.face = 2, .i = 64, .j = 0});
+    CHECK(volume.unsaved().empty());
+    volume.set({.face = 2, .i = 65, .j = 5, .layer = 71}, full_of(Material::Clay));
+    CHECK(volume.unsaved() == std::vector<Site>{{.face = 2, .i = 64, .j = 0}});
+    // Put back from its saved bytes, it's as saved.
+    const std::vector<std::byte> bytes = volume.encode_column({.face = 2, .i = 64, .j = 0});
+    REQUIRE(volume.decode_column({.face = 2, .i = 64, .j = 0}, bytes));
+    CHECK(volume.unsaved().empty());
+}
+
+TEST_CASE("a voxel's heat is told over the open air's warmth where it is", "[globe][volume]") {
+    const hog::globe::Planet& planet = earth().planet();
+    const hog::globe::Layers& layers = earth().layers();
+    const auto at = [&](hog::DVec3 direction, int layer) {
+        const Cell cell = hog::globe::cell_under(glm::normalize(direction), layers.level);
+        return hog::globe::place_temperature(
+            planet, layers,
+            {.face = cell.face, .i = cell.i, .j = cell.j, .layer = static_cast<std::uint32_t>(layer)});
+    };
+    const hog::DVec3 equator{1.0, 0.0, 0.0};
+    const hog::DVec3 north{0.1, 0.0, 1.0};
+    const int sea = layers.layer_at(planet.radius);
+    // Colder up high and towards a pole, and no warmer under the sea than at it.
+    CHECK(at(equator, sea + 400) < at(equator, sea));
+    CHECK(at(north, sea) < at(equator, sea));
+    CHECK(at(equator, sea - 20) == Catch::Approx(at(equator, sea)));
+    const Cube warm{.solid = Material::Basalt, .solid_level = Cube::levels, .heat = 3};
+    const double baseline = at(equator, sea);
+    CHECK(hog::globe::kelvin(hog::globe::voxel_of(warm, baseline).temperature) ==
+          Catch::Approx(baseline + (3 * Cube::heat_step)).margin(0.125));
 }
 
 TEST_CASE("a volume archive keeps tile columns and what they were made from", "[globe][volume]") {

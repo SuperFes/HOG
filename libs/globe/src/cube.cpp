@@ -1,4 +1,5 @@
 #include <hog/globe/cube.hpp>
+#include <hog/globe/maths.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +47,15 @@ Voxel voxel_of(const Cube& cube, double baseline) noexcept {
     voxel.condition = cube.condition;
     voxel.temperature = temperature_in_eighths(baseline + (cube.heat * Cube::heat_step));
     return voxel;
+}
+
+double place_temperature(const Planet& planet, const Layers& layers, Site site) {
+    const DVec3 middle = middle_of(site, layers);
+    const double radius = glm::length(middle);
+    const double latitude =
+        maths::atan2(middle.z, std::sqrt((middle.x * middle.x) + (middle.y * middle.y)));
+    return temperature_at(planet, latitude) -
+           (climate_lapse_rate(planet) * std::max(0.0, radius - planet.radius));
 }
 
 } // namespace hog::globe
