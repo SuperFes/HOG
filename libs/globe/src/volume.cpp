@@ -1,6 +1,8 @@
 #include <hog/core/bytes.hpp>
 #include <hog/globe/volume.hpp>
 
+#include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -90,15 +92,13 @@ void Volume::put_tile(Site site, VoxelTree tile) {
     tiles_.insert_or_assign(key_of(site), std::move(tile));
 }
 
-void Volume::merge(Volume&& other) {
+void Volume::merge(Volume other) {
     for (const auto& [column, layer] : other.floors_) {
         floors_.insert_or_assign(column, layer);
     }
-    other.floors_.clear();
     for (auto& [key, tile] : other.tiles_) {
         tiles_.insert_or_assign(key, std::move(tile));
     }
-    other.tiles_.clear();
 }
 
 std::vector<std::byte> Volume::encode() const {
@@ -180,6 +180,75 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
         return fail("a volume's bytes run on past its tiles");
     }
     return volume;
+}
+
+std::vector<std::byte> Volume::encode_column(Site site) const {
+    const std::optional<std::uint32_t> lowest = floor(site);
+    if (!lowest) {
+        return {};
+    }
+    const Column column = column_of(site);
+    const auto first = tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j});
+    const auto last =
+        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX});
+    ByteWriter out;
+    out.write_varint(*lowest);
+    out.write_varint(static_cast<std::uint64_t>(std::distance(first, last)));
+    for (auto at = first; at != last; ++at) {
+        const std::vector<std::byte> bytes = at->second.encode();
+        out.write_varint(at->first.k);
+        out.write_varint(bytes.size());
+        out.write_bytes(bytes);
+    }
+    return std::move(out).take();
+}
+
+Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) {
+    const auto fail = [](std::string_view why) {
+        return make_error(ErrorCode::InvalidArgument, std::string{why});
+    };
+    ByteReader in{bytes};
+    const auto lowest = in.read_varint();
+    const auto count = in.read_varint();
+    if (!lowest || !count || *count > bytes.size()) {
+        return fail("a tile column's bytes are cut short or out of range");
+    }
+    const Column column = column_of(site);
+    std::vector<std::pair<Key, VoxelTree>> found;
+    for (std::uint64_t n = 0; n < *count; ++n) {
+        const auto k = in.read_varint();
+        const auto size = in.read_varint();
+        if (!k || !size) {
+            return fail("a tile column's bytes are cut short");
+        }
+        const auto tree_bytes = in.read_bytes(*size);
+        if (!tree_bytes) {
+            return fail("a tile column's bytes are cut short");
+        }
+        auto tree = VoxelTree::decode(*tree_bytes);
+        if (!tree) {
+            return std::unexpected(tree.error());
+        }
+        if (tree->side() != tile_side) {
+            return fail("a tile column's tile is the wrong size");
+        }
+        found.emplace_back(Key{.face = column.face,
+                               .i = column.i,
+                               .j = column.j,
+                               .k = static_cast<std::uint32_t>(*k)},
+                           std::move(*tree));
+    }
+    if (in.remaining() != 0) {
+        return fail("a tile column's bytes run on past its tiles");
+    }
+    tiles_.erase(
+        tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j}),
+        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX}));
+    for (auto& [key, tree] : found) {
+        tiles_.insert_or_assign(key, std::move(tree));
+    }
+    floors_.insert_or_assign(column, static_cast<std::uint32_t>(*lowest));
+    return {};
 }
 
 bool Volume::same_as(const Volume& other) const {

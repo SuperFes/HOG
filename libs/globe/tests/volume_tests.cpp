@@ -1,6 +1,7 @@
 #include "bed.hpp"
 
 #include <hog/globe/volume.hpp>
+#include <hog/globe/volume_archive.hpp>
 #include <hog/globe/volume_build.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,7 +9,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <cstdio>
+#include <format>
+#include <iostream>
+#include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -103,6 +107,51 @@ TEST_CASE("a volume comes back from its bytes as it was", "[globe][volume]") {
     CHECK_FALSE(Volume::decode(cut));
 }
 
+TEST_CASE("a tile column comes back from its bytes, in place of what was there",
+          "[globe][volume]") {
+    Volume volume = rock_to(70);
+    volume.set_floor({.face = 2, .i = 0, .j = 5}, 12);
+    const Site column{.face = 2, .i = 63, .j = 5};
+    const std::vector<std::byte> bytes = volume.encode_column(column);
+    REQUIRE_FALSE(bytes.empty());
+    CHECK(Volume{}.encode_column(column).empty());
+
+    Volume other = rock_to(90);
+    REQUIRE(other.decode_column(column, bytes));
+    CHECK(other.floor(column) == 12U);
+    CHECK(other.at({.face = 2, .i = 63, .j = 5, .layer = 70}).solid == Material::Granite);
+    CHECK(other.at({.face = 2, .i = 63, .j = 5, .layer = 80}) == Cube{});
+    // Its neighbour, another tile column, is left as it was.
+    CHECK(other.at({.face = 2, .i = 64, .j = 5, .layer = 80}).solid == Material::Granite);
+
+    std::vector<std::byte> cut = bytes;
+    cut.pop_back();
+    CHECK_FALSE(other.decode_column(column, cut));
+    CHECK(other.floor(column) == 12U);
+}
+
+TEST_CASE("a volume archive keeps tile columns and what they were made from", "[globe][volume]") {
+    hog::globe::MemoryVolumeArchive archive;
+    REQUIRE(archive.header());
+    CHECK(archive.header()->empty());
+    const hog::globe::VolumeOrigin origin = hog::globe::origin_of(earth());
+    const std::vector<std::byte> header = hog::globe::volume_header(origin);
+    const hog::globe::SavedColumn saved{
+        .face = 4, .i = 7, .j = 9, .bytes = rock_to(3).encode_column({.face = 2, .i = 60, .j = 5})};
+    REQUIRE(archive.write(header, std::span{&saved, 1}));
+    CHECK(archive.header() == header);
+    CHECK(hog::globe::origin_from(*archive.header()) == origin);
+    CHECK(archive.column(4, 7, 9) == saved);
+    CHECK(archive.column(4, 7, 10) == std::nullopt);
+
+    std::vector<std::byte> other = header;
+    other.front() = std::byte{99};
+    CHECK_FALSE(hog::globe::origin_from(other));
+    other = header;
+    other.pop_back();
+    CHECK_FALSE(hog::globe::origin_from(other));
+}
+
 TEST_CASE("the generator's voxels are made into the volume once, its air left out",
           "[globe][volume]") {
     const Generator& generator = earth();
@@ -143,23 +192,22 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
     for (const Generator::Column& each : columns) {
         lowest = std::min(lowest, each.ground());
     }
-    const auto floor = volume.floor(corner);
-    REQUIRE(floor);
-    CHECK(std::cmp_equal(*floor, layers.layer_at(lowest) - hog::globe::made_depth));
-    REQUIRE(*floor > Volume::tile_side);
-    const Site under{.face = cell.face, .i = corner.i, .j = corner.j, .layer = *floor - 1};
+    const std::uint32_t floor = volume.floor(corner).value_or(0);
+    CHECK(std::cmp_equal(floor, layers.layer_at(lowest) - hog::globe::made_depth));
+    REQUIRE(floor > Volume::tile_side);
+    const Site under{.face = cell.face, .i = corner.i, .j = corner.j, .layer = floor - 1};
     CHECK_FALSE(volume.made(under));
-    CHECK(volume.made({.face = cell.face, .i = corner.i, .j = corner.j, .layer = *floor}));
+    CHECK(volume.made({.face = cell.face, .i = corner.i, .j = corner.j, .layer = floor}));
 
     // The tile the ground lies in, and the one the floor lies in.
     const auto ground_tile =
         tile_from(static_cast<std::uint32_t>(layers.layer_at(columns.front().ground())));
-    for (const std::uint32_t bottom : {ground_tile, tile_from(*floor)}) {
+    for (const std::uint32_t bottom : {ground_tile, tile_from(floor)}) {
         CAPTURE(bottom);
         const VoxelTree* built =
             volume.tile_at({.face = cell.face, .i = corner.i, .j = corner.j, .layer = bottom});
         REQUIRE(built != nullptr);
-        const VoxelTree expected = every(bottom, *floor);
+        const VoxelTree expected = every(bottom, floor);
         CHECK(built->same_as(expected));
         CHECK(built->leaves() < expected.unshared_nodes());
     }
@@ -187,15 +235,15 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
     // Dug toward, a tile's height more is made under it as it would have been, and what was
     // made is kept.
     Volume deeper = volume;
-    const Site edited{.face = cell.face, .i = corner.i, .j = corner.j, .layer = *floor + 1};
+    const Site edited{.face = cell.face, .i = corner.i, .j = corner.j, .layer = floor + 1};
     REQUIRE(deeper.set(edited, full_of(Material::Clay)));
     REQUIRE(hog::globe::deepen(deeper, generator, cell.face, i, j));
-    const std::uint32_t lower = *floor - Volume::tile_side;
+    const std::uint32_t lower = floor - Volume::tile_side;
     CHECK(deeper.floor(corner) == lower);
     CHECK(deeper.made(under));
     CHECK(deeper.at(edited).solid == Material::Clay);
     deeper.set(edited, volume.at(edited));
-    for (const std::uint32_t bottom : {tile_from(lower), tile_from(*floor)}) {
+    for (const std::uint32_t bottom : {tile_from(lower), tile_from(floor)}) {
         CAPTURE(bottom);
         const VoxelTree* built =
             deeper.tile_at({.face = cell.face, .i = corner.i, .j = corner.j, .layer = bottom});
@@ -204,6 +252,53 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
     }
     matches_world(deeper);
 }
+
+namespace {
+
+std::vector<Generator::Column> columns_under(const Generator& generator, std::uint8_t face,
+                                             std::uint32_t i, std::uint32_t j) {
+    return generator.columns({.level = static_cast<std::uint8_t>(generator.layers().level),
+                              .face = face,
+                              .i = i * Volume::tile_side,
+                              .j = j * Volume::tile_side},
+                             Volume::tile_side, hog::globe::voxel_lod(generator));
+}
+
+// The first made voxel of the tile column at (`face`, `i`, `j`), in tiles, that isn't as the
+// generator makes it, up to a little over its ground or the sea.
+std::optional<Site> first_wrong(const Volume& volume, const Generator& generator,
+                                const std::vector<Generator::Column>& columns, std::uint8_t face,
+                                std::uint32_t i, std::uint32_t j) {
+    const hog::globe::Layers& layers = generator.layers();
+    const double sea = generator.sea_level().value_or(layers.floor);
+    const std::uint32_t lowest =
+        volume.floor({.face = face, .i = i * Volume::tile_side, .j = j * Volume::tile_side})
+            .value_or(0);
+    for (std::uint32_t y = 0; y < 64; ++y) {
+        for (std::uint32_t x = 0; x < 64; ++x) {
+            const Generator::Column& column = columns[(y * 64) + x];
+            const auto top = static_cast<std::uint32_t>(
+                std::min(layers.layer_at(std::max(column.top(), sea)) + 2, layers.count - 1));
+            for (std::uint32_t layer = lowest; layer <= top; ++layer) {
+                const hog::globe::Voxel made = hog::globe::generated_at(column, layers, layer);
+                const Site site{.face = face,
+                                .i = (i * Volume::tile_side) + x,
+                                .j = (j * Volume::tile_side) + y,
+                                .layer = layer};
+                if (volume.at(site) != hog::globe::cube_of(made, made.temperature / 8.0)) {
+                    return site;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+double since(std::chrono::steady_clock::time_point started) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+}
+
+} // namespace
 
 TEST_CASE("the working world's tile columns, timed and sized", "[.time]") {
     auto planet = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
@@ -214,76 +309,38 @@ TEST_CASE("the working world's tile columns, timed and sized", "[.time]") {
     // Land and sea apart.
     struct Sum {
         double seconds = 0.0;
-        double boundaries = 0.0;
         double caves = 0.0;
         std::size_t tiles = 0;
         std::size_t bytes = 0;
-        int count = 0;
+        std::size_t count = 0;
     };
     Sum land;
     Sum water;
-    const auto since = [](auto started) {
-        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    };
     for (std::uint64_t n = 0; n < 24; ++n) {
         const Cell cell = hog::globe::cell_under(somewhere(n), layers.level);
         const auto i = cell.i / Volume::tile_side;
         const auto j = cell.j / Volume::tile_side;
-        const std::vector<Generator::Column> columns =
-            generator.columns({.level = static_cast<std::uint8_t>(layers.level),
-                               .face = cell.face,
-                               .i = i * Volume::tile_side,
-                               .j = j * Volume::tile_side},
-                              Volume::tile_side, hog::globe::voxel_lod(generator));
-        double lowest = columns.front().ground();
-        for (const Generator::Column& each : columns) {
-            lowest = std::min(lowest, each.ground());
-        }
-        const double floor =
-            layers.bottom(std::max(layers.layer_at(lowest) - hog::globe::made_depth, 0));
+        const std::vector<Generator::Column> columns = columns_under(generator, cell.face, i, j);
         Sum& sum = columns.front().ground() > sea ? land : water;
         auto started = std::chrono::steady_clock::now();
-        for (const Generator::Column& each : columns) {
-            static_cast<void>(each.boundaries(floor, each.top(), 0.0));
-        }
-        sum.boundaries += since(started);
+        const Volume volume = hog::globe::generate_tiles(generator, cell.face, i, j);
+        sum.seconds += since(started);
+        const double floor = layers.bottom(static_cast<int>(
+            volume
+                .floor({.face = cell.face, .i = i * Volume::tile_side, .j = j * Volume::tile_side})
+                .value_or(0)));
         started = std::chrono::steady_clock::now();
         for (const Generator::Column& each : columns) {
             static_cast<void>(each.caves(floor, each.ground(), layers.thickness / 2.0));
         }
         sum.caves += since(started);
-        started = std::chrono::steady_clock::now();
-        const Volume volume = hog::globe::generate_tiles(generator, cell.face, i, j);
-        sum.seconds += since(started);
         // Every made voxel as the generator makes it, on the first few.
         if (n < 6) {
-            int wrong = 0;
-            Site first_wrong;
-            const std::uint32_t lowest_made = *volume.floor(
-                {.face = cell.face, .i = i * Volume::tile_side, .j = j * Volume::tile_side});
-            for (std::uint32_t y = 0; y < 64; ++y) {
-                for (std::uint32_t x = 0; x < 64; ++x) {
-                    const Generator::Column& column = columns[(y * 64) + x];
-                    const auto top = static_cast<std::uint32_t>(std::min(
-                        layers.layer_at(std::max(column.top(), sea)) + 2, layers.count - 1));
-                    for (std::uint32_t layer = lowest_made; layer <= top; ++layer) {
-                        const hog::globe::Voxel made =
-                            hog::globe::generated_at(column, layers, layer);
-                        const Site site{.face = cell.face,
-                                        .i = (i * Volume::tile_side) + x,
-                                        .j = (j * Volume::tile_side) + y,
-                                        .layer = layer};
-                        if (volume.at(site) != hog::globe::cube_of(made, made.temperature / 8.0)) {
-                            if (wrong == 0) {
-                                first_wrong = site;
-                            }
-                            ++wrong;
-                        }
-                    }
-                }
-            }
-            CAPTURE(n, first_wrong.i, first_wrong.j, first_wrong.layer);
-            CHECK(wrong == 0);
+            const std::optional<Site> wrong =
+                first_wrong(volume, generator, columns, cell.face, i, j);
+            CAPTURE(n, wrong.value_or(Site{}).i, wrong.value_or(Site{}).j,
+                    wrong.value_or(Site{}).layer);
+            CHECK_FALSE(wrong);
         }
         sum.tiles += volume.tiles();
         sum.bytes += volume.encode().size();
@@ -291,11 +348,11 @@ TEST_CASE("the working world's tile columns, timed and sized", "[.time]") {
     }
     for (const auto& [name, sum] : {std::pair{"land", land}, std::pair{"sea", water}}) {
         if (sum.count > 0) {
-            std::printf("%s, %d tile columns: %.3f s (boundaries %.3f s, caves %.3f s), %zu "
-                        "tiles, %zu bytes each\n",
-                        name, sum.count, sum.seconds / sum.count, sum.boundaries / sum.count,
-                        sum.caves / sum.count, sum.tiles / static_cast<std::size_t>(sum.count),
-                        sum.bytes / static_cast<std::size_t>(sum.count));
+            const auto count = static_cast<double>(sum.count);
+            std::cout << std::format("{}, {} tile columns: {:.3f} s (caves {:.3f} s), {} tiles, "
+                                     "{} bytes each\n",
+                                     name, sum.count, sum.seconds / count, sum.caves / count,
+                                     sum.tiles / sum.count, sum.bytes / sum.count);
         }
     }
 }
