@@ -7,7 +7,6 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/chat.cpp
-    src/chunk_cache.cpp
     src/column_meshes.cpp
     src/cutaway.cpp
     src/daylight.cpp
@@ -37,7 +36,6 @@ hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
     tests/chat_tests.cpp
-    tests/chunk_cache_tests.cpp
     tests/column_meshes_tests.cpp
     tests/daylight_tests.cpp
     tests/cutaway_tests.cpp

@@ -1,5 +1,4 @@
 #include <hog/client/options.hpp>
-#include <hog/protocol/messages.hpp>
 
 #include <algorithm>
 #include <array>
@@ -168,26 +167,6 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
         options.surface_boxes = value == "boxes";
     } else if (option == "--clouds") {
         return read_clouds(options, value);
-    } else if (option == "--detail") {
-        const std::optional<double> ratio = real(value);
-        if (!ratio || !(*ratio >= static_cast<double>(protocol::least_detail_ratio)) ||
-            !(*ratio <= static_cast<double>(protocol::most_detail_ratio))) {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("--detail takes a number from {} to {}, not {}",
-                                          protocol::least_detail_ratio, protocol::most_detail_ratio,
-                                          value));
-        }
-        options.detail = *ratio;
-    } else if (option == "--falloff") {
-        const std::optional<double> slope = real(value);
-        if (!slope || !(*slope >= static_cast<double>(protocol::least_detail_slope)) ||
-            !(*slope <= static_cast<double>(protocol::most_detail_slope))) {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("--falloff takes a number from {} to {}, not {}",
-                                          protocol::least_detail_slope, protocol::most_detail_slope,
-                                          value));
-        }
-        options.falloff = *slope;
     } else if (option == "--quit-after") {
         const std::optional<int> seconds = integer(value);
         if (!seconds || *seconds < 0) {
@@ -315,12 +294,6 @@ options:
                          talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
-  --detail RATIO         how fast the ground's detail falls off with distance, from a
-                         server: each chunk as coarse as keeps it this many of its
-                         widths from the eye; lower is coarser and sends less (default 3)
-  --falloff SLOPE        how much faster detail falls off past a kilometre: 1 carries on
-                         as it does within it (default), higher makes the ground a long
-                         way off coarser and sends fewer chunks, the near ground as it was
   --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
                          own (0.5 by default); for looking, flying alone
   --world FILE           the world's file, its ground made ahead by hog-build-world, to

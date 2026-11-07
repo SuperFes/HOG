@@ -34,11 +34,9 @@ constexpr double near_wear_reach = 48.0;
 constexpr double near_wear_gap = 5.0;
 // How near a player a vent is taken up by the flow, metres.
 constexpr double vent_reach = 4'000.0;
-// Chunks of the planet's surface a player is sent a tick.
-constexpr std::size_t chunks_per_tick = 4;
-// Bytes a connection may have queued before chunks wait; one more may go over it, and it holds far
-// more.
-constexpr std::size_t chunk_queue = 256 * 1'024;
+// Bytes a connection may have queued before tile columns wait; one more may go over it, and it
+// holds far more.
+constexpr std::size_t column_queue = std::size_t{256} * 1'024;
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
 
@@ -72,7 +70,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       held_(volume_, volumes_, globe::origin_of(generator_)), snapshots_(std::move(snapshots)),
       places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
-      persistence_(entities_), chunks_(globe_, jobs_), columns_(generator_.layers()),
+      persistence_(entities_), columns_(generator_.layers()),
       joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
@@ -99,8 +97,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
       hateful_lines_(registry_.counter("hog_chat_hateful_lines_total",
                                        "Lines of hate speech reported, sent on as small talk.")),
-      chunks_sent_(registry_.counter("hog_chunks_sent_total",
-                                     "Chunks of the planet's surface sent to players.")),
+      columns_sent_(registry_.counter("hog_columns_sent_total",
+                                      "Tile columns of the voxel world sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -365,7 +363,6 @@ void Server::serve_players() {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
             handshakes_.erase(lost->connection);
-            chunks_.leave(lost->connection);
             columns_.leave(lost->connection);
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
@@ -417,7 +414,6 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
             send_placed(connection, player->account);
         }
         handshakes_.erase(shaking);
-        chunks_.join(connection);
         columns_.join(connection);
         if (weather_ && weather_->latest()) {
             send_weather(connection, *weather_->latest());
@@ -459,10 +455,6 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         dig(connection, *dug);
     } else if (const auto* built = std::get_if<protocol::Built>(&*message)) {
         build(connection, *built);
-    } else if (const auto* view = std::get_if<protocol::ViewDetail>(&*message)) {
-        chunks_.detail(connection, *view);
-    } else if (const auto* asked = std::get_if<protocol::ChunksAsked>(&*message)) {
-        chunks_.ask(connection, asked->keys);
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -542,7 +534,6 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     if (!joined_.find(connection)) {
         return;
     }
-    chunks_.edited();
     const std::uint64_t before = globe_.revision();
     globe::dig(globe_, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
     for (const globe::BrickSite brick : globe_.changed_since(before)) {
@@ -563,7 +554,6 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
                    std::to_underlying(connection), built.material);
         return;
     }
-    chunks_.edited();
     const std::uint64_t before = globe_.revision();
     globe::build(globe_, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
                  material);
@@ -571,49 +561,6 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
         ground_.changed(brick);
         flow_.touched(brick);
         flow_.disturbed(brick);
-    }
-}
-
-void Server::tell_chunks() {
-    chunks_.step();
-    for (const auto& [connection, look] : joined_.looks()) {
-        const WorldPosition at = look.at;
-        chunks_.follow(connection, at.metres(), look.forward);
-        const float ground =
-            static_cast<float>(chunks::globe_ground(globe_, glm::normalize(at.metres())));
-        if (auto sent = players_->send(connection, net::Delivery::Unreliable,
-                                       protocol::encode(protocol::Ground{.height = ground}));
-            !sent) {
-            log::debug(server_log, "couldn't send connection {} the ground: {}",
-                       std::to_underlying(connection), sent.error());
-        }
-        server::ChunkSharing::Next next = chunks_.next(connection, chunks_per_tick);
-        if (next.plan) {
-            if (auto sent =
-                    players_->send(connection, net::Delivery::Bulk, protocol::encode(*next.plan));
-                !sent) {
-                log::debug(server_log, "couldn't send connection {} the plan: {}",
-                           std::to_underlying(connection), sent.error());
-                chunks_.retry_plan(connection);
-            }
-        }
-        // Sent while the connection has room, a chunk's parts together; what waits is asked for
-        // again, and nothing is dropped.
-        const std::optional<net::Stats> stats = players_->stats(connection);
-        const std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
-        std::vector<protocol::Chunk> unsent = server::send_chunks(
-            std::move(next.chunks), queued, chunk_queue, [&](const std::vector<std::byte>& bytes) {
-                if (auto sent = players_->send(connection, net::Delivery::Bulk, bytes); !sent) {
-                    log::debug(server_log, "couldn't send connection {} a chunk: {}",
-                               std::to_underlying(connection), sent.error());
-                    return false;
-                }
-                chunks_sent_.add();
-                return true;
-            });
-        for (protocol::Chunk& chunk : unsent) {
-            chunks_.retry(connection, std::move(chunk));
-        }
     }
 }
 
@@ -629,11 +576,11 @@ void Server::tell_columns() {
     for (const auto& [connection, look] : joined_.looks()) {
         columns_.follow(connection, look.at.metres());
         const std::optional<net::Stats> stats = players_->stats(connection);
-        const std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
-        if (queued >= chunk_queue || columns_.due(connection) == 0) {
+        const std::size_t queued = stats ? stats->queued_bytes : column_queue;
+        if (queued >= column_queue || columns_.due(connection) == 0) {
             continue;
         }
-        auto next = columns_.next(connection, chunk_queue - queued, volume_, volumes_);
+        auto next = columns_.next(connection, column_queue - queued, volume_, volumes_);
         if (!next) {
             log::warn(server_log, "couldn't read tile columns for connection {}: {}",
                       std::to_underlying(connection), next.error());
@@ -646,7 +593,9 @@ void Server::tell_columns() {
             !sent) {
             log::debug(server_log, "couldn't send connection {} tile columns: {}",
                        std::to_underlying(connection), sent.error());
+            continue;
         }
+        columns_sent_.add(next->columns.size());
     }
 }
 
@@ -687,7 +636,6 @@ void Server::share() {
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }
-    tell_chunks();
     joined_.share(
         nearby_, [this](net::ConnectionId connection, const protocol::Snapshot& snapshot) {
             const std::vector<std::byte> bytes = protocol::encode(snapshot);
@@ -731,8 +679,6 @@ void Server::hold(std::span<const DVec3> places) {
             flow_.reload(brick);
         }
     }
-    chunks_.columns(changed->loaded);
-    chunks_.columns(changed->dropped);
     if (!changed->loaded.empty() || !changed->dropped.empty()) {
         log::debug(server_log, "read in {} tile columns, let go {}", changed->loaded.size(),
                    changed->dropped.size());

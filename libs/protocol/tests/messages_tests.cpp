@@ -109,35 +109,7 @@ std::vector<Message> examples() {
         Columns{.columns =
                     {{.face = 5, .i = 0xFFFF'FFF0, .j = 3, .level = 6, .bytes = bytes({1, 2, 3})},
                      {.face = 0, .i = 1, .j = 2, .level = 0, .bytes = {}}}},
-        Ground{.height = -12.5F},
-        ChunkPlan{},
-        ChunkPlan{
-            .wanted = {{.key = 5, .version = 0}, {.key = 0xFFFF'FFFF'FFFF'FFF0, .version = 7}}},
-        ViewDetail{},
-        ViewDetail{.ratio = 1.5F, .near = 250.0F, .slope = 2.0F},
-        ChunksAsked{},
-        ChunksAsked{.keys = {1, 0xFFFF'FFFF'FFFF'FFF0}},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
-        Chunk{},
-        Chunk{.key = 0xAB'0000'0001,
-              .version = 9,
-              .part = 1,
-              .parts = 3,
-              .ground = {.origin = far_out,
-                         .vertices = {{.position = {1.0F, -2.5F, 3.25F},
-                                       .normal = {0.0F, 1.0F, 0.0F},
-                                       .tiles = {1, 2, 3},
-                                       .corner = 130},
-                                      {.position = {0.0F, 0.0F, 0.0F},
-                                       .normal = {1.0F, 0.0F, 0.0F},
-                                       .tiles = {4, 4, 4},
-                                       .corner = 1},
-                                      {.position = {9.0F, 9.0F, 9.0F},
-                                       .normal = {0.0F, 0.0F, 1.0F},
-                                       .tiles = {5, 5, 5},
-                                       .corner = 2}},
-                         .indices = {0, 1, 2, 2, 1, 0}},
-              .water = {}},
         Grains{},
         Grains{.tick = 7,
                .flying = {{.id = NetId{1},
@@ -444,56 +416,4 @@ TEST_CASE("an edit of no width or too wide, and tile columns too many or too big
     auto cut = encode(Grains{.tick = 1, .flying = {{.id = NetId{2}}}});
     cut.pop_back();
     CHECK(!decode(cut));
-}
-
-TEST_CASE("a chunk with the most vertices and indices sent still fits a message", "[protocol]") {
-    Chunk chunk{.key = 1, .version = 1, .part = 0, .parts = 1, .ground = {}, .water = {}};
-    chunk.ground.vertices.assign(most_ground_vertices, MeshVertex{});
-    chunk.water.vertices.assign(most_water_vertices, MeshVertex{});
-    // The largest indices take the most bytes.
-    chunk.ground.indices.assign(most_ground_indices,
-                                static_cast<std::uint32_t>(most_ground_vertices - 1));
-    chunk.water.indices.assign(most_water_indices,
-                               static_cast<std::uint32_t>(most_water_vertices - 1));
-    const std::vector<std::byte> sent = encode(chunk);
-    CHECK(sent.size() <= std::size_t{512} * 1'024);
-    const auto read = decode(sent);
-    REQUIRE(read);
-    CHECK(std::get<Chunk>(*read) == chunk);
-}
-
-TEST_CASE("a chunk's part past its parts, or of none, is refused", "[protocol]") {
-    const std::vector<std::byte> whole = encode(Chunk{});
-    // The key is 8 bytes after the kind, then the version's 4; then the part and the parts.
-    std::vector<std::byte> past = whole;
-    past[14] = std::byte{3};
-    past[15] = std::byte{3};
-    CHECK_FALSE(decode(past));
-    std::vector<std::byte> none = whole;
-    none[14] = std::byte{0};
-    none[15] = std::byte{0};
-    CHECK_FALSE(decode(none));
-}
-
-TEST_CASE("a view detail out of range, or not a number, is refused", "[protocol]") {
-    const auto sent = [](ViewDetail detail) {
-        // Written as it is, whatever it holds.
-        hog::ByteWriter out;
-        out.write(std::uint16_t{24});
-        out.write(std::bit_cast<std::uint32_t>(detail.ratio));
-        out.write(std::bit_cast<std::uint32_t>(detail.near));
-        out.write(std::bit_cast<std::uint32_t>(detail.slope));
-        return decode(std::move(out).take());
-    };
-    CHECK(sent({.ratio = 1.25F, .near = 100.0F, .slope = 1.0F}));
-    CHECK_FALSE(sent({.ratio = 1.0F, .near = 100.0F, .slope = 1.0F}));
-    CHECK_FALSE(sent({.ratio = 0.0F, .near = 100.0F, .slope = 1.0F}));
-    CHECK_FALSE(sent({.ratio = 100.0F, .near = 100.0F, .slope = 1.0F}));
-    CHECK_FALSE(sent({.ratio = 2.0F, .near = 1.0F, .slope = 1.0F}));
-    CHECK_FALSE(sent({.ratio = 2.0F, .near = 100.0F, .slope = 0.5F}));
-    CHECK_FALSE(sent({.ratio = 2.0F, .near = 100.0F, .slope = 9.0F}));
-    CHECK_FALSE(
-        sent({.ratio = std::numeric_limits<float>::quiet_NaN(), .near = 100.0F, .slope = 1.0F}));
-    CHECK_FALSE(
-        sent({.ratio = 2.0F, .near = 100.0F, .slope = std::numeric_limits<float>::quiet_NaN()}));
 }

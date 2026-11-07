@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 32;
+inline constexpr std::uint32_t version = 33;
 // The longest planet a welcome carries.
 inline constexpr std::size_t most_planet = 1'024;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -311,112 +311,6 @@ struct Grains {
     friend bool operator==(const Grains&, const Grains&) = default;
 };
 
-// Server to client, unreliable: how high the ground stands over the planet's radius, in metres,
-// under the client's player, for the client to flatten the planet's curve about it.
-struct Ground {
-    float height = 0.0F;
-
-    friend bool operator==(const Ground&, const Ground&) = default;
-};
-
-// The most a chunk's meshes are sent with: a chunk's ground is meshed in some thousands of vertices,
-// most of them under 6,000, and its still water in few; a message carries 512 KiB.
-inline constexpr std::size_t most_ground_vertices = 14'000;
-inline constexpr std::size_t most_ground_indices = 42'000;
-inline constexpr std::size_t most_water_vertices = 3'000;
-inline constexpr std::size_t most_water_indices = 9'000;
-
-// A corner of a surface, as terrain::BlockVertex has it, its normal sent to a 32767th.
-struct MeshVertex {
-    std::array<float, 3> position{};
-    std::array<float, 3> normal{};
-    std::array<std::uint8_t, 3> tiles{};
-    std::uint8_t corner = 0;
-
-    friend bool operator==(const MeshVertex&, const MeshVertex&) = default;
-};
-
-// Triangles of three indices each, anticlockwise seen from outside; positions are metres from
-// `origin`.
-struct SentMesh {
-    Millimetres origin{0};
-    std::vector<MeshVertex> vertices;
-    std::vector<std::uint32_t> indices; // each below the vertices' count
-
-    friend bool operator==(const SentMesh&, const SentMesh&) = default;
-};
-
-// Server to client, bulk: a chunk of the planet's surface to show under its key, in place of any
-// shown there: its ground, and the still water standing on it.
-//
-// One that's too big for a message is sent in `parts`, each a piece of the ground, `part` counting
-// from 0; the water comes with part 0. All of a key's parts are one chunk, shown once all are there.
-struct Chunk {
-    std::uint64_t key = 0;
-    // Which meshing of the chunk this is: it goes up each time it's meshed again, as the world
-    // under it changes.
-    std::uint32_t version = 0;
-    std::uint8_t part = 0;
-    std::uint8_t parts = 1;
-    SentMesh ground;
-    SentMesh water;
-
-    friend bool operator==(const Chunk&, const Chunk&) = default;
-};
-
-// A chunk wanted, and the newest meshing of it there is, 0 while it isn't meshed yet.
-struct PlannedChunk {
-    std::uint64_t key = 0;
-    std::uint32_t version = 0;
-
-    friend bool operator==(const PlannedChunk&, const PlannedChunk&) = default;
-};
-
-// Chunks in a plan, at most: those wanted round a player, nearest first.
-inline constexpr std::size_t most_planned = 4'096;
-
-// Server to client, bulk: the chunks to show round the client now, nearest first, as often as that
-// changes. The client keeps those it has, asks for those it hasn't, and draws the plan from them;
-// the server never takes a chunk back.
-struct ChunkPlan {
-    std::vector<PlannedChunk> wanted; // at most most_planned
-
-    friend bool operator==(const ChunkPlan&, const ChunkPlan&) = default;
-};
-
-// The falloff of detail the client asks for, within these.
-// A chunk must be drawn further off than it's wide, so the ratio is over 1.
-inline constexpr float least_detail_ratio = 1.25F;
-inline constexpr float most_detail_ratio = 8.0F;
-inline constexpr float least_detail_slope = 1.0F;
-inline constexpr float most_detail_slope = 3.0F;
-inline constexpr float least_detail_near = 50.0F;    // metres
-inline constexpr float most_detail_near = 20'000.0F; // metres
-
-// Client to server, reliable, once welcomed and when it changes: how fast the client wants detail
-// to fall off with distance. Each chunk is as coarse as keeps it `ratio` of its widths from the
-// eye, as far as `near` metres; past that, a `slope` over 1 has detail fall off faster, that many
-// levels to a doubling of distance, so the ground a long way off is coarser and the client is sent
-// fewer chunks, while what's near stays as it was.
-struct ViewDetail {
-    float ratio = 3.0F;
-    float near = 1'000.0F;
-    float slope = 1.0F;
-
-    friend bool operator==(const ViewDetail&, const ViewDetail&) = default;
-};
-
-// Chunks asked for in a message, at most.
-inline constexpr std::size_t most_asked = 256;
-
-// Client to server, reliable: chunks of the plan the client lacks, nearest first, to be sent when
-// meshed; asked for again if they don't come.
-struct ChunksAsked {
-    std::vector<std::uint64_t> keys; // at most most_asked
-
-    friend bool operator==(const ChunksAsked&, const ChunksAsked&) = default;
-};
-
 // How many cells the weather at `level` has.
 [[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
     return std::size_t{6} << (2U * level);
@@ -426,8 +320,7 @@ struct ChunksAsked {
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Columns, Grains, Chunk, Ground,
-                             ChunkPlan, ChunksAsked, ViewDetail>;
+                             Said, Hurry, Clock, Placed, Dug, Built, Columns, Grains>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
