@@ -712,9 +712,6 @@ namespace {
 struct Digger {
     hog::net::Client client;
     bool welcomed = false;
-    // Each chunk's key, how many times it was sent, and its newest version.
-    std::map<std::uint64_t, int> chunks;
-    std::map<std::uint64_t, std::uint32_t> versions;
     // Each tile column sent at its own level, how many times, and as last sent.
     std::map<std::tuple<std::uint8_t, std::uint32_t, std::uint32_t>,
              std::pair<int, std::vector<std::byte>>>
@@ -742,24 +739,6 @@ void hear(Digger& digger) {
                         bytes = std::move(column.bytes);
                     }
                 }
-            } else if (const auto* chunk = std::get_if<hog::protocol::Chunk>(&*decoded)) {
-                ++digger.chunks[chunk->key];
-                digger.versions[chunk->key] = chunk->version;
-            } else if (const auto* plan = std::get_if<hog::protocol::ChunkPlan>(&*decoded)) {
-                // Asks for what the plan has that's newer than what's held, the nearest few.
-                hog::protocol::ChunksAsked asked;
-                for (const hog::protocol::PlannedChunk& planned : plan->wanted) {
-                    const auto have = digger.versions.find(planned.key);
-                    if (planned.version > 0 &&
-                        (have == digger.versions.end() || have->second < planned.version) &&
-                        asked.keys.size() < hog::protocol::most_asked) {
-                        asked.keys.push_back(planned.key);
-                    }
-                }
-                if (!asked.keys.empty()) {
-                    REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
-                                               hog::protocol::encode(asked)));
-                }
             }
         }
     }
@@ -767,7 +746,7 @@ void hear(Digger& digger) {
 
 } // namespace
 
-TEST_CASE("a player's digging has the chunks and tile columns it touches sent again to everyone",
+TEST_CASE("a player's digging has the tile columns it touches sent again to everyone",
           "[app][server]") {
     const World world;
     build_ground(world, hog::planet::start_direction);
@@ -784,14 +763,10 @@ TEST_CASE("a player's digging has the chunks and tile columns it touches sent ag
     REQUIRE(second);
     std::array<Digger, 2> diggers{Digger{.client = std::move(*first),
                                          .welcomed = false,
-                                         .chunks = {},
-                                         .versions = {},
                                          .columns = {},
                                          .events = {}},
                                   Digger{.client = std::move(*second),
                                          .welcomed = false,
-                                         .chunks = {},
-                                         .versions = {},
                                          .columns = {},
                                          .events = {}}};
     const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
@@ -806,10 +781,6 @@ TEST_CASE("a player's digging has the chunks and tile columns it touches sent ag
     bool dug = false;
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 60s;
-    // The key a player was sent first, which the digging is under.
-    const auto resent = [](const Digger& digger) {
-        return std::ranges::any_of(digger.chunks, [](const auto& sent) { return sent.second > 1; });
-    };
     Visited timer{[&] {
         for (Digger& digger : diggers) {
             hear(digger);
@@ -826,8 +797,9 @@ TEST_CASE("a player's digging has the chunks and tile columns it touches sent ag
                                                .stance = hog::protocol::Stance::Flying})));
             }
         }
-        // Dug once each has been sent some of the ground.
-        if (placed && !dug && !diggers[0].chunks.empty() && !diggers[1].chunks.empty()) {
+        // Dug once each holds the column it's over.
+        const auto holds = [&](const Digger& digger) { return digger.columns.contains(under); };
+        if (placed && !dug && holds(diggers[0]) && holds(diggers[1])) {
             dug = true;
             REQUIRE(diggers[0].client.send(
                 hog::net::Delivery::Reliable,
@@ -835,27 +807,28 @@ TEST_CASE("a player's digging has the chunks and tile columns it touches sent ag
                     .centre = hog::protocol::to_millimetres(hog::WorldPosition{direction * ground}),
                     .radius = 3'000})));
         }
-        if ((dug && resent(diggers[0]) && resent(diggers[1]) && sent_again(diggers[0]) &&
-             sent_again(diggers[1])) ||
+        if ((dug && sent_again(diggers[0]) && sent_again(diggers[1])) ||
             MonotonicClock::now() >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(server->globe().revision() > 0);
-    // Both are sent chunks, and those over the hole again once it was dug.
+    // Both are sent the column under the hole again once it was dug, as the server holds it.
     for (const Digger& digger : diggers) {
-        INFO("chunks held " << digger.chunks.size() << ", dug " << dug);
-        CHECK_FALSE(digger.chunks.empty());
-        CHECK(resent(digger));
-        // The column under the hole as the server holds it, dug.
+        INFO("columns held " << digger.columns.size() << ", dug " << dug);
         CHECK(sent_again(digger));
         const auto found = digger.columns.find(under);
         REQUIRE(found != digger.columns.end());
-        CHECK(found->second.second ==
-              server->volume().encode_column(
-                  {.face = cell.face,
-                   .i = cell.i / hog::globe::Volume::tile_side * hog::globe::Volume::tile_side,
-                   .j = cell.j / hog::globe::Volume::tile_side * hog::globe::Volume::tile_side}));
+        // The hole is in it: the flow carries on changing the ground after, so it may be sent
+        // again later still.
+        hog::globe::Volume held;
+        const hog::globe::Site at{
+            .face = cell.face,
+            .i = cell.i,
+            .j = cell.j,
+            .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 1.0))};
+        REQUIRE(held.decode_column(at, found->second.second));
+        CHECK(held.at(at).solid == hog::globe::Material::Air);
     }
 }

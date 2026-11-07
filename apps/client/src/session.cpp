@@ -144,12 +144,6 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
     } else if (auto* columns = std::get_if<protocol::Columns>(&*message)) {
         columns_.insert(columns_.end(), std::make_move_iterator(columns->columns.begin()),
                         std::make_move_iterator(columns->columns.end()));
-    } else if (auto* chunk = std::get_if<protocol::Chunk>(&*message)) {
-        chunks_.emplace_back(std::move(*chunk));
-    } else if (auto* plan = std::get_if<protocol::ChunkPlan>(&*message)) {
-        chunks_.emplace_back(std::move(*plan));
-    } else if (const auto* ground = std::get_if<protocol::Ground>(&*message)) {
-        ground_ = ground->height;
     } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
         grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
@@ -228,22 +222,6 @@ void Session::build(WorldPosition centre, double radius, std::uint8_t material) 
                          .radius = *width,
                          .material = material},
          net::Delivery::Reliable);
-}
-
-void Session::set_view_detail(const protocol::ViewDetail& detail) {
-    if (state_ == State::Welcomed) {
-        send(detail, net::Delivery::Reliable);
-    }
-}
-
-void Session::ask_chunks(std::span<const std::uint64_t> keys) {
-    if (state_ != State::Welcomed) {
-        return;
-    }
-    for (std::size_t from = 0; from < keys.size(); from += protocol::most_asked) {
-        const auto chunk = keys.subspan(from, std::min(protocol::most_asked, keys.size() - from));
-        send(protocol::ChunksAsked{.keys = {chunk.begin(), chunk.end()}}, net::Delivery::Reliable);
-    }
 }
 
 void Session::send(const protocol::Message& message, net::Delivery delivery) {

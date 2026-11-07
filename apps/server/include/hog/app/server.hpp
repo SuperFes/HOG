@@ -19,8 +19,6 @@
 #include <hog/protocol/handshake.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/catch_up.hpp>
-#include <hog/server/chunk_sending.hpp>
-#include <hog/server/chunk_sharing.hpp>
 #include <hog/server/column_sending.hpp>
 #include <hog/server/held_ground.hpp>
 #include <hog/server/persistence.hpp>
@@ -145,7 +143,6 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
-    void tell_chunks();
     // Sends each player the tile columns due to them, as their connection has room, once those
     // the world changed are due again.
     void tell_columns();
@@ -190,8 +187,6 @@ private:
     flecs::world entities_;
     server::Persistence persistence_;
     jobs::JobSystem jobs_;
-    // The surfaces each player is shown, meshed on the jobs.
-    server::ChunkSharing chunks_;
     // The tile columns each player is sent, and the world's revision they're told up to.
     server::ColumnSending columns_;
     std::uint64_t columns_told_ = 0;
@@ -230,7 +225,7 @@ private:
     metrics::Counter& corrected_moves_;
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
-    metrics::Counter& chunks_sent_;
+    metrics::Counter& columns_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

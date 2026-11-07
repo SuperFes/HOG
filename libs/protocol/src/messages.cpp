@@ -36,11 +36,6 @@ enum class Kind : std::uint16_t {
     Built = 15,
     Columns = 16,
     Grains = 17,
-    Chunk = 19,
-    Ground = 21,
-    ChunkPlan = 22,
-    ChunksAsked = 23,
-    ViewDetail = 24,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -220,103 +215,6 @@ void write_position(ByteWriter& out, Millimetres at) {
     for (std::size_t axis = 0; axis < 3; ++axis) {
         out.write_signed(at[axis]);
     }
-}
-
-void write_float(ByteWriter& out, float value) {
-    out.write(std::bit_cast<std::uint32_t>(value));
-}
-
-[[nodiscard]] Result<float> read_float(ByteReader& in, std::string_view what) {
-    const auto bits = in.read<std::uint32_t>();
-    if (!bits) {
-        return make_error(ErrorCode::Parse, std::format("{} cut short", what));
-    }
-    return std::bit_cast<float>(*bits);
-}
-
-// A mesh: its origin, its vertices a float at a time, and its indices as varints.
-void write_mesh(ByteWriter& out, const SentMesh& mesh, std::size_t most_vertices,
-                std::size_t most_indices) {
-    HOG_ASSERT(mesh.vertices.size() <= most_vertices, "a mesh with too many vertices to send");
-    HOG_ASSERT(mesh.indices.size() <= most_indices, "a mesh with too many indices to send");
-    write_position(out, mesh.origin);
-    out.write(static_cast<std::uint32_t>(mesh.vertices.size()));
-    out.write(static_cast<std::uint32_t>(mesh.indices.size()));
-    for (const MeshVertex& vertex : mesh.vertices) {
-        for (const float axis : vertex.position) {
-            write_float(out, axis);
-        }
-        for (const float axis : vertex.normal) {
-            out.write(static_cast<std::uint16_t>(
-                static_cast<std::int16_t>(std::lround(std::clamp(axis, -1.0F, 1.0F) * 32'767.0F))));
-        }
-        for (const std::uint8_t tile : vertex.tiles) {
-            out.write(tile);
-        }
-        out.write(vertex.corner);
-    }
-    for (const std::uint32_t index : mesh.indices) {
-        out.write_varint(index);
-    }
-}
-
-[[nodiscard]] Result<SentMesh> read_mesh(ByteReader& in, std::size_t most_vertices,
-                                         std::size_t most_indices) {
-    SentMesh mesh;
-    auto origin = read_position(in, "a mesh");
-    const auto vertices = in.read<std::uint32_t>();
-    const auto indices = in.read<std::uint32_t>();
-    if (!origin || !vertices || !indices) {
-        return make_error(ErrorCode::Parse, "a mesh cut short");
-    }
-    if (*vertices > most_vertices || *indices > most_indices || *indices % 3 != 0) {
-        return make_error(ErrorCode::OutOfRange,
-                          std::format("a mesh of {} vertices and {} indices", *vertices, *indices));
-    }
-    mesh.origin = *origin;
-    mesh.vertices.reserve(*vertices);
-    for (std::uint32_t at = 0; at < *vertices; ++at) {
-        MeshVertex vertex;
-        for (float& axis : vertex.position) {
-            const auto value = read_float(in, "a mesh");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            axis = *value;
-        }
-        for (float& axis : vertex.normal) {
-            const auto value = in.read<std::uint16_t>();
-            if (!value) {
-                return make_error(ErrorCode::Parse, "a mesh cut short");
-            }
-            axis = static_cast<float>(static_cast<std::int16_t>(*value)) / 32'767.0F;
-        }
-        for (std::uint8_t& tile : vertex.tiles) {
-            const auto value = in.read<std::uint8_t>();
-            if (!value) {
-                return make_error(ErrorCode::Parse, "a mesh cut short");
-            }
-            tile = *value;
-        }
-        const auto corner = in.read<std::uint8_t>();
-        if (!corner) {
-            return make_error(ErrorCode::Parse, "a mesh cut short");
-        }
-        vertex.corner = *corner;
-        mesh.vertices.push_back(vertex);
-    }
-    mesh.indices.reserve(*indices);
-    for (std::uint32_t at = 0; at < *indices; ++at) {
-        const auto index = in.read_varint();
-        if (!index) {
-            return make_error(ErrorCode::Parse, "a mesh cut short");
-        }
-        if (*index >= *vertices) {
-            return make_error(ErrorCode::OutOfRange, "a mesh index past its vertices");
-        }
-        mesh.indices.push_back(static_cast<std::uint32_t>(*index));
-    }
-    return mesh;
 }
 
 // A stance and facing, as a move or a placing ends with.
@@ -688,76 +586,6 @@ struct Ball {
     return finished(in, std::move(columns));
 }
 
-[[nodiscard]] Result<Message> read_chunk(ByteReader& in) {
-    const auto key = in.read<std::uint64_t>();
-    const auto version = in.read<std::uint32_t>();
-    const auto part = in.read<std::uint8_t>();
-    const auto parts = in.read<std::uint8_t>();
-    if (!key || !version || !part || !parts) {
-        return make_error(ErrorCode::Parse, "a chunk cut short");
-    }
-    if (*parts == 0 || *part >= *parts) {
-        return make_error(ErrorCode::OutOfRange,
-                          std::format("part {} of {} of a chunk", *part, *parts));
-    }
-    auto ground = read_mesh(in, most_ground_vertices, most_ground_indices);
-    if (!ground) {
-        return std::unexpected(ground.error());
-    }
-    auto water = read_mesh(in, most_water_vertices, most_water_indices);
-    if (!water) {
-        return std::unexpected(water.error());
-    }
-    return finished(in, Chunk{.key = *key,
-                              .version = *version,
-                              .part = *part,
-                              .parts = *parts,
-                              .ground = std::move(*ground),
-                              .water = std::move(*water)});
-}
-
-[[nodiscard]] Result<Message> read_chunk_plan(ByteReader& in) {
-    const auto count = in.read<std::uint16_t>();
-    if (!count) {
-        return make_error(ErrorCode::Parse, "a chunk plan cut short");
-    }
-    if (*count > most_planned) {
-        return make_error(ErrorCode::OutOfRange,
-                          std::format("{} chunks in a plan; {} allowed", *count, most_planned));
-    }
-    ChunkPlan plan;
-    plan.wanted.reserve(*count);
-    for (std::uint16_t at = 0; at < *count; ++at) {
-        const auto key = in.read<std::uint64_t>();
-        const auto version = in.read<std::uint32_t>();
-        if (!key || !version) {
-            return make_error(ErrorCode::Parse, "a chunk plan cut short");
-        }
-        plan.wanted.push_back({.key = *key, .version = *version});
-    }
-    return finished(in, std::move(plan));
-}
-
-[[nodiscard]] Result<Message> read_chunks_asked(ByteReader& in) {
-    const auto count = in.read<std::uint16_t>();
-    if (!count) {
-        return make_error(ErrorCode::Parse, "chunks asked for cut short");
-    }
-    if (*count > most_asked) {
-        return make_error(ErrorCode::OutOfRange,
-                          std::format("{} chunks asked for; {} allowed", *count, most_asked));
-    }
-    ChunksAsked asked;
-    for (std::uint16_t at = 0; at < *count; ++at) {
-        const auto key = in.read<std::uint64_t>();
-        if (!key) {
-            return make_error(ErrorCode::Parse, "chunks asked for cut short");
-        }
-        asked.keys.push_back(*key);
-    }
-    return finished(in, std::move(asked));
-}
-
 [[nodiscard]] Result<Message> read_grains(ByteReader& in) {
     const auto tick = read<std::uint32_t>(in, "grains");
     const auto count = read<std::uint16_t>(in, "grains");
@@ -941,37 +769,6 @@ std::vector<std::byte> encode(const Message& message) {
                     out.write(static_cast<std::uint32_t>(column.bytes.size()));
                     out.write_bytes(column.bytes);
                 }
-            } else if constexpr (std::is_same_v<Body, ChunkPlan>) {
-                HOG_ASSERT(body.wanted.size() <= most_planned, "too many chunks planned to send");
-                out.write(static_cast<std::uint16_t>(Kind::ChunkPlan));
-                out.write(static_cast<std::uint16_t>(body.wanted.size()));
-                for (const PlannedChunk& planned : body.wanted) {
-                    out.write(planned.key);
-                    out.write(planned.version);
-                }
-            } else if constexpr (std::is_same_v<Body, ViewDetail>) {
-                out.write(static_cast<std::uint16_t>(Kind::ViewDetail));
-                write_float(out, body.ratio);
-                write_float(out, body.near);
-                write_float(out, body.slope);
-            } else if constexpr (std::is_same_v<Body, ChunksAsked>) {
-                HOG_ASSERT(body.keys.size() <= most_asked, "too many chunks asked for at once");
-                out.write(static_cast<std::uint16_t>(Kind::ChunksAsked));
-                out.write(static_cast<std::uint16_t>(body.keys.size()));
-                for (const std::uint64_t key : body.keys) {
-                    out.write(key);
-                }
-            } else if constexpr (std::is_same_v<Body, Ground>) {
-                out.write(static_cast<std::uint16_t>(Kind::Ground));
-                write_float(out, body.height);
-            } else if constexpr (std::is_same_v<Body, Chunk>) {
-                out.write(static_cast<std::uint16_t>(Kind::Chunk));
-                out.write(body.key);
-                out.write(body.version);
-                out.write(body.part);
-                out.write(body.parts);
-                write_mesh(out, body.ground, most_ground_vertices, most_ground_indices);
-                write_mesh(out, body.water, most_water_vertices, most_water_indices);
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 HOG_ASSERT(body.flying.size() <= most_grains, "too much grain to send at once");
                 out.write(static_cast<std::uint16_t>(Kind::Grains));
@@ -1113,36 +910,6 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_columns(in);
     case Kind::Grains:
         return read_grains(in);
-    case Kind::ViewDetail: {
-        const auto ratio = read_float(in, "a view detail");
-        const auto near = read_float(in, "a view detail");
-        const auto slope = read_float(in, "a view detail");
-        if (!ratio || !near || !slope) {
-            return make_error(ErrorCode::Parse, "a view detail cut short");
-        }
-        // Within what's allowed, and a number.
-        if (!(*ratio >= least_detail_ratio && *ratio <= most_detail_ratio &&
-              *near >= least_detail_near && *near <= most_detail_near &&
-              *slope >= least_detail_slope && *slope <= most_detail_slope)) {
-            return make_error(
-                ErrorCode::OutOfRange,
-                std::format("a view detail of ratio {} near {} slope {}", *ratio, *near, *slope));
-        }
-        return finished(in, ViewDetail{.ratio = *ratio, .near = *near, .slope = *slope});
-    }
-    case Kind::ChunkPlan:
-        return read_chunk_plan(in);
-    case Kind::ChunksAsked:
-        return read_chunks_asked(in);
-    case Kind::Ground: {
-        const auto height = read_float(in, "ground");
-        if (!height) {
-            return std::unexpected(height.error());
-        }
-        return finished(in, Ground{.height = *height});
-    }
-    case Kind::Chunk:
-        return read_chunk(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {

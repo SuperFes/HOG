@@ -98,22 +98,12 @@ public:
     void dig(WorldPosition centre, double radius);
     void build(WorldPosition centre, double radius, std::uint8_t material);
 
-    // What the server sent of the planet's surface since last asked, in the order it came: parts of
-    // chunks, and plans of those wanted.
-    using ChunkEvent = std::variant<protocol::Chunk, protocol::ChunkPlan>;
-    [[nodiscard]] std::vector<ChunkEvent> take_chunks() { return std::exchange(chunks_, {}); }
-    // Tells the server how fast the client wants detail to fall off with distance.
-    void set_view_detail(const protocol::ViewDetail& detail);
-    // Asks the server for these chunks of its plan, in messages that fit.
-    void ask_chunks(std::span<const std::uint64_t> keys);
     // The planet the server runs, as it said when it welcomed; empty before.
     [[nodiscard]] const std::vector<std::byte>& planet() const noexcept { return planet_; }
     // The voxel layers the server's ground stands on, as hog::globe::volume_header has them.
     [[nodiscard]] const std::vector<std::byte>& ground_origin() const noexcept {
         return ground_origin_;
     }
-    // How high the ground stands under the player, as the server last said; none before.
-    [[nodiscard]] std::optional<float> ground() const noexcept { return ground_; }
 
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
@@ -144,8 +134,6 @@ private:
     std::optional<std::uint64_t> world_;
     std::vector<std::byte> planet_;
     std::vector<std::byte> ground_origin_;
-    std::optional<float> ground_;
-    std::vector<ChunkEvent> chunks_;
     State state_ = State::Connecting;
     std::string reason_;
     replication::Replica replica_;
