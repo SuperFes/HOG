@@ -90,6 +90,9 @@ struct VolumeOrigin {
 // Fails, saying why, on a header of another format, or cut short.
 [[nodiscard]] Result<VolumeOrigin> origin_from(std::span<const std::byte> header);
 
+// What the archive's volume was made from, none where nothing was ever written; fails on a header
+// of another format.
+[[nodiscard]] Result<std::optional<VolumeOrigin>> archived_origin(const VolumeArchive& archive);
 // Whether the archive holds a volume, false where nothing was ever written; fails where it's one
 // made from another origin.
 [[nodiscard]] Result<bool> made_from(const VolumeArchive& archive, const VolumeOrigin& origin);

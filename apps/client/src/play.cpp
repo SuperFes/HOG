@@ -21,6 +21,7 @@
 #include <hog/core/time.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/column_cache.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/volume_archive.hpp>
@@ -62,6 +63,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <numbers>
@@ -69,6 +71,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -216,8 +219,8 @@ DVec3 movement(const Controls& controls) {
             axis(SDL_SCANCODE_W, SDL_SCANCODE_S)};
 }
 
-client::Flight start(const client::Options& options, const client::GlobeWorld& globe) {
-    const double radius = globe.generator.planet().radius;
+client::Flight start(const client::Options& options, const globe::World& world) {
+    const double radius = world.planet().radius;
     client::Flight flight;
     if (options.start) {
         constexpr double degree = std::numbers::pi / 180.0;
@@ -225,7 +228,7 @@ client::Flight start(const client::Options& options, const client::GlobeWorld& g
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
     } else {
-        const double ground = globe::ground_height(globe.world, planet::start_direction);
+        const double ground = globe::ground_height(world, planet::start_direction);
         flight = client::start_flight(planet::start_direction, radius, ground + globe_start_height,
                                       planet::north_pole);
     }
@@ -803,11 +806,9 @@ void show_held(client::ColumnMeshes& meshes, client::Scene& scene, const globe::
     scene.set_ground_state(held_ground, meshes.in_flight() > 0);
 }
 
-// Digs or builds as the keys ask: through the server when on one, which sends the bricks back,
-// or straight into the world when alone. Then holds the bricks the server sent, and has the
-// chunks they touch drawn again. The world is changed only with no chunk in flight.
-// Digs or builds into the world as asked, when drawing it alone.
-void edit_globe(Controls& controls, client::GlobeWorld& globe, client::ColumnMeshes& meshes,
+// Digs or builds into the world as asked, when drawing it alone, and has the tile columns it
+// changed meshed again.
+void edit_globe(Controls& controls, globe::World& world, client::ColumnMeshes& meshes,
                 const render::Camera& camera) {
     const bool dig = std::exchange(controls.dig, false);
     const bool asked = dig || std::exchange(controls.build, false);
@@ -816,15 +817,15 @@ void edit_globe(Controls& controls, client::GlobeWorld& globe, client::ColumnMes
     }
     const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
     meshes.finish();
-    const std::uint64_t before = globe.world.revision();
+    const std::uint64_t before = world.revision();
     if (dig) {
-        globe::dig(globe.world, centre.metres(), edit_radius);
+        globe::dig(world, centre.metres(), edit_radius);
     } else {
-        globe::build(globe.world, centre.metres(), edit_radius,
+        globe::build(world, centre.metres(), edit_radius,
                      static_cast<globe::Material>(edit_material));
     }
     std::vector<globe::Site> corners;
-    for (const globe::BrickSite brick : globe.world.changed_since(before)) {
+    for (const globe::BrickSite brick : world.changed_since(before)) {
         constexpr std::uint32_t across = globe::Volume::tile_side / globe::brick_side;
         corners.push_back({.face = brick.face,
                            .i = brick.i / across * globe::Volume::tile_side,
@@ -838,12 +839,12 @@ void edit_globe(Controls& controls, client::GlobeWorld& globe, client::ColumnMes
 
 // Puts the player back where the server says they were when they last left.
 void return_to(Connection& connection, Controls& controls, std::optional<client::Player>& player,
-               client::Flight& flight, const client::GlobeWorld& globe) {
+               client::Flight& flight, const globe::World& world) {
     const auto placed = connection.take_placed();
     if (!placed) {
         return;
     }
-    auto placing = client::placing(globe.world, *placed);
+    auto placing = client::placing(world, *placed);
     if (!placing) {
         log::warn(player_log, "can't go back to where the player was: {}", placing.error());
         return;
@@ -870,15 +871,16 @@ void return_to(Connection& connection, Controls& controls, std::optional<client:
     return chatting;
 }
 
-// Starts or stops playing the character as asked: stood on the ground under the eye, or flying
-// on from where the camera was.
 // Metres the ground drawn stands over the radius under a point.
-double drawn_ground(const client::GlobeWorld& globe, WorldPosition at) {
-    return globe::ground_height(globe.world, at.metres());
+double drawn_ground(const globe::World& world, WorldPosition at) {
+    return globe::ground_height(world, at.metres());
 }
 
+// Starts or stops playing the character as asked: stood on the ground under the eye, or flying
+// on from where the camera was.
+
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
-               const render::Camera& camera, const client::GlobeWorld& globe) {
+               const render::Camera& camera, const globe::World& world) {
     if (controls.walking == player.has_value()) {
         return;
     }
@@ -887,7 +889,7 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
         flight.eye = camera.eye;
         return;
     }
-    auto made = client::Player::create(globe.world, glm::normalize(flight.eye.metres()));
+    auto made = client::Player::create(world, glm::normalize(flight.eye.metres()));
     if (!made) {
         log::warn(player_log, "can't walk here: {}", made.error());
         controls.walking = false;
@@ -898,13 +900,13 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
 
 // Plays the character or flies a frame on, as the controls ask; what the camera then sees.
 render::Camera move(const Controls& controls, std::optional<client::Player>& player,
-                    client::Flight& flight, const client::GlobeWorld& globe, double seconds) {
+                    client::Flight& flight, const globe::World& world, double seconds) {
     HOG_ZONE("move");
     const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
     if (!player) {
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
-            globe.generator.planet().radius, drawn_ground(globe, flight.eye),
+            world.planet().radius, drawn_ground(world, flight.eye),
             {.speed = controls.speed * (faster ? fast : 1.0),
              .through = controls.through,
              .underground = client::FlySettings{}.underground * (faster ? fast : 1.0)});
@@ -935,7 +937,7 @@ struct Cutaway {
 // Draws the ground's inside as a shell round the eye while flying through the ground, made again
 // as the eye moves off its middle or the bubble changes size, and takes it away otherwise.
 void update_cutaway(Cutaway& drawn, double wanted, const render::Camera& camera,
-                    const client::GlobeWorld& globe, client::Scene& scene) {
+                    const globe::World& world, client::Scene& scene) {
     const double radius = std::floor(wanted);
     if (radius < 1.0) {
         if (std::exchange(drawn.shown, false)) {
@@ -949,7 +951,7 @@ void update_cutaway(Cutaway& drawn, double wanted, const render::Camera& camera,
     }
     drawn = {.at = camera.eye, .radius = radius, .shown = true};
     scene.show_cutaway(std::make_shared<const terrain::BlockMesh>(
-        client::cutaway_shell(globe.world, camera.eye, radius)));
+        client::cutaway_shell(world, camera.eye, radius)));
 }
 
 // Sends what the chat box finished, if anything; an empty line says nothing.
@@ -1000,15 +1002,50 @@ void change_clouds(Controls& controls, client::Scene& scene, const render::Devic
     }
 }
 
+// The viewer's own air, as a server would keep it, from a generator the ground needn't wait for.
+// No weather comes until it's made; a viewer closed first leaves it to finish unheard.
+class OwnWeather {
+public:
+    OwnWeather(const globe::Planet& planet, GameDuration day, double tilt)
+        : day_{day}, tilt_{tilt} {
+        std::promise<std::unique_ptr<const globe::Generator>> made;
+        made_ = made.get_future();
+        std::thread{[made = std::move(made), planet] mutable {
+            made.set_value(std::make_unique<const globe::Generator>(planet));
+        }}.detach();
+    }
+    OwnWeather(std::unique_ptr<const globe::Generator> generator, GameDuration day, double tilt)
+        : day_{day}, tilt_{tilt}, generator_{std::move(generator)} {}
+
+    // The weather just made, if any, as WeatherKeeper::poll.
+    [[nodiscard]] std::optional<protocol::Weather> poll(GameTime now,
+                                                        std::chrono::milliseconds fade) {
+        if (made_.valid() && made_.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+            generator_ = made_.get();
+        }
+        if (!keeper_ && generator_) {
+            keeper_.emplace(*generator_, day_, tilt_, now);
+        }
+        return keeper_ ? keeper_->poll(now, fade) : std::nullopt;
+    }
+
+private:
+    GameDuration day_;
+    double tilt_;
+    std::future<std::unique_ptr<const globe::Generator>> made_;
+    std::unique_ptr<const globe::Generator> generator_;
+    std::optional<skies::WeatherKeeper> keeper_;
+};
+
 // How long the weather fades in over when the viewer makes its own.
 constexpr std::chrono::milliseconds alone_fade{5'000};
 
 // Flies or walks over the world until the window closes or it's time to quit.
-Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::GlobeWorld& globe,
+Result<void> fly(client::Scene& scene, client::PlanetClock& clock, globe::World& world,
                  client::ColumnMeshes& meshes, client::Flight flight, Connection& connection,
-                 skies::WeatherKeeper* alone, const client::Options& options,
-                 const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
-    const double radius = globe.generator.planet().radius;
+                 OwnWeather& weather, const client::Options& options, const render::Device& device,
+                 render::Presenter& presenter, SDL_Window* window) {
+    const double radius = world.planet().radius;
     Controls controls;
     controls.timings = options.timings;
     controls.through = options.through;
@@ -1045,18 +1082,16 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        take_part(controls, player, flight, camera, globe);
-        if (alone != nullptr) {
-            if (const auto made = alone->poll(clock.time(), alone_fade)) {
-                forecast.receive(*made, now);
-            }
+        take_part(controls, player, flight, camera, world);
+        if (const auto made = weather.poll(clock.time(), alone_fade)) {
+            forecast.receive(*made, now);
         }
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        return_to(connection, controls, player, flight, globe);
-        camera = move(controls, player, flight, globe, seconds);
-        edit_globe(controls, globe, meshes, camera);
-        show_held(meshes, scene, globe.world, camera.eye.metres(), over);
-        const double ground_height = drawn_ground(globe, camera.eye);
+        return_to(connection, controls, player, flight, world);
+        camera = move(controls, player, flight, world, seconds);
+        edit_globe(controls, world, meshes, camera);
+        show_held(meshes, scene, world, camera.eye.metres(), over);
+        const double ground_height = drawn_ground(world, camera.eye);
         change_pace(controls, clock);
         hurry_world(controls, connection);
         clock.advance(seconds);
@@ -1070,7 +1105,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
             controls.quit = true;
         }
         const DVec3 companion_up = client::companion_direction(flight, companion_ahead);
-        const double ground_ahead = drawn_ground(globe, WorldPosition{companion_up * radius});
+        const double ground_ahead = drawn_ground(world, WorldPosition{companion_up * radius});
         const render::Standing companion{
             .feet = player ? WorldPosition{companion_up * (radius + ground_ahead)}
                            : client::companion_feet(flight, companion_ahead, companion_below,
@@ -1085,8 +1120,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
             session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
         std::vector<render::Capsule> avatars = client::avatars(others);
         if (session != nullptr) {
-            const std::vector<render::Capsule> grains = session->grains().capsules(
-                now, globe.generator.layers().thickness, globe.generator.planet().gravity);
+            const std::vector<render::Capsule> grains =
+                session->grains().capsules(now, world.layers().thickness, world.planet().gravity);
             avatars.insert(avatars.end(), grains.begin(), grains.end());
         }
         if (player) {
@@ -1094,10 +1129,10 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
             avatars.push_back(client::avatar(player->feet(), client::colour_of(protocol::NetId{})));
         }
         const double cutaway = controls.through && !player ? controls.cutaway : 0.0;
-        update_cutaway(cut, cutaway, camera, globe, scene);
+        update_cutaway(cut, cutaway, camera, world, scene);
         if (std::exchange(controls.ping, false)) {
             const auto pinged = MonotonicClock::now();
-            pockets = globe::find_pockets(globe.world, camera.eye.metres(), client::ping_range,
+            pockets = globe::find_pockets(world, camera.eye.metres(), client::ping_range,
                                           client::ping_spacing);
             std::cout << std::format(
                 "{}: ping: {} air pockets within {:.0f} m, found in {:.2f} s\n", program,
@@ -1354,6 +1389,39 @@ void startup(std::string_view stage) {
     std::cout << std::format("{}: {:7.1f} s  {}\n", program, since.count(), stage) << std::flush;
 }
 
+// The ground drawn alone: the planet in its voxel layers, and what's made of them.
+struct ViewedGround {
+    ViewedGround(const globe::Planet& planet, const globe::Layers& layers, globe::Volume made)
+        : planet{planet}, volume{std::move(made)}, world{this->planet, layers, volume} {}
+    ViewedGround(const ViewedGround&) = delete;
+    ViewedGround& operator=(const ViewedGround&) = delete;
+    ViewedGround(ViewedGround&&) = delete;
+    ViewedGround& operator=(ViewedGround&&) = delete;
+    ~ViewedGround() = default;
+
+    globe::Planet planet;
+    globe::Volume volume;
+    globe::World world;
+};
+
+// How the voxel layers lie in a world's file; fails where it holds none, or was made for another
+// planet than `planet`.
+Result<globe::VolumeOrigin> origin_in(const globe::VolumeArchive& archive,
+                                      const globe::Planet& planet) {
+    const auto origin = globe::archived_origin(archive);
+    if (!origin) {
+        return std::unexpected(origin.error());
+    }
+    if (!*origin) {
+        return make_error(ErrorCode::NotFound, "holds no ground; hog-build-world makes it");
+    }
+    if ((*origin)->seed != planet.seed) {
+        return make_error(ErrorCode::InvalidArgument, std::format("made for planet seed {}, not {}",
+                                                                  (*origin)->seed, planet.seed));
+    }
+    return **origin;
+}
+
 int show(const client::Options& options, const planet::PlanetConfig& planet, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     startup("starting");
@@ -1371,22 +1439,33 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
             return EXIT_FAILURE;
         }
     }
-    startup(std::format("making planet {:016x}", globe::world_id(*described)));
-    client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
-    startup("planet made");
+    // The world's file says how its voxel layers lie; without one only the generator knows, and
+    // nothing stands on them.
+    std::optional<ViewedGround> ground;
+    std::optional<OwnWeather> own;
     if (options.world) {
         auto archive = store::SqliteVolumeArchive::open(*options.world);
-        auto volume = archive ? globe::load_volume(*archive, globe::origin_of(globe.generator))
-                              : Result<globe::Volume>{std::unexpected(archive.error())};
+        auto origin = archive ? origin_in(*archive, *described)
+                              : Result<globe::VolumeOrigin>{std::unexpected(archive.error())};
+        auto volume = origin ? globe::load_volume(*archive, *origin)
+                             : Result<globe::Volume>{std::unexpected(origin.error())};
         if (!volume) {
             std::cerr << std::format("{}: {}: {}\n", program, options.world->string(),
                                      volume.error());
             return EXIT_FAILURE;
         }
-        globe.volume = std::move(*volume);
-        startup(std::format("{} tiles of ground", globe.volume.tiles()));
+        ground.emplace(*described, origin->layers, std::move(*volume));
+        own.emplace(*described, planet.day_length, planet.axial_tilt);
+        startup(std::format("{} tiles of ground", ground->volume.tiles()));
+    } else {
+        startup(std::format("making planet {:016x}", globe::world_id(*described)));
+        auto generator = std::make_unique<const globe::Generator>(
+            *described, [](std::string_view stage) { startup(stage); });
+        ground.emplace(*described, generator->layers(), globe::Volume{});
+        own.emplace(std::move(generator), planet.day_length, planet.axial_tilt);
+        startup("planet made");
     }
-    const client::Flight flight = start(options, globe);
+    const client::Flight flight = start(options, ground->world);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
                                                  glm::normalize(flight.eye.metres()),
@@ -1403,7 +1482,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     startup("starting the renderer");
     // Before the scene, whose bakes run on it.
     jobs::JobSystem jobs{options.threads};
-    auto scene = client::Scene::create(device, globe.generator.planet(), jobs, calendar,
+    auto scene = client::Scene::create(device, ground->planet, jobs, calendar,
                                        presenter.swapchain().format(), render::frames_in_flight,
                                        companion(options, device, presenter.swapchain().format()));
     if (!scene) {
@@ -1415,22 +1494,17 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         return EXIT_FAILURE;
     }
     scene->set_system(planet.system);
-    client::ColumnMeshes meshes{globe.world, jobs};
+    client::ColumnMeshes meshes{ground->world, jobs};
     startup("ready");
     // Only now, as the loop begins to answer it: the server refuses a connection that says no hello
     // within seconds, and the stages above take longer.
-    // Without a server the viewer keeps its own air, as a server would.
-    std::optional<skies::WeatherKeeper> alone;
-    if (viewing) {
-        alone.emplace(globe.generator, planet.day_length, planet.axial_tilt, clock.time());
-    }
     auto connection = Connection::open(options, std::nullopt);
     if (!connection) {
         std::cerr << std::format("{}: {}\n", program, connection.error());
         return EXIT_FAILURE;
     }
-    const Result<void> flown = fly(*scene, clock, globe, meshes, flight, *connection,
-                                   alone ? &*alone : nullptr, options, device, presenter, window);
+    const Result<void> flown = fly(*scene, clock, ground->world, meshes, flight, *connection, *own,
+                                   options, device, presenter, window);
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {

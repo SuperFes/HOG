@@ -76,8 +76,8 @@ TEST_CASE("running water only lowers ground, most where most drains, and leaves 
         if (ground[cell] <= 0.0F) {
             CHECK(after[cell] == ground[cell]);
         }
-        if (ground[cell] - after[cell] > cut_most) {
-            cut_most = ground[cell] - after[cell];
+        if (static_cast<double>(ground[cell] - after[cell]) > cut_most) {
+            cut_most = static_cast<double>(ground[cell] - after[cell]);
             drains_most = before.catchment[cell];
         }
     }

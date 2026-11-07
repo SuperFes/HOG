@@ -88,22 +88,30 @@ Result<VolumeOrigin> origin_from(std::span<const std::byte> header) {
                                    .count = static_cast<int>(*count)}};
 }
 
-Result<bool> made_from(const VolumeArchive& archive, const VolumeOrigin& origin) {
+Result<std::optional<VolumeOrigin>> archived_origin(const VolumeArchive& archive) {
     const auto header = archive.header();
     if (!header) {
         return std::unexpected(header.error());
     }
     if (header->empty()) {
+        return std::nullopt;
+    }
+    return origin_from(*header);
+}
+
+Result<bool> made_from(const VolumeArchive& archive, const VolumeOrigin& origin) {
+    const auto archived = archived_origin(archive);
+    if (!archived) {
+        return std::unexpected(archived.error());
+    }
+    if (!*archived) {
         return false;
     }
-    const auto saved = origin_from(*header);
-    if (!saved) {
-        return std::unexpected(saved.error());
-    }
-    if (*saved != origin) {
+    const VolumeOrigin& saved = **archived;
+    if (saved != origin) {
         return make_error(ErrorCode::InvalidArgument,
                           std::format("the world was made from seed {}, not {}, or other layers",
-                                      saved->seed, origin.seed));
+                                      saved.seed, origin.seed));
     }
     return true;
 }

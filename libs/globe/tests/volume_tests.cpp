@@ -255,6 +255,7 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     hog::globe::MemoryVolumeArchive archive;
     REQUIRE(archive.header());
     CHECK(archive.header()->empty());
+    CHECK(hog::globe::archived_origin(archive) == std::nullopt);
     const hog::globe::VolumeOrigin origin = hog::globe::origin_of(earth());
     const std::vector<std::byte> header = hog::globe::volume_header(origin);
     const hog::globe::SavedColumn saved{
@@ -262,6 +263,7 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     REQUIRE(archive.write(header, std::span{&saved, 1}));
     CHECK(archive.header() == header);
     CHECK(hog::globe::origin_from(*archive.header()) == origin);
+    CHECK(hog::globe::archived_origin(archive) == origin);
     CHECK(archive.column(4, 7, 9, 0) == saved);
     CHECK(archive.column(4, 7, 10, 0) == std::nullopt);
     CHECK(archive.column(4, 7, 9, 1) == std::nullopt);
@@ -272,6 +274,8 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     other = header;
     other.pop_back();
     CHECK_FALSE(hog::globe::origin_from(other));
+    REQUIRE(archive.write(other, {}));
+    CHECK_FALSE(hog::globe::archived_origin(archive));
 }
 
 TEST_CASE("tile columns are loaded where the archive holds them, and saved a few at a time",
