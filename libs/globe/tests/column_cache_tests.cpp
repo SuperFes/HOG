@@ -89,3 +89,37 @@ TEST_CASE("a client lets go the tile columns far from it", "[globe][column_cache
         CHECK((volume.floor(corner).has_value() || cache.coarse(corner) != nullptr) == kept);
     }
 }
+
+TEST_CASE("a world reads the tile columns held coarser where it holds none of its own",
+          "[globe][column_cache]") {
+    // Granite up to layer 40 right across a tile.
+    const hog::globe::TileColumn column{
+        .floor = 0,
+        .tiles = {{0, hog::globe::VoxelTree::build(Volume::tile_side, [](int, int, int z) {
+                       return z < 40 ? hog::globe::Cube{.solid = Material::Granite,
+                                                        .solid_amount = Voxel::full}
+                                     : hog::globe::Cube{};
+                   })}}};
+    Volume volume;
+    hog::globe::World world{earth(), volume};
+    ColumnCache cache{volume};
+    REQUIRE(cache.take(1, 2, 3, 2, column.halved().halved().encode()));
+    const auto at = [&](std::uint32_t layer) {
+        return world.at({.face = 1, .i = (2 * 64) + 17, .j = (3 * 64) + 50, .layer = layer});
+    };
+    CHECK(at(20).solid == Material::Air);
+
+    world.read_coarse(&cache);
+    CHECK(at(20).solid == Material::Granite);
+    CHECK(at(39).solid == Material::Granite);
+    CHECK(at(40).solid == Material::Air);
+    const std::vector<hog::globe::Cell> cells{
+        hog::globe::column_of({.face = 1, .i = 2 * 64, .j = 3 * 64}, earth().layers())};
+    const std::vector<Voxel> filled = world.fill(cells, 0, 64);
+    CHECK(filled[39].solid == Material::Granite);
+    CHECK(filled[40].solid == Material::Air);
+
+    // Its own level, once held, is read in place of the coarser.
+    REQUIRE(cache.take(1, 2, 3, 0, hog::globe::TileColumn{.floor = 0, .tiles = {}}.encode()));
+    CHECK(at(20).solid == Material::Air);
+}

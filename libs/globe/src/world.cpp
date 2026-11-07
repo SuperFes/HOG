@@ -58,26 +58,46 @@ void World::column(Site base, int bottom, int count, int apart, std::span<Voxel>
     const Planet& planet = generator_->planet();
     const Layers& layers = generator_->layers();
     const DVec3 up = center(column_of(base, layers));
-    const std::optional<std::uint32_t> lowest = volume_->floor(base);
+    std::optional<std::uint32_t> lowest = volume_->floor(base);
     constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
-    const auto x = static_cast<int>(base.i % side);
-    const auto y = static_cast<int>(base.j % side);
+    // Held only coarser, its voxels are counted that many halvings larger.
+    const ColumnCache::Coarse* coarse = nullptr;
+    if (!lowest && coarse_ != nullptr) {
+        coarse = coarse_->coarse(
+            {.face = base.face, .i = base.i / side * side, .j = base.j / side * side});
+        if (coarse != nullptr) {
+            lowest = coarse->column.floor;
+        }
+    }
+    const std::uint32_t shift = coarse != nullptr ? coarse->level : 0;
+    const std::uint32_t across = side >> shift;
+    const auto x = static_cast<int>((base.i % side) >> shift);
+    const auto y = static_cast<int>((base.j % side) >> shift);
     const VoxelTree* tile = nullptr;
     std::optional<std::uint32_t> tile_k;
+    const auto tile_of = [&](std::uint32_t k) -> const VoxelTree* {
+        if (coarse == nullptr) {
+            return volume_->tile_at(
+                {.face = base.face, .i = base.i, .j = base.j, .layer = k * side});
+        }
+        const auto found = std::ranges::lower_bound(coarse->column.tiles, k, {},
+                                                    &std::pair<std::uint32_t, VoxelTree>::first);
+        return found != coarse->column.tiles.end() && found->first == k ? &found->second : nullptr;
+    };
     for (int step = 0; step < count; ++step) {
         const auto layer = static_cast<std::uint32_t>(bottom + (step * apart));
+        const std::uint32_t at = layer >> shift;
         Cube cube;
-        if (lowest && layer < *lowest) {
+        if (lowest && at < *lowest) {
             // Under a column's floor nothing is made yet: deep ground, taken as the crust's rock.
             cube = {.solid = planet.high.rock, .solid_amount = Voxel::full};
         } else {
-            if (tile_k != layer / side) {
-                tile_k = layer / side;
-                tile =
-                    volume_->tile_at({.face = base.face, .i = base.i, .j = base.j, .layer = layer});
+            if (tile_k != at / across) {
+                tile_k = at / across;
+                tile = tile_of(*tile_k);
             }
             if (tile != nullptr) {
-                cube = tile->at(x, y, static_cast<int>(layer % side));
+                cube = tile->at(x, y, static_cast<int>(at % across));
             }
         }
         out[static_cast<std::size_t>(step) * stride] =
