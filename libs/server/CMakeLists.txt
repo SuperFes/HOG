@@ -4,7 +4,6 @@ add_library(hog_server
     src/chunk_sharing.cpp
     src/brick_sharing.cpp
     src/grain_sharing.cpp
-    src/ground_bake.cpp
     src/ground_wetting.cpp
     src/move_check.cpp
     src/pacer.cpp
@@ -33,7 +32,6 @@ hog_add_tests(hog_server
     tests/brick_sharing_tests.cpp
     tests/catch_up_tests.cpp
     tests/grain_sharing_tests.cpp
-    tests/ground_bake_tests.cpp
     tests/ground_wetting_tests.cpp
     tests/move_check_tests.cpp
     tests/network_cost_bench.cpp

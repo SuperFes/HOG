@@ -1,4 +1,4 @@
-#include <hog/server/ground_bake.hpp>
+#include <hog/flow/ground_bake.hpp>
 
 #include <hog/core/bytes.hpp>
 #include <hog/flow/simulation.hpp>
@@ -17,7 +17,7 @@
 #include <format>
 #include <utility>
 
-namespace hog::server {
+namespace hog::flow {
 namespace {
 
 constexpr double hours_a_year = 365.25 * 24.0;
@@ -33,7 +33,7 @@ DVec3 middle_of(const globe::Layers& layers, GroundBake::Tile tile);
 
 // The climate the tile's ground weathered under: its latitude's warmth, cooling with height,
 // and the rain it gets.
-flow::Region::ClimateAt climate_of(const globe::Generator& generator, GroundBake::Tile tile,
+Region::ClimateAt climate_of(const globe::Generator& generator, GroundBake::Tile tile,
                                    const RainRecord& rain) {
     const globe::Layers& layers = generator.layers();
     const globe::Cell middle = globe::cell_under(middle_of(layers, tile), layers.level);
@@ -163,13 +163,13 @@ std::vector<GroundBake::Baked> GroundBake::bake(const globe::Generator& generato
     }
     store.clear_changed();
     globe::World world{generator, store};
-    flow::Simulation flow{world};
+    Simulation flow{world};
     const std::vector<globe::BrickSite> bricks = bricks_of(world, tile);
     static_cast<void>(flow.weather_ground(bricks, climate_of(generator, tile, rain),
                                           generator.planet().weathering));
     const Course through = course(world, tile, rain);
     const auto river = through.find(tile);
-    const flow::Region::Rainfall rainfall{
+    const Region::Rainfall rainfall{
         .rain = [&](DVec3 up) { return rain.at(up); },
         .river = river != through.end() ? std::optional{river->second} : std::nullopt,
         .springs = springs(tile),
@@ -371,12 +371,12 @@ GroundBake::Course GroundBake::course(const globe::World& world, Tile tile,
     Course found;
     for (std::size_t here = end; here != tiles.size(); here = came[here]) {
         const std::size_t side = here == start ? in_side : tiles.side_of(here, came[here]);
-        found.emplace(tiles.tile(here), flow::Region::River{.discharge = discharge, .side = side});
+        found.emplace(tiles.tile(here), Region::River{.discharge = discharge, .side = side});
     }
     return found;
 }
 
-std::vector<flow::Region::Spring> GroundBake::springs(Tile tile) {
+std::vector<Region::Spring> GroundBake::springs(Tile tile) {
     // About one tile in eight has a spring, giving from a trickle to a few litres a second.
     const std::uint64_t seed = hash_values(std::uint64_t{tile.face}, std::uint64_t{tile.i},
                                            std::uint64_t{tile.j}, std::uint64_t{0x5eed});
@@ -454,4 +454,4 @@ double RainRecord::at(DVec3 up) const {
     return sum_[cell] / hours_[cell] * hours_a_year / 1'000.0;
 }
 
-} // namespace hog::server
+} // namespace hog::flow

@@ -5,6 +5,7 @@
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/flow/ground_bake.hpp>
 #include <hog/flow/simulation.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
@@ -21,7 +22,6 @@
 #include <hog/server/catch_up.hpp>
 #include <hog/server/chunk_sending.hpp>
 #include <hog/server/chunk_sharing.hpp>
-#include <hog/server/ground_bake.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
 #include <hog/server/server_config.hpp>
@@ -198,12 +198,12 @@ private:
     // Made once the world's time is known.
     std::optional<skies::WeatherKeeper> weather_;
     // The rain the weather has let fall, and the game time it was last told of.
-    server::RainRecord rain_;
+    flow::RainRecord rain_;
     std::optional<GameTime> rained_;
-    server::GroundBake baked_;
+    flow::GroundBake baked_;
     // The tile being baked on the jobs, and the store's revision it started from.
-    std::unique_ptr<jobs::Async<std::vector<server::GroundBake::Baked>>> baking_;
-    server::GroundBake::Tile baking_tile_{};
+    std::unique_ptr<jobs::Async<std::vector<flow::GroundBake::Baked>>> baking_;
+    flow::GroundBake::Tile baking_tile_{};
     std::uint64_t baking_from_ = 0;
     // The ground near players, to check their moves against.
     physics::Space space_;
