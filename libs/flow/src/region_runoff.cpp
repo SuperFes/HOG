@@ -73,7 +73,9 @@ std::vector<Region::Top> Region::tops() {
                      .j = j,
                      .first = top.surface.first,
                      .open = top.surface.open,
-                     .ground = layers.floor + (units / static_cast<double>(full) * layers.thickness)});
+                     .ground = layers.floor + (units / static_cast<double>(full) * layers.thickness),
+                     .grain_amount = top.surface.grain_amount,
+                     .grain = top.surface.grain});
             }
         }
     }
@@ -97,7 +99,8 @@ void Region::lay_water(const std::vector<Top>& tops,
             const std::int64_t taken =
                 here->grain_amount + (here->solid == Material::Air ? here->solid_amount : 0);
             const auto amount = static_cast<std::uint16_t>(std::clamp<std::int64_t>(
-                std::llround(share * static_cast<double>(full)) - taken, 0, full - taken));
+                std::llround(share * static_cast<double>(full)) - taken, 0,
+                std::max<std::int64_t>(full - taken, 0)));
             if (amount != here->liquid_amount || (amount > 0 && here->liquid != liquid_)) {
                 stepped.changed += std::abs(std::int64_t{amount} - here->liquid_amount);
                 pour(site, amount);
@@ -106,15 +109,9 @@ void Region::lay_water(const std::vector<Top>& tops,
     }
 }
 
-Stepped Region::settle_water(const Rainfall& rainfall) {
-    ++steps_;
-    Stepped stepped;
+Runoff Region::run_off(const std::vector<Top>& held_tops, const Rainfall& rainfall) {
     const globe::Layers& layers = world_->store().layers();
     const std::optional<double> sea = world_->generator().sea_level();
-    const std::vector<Top> held_tops = tops();
-    if (held_tops.empty()) {
-        return stepped;
-    }
     std::map<Key, std::size_t> index;
     for (std::size_t n = 0; n < held_tops.size(); ++n) {
         index.emplace(Key{.face = held_tops[n].face, .i = held_tops[n].i, .j = held_tops[n].j}, n);
@@ -129,10 +126,8 @@ Stepped Region::settle_water(const Rainfall& rainfall) {
             next ? index.find(Key{.face = next->face, .i = next->i, .j = next->j}) : index.end();
         return found != index.end() ? static_cast<int>(found->second) : Runoff::none;
     };
-    const Top& first = held_tops.front();
-    const double width = std::sqrt(
-        layers.volume(cell_of(first), static_cast<int>(first.first)) / layers.thickness);
-    Runoff runoff{held_tops.size(), {.cell = width, .evaporation = rainfall.evaporation}};
+    Runoff runoff{held_tops.size(),
+                  {.cell = column_width(held_tops.front()), .evaporation = rainfall.evaporation}};
     // Water leaves over the held ground's edge, but not back up the side a river comes in by.
     const std::size_t closed = rainfall.river ? rainfall.river->side : Runoff::sides;
     for (std::size_t n = 0; n < held_tops.size(); ++n) {
@@ -153,6 +148,25 @@ Stepped Region::settle_water(const Rainfall& rainfall) {
     }
     add_springs(runoff, index, rainfall.springs);
     runoff.settle();
+    return runoff;
+}
+
+double Region::column_width(const Top& top) const {
+    const globe::Layers& layers = world_->store().layers();
+    const globe::Cell cell{
+        .level = static_cast<std::uint8_t>(layers.level), .face = top.face, .i = top.i, .j = top.j};
+    return std::sqrt(layers.volume(cell, static_cast<int>(top.first)) / layers.thickness);
+}
+
+Stepped Region::settle_water(const Rainfall& rainfall) {
+    ++steps_;
+    Stepped stepped;
+    const std::optional<double> sea = world_->generator().sea_level();
+    const std::vector<Top> held_tops = tops();
+    if (held_tops.empty()) {
+        return stepped;
+    }
+    const Runoff runoff = run_off(held_tops, rainfall);
     // The sea's own water is left as it is.
     lay_water(held_tops,
               [&](std::size_t n) {

@@ -7,6 +7,7 @@ add_library(hog_flow
     src/region_lava.cpp
     src/region_rocks.cpp
     src/region_slump.cpp
+    src/region_soil.cpp
     src/region_support.cpp
     src/runoff.cpp
     src/region_runoff.cpp
@@ -14,6 +15,7 @@ add_library(hog_flow
     src/support.cpp
     src/lava.cpp
     src/vent.cpp
+    src/wash.cpp
     src/wear.cpp
     src/simulation.cpp)
 add_library(hog::flow ALIAS hog_flow)
@@ -35,8 +37,10 @@ hog_add_tests(hog_flow
     tests/runoff_tests.cpp
     tests/runoff_region_tests.cpp
     tests/slump_tests.cpp
+    tests/soil_region_tests.cpp
     tests/support_tests.cpp
     tests/vent_tests.cpp
+    tests/wash_tests.cpp
     tests/wear_tests.cpp
     tests/wetting_tests.cpp
     tests/simulation_tests.cpp)

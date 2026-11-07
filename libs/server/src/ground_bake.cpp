@@ -3,6 +3,7 @@
 #include <hog/core/bytes.hpp>
 #include <hog/flow/simulation.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/planet.hpp>
 
 #include <hog/core/hash.hpp>
 
@@ -20,10 +21,31 @@ namespace hog::server {
 namespace {
 
 constexpr double hours_a_year = 365.25 * 24.0;
+// Years the weather has worked the loose ground since it weathered.
+constexpr double washed_for = 2'000.0;
 
 // Tiles across a face.
 std::uint32_t tiles_across(const globe::VoxelStore& store) {
     return std::max<std::uint32_t>(1, store.bricks_across() / GroundBake::tile_side);
+}
+
+DVec3 middle_of(const globe::Layers& layers, GroundBake::Tile tile);
+
+// The climate the tile's ground weathered under: its latitude's warmth, cooling with height,
+// and the rain it gets.
+flow::Region::ClimateAt climate_of(const globe::Generator& generator, GroundBake::Tile tile,
+                                   const RainRecord& rain) {
+    const globe::Layers& layers = generator.layers();
+    const globe::Cell middle = globe::cell_under(middle_of(layers, tile), layers.level);
+    const double warmth =
+        generator.columns(std::span{&middle, 1}, globe::voxel_lod(generator))[0].surface_temperature();
+    return [&generator, &rain, warmth](DVec3 up, double radius) {
+        return globe::Climate{
+            .kelvin = globe::baseline_temperature(generator.planet(), generator.derived(), warmth,
+                                                  radius, radius, globe::Surroundings::Open),
+            .rain = rain.at(up),
+            .liquid = generator.derived().liquid};
+    };
 }
 
 } // namespace
@@ -142,14 +164,19 @@ std::vector<GroundBake::Baked> GroundBake::bake(const globe::Generator& generato
     store.clear_changed();
     globe::World world{generator, store};
     flow::Simulation flow{world};
+    const std::vector<globe::BrickSite> bricks = bricks_of(world, tile);
+    static_cast<void>(flow.weather_ground(bricks, climate_of(generator, tile, rain),
+                                          generator.planet().weathering));
     const Course through = course(world, tile, rain);
     const auto river = through.find(tile);
-    static_cast<void>(flow.settle_water(
-        bricks_of(world, tile),
-        {.rain = [&](DVec3 up) { return rain.at(up); },
-         .river = river != through.end() ? std::optional{river->second} : std::nullopt,
-         .springs = springs(tile),
-         .evaporation = evaporation}));
+    const flow::Region::Rainfall rainfall{
+        .rain = [&](DVec3 up) { return rain.at(up); },
+        .river = river != through.end() ? std::optional{river->second} : std::nullopt,
+        .springs = springs(tile),
+        .evaporation = evaporation};
+    static_cast<void>(flow.wash(bricks, rainfall, washed_for));
+    static_cast<void>(flow.age_cover(bricks, washed_for));
+    static_cast<void>(flow.settle_water(bricks, rainfall));
     std::vector<Baked> written;
     for (const globe::BrickSite site : store.changed()) {
         const globe::Brick* brick = store.brick(site);

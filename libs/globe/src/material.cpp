@@ -16,7 +16,9 @@ const Properties& properties(Material material) {
     // 35° dry; soil soaked through slumps as mud, sand a little less steep. A flow carries sand
     // at a quarter of a pascal of drag, settled mud and cohesive soil at a few, rock only over
     // ages: its erodibility is stream-power incision, a millimetre a thousand years. Carried, mud
-    // settles out at a tenth of a millimetre a second, sand in centimetres, rubble at once.
+    // settles out at a tenth of a millimetre a second, sand in centimetres, rubble at once. Clay
+    // stands steep dry and runs soaked, and water barely gets through it; rocky dirt drains like
+    // gravel, holds near its dry slope wet, and only a flood moves its stones.
     constexpr double degree = std::numbers::pi / 180.0;
     static constexpr std::array<Properties, material_count> all{{
         {.density = 1.2, .melts = 0.0, .strength = 0.0, .heat_capacity = 1005.0},       // air
@@ -196,6 +198,34 @@ const Properties& properties(Material material) {
          .settling = 3e-1,
          .friction = 25.0 * degree,
          .wet_friction = 5.0 * degree}, // ice
+        {.density = 1700.0,
+         .melts = 1400.0,
+         .strength = 5e4,
+         .heat_capacity = 900.0,
+         .porosity = 0.45,
+         .conductivity = 1e-9,
+         .repose = 40.0 * degree,
+         .saturated_repose = 8.0 * degree,
+         .critical_shear = 5.0,
+         .erodibility = 5e-7,
+         .settling = 1e-5,
+         .cohesion = 1e4,
+         .bed_friction = 22.0 * degree,
+         .bounce = 0.0}, // clay
+        {.density = 1900.0,
+         .melts = 1500.0,
+         .strength = 2e4,
+         .heat_capacity = 850.0,
+         .porosity = 0.3,
+         .conductivity = 1e-3,
+         .repose = 38.0 * degree,
+         .saturated_repose = 34.0 * degree,
+         .critical_shear = 15.0,
+         .erodibility = 3e-6,
+         .settling = 3e-1,
+         .cohesion = 500.0,
+         .bed_friction = 35.0 * degree,
+         .bounce = 0.2}, // gravel
     }};
     return all[static_cast<std::size_t>(material)];
 }

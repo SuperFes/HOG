@@ -1,12 +1,15 @@
 #pragma once
 
 #include <hog/flow/flight.hpp>
+#include <hog/flow/runoff.hpp>
+#include <hog/flow/wash.hpp>
 #include <hog/flow/slump.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/surface.hpp>
 #include <hog/globe/voxel.hpp>
+#include <hog/globe/weathering.hpp>
 #include <hog/globe/world.hpp>
 
 #include <cstddef>
@@ -43,6 +46,8 @@ struct Stepped {
     std::int64_t glaciated = 0;
     // Cover units that crept between columns this step.
     std::int64_t crept = 0;
+    // Units of loose ground running water took up or dropped.
+    std::int64_t washed = 0;
     // Where ice ends at a drop, for icicles to hang from: the column, the layer its surface is in,
     // which way it faces (+i, +j, -i, -j) and how far the drop is, metres.
     struct Icicle {
@@ -106,6 +111,12 @@ public:
     // and come smooth. Runs over every held column, with no liquid, grain or rock stepped.
     Stepped age_cover(double years);
 
+    // Turns the rock under each column's top ground into what it has weathered into, down from
+    // the surface as globe::horizons has it for the climate `climate(up, radius)` gives the
+    // ground at that height: the voxel the surface lies in takes the top layer, those under it
+    // the layer their tops lie in. Loose ground and anything not rock is left as it is.
+    using ClimateAt = std::function<globe::Climate(DVec3 up, double radius)>;
+    Stepped weather_ground(const ClimateAt& climate, double depth);
     // What the sky gives the ground held: metres of rain a year on a column, by the way up it
     // stands; a river running in from the ground beyond, entering at the lowest column on the
     // held ground's edge on its side; springs welling up at columns; and metres a year open water
@@ -132,6 +143,9 @@ public:
     // leaves at the edge of what's held and wherever the ground is under the sea, whose water is
     // left as it is.
     Stepped settle_water(const Rainfall& rainfall);
+    // Lets the rain wash the loose ground on all the ground held for `years`, as Wash has it:
+    // what the water takes comes off the top, grain first, and what it drops is piled as grain.
+    Stepped wash(const Rainfall& rainfall, double years);
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
@@ -337,6 +351,9 @@ private:
     // a column flows, and caves under it do not.
     void glaciate(Stepped& stepped, double years);
     void creep(Stepped& stepped, double years);
+    // Weathers one column's rock from layer `top` down; voxels changed.
+    std::int64_t weather_column(globe::Site top, std::int64_t ground, std::uint32_t low,
+                                const globe::Climate& climate, double depth);
     // A column's top ground with its grain, metres from the centre, and the open voxels over it.
     struct Top {
         std::uint8_t face = 0;
@@ -345,9 +362,25 @@ private:
         std::uint32_t first = 0;
         std::uint32_t open = 0;
         double ground = 0.0;
+        std::int64_t grain_amount = 0;
+        globe::Material grain = globe::Material::Air;
     };
     // Every column held that has a top ground.
     [[nodiscard]] std::vector<Top> tops();
+    // The rain run off the tops until it rests, as Runoff has it.
+    [[nodiscard]] Runoff run_off(const std::vector<Top>& tops, const Rainfall& rainfall);
+    // Metres between the middles of columns side by side about a top.
+    [[nodiscard]] double column_width(const Top& top) const;
+    // The loose ground over a top's rock, bottom first.
+    [[nodiscard]] std::vector<Wash::Piece> loose_under(const Top& top);
+    // Takes `taken` metres off the top's loose ground, grain first, and piles what's left of its
+    // grain and the pieces the water laid over it; the units moved.
+    std::int64_t relay(const Top& top, const Wash::Node& washed, double taken);
+    // Piles `pieces`, bottom first, as grain up the open voxels from `column`, `voxels` of them.
+    void pile_pieces(globe::Site column, std::uint32_t voxels,
+                     const std::vector<Wash::Piece>& pieces);
+    // Takes `units` of shaped matter down from the voxel `bed`.
+    void dig_units(globe::Site bed, std::int64_t units);
     // Fills the open voxels over each top to `surface(n)`, less the room ground and grain take.
     void lay_water(const std::vector<Top>& tops, const std::function<double(std::size_t)>& surface,
                    Stepped& stepped);

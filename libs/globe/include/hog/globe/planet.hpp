@@ -65,6 +65,9 @@ struct Planet {
     // How hard running water has worn the land before the world begins, as the drainage's erosion
     // rate; none at 0.
     double wear = 0.0;
+    // Metres of loose ground rock has weathered into on level ground in a temperate climate;
+    // the climate and the rock make it more or less.
+    double weathering = 8.0;
 };
 
 // What follows from the knobs by known physics.

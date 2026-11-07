@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 29;
+inline constexpr std::uint32_t version = 30;
 // The longest planet a welcome carries.
 inline constexpr std::size_t most_planet = 1'024;
 // The longest connect token a client may present; more is a broken or hostile client.
