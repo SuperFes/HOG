@@ -18,7 +18,7 @@ add_library(hog::server ALIAS hog_server)
 
 target_include_directories(hog_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_server
-    PUBLIC hog::chunks hog::core hog::flow hog::globe hog::jobs hog::net hog::physics hog::planet hog::protocol
+    PUBLIC hog::core hog::flow hog::globe hog::jobs hog::net hog::physics hog::planet hog::protocol
         hog::replication hog::save hog::sim hog::skies hog::waves hog::weather flecs::flecs_static
     PRIVATE tomlplusplus)
 hog_target_defaults(hog_server)

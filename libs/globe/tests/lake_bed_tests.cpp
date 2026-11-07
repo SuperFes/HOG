@@ -119,50 +119,6 @@ Lake make_lake(MadeWorld& made, double across, double fall) {
 
 } // namespace
 
-TEST_CASE("a lake filling its bowl meshes level, with a closed shore", "[globe][lake]") {
-    const double voxel = GENERATE(from_range(sizes));
-    CAPTURE(voxel);
-    const Generator& generator = working(voxel);
-    MadeWorld made{generator};
-    const World& world = made.world();
-    const Lake lake = make_lake(made, 32.0 * voxel, 1.5 * voxel);
-    const double thickness = generator.layers().thickness;
-    const SurfaceMesh mesh =
-        mesh_of(world, block_round(hog::globe::chunk_under(lake.up, generator.layers())));
-    std::size_t surface = 0;
-    std::size_t off_level = 0;
-    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
-        const DVec3 point = world_point(mesh, v);
-        const bool up = glm::dot(DVec3{mesh.vertices[v].normal}, glm::normalize(point)) > 0.99;
-        if (liquid(mesh.vertices[v].material) && up) {
-            ++surface;
-            off_level += std::abs(glm::length(point) - lake.level) > thickness ? 1U : 0U;
-        }
-    }
-    CHECK(surface > 20);
-    CHECK(off_level * 20 < surface);
-    // The sheet of water ends under the ground at the shore, not short of it: every edge it ends
-    // in lies under the ground the mesh draws, or on it, to within the contouring's own precision,
-    // a sixth of a voxel; a sheet stopping short is off by about a voxel.
-    std::size_t open = 0;
-    double worst = 0.0;
-    for (const auto& [p, q] : open_ends(mesh)) {
-        const DVec3 mid = 0.5 * (p + q);
-        const DVec3 out = mid - lake.rim;
-        if (glm::length(out - (glm::dot(out, lake.up) * lake.up)) >= lake.across) {
-            continue;
-        }
-        const double over = clearance(mesh, mid);
-        worst = std::max(worst, over);
-        open += over > precision * thickness ? 1U : 0U;
-    }
-    CAPTURE(worst);
-    // The measure itself: over the old ground is open air, and far under it is rock.
-    CHECK(clearance(mesh, lake.rim + (lake.up * 4.0 * thickness)) > 0.0);
-    CHECK(clearance(mesh, lake.rim - (lake.up * 40.0 * thickness)) < 0.0);
-    CHECK(open == 0);
-}
-
 TEST_CASE("a lake's water is closed by the ground, never stopping short of a lower shore",
           "[globe][lake]") {
     const double voxel = GENERATE(from_range(sizes));

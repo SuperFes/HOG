@@ -77,7 +77,7 @@ struct Surface {
 static const float disc_kind = 0.0;
 static const float voxel_sea_kind = 1.0;
 static const float still_kind = 2.0;
-// As hog::chunks::globe_sea_corner marks the sea's own surfaces among still water's.
+// As hog::client::sea_corner marks the sea's own surfaces among still water's.
 static const uint sea_corner = 1u;
 
 Surf as_surf(float4 surf) {

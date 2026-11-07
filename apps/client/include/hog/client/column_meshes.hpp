@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hog/chunks/globe_stream.hpp>
+#include <hog/client/ground_changes.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -22,6 +23,9 @@ struct ColumnDrawn {
     terrain::BlockMesh ground;
     terrain::BlockMesh water;
 };
+
+// What marks the sea's own surfaces among still water: the corner byte of each of their vertices.
+inline constexpr std::uint8_t sea_corner = 1;
 
 // The faces split into ground and water: a liquid's faces at `sea` metres from the planet's
 // centre, within a voxel `thickness`, are the sea's own, marked so for its waves to be drawn.
@@ -40,10 +44,13 @@ public:
 
     // The tile columns at these corners changed: meshed again as now held, or gone where none is.
     void changed(std::span<const globe::Site> corners);
+    // Has the tile columns held within `metres` of `eye`, from the planet's centre, meshed, and
+    // those meshed further off gone: for a world held whole, not sent.
+    void follow(DVec3 eye, double metres);
     // Waits for the meshing in flight: before the world changes under it.
     void finish();
     // What's done meshing since last asked, and what's gone.
-    [[nodiscard]] chunks::GlobeStream::Changes collect();
+    [[nodiscard]] GroundChanges collect();
     [[nodiscard]] std::size_t in_flight() const noexcept { return working_.size(); }
 
 private:
@@ -58,7 +65,8 @@ private:
     const globe::World* world_;
     jobs::JobSystem* jobs_;
     std::vector<Work> working_;
-    chunks::GlobeStream::Changes changes_;
+    GroundChanges changes_;
+    std::set<globe::Site> meshed_; // corners asked for and not gone since
 };
 
 } // namespace hog::client

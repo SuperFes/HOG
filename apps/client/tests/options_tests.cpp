@@ -18,12 +18,6 @@ using hog::client::parse_options;
 using hog::client::Place;
 using Arguments = std::vector<std::string_view>;
 
-TEST_CASE("the voxels are drawn as boxes only when asked for", "[client][options]") {
-    CHECK_FALSE(parse_options(Arguments{})->surface_boxes);
-    CHECK(parse_options(Arguments{"--surface", "boxes"})->surface_boxes);
-    CHECK_FALSE(parse_options(Arguments{"--surface", "smooth"})->surface_boxes);
-}
-
 TEST_CASE("the voxel size to look at the world in is read in metres", "[client][options]") {
     const auto options = parse_options(Arguments{"--voxel", "0.25"});
     REQUIRE(options);
@@ -108,8 +102,6 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--voxel", "0"}));
     CHECK_FALSE(parse_options(Arguments{"--voxel", "-1"}));
     CHECK_FALSE(parse_options(Arguments{"--voxel", "fine"}));
-    CHECK_FALSE(parse_options(Arguments{"--surface", "cubes"}));
-    CHECK_FALSE(parse_options(Arguments{"--surface", "boxes", "--connect", "127.0.0.1:7675"}));
     CHECK_FALSE(parse_options(Arguments{"--voxel", "0.1", "--connect", "127.0.0.1:7675"}));
     CHECK_FALSE(hog::client::usage().empty());
 }

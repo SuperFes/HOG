@@ -3,10 +3,8 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/globe/brick.hpp>
-#include <hog/globe/detail.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/surface_mesh.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>

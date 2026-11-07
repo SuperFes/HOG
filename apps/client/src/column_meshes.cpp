@@ -1,6 +1,7 @@
 #include <hog/client/column_meshes.hpp>
 #include <hog/globe/column_cache.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -37,7 +38,7 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
             for (std::size_t k = 0; k < 4; ++k) {
                 stands += glm::length(mesh.origin + DVec3{mesh.vertices[face + k].position}) / 4.0;
             }
-            corner = std::abs(stands - *sea) <= thickness ? chunks::globe_sea_corner : 0;
+            corner = std::abs(stands - *sea) <= thickness ? sea_corner : 0;
         }
         const auto tile = static_cast<std::uint8_t>(first.material);
         const auto base = static_cast<std::uint32_t>(into.vertices.size());
@@ -76,8 +77,10 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
         const std::optional<int> level = level_held(*world, corner);
         if (!level) {
             changes_.gone.push_back(column_key(corner));
+            meshed_.erase(corner);
             continue;
         }
+        meshed_.insert(corner);
         working_.push_back(
             {.corner = corner,
              .job = std::make_unique<jobs::Async<ColumnDrawn>>(*jobs_, [=, at = *level] {
@@ -101,7 +104,28 @@ void ColumnMeshes::finish() {
     working_.clear();
 }
 
-chunks::GlobeStream::Changes ColumnMeshes::collect() {
+void ColumnMeshes::follow(DVec3 eye, double metres) {
+    const std::vector<globe::Site> near = globe::tile_columns_near(world_->layers(), eye, metres);
+    std::vector<globe::Site> changed;
+    for (const globe::Site corner : near) {
+        if (!meshed_.contains(corner) && level_held(*world_, corner)) {
+            changed.push_back(corner);
+        }
+    }
+    for (const globe::Site corner : meshed_) {
+        if (!std::ranges::binary_search(near, corner)) {
+            changes_.gone.push_back(column_key(corner));
+        }
+    }
+    const auto far = [&](const globe::Site corner) {
+        return !std::ranges::binary_search(near, corner);
+    };
+    std::erase_if(meshed_, far);
+    std::erase_if(working_, [&](const Work& work) { return far(work.corner); });
+    this->changed(changed);
+}
+
+GroundChanges ColumnMeshes::collect() {
     std::erase_if(working_, [&](Work& work) {
         if (!work.job->done()) {
             return false;

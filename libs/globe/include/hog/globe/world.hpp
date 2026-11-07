@@ -51,11 +51,6 @@ public:
     [[nodiscard]] const Generator& generator() const noexcept;
     [[nodiscard]] const Volume& volume() const noexcept { return *volume_; }
 
-    // Whether chunks are drawn as the voxels' own boxes, nothing smoothed, in place of the shaped
-    // surface. Copies of the world keep the choice.
-    void draw_as_boxes(bool on) noexcept { as_boxes_ = on; }
-    [[nodiscard]] bool draws_as_boxes() const noexcept { return as_boxes_; }
-
     // Where the volume holds no tile column, reads those `cache` holds coarser, each of their
     // voxels all through the voxels it stands for; none to read nothing more. The cache must
     // outlive the world and its copies.
@@ -92,7 +87,6 @@ private:
     Layers layers_;
     Volume* volume_;
     const ColumnCache* coarse_ = nullptr;
-    bool as_boxes_ = false;
 };
 
 // The highest layer of the column through `cell` holding matter; none where it holds nothing.
@@ -104,6 +98,9 @@ private:
 [[nodiscard]] std::optional<double> surface_under(const World& world, DVec3 direction, double from);
 // The highest surface in the column, from the sky's ceiling down.
 [[nodiscard]] std::optional<double> top_of(const World& world, DVec3 direction);
+// Metres the highest surface under `at` stands over the planet's radius; the floor's where the
+// world holds none there.
+[[nodiscard]] double ground_height(const World& world, DVec3 at);
 
 // Shaped matter taken out of a ball, or built up in one of `material`; `centre` in metres from
 // the planet's centre. Loose matter is left where it is.

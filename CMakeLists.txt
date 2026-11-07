@@ -190,7 +190,6 @@ function(hog_add_benchmarks lib)
 endfunction()
 
 add_subdirectory(libs/atmosphere)
-add_subdirectory(libs/chunks)
 add_subdirectory(libs/chat)
 add_subdirectory(libs/core)
 add_subdirectory(libs/flora)

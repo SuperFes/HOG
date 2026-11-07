@@ -4,7 +4,6 @@ add_library(hog_globe
     src/cell.cpp
     src/craters.cpp
     src/crust.cpp
-    src/detail.cpp
     src/drainage.cpp
     src/erosion.cpp
     src/generator.cpp
@@ -21,7 +20,6 @@ add_library(hog_globe
     src/rockfall.cpp
     src/strata.cpp
     src/surface.cpp
-    src/surface_mesh.cpp
     src/vents.cpp
     src/volcanoes.cpp
     src/column_cache.cpp
@@ -45,7 +43,6 @@ hog_add_tests(hog_globe
     tests/cave_bed_tests.cpp
     tests/cell_tests.cpp
     tests/craters_tests.cpp
-    tests/detail_tests.cpp
     tests/drainage_tests.cpp
     tests/generator_tests.cpp
     tests/grip_tests.cpp
@@ -60,11 +57,9 @@ hog_add_tests(hog_globe
     tests/qef_tests.cpp
     tests/rockfall_tests.cpp
     tests/strata_tests.cpp
-    tests/surface_mesh_tests.cpp
     tests/vents_tests.cpp
     tests/volcanoes_tests.cpp
     tests/octree_estimate_tests.cpp
-    tests/voxel_faces_tests.cpp
     tests/temperature_tests.cpp
     tests/column_cache_tests.cpp
     tests/cube_tests.cpp
