@@ -1,5 +1,6 @@
 import bend;
 import gusts;
+import mirror;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -57,8 +58,8 @@ static const float puddle_level = 0.996;
 static const float puddle_tilted = 0.985;
 static const float3 puddle_sky = float3(0.55, 0.65, 0.8);
 static const float puddle_glint = 6.0;
-// The probe's mip a puddle mirrors: each one up halves its detail.
-static const float puddle_blur = 1.5;
+// Radians a puddle blurs what it mirrors over.
+static const float puddle_blur = 0.02;
 
 struct Surface {
     float4 position : SV_Position;
@@ -234,7 +235,8 @@ float4 fragment_main(Surface surface) : SV_Target {
         const float3 east = length(across) > 1e-6 ? normalize(across) : float3(1.0, 0.0, 0.0);
         const float3 mirror = reflect(view, up);
         // A little soft, as a puddle's surface never lies quite still.
-        const float4 around = environment.SampleLevel(
+        const float4 around = blurred(
+            environment,
             float3(dot(mirror, east), dot(mirror, eye_up), dot(mirror, cross(eye_up, east))),
             puddle_blur);
         const float3 mirrored =
