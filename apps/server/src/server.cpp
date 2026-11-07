@@ -346,9 +346,11 @@ void Server::serve_players() {
         if (const auto* connected = std::get_if<net::Connected>(&event)) {
             log::info(server_log, "connection {} opened",
                       std::to_underlying(connected->connection));
-            handshakes_.emplace(connected->connection,
-                                protocol::Handshake{MonotonicClock::now(), login_key_, world_id_,
-                                                    globe::encode_planet(generator_.planet())});
+            handshakes_.emplace(
+                connected->connection,
+                protocol::Handshake{MonotonicClock::now(), login_key_, world_id_,
+                                    globe::encode_planet(generator_.planet()),
+                                    globe::volume_header(globe::origin_of(generator_))});
         } else if (const auto* message = std::get_if<net::Message>(&event)) {
             const auto shaking = handshakes_.find(message->from());
             if (shaking != handshakes_.end()) {

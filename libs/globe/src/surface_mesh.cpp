@@ -30,8 +30,8 @@ Cell chunk_under(DVec3 direction, const Layers& layers, int detail) {
 }
 
 std::vector<Cell> chunks_near(const World& world, DVec3 around, double reach) {
-    const Layers& layers = world.generator().layers();
-    const double radius = world.generator().planet().radius;
+    const Layers& layers = world.layers();
+    const double radius = world.planet().radius;
     const Cell first = chunk_under(around, layers);
     // A chunk's middle is never farther than this from its corners.
     const double slack = 2.0 * glm::length(corners(first)[0] - center(first)) * radius;
@@ -268,7 +268,7 @@ struct Leaf {
 class Grid {
 public:
     Grid(const World& world, Cell chunk, const Drawn& drawn, DVec3 origin)
-        : world_{&world}, layers_{&world.generator().layers()}, chunk_{chunk},
+        : world_{&world}, layers_{&world.layers()}, chunk_{chunk},
           apart_{apart_at(detail_of(chunk, *layers_))}, origin_{origin},
           step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
           size_{chunk_side * apart_ / step_},
@@ -1579,7 +1579,7 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
 
 void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
                       std::optional<Sight> sight) {
-    const Layers& layers = world.generator().layers();
+    const Layers& layers = world.layers();
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
     Grid grid{world, chunk, drawn, mesh.origin};
@@ -1591,7 +1591,7 @@ void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const D
 }
 
 bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {
-    const Grid grid{world, chunk, drawn, center(chunk) * world.generator().planet().radius};
+    const Grid grid{world, chunk, drawn, center(chunk) * world.planet().radius};
     return !grid.overlapped();
 }
 
@@ -1601,7 +1601,7 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& d
         add_chunk_voxels(mesh, world, chunk, drawn, sight);
         return;
     }
-    const Layers& layers = world.generator().layers();
+    const Layers& layers = world.layers();
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
     Grid grid{world, chunk, drawn, mesh.origin};

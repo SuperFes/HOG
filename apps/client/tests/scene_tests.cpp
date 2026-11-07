@@ -45,7 +45,7 @@ using hog::render::testing::test_device;
 namespace {
 
 Shot shot_of(const hog::client::Flight& flight, const hog::globe::World& world) {
-    const double radius = world.generator().planet().radius;
+    const double radius = world.planet().radius;
     const hog::DVec3 up = glm::normalize(flight.eye.metres());
     const hog::GameTime date = hog::to_game_time(
         hog::WallClock::time_point{std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}});

@@ -93,7 +93,7 @@ inline void cover_chunks(MadeWorld& made, std::span<const Cell> chunks) {
 inline SurfaceMesh mesh_of(const World& world, std::span<const Cell> chunks,
                            std::optional<hog::globe::Sight> sight = std::nullopt) {
     SurfaceMesh mesh;
-    mesh.origin = hog::globe::center(chunks.front()) * world.generator().planet().radius;
+    mesh.origin = hog::globe::center(chunks.front()) * world.planet().radius;
     for (const Cell chunk : chunks) {
         hog::globe::add_chunk(mesh, world, chunk, hog::globe::Drawn{}, sight);
     }
@@ -230,7 +230,7 @@ inline double clearance(const SurfaceMesh& mesh, DVec3 point) {
 // given it and the radius its bottom stands at.
 inline void fill_hollow(World& world, DVec3 centre, double radius, const auto& change,
                         bool ground = false) {
-    const hog::globe::Layers& layers = world.generator().layers();
+    const hog::globe::Layers& layers = world.layers();
     const Cell middle = hog::globe::cell_under(glm::normalize(centre), layers.level);
     const int layer = layers.layer_at(glm::length(centre));
     const int reach = static_cast<int>(std::ceil(radius / layers.thickness)) + 1;

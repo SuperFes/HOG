@@ -53,7 +53,7 @@ const Generator& moon() {
 
 // Open sides that lie in the chunk, above where caves stop being drawn.
 std::size_t open_in(const World& world, const SurfaceMesh& mesh, Cell chunk) {
-    const hog::globe::Layers& layers = world.generator().layers();
+    const hog::globe::Layers& layers = world.layers();
     const int detail = hog::globe::detail_of(chunk, layers);
     const int apart = hog::globe::apart_at(detail);
     const double depth = std::max(hog::globe::surface_depth, 4.0 * apart * layers.thickness) -

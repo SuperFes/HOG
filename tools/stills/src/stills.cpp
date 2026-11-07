@@ -389,7 +389,7 @@ Image voxel_section(const globe::World& world, const Place& place, double length
                     double top, int width) {
     const Frame frame = frame_at(place);
     const globe::Layers& layers = world.layers();
-    const double radius = world.generator().planet().radius;
+    const double radius = world.planet().radius;
     const double spacing = length / width;
     const int height = std::max(static_cast<int>(std::lround((top - bottom) / spacing)), 1);
     Image image{.width = width,

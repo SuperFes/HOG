@@ -17,7 +17,7 @@ constexpr std::uint32_t tallest = 64;
 } // namespace
 
 std::optional<double> grip_at(const World& world, DVec3 feet) {
-    const Layers& layers = world.generator().layers();
+    const Layers& layers = world.layers();
     const double radius = glm::length(feet);
     const Cell column = cell_under(feet / radius, layers.level);
     const int start = layers.layer_at(radius);
@@ -39,7 +39,7 @@ std::optional<double> grip_at(const World& world, DVec3 feet) {
     if (!surface) {
         return std::nullopt;
     }
-    return std::atan(surface->holds(layers.thickness, world.generator().planet().gravity));
+    return std::atan(surface->holds(layers.thickness, world.planet().gravity));
 }
 
 } // namespace hog::globe

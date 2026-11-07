@@ -55,7 +55,12 @@ TEST_CASE("a hello of this version is welcomed", "[protocol][handshake]") {
 
 TEST_CASE("the welcome says which world the server runs", "[protocol][handshake]") {
     Handshake handshake{opened, std::nullopt, 42};
-    CHECK(handshake.received(encode(Hello{}), now).reply == Message{Welcome{.world = 42, .planet = {}}});
+    CHECK(handshake.received(encode(Hello{}), now).reply ==
+          Message{Welcome{.world = 42, .planet = {}, .ground = {}}});
+    Handshake told{opened, std::nullopt, 42, {std::byte{1}}, {std::byte{2}, std::byte{3}}};
+    CHECK(told.received(encode(Hello{}), now).reply ==
+          Message{Welcome{
+              .world = 42, .planet = {std::byte{1}}, .ground = {std::byte{2}, std::byte{3}}}});
 }
 
 TEST_CASE("a hello of another version is refused, saying which", "[protocol][handshake]") {

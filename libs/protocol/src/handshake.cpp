@@ -42,7 +42,9 @@ Answer Handshake::received(std::span<const std::byte> bytes, login::UnixTime now
         player_ = std::move(*token);
     }
     welcomed_ = true;
-    return {.reply = Welcome{.world = world_, .planet = planet_}, .close = false, .reason = {}};
+    return {.reply = Welcome{.world = world_, .planet = planet_, .ground = ground_},
+            .close = false,
+            .reason = {}};
 }
 
 std::optional<Answer> Handshake::waited(MonotonicClock::time_point now) const {

@@ -85,8 +85,8 @@ void set_grain(Voxel& voxel, std::int64_t amount) noexcept {
 
 Region::Region(globe::World& world, bool hold_sea)
     : world_{&world}, hold_sea_{hold_sea},
-      liquid_{world.generator().planet().volatiles == globe::Volatile::Water ? Material::Water
-                                                                             : Material::Air} {}
+      liquid_{world.planet().volatiles == globe::Volatile::Water ? Material::Water
+                                                                 : Material::Air} {}
 
 void Region::load(BrickSite site) {
     const auto [found, added] = held_.try_emplace(globe::brick_key(site));
@@ -208,9 +208,8 @@ std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, doub
 
 bool Region::red_hot(const Voxel& voxel) const {
     // Not where the whole planet is hotter than that: its rock has no cooling to do.
-    return voxel.solid != Material::Air &&
-           globe::kelvin(voxel.temperature) > red_hot_kelvin &&
-           world_->generator().planet().equator_temperature < red_hot_kelvin - 100.0;
+    return voxel.solid != Material::Air && globe::kelvin(voxel.temperature) > red_hot_kelvin &&
+           world_->planet().equator_temperature < red_hot_kelvin - 100.0;
 }
 
 bool Region::hot(BrickSite site) const {
@@ -896,7 +895,7 @@ Stepped Region::step(double seconds) {
 
 void Region::carry(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
     const double thickness = world_->layers().thickness;
-    const double gravity = world_->generator().planet().gravity;
+    const double gravity = world_->planet().gravity;
     for (const Column& column : columns) {
         std::size_t next = column.first;
         std::optional<Bed> bed;

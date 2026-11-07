@@ -167,9 +167,10 @@ TEST_CASE("a session keeps the planet it's welcomed to, the ground height, and t
     auto session = Session::connect(std::format("127.0.0.1:{}", stand.server.port()), {});
     REQUIRE(session);
     look_until(*session, stand, [&] { return stand.count<protocol::Hello>() == 1; });
-    stand.send(protocol::Welcome{.planet = {std::byte{9}, std::byte{8}}});
+    stand.send(protocol::Welcome{.planet = {std::byte{9}, std::byte{8}}, .ground = {std::byte{3}}});
     look_until(*session, stand, [&] { return session->state() == Session::State::Welcomed; });
     CHECK(session->planet() == std::vector{std::byte{9}, std::byte{8}});
+    CHECK(session->ground_origin() == std::vector{std::byte{3}});
     CHECK_FALSE(session->ground());
 
     stand.send(protocol::Ground{.height = 12.5F});
@@ -199,7 +200,7 @@ TEST_CASE("a session that makes a planet's ground is refused a server of another
     auto session = Session::connect(std::format("127.0.0.1:{}", stand.server.port()), {}, 7);
     REQUIRE(session);
     look_until(*session, stand, [&] { return stand.count<protocol::Hello>() == 1; });
-    stand.send(protocol::Welcome{.world = 8, .planet = {}});
+    stand.send(protocol::Welcome{.world = 8, .planet = {}, .ground = {}});
     look_until(*session, stand, [&] { return session->state() == Session::State::Refused; });
     CHECK(session->reason().find("planet") != std::string::npos);
 }
