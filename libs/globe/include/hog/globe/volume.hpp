@@ -28,6 +28,10 @@ public:
     void remove(Site site) { set(site, {}); }
 
     [[nodiscard]] std::size_t tiles() const noexcept { return tiles_.size(); }
+    // Puts the tile holding `site`, none where it's all air.
+    void put_tile(Site site, VoxelTree tile);
+    // Takes in the other's tiles, over any of its own in the same places.
+    void merge(Volume&& other);
 
     // Each tile once, in order, as its place and its tree's bytes.
     [[nodiscard]] std::vector<std::byte> encode() const;
