@@ -45,7 +45,13 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
         const auto tile = static_cast<std::uint8_t>(first.material);
         const auto base = static_cast<std::uint32_t>(into.vertices.size());
         for (std::size_t k = 0; k < 4; ++k) {
-            into.vertices.push_back({.position = mesh.vertices[face + k].position,
+            Vec3 position = mesh.vertices[face + k].position;
+            // The voxel holding the sea's surface is drawn full, but the sea stands at its level.
+            if (corner == sea_corner && sea) {
+                const DVec3 at = mesh.origin + DVec3{position};
+                position = Vec3{(glm::normalize(at) * *sea) - mesh.origin};
+            }
+            into.vertices.push_back({.position = position,
                                      .normal = mesh.vertices[face + k].normal,
                                      .tiles = {tile, tile, tile},
                                      .corner = corner});
@@ -72,7 +78,7 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     const globe::World* world = world_;
     const std::optional<double> sea =
         world->planet().sea_fraction > 0.0 ? std::optional{world->planet().radius} : std::nullopt;
-    const double thickness = world->layers().thickness;
+    const double voxel = world->layers().thickness;
     for (const globe::Site corner : corners) {
         // Meshed as it was, it's out of date.
         std::erase_if(working_, [&](const Work& work) { return work.corner == corner; });
@@ -85,7 +91,9 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
         working_.push_back(
             {.corner = corner,
              .job = std::make_unique<jobs::Async<ColumnDrawn>>(*jobs_, [=, at = *level] {
-                 return drawn_of(globe::mesh_tile_column(*world, corner, at), sea, thickness);
+                 // Coarser, each voxel stands for 2^level a side.
+                 return drawn_of(globe::mesh_tile_column(*world, corner, at), sea,
+                                 std::ldexp(voxel, at));
              })});
     }
 }
