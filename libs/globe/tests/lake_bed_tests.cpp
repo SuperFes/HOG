@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -29,21 +28,6 @@ namespace {
 
 // Voxel sizes a world may be run at, in metres: what a rule has to hold at.
 constexpr std::array sizes{0.5, 1.0, 2.5, 5.0};
-
-// How near a voxel's size the contoured surface lies to the field it was taken from.
-constexpr double precision = 1.0 / 6.0;
-
-// The planet at a voxel size, kept so each is made once.
-const Generator& working(double voxel) {
-    static std::map<double, std::unique_ptr<Generator>> made;
-    auto& held = made[voxel];
-    if (!held) {
-        auto planet = hog::globe::Planet{};
-        planet.voxel = voxel;
-        held = std::make_unique<Generator>(planet);
-    }
-    return *held;
-}
 
 // A small worn planet with lakes in it, at a voxel size, kept so each is made once.
 const Generator& lake_world(double voxel) {
@@ -73,48 +57,6 @@ bool flooded(const Generator& generator, hog::globe::Cell column) {
            std::ranges::any_of(found->second.layers, [&](const auto& layer) {
                return ((layer.rows[column.i & 63U] >> (column.j & 63U)) & 1U) != 0U;
            });
-}
-
-// A bowl dug into gentle ground, about `across` metres wide, holding water `fall` metres under
-// the lowest ground round its rim, so the ground itself holds the water in.
-struct Lake {
-    DVec3 up{0.0};
-    DVec3 rim{0.0}; // the ground under the bowl's middle, before it was dug
-    double level = 0.0;
-    double across = 0.0;
-};
-
-Lake make_lake(MadeWorld& made, double across, double fall) {
-    World& world = made.world();
-    const Generator& generator = world.generator();
-    const DVec3 up = ground_between(generator, 50.0, 400.0);
-    made.cover(up);
-    const double ground = hog::globe::ground_below(generator, up, 0.5).value_or(0.0);
-    const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
-    const DVec3 north = glm::cross(up, east);
-    double lowest = ground;
-    for (int k = 0; k < 16; ++k) {
-        const double turn = static_cast<double>(k) * std::numbers::pi / 8.0;
-        const DVec3 round =
-            glm::normalize(up + (((std::cos(turn) * east) + (std::sin(turn) * north)) * 0.75 *
-                                 across / generator.planet().radius));
-        lowest = std::min(lowest, hog::globe::ground_below(generator, round, 0.5).value_or(ground));
-    }
-    const double level = lowest - fall;
-    const double deep = (ground - level) + (3.0 * generator.layers().thickness);
-    // A ball whose lowest part is the bowl.
-    const double radius = ((across * across / 4.0) + (deep * deep)) / (2.0 * deep);
-    const DVec3 centre = up * (ground + radius - deep);
-    hog::globe::dig(world, centre, radius);
-    const double thickness = generator.layers().thickness;
-    fill_hollow(world, centre, radius, [&](hog::globe::Voxel& voxel, double bottom) {
-        if (bottom < level) {
-            voxel.liquid = Material::Water;
-            voxel.liquid_amount =
-                hog::globe::amount_of(std::min(1.0, (level - bottom) / thickness));
-        }
-    });
-    return {.up = up, .rim = up * ground, .level = level, .across = across};
 }
 
 } // namespace
