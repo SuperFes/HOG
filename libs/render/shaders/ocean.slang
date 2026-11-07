@@ -68,7 +68,16 @@ struct Surface {
     float4 reach;
     // The surf there, as Surf's breaking, trailing, lace and white.
     float4 surf;
+    // Which water this is: the sea's disc, the sea's own surface as the voxels hold it, or still
+    // water standing clear of the sea.
+    nointerpolation float kind;
 };
+
+static const float disc_kind = 0.0;
+static const float voxel_sea_kind = 1.0;
+static const float still_kind = 2.0;
+// As hog::chunks::globe_sea_corner marks the sea's own surfaces among still water's.
+static const uint sea_corner = 1u;
 
 Surf as_surf(float4 surf) {
     Surf taken;
@@ -166,6 +175,7 @@ Surface vertex_main(Vertex vertex) {
         surface.foam = float4(coarse.coarse, coarse.across, coarse.coarse_seen, coarse.coarse_slope);
     }
     surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+    surface.kind = disc_kind;
     return surface;
 }
 
@@ -193,12 +203,19 @@ Surface vertex_still(StillVertex vertex) {
     surface.rest = vertex.position + vertex.origin.xyz;
     surface.from_eye = bent(surface.rest, push.up_height, float2(radius, faked));
     surface.normal = normalize(surface.from_eye + (up * (faked + push.up_height.w)));
-    // Too deep for any wave to feel its floor, and held at its own level, not the sea's.
-    surface.floor = float4(deep_floor(), 0.0);
-    surface.reach = float4(still_fetch, 0.0, 0.0, 0.0);
+    const bool sea = (vertex.tiles.w & sea_corner) != 0u;
+    if (sea) {
+        // The sea's own surface: its floor, tide and fetch as the disc has them there.
+        surface.floor = floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.reach);
+    } else {
+        // Too deep for any wave to feel its floor, and held at its own level, not the sea's.
+        surface.floor = float4(deep_floor(), 0.0);
+        surface.reach = float4(still_fetch, 0.0, 0.0, 0.0);
+    }
+    surface.kind = sea ? voxel_sea_kind : still_kind;
     const WaveSurface water =
         wave_surface(waves, surface.rest, still_between, surface.floor.xyz, surface.reach);
-    surface.from_eye += as_drawn(water.moved, up, surface.normal);
+    surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
     const Surf surf = surf_at(waves, water, surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
@@ -333,7 +350,20 @@ float4 carried_at(Surface surface) {
                 saturate(plume) * smoothstep(plume_front.x, plume_front.y, plume));
 }
 
+// Where the water isn't drawn: within the ground covered round the eye, waves.first.w metres
+// along it, the sea is the voxels' own surface, meeting the ground as they mesh it, and the disc
+// gives way to it; past it, the disc, and the voxels' gives way. Still water kept out under the
+// ground round it isn't drawn where the ground stands over it.
 bool over_dry(Surface surface) {
+    const float covered = waves.first.w;
+    const float3 up = push.up_height.xyz;
+    const float away = length(surface.rest - (up * dot(surface.rest, up)));
+    if (surface.kind == voxel_sea_kind) {
+        return away >= covered;
+    }
+    if (surface.kind == disc_kind && away < covered) {
+        return true;
+    }
     return surface.reach.x > 0.0 && surface.floor.w > 0.0 &&
            still_water_at(waves, shore_depths, surface.rest).y <= 0.0;
 }

@@ -941,7 +941,7 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
     const planet::TangentFrame ground = planet::tangent_frame(view.bend.up);
     drawn.count_left_radius.z = static_cast<float>(view.bend.radius);
     drawn.up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)};
-    drawn.first = {Vec3{ground.east}, 0.0F};
+    drawn.first = {Vec3{ground.east}, static_cast<float>(view.voxel_sea)};
     drawn.second = {Vec3{ground.north}, 0.0F};
     if (shore_) {
         const DVec3 eye = view.bend.up * (view.bend.radius + view.bend.eye_height);

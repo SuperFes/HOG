@@ -518,11 +518,15 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     drawn_waves.rain = {
         static_cast<float>(render::rain_ring_chance(falling, static_cast<double>(here.snow))),
         static_cast<float>(render::rain_ring_seconds(shot.time)), 0.0F, 0.0F};
+    // Where every chunk round the eye is drawn, its own surface is the sea, meeting the ground
+    // they mesh exactly.
     const render::OceanView sea{.camera = shot.camera,
                                 .sun = sky.sun,
                                 .bend = shot.bend,
                                 .air = through,
-                                .waves = drawn_waves};
+                                .waves = drawn_waves,
+                                .behind = std::nullopt,
+                                .voxel_sea = globe_ ? globe_->covered() : 0.0};
     graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
         return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
                                 shot.still);

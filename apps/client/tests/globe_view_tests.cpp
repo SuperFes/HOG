@@ -96,7 +96,7 @@ TEST_CASE("the liquid's surface is left out of a chunk's blocks", "[client][glob
     CHECK(blocks.indices.empty());
 }
 
-TEST_CASE("liquid standing clear of the sea's level is still water for the sea to draw",
+TEST_CASE("liquid is still water for the sea to draw, the sea's own marked as its",
           "[client][globe]") {
     constexpr double sea = 115'000.0;
     SurfaceMesh mesh;
@@ -118,14 +118,18 @@ TEST_CASE("liquid standing clear of the sea's level is still water for the sea t
     }
     mesh.indices = {0, 1, 2, 3, 4, 5, 6, 7, 8};
     const hog::terrain::BlockMesh still = hog::chunks::globe_still_water(mesh, sea, 0.5);
-    REQUIRE(still.indices == std::vector<std::uint32_t>{0, 1, 2});
-    REQUIRE(still.vertices.size() == 3);
-    CHECK(still.vertices[0].position == Vec3{1.0F, 0.0F, 100.0F});
+    // Both liquid triangles, the one at the sea's level marked as the sea's.
+    REQUIRE(still.indices.size() == 6);
+    REQUIRE(still.vertices.size() == 6);
     CHECK(still.origin.metres() == mesh.origin);
     const auto water = static_cast<std::uint8_t>(Material::Water);
     CHECK(still.vertices[1].tiles == std::array<std::uint8_t, 3>{water, water, water});
-    // Without a sea, all liquid is still.
-    CHECK(hog::chunks::globe_still_water(mesh, std::nullopt, 0.5).indices.size() == 6);
+    CHECK(still.vertices[0].corner == hog::chunks::globe_sea_corner);
+    CHECK(still.vertices[3].position == Vec3{1.0F, 0.0F, 100.0F});
+    CHECK(still.vertices[3].corner == 0);
+    // Without a sea, no liquid is the sea's.
+    const hog::terrain::BlockMesh none = hog::chunks::globe_still_water(mesh, std::nullopt, 0.5);
+    CHECK(std::ranges::none_of(none.vertices, [](const auto& vertex) { return vertex.corner != 0; }));
     CHECK(hog::chunks::globe_blocks(mesh).indices.size() == 3);
 }
 
@@ -336,4 +340,23 @@ TEST_CASE("how big the chunks' meshes are, to look at", "[.look][client][globe]"
                      detail, size.count, size.vertices / size.count, size.indices / size.count,
                      size.most_vertices, size.most_indices, size.water);
     }
+}
+
+TEST_CASE("the ground round the eye is covered as far as every chunk wanted is shown",
+          "[client][globe]") {
+    hog::globe::Planet small;
+    small.radius = 4'000.0;
+    small.floor_depth = 100.0;
+    small.sky_height = 500.0;
+    const hog::client::GlobeWorld globe{small};
+    hog::jobs::JobSystem jobs{3};
+    hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 3.0, .least = 50.0}};
+    CHECK(stream.covered() == 0.0);
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(5, 321));
+    stream.follow(up * (small.radius + hog::chunks::globe_ground(globe.world, up) + 2.0));
+    // Nothing shown yet, nothing covered.
+    CHECK(stream.covered() == 0.0);
+    static_cast<void>(stream.finish());
+    // All of it shown: covered as far as the chunks reach.
+    CHECK(stream.covered() > 50.0);
 }
