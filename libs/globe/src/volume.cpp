@@ -1,6 +1,5 @@
-#include <hog/globe/volume.hpp>
-
 #include <hog/core/bytes.hpp>
+#include <hog/globe/volume.hpp>
 
 #include <string>
 #include <string_view>
@@ -25,19 +24,40 @@ Volume::Key Volume::key_of(Site site) noexcept {
     return {.face = site.face, .i = site.i / side, .j = site.j / side, .k = site.layer / side};
 }
 
-Cube Volume::at(Site site) const {
-    const auto found = tiles_.find(key_of(site));
-    return found == tiles_.end() ? Cube{}
-                                 : found->second.at(within(site.i), within(site.j),
-                                                    within(site.layer));
+Volume::Column Volume::column_of(Site site) noexcept {
+    return {.face = site.face, .i = site.i / side, .j = site.j / side};
 }
 
-void Volume::set(Site site, const Cube& voxel) {
+std::optional<std::uint32_t> Volume::floor(Site site) const {
+    const auto found = floors_.find(column_of(site));
+    return found == floors_.end() ? std::nullopt : std::optional{found->second};
+}
+
+void Volume::set_floor(Site site, std::uint32_t layer) {
+    floors_.insert_or_assign(column_of(site), layer);
+}
+
+bool Volume::made(Site site) const {
+    const std::optional<std::uint32_t> lowest = floor(site);
+    return lowest && site.layer >= *lowest;
+}
+
+Cube Volume::at(Site site) const {
+    const auto found = tiles_.find(key_of(site));
+    return found == tiles_.end()
+               ? Cube{}
+               : found->second.at(within(site.i), within(site.j), within(site.layer));
+}
+
+bool Volume::set(Site site, const Cube& voxel) {
+    if (!made(site)) {
+        return false;
+    }
     const Key key = key_of(site);
     auto found = tiles_.find(key);
     if (found == tiles_.end()) {
         if (voxel == Cube{}) {
-            return;
+            return true;
         }
         found = tiles_.emplace(key, VoxelTree{tile_side}).first;
     }
@@ -46,15 +66,15 @@ void Volume::set(Site site, const Cube& voxel) {
     if (all_air(tile)) {
         tiles_.erase(found);
     }
+    return true;
 }
 
 bool Volume::put_on(Site below, const Cube& voxel) {
     const Site above{.face = below.face, .i = below.i, .j = below.j, .layer = below.layer + 1};
-    if (at(below).solid == Material::Air || at(above).solid != Material::Air) {
+    if (!made(below) || at(below).solid == Material::Air || at(above).solid != Material::Air) {
         return false;
     }
-    set(above, voxel);
-    return true;
+    return set(above, voxel);
 }
 
 const VoxelTree* Volume::tile_at(Site site) const {
@@ -71,6 +91,10 @@ void Volume::put_tile(Site site, VoxelTree tile) {
 }
 
 void Volume::merge(Volume&& other) {
+    for (const auto& [column, layer] : other.floors_) {
+        floors_.insert_or_assign(column, layer);
+    }
+    other.floors_.clear();
     for (auto& [key, tile] : other.tiles_) {
         tiles_.insert_or_assign(key, std::move(tile));
     }
@@ -79,6 +103,13 @@ void Volume::merge(Volume&& other) {
 
 std::vector<std::byte> Volume::encode() const {
     ByteWriter out;
+    out.write_varint(floors_.size());
+    for (const auto& [column, layer] : floors_) {
+        out.write(column.face);
+        out.write_varint(column.i);
+        out.write_varint(column.j);
+        out.write_varint(layer);
+    }
     out.write_varint(tiles_.size());
     for (const auto& [key, tile] : tiles_) {
         out.write(key.face);
@@ -97,11 +128,28 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
         return make_error(ErrorCode::InvalidArgument, std::string{why});
     };
     ByteReader in{bytes};
+    Volume volume;
+    const auto floors = in.read_varint();
+    if (!floors || *floors > bytes.size()) {
+        return fail("a volume's floor count is cut short or out of range");
+    }
+    for (std::uint64_t n = 0; n < *floors; ++n) {
+        const auto face = in.read<std::uint8_t>();
+        const auto i = in.read_varint();
+        const auto j = in.read_varint();
+        const auto layer = in.read_varint();
+        if (!face || !i || !j || !layer) {
+            return fail("a volume's floors are cut short");
+        }
+        volume.floors_.emplace(Column{.face = *face,
+                                      .i = static_cast<std::uint32_t>(*i),
+                                      .j = static_cast<std::uint32_t>(*j)},
+                               static_cast<std::uint32_t>(*layer));
+    }
     const auto count = in.read_varint();
     if (!count || *count > bytes.size()) {
         return fail("a volume's tile count is cut short or out of range");
     }
-    Volume volume;
     for (std::uint64_t n = 0; n < *count; ++n) {
         const auto face = in.read<std::uint8_t>();
         const auto i = in.read_varint();
@@ -135,7 +183,7 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
 }
 
 bool Volume::same_as(const Volume& other) const {
-    if (tiles_.size() != other.tiles_.size()) {
+    if (floors_ != other.floors_ || tiles_.size() != other.tiles_.size()) {
         return false;
     }
     for (auto a = tiles_.begin(), b = other.tiles_.begin(); a != tiles_.end(); ++a, ++b) {
