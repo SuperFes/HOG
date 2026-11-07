@@ -49,8 +49,9 @@ public:
     // The world was edited by a player, who is to see it soon: carried over at the next step.
     void edited();
 
-    // The world's volume was put back whole, as from its file: meshed afresh from now on.
-    void reload();
+    // The world read in or let go the tile columns at these corners: carried over at the next
+    // step, meshed afresh.
+    void columns(std::span<const globe::Site> corners);
 
     // The player lacks these chunks of the plan, and wants them when meshed.
     void ask(net::ConnectionId player, std::span<const std::uint64_t> keys);
@@ -111,6 +112,7 @@ private:
     std::uint64_t synced_ = 0;
     int ticks_ = 0;
     bool syncing_ = false;
+    std::vector<globe::Site> columns_; // corners read in or let go since the last sync
     std::map<net::ConnectionId, std::unique_ptr<Player>> players_;
 };
 

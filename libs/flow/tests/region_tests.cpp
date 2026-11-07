@@ -99,6 +99,19 @@ TEST_CASE("liquid on the move against the edge of what's held wants the bricks b
     CHECK(block.region().step(tick).wanted.empty());
 }
 
+TEST_CASE("the bricks held are those loaded and not let go", "[flow][region]") {
+    Block block{floor_above_sea(100.0)};
+    std::vector<BrickSite> held = block.region().held();
+    std::ranges::sort(held);
+    std::vector<BrickSite> loaded = block.bricks();
+    std::ranges::sort(loaded);
+    CHECK(held == loaded);
+    block.region().unload(loaded.front());
+    held = block.region().held();
+    CHECK(held.size() == loaded.size() - 1);
+    CHECK(std::ranges::find(held, loaded.front()) == held.end());
+}
+
 TEST_CASE("liquid finds its level through a tunnel", "[flow][region]") {
     // Two shafts 16 deep, a tunnel of seven columns along the floor between them.
     const auto shape = [](std::uint32_t i, std::uint32_t j, int layer) {

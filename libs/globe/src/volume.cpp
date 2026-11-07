@@ -306,6 +306,24 @@ std::vector<BrickSite> Volume::changed_since(std::uint64_t revision) const {
     return {bricks.begin(), bricks.end()};
 }
 
+void Volume::drop_column(Site site) {
+    const Column column = column_of(site);
+    floors_.erase(column);
+    unsaved_.erase(column);
+    tiles_.erase(
+        tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j}),
+        tiles_.upper_bound({.face = column.face, .i = column.i, .j = column.j, .k = UINT32_MAX}));
+}
+
+std::vector<Site> Volume::columns() const {
+    std::vector<Site> corners;
+    corners.reserve(floors_.size());
+    for (const auto& [column, layer] : floors_) {
+        corners.push_back({.face = column.face, .i = column.i * side, .j = column.j * side});
+    }
+    return corners;
+}
+
 std::vector<Site> Volume::unsaved() const {
     std::vector<Site> corners;
     corners.reserve(unsaved_.size());

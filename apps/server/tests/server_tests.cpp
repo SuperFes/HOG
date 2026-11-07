@@ -682,6 +682,8 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         const double ground =
             hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
                 .value_or(generator.planet().radius);
+        const std::vector<hog::DVec3> here{direction * ground};
+        server->hold(here);
         const hog::globe::Cell cell = hog::globe::cell_under(direction, layers.level);
         site = {.face = cell.face,
                 .i = cell.i,
@@ -695,6 +697,10 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         REQUIRE(server->save());
     }
     auto reopened = opened(world.config());
+    CHECK(reopened->volume().columns().empty());
+    const std::vector<hog::DVec3> here{direction * reopened->generator().planet().radius};
+    reopened->hold(here);
+    CHECK_FALSE(reopened->volume().columns().empty());
     CHECK(reopened->volume().unsaved().empty());
     CHECK(reopened->globe().at(site).solid == hog::globe::Material::Air);
 }

@@ -69,8 +69,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
     : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
       globe_(generator_, volume_), flow_(globe_), vent_sites_(globe::vent_sites(generator_)),
       vented_(vent_sites_.size(), false), volumes_(std::move(volumes)),
-      snapshots_(std::move(snapshots)), places_(std::move(places)),
-      writer_(snapshots_, config.keep_snapshots),
+      held_(volume_, volumes_, globe::origin_of(generator_)), snapshots_(std::move(snapshots)),
+      places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
       persistence_(entities_), chunks_(globe_, jobs_),
       joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
@@ -160,18 +160,13 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
 
     auto server = std::make_unique<Server>(Opened{}, config, globe, std::move(*snapshots),
                                            std::move(*places), std::move(*volumes));
-    auto volume = globe::load_volume(server->volumes_, globe::origin_of(server->generator_));
-    if (!volume) {
-        return context(world_file, volume.error());
+    const auto built = globe::made_from(server->volumes_, globe::origin_of(server->generator_));
+    if (!built) {
+        return context(world_file, built.error());
     }
-    server->volume_ = std::move(*volume);
-    server->chunks_.reload();
-    if (server->volume_.tiles() == 0) {
+    if (!*built) {
         log::warn(server_log, "world {:016x} in {} has no ground built: run hog-build-world",
                   server->world_id_, world_file);
-    } else {
-        log::info(server_log, "world {:016x} in {}: {} tiles", server->world_id_, world_file,
-                  server->volume_.tiles());
     }
 
     const GameTime first = config.debug.start.value_or(now);
@@ -650,6 +645,7 @@ void Server::share() {
         return;
     }
     tell_grains();
+    hold_ground();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }
@@ -665,6 +661,44 @@ void Server::share() {
             shared_snapshots_.add();
             shared_bytes_.add(bytes.size());
         });
+}
+
+void Server::hold_ground() {
+    std::vector<DVec3> places;
+    for (const auto& [connection, look] : joined_.looks()) {
+        places.push_back(look.at.metres());
+    }
+    if (held_.moved(places)) {
+        hold(places);
+    }
+}
+
+void Server::hold(std::span<const DVec3> places) {
+    const std::vector<globe::BrickSite> flowing = flow_.region().held();
+    const auto changed = held_.keep(places, server::HeldGround::corners_of(flowing));
+    if (!changed) {
+        log::warn(server_log, "couldn't hold the ground near players: {}", changed.error());
+        return;
+    }
+    for (const globe::Site corner : changed->loaded) {
+        for (const globe::BrickSite brick : server::HeldGround::footprint(corner)) {
+            ground_.changed(brick);
+        }
+    }
+    // The flow held air where nothing was read in yet.
+    for (const globe::BrickSite brick : flowing) {
+        const std::vector<globe::Site> corner =
+            server::HeldGround::corners_of(std::span{&brick, 1});
+        if (std::ranges::binary_search(changed->loaded, corner.front())) {
+            flow_.reload(brick);
+        }
+    }
+    chunks_.columns(changed->loaded);
+    chunks_.columns(changed->dropped);
+    if (!changed->loaded.empty() || !changed->dropped.empty()) {
+        log::debug(server_log, "read in {} tile columns, let go {}", changed->loaded.size(),
+                   changed->dropped.size());
+    }
 }
 
 void Server::tell_clock() {

@@ -60,6 +60,11 @@ public:
     // Puts back the tile column holding `site` from its bytes, in place of what was there; fails,
     // changing nothing, on bytes that aren't one.
     [[nodiscard]] Result<void> decode_column(Site site, std::span<const std::byte> bytes);
+    // Lets the tile column holding `site` go, its floor and tiles, as if never made; what of it
+    // is unsaved is lost.
+    void drop_column(Site site);
+    // The corners of the tile columns made, in order.
+    [[nodiscard]] std::vector<Site> columns() const;
 
     [[nodiscard]] bool same_as(const Volume& other) const;
 

@@ -21,6 +21,7 @@
 #include <hog/server/catch_up.hpp>
 #include <hog/server/chunk_sending.hpp>
 #include <hog/server/chunk_sharing.hpp>
+#include <hog/server/held_ground.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
 #include <hog/server/server_config.hpp>
@@ -99,6 +100,9 @@ public:
     [[nodiscard]] globe::World globe() noexcept { return globe_; }
     [[nodiscard]] const globe::Generator& generator() const noexcept { return generator_; }
     [[nodiscard]] const globe::Volume& volume() const noexcept { return volume_; }
+    // Reads in the ground about `places` (from the planet's centre) and lets go the rest, as
+    // players come near it and leave.
+    void hold(std::span<const DVec3> places);
     // Null without a players' port, or when it couldn't be opened.
     [[nodiscard]] const net::Server* players() const noexcept {
         return players_ ? &*players_ : nullptr;
@@ -145,6 +149,9 @@ private:
     void tell_grains();
     // Sends each player a snapshot of those near them.
     void share();
+    // Reads the ground in as players come near it and lets it go as they leave, telling those
+    // who keep copies of it.
+    void hold_ground();
     // Sends every player how fast the world's clock runs.
     void tell_clock();
     void send_clock(net::ConnectionId connection);
@@ -167,6 +174,7 @@ private:
     GameDuration unwetted_{};
     GameDuration swept_{};
     store::SqliteVolumeArchive volumes_;
+    server::HeldGround held_;
     // Players last sent some grain in flight, who need telling when there's none.
     std::set<net::ConnectionId> grains_told_;
     store::SqliteSnapshotStore snapshots_;

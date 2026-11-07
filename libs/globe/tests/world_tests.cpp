@@ -461,3 +461,48 @@ TEST_CASE("the ground's top is read from the voxels, as generated, dug or built"
     CHECK(floor < ground - 2.5);
     CHECK(floor > ground - 3.5 - thickness);
 }
+
+TEST_CASE("the tile columns near a place are all those with ground in reach, across a face's edge",
+          "[globe][world]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const double radius = earth().planet().radius;
+    const double tile = hog::globe::Volume::tile_side * layers.thickness;
+    constexpr double reach = 1000.0;
+    const auto check = [&](DVec3 direction) {
+        const DVec3 centre = direction * radius;
+        const std::vector<Site> corners = hog::globe::tile_columns_near(layers, centre, reach);
+        CHECK(std::ranges::is_sorted(corners));
+        CHECK(std::ranges::adjacent_find(corners) == corners.end());
+        for (const Site& corner : corners) {
+            CHECK(corner.i % hog::globe::Volume::tile_side == 0);
+            CHECK(corner.j % hog::globe::Volume::tile_side == 0);
+            const hog::globe::Cell middle = hog::globe::column_of(
+                {.face = corner.face, .i = corner.i + 32, .j = corner.j + 32}, layers);
+            CHECK(glm::length((hog::globe::center(middle) * radius) - centre) <=
+                  reach + (2.0 * tile));
+        }
+        // Ground anywhere in reach is in one of them.
+        const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, direction));
+        const DVec3 north = glm::cross(direction, east);
+        std::set<int> faces;
+        const double step = tile / 4.0;
+        const auto steps = static_cast<int>(reach / step);
+        for (int a = -steps; a <= steps; ++a) {
+            for (int b = -steps; b <= steps; ++b) {
+                const double x = a * step;
+                const double y = b * step;
+                if (std::hypot(x, y) > reach) {
+                    continue;
+                }
+                const hog::globe::Cell cell = hog::globe::cell_under(
+                    glm::normalize(centre + (east * x) + (north * y)), layers.level);
+                const Site corner{.face = cell.face, .i = cell.i / 64 * 64, .j = cell.j / 64 * 64};
+                CHECK(std::ranges::binary_search(corners, corner));
+                faces.insert(cell.face);
+            }
+        }
+        return faces.size();
+    };
+    CHECK(check(glm::normalize(DVec3{0.3, 0.4, 0.86})) == 1);
+    CHECK(check(glm::normalize(DVec3{1.0, 1.0 - 1e-4, 0.2})) == 2);
+}

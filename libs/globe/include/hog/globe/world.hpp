@@ -107,6 +107,9 @@ void build_shape(World& world, DVec3 centre, double reach, double height, const 
 // `height` bounds the layers separately from the columns' `reach`, for shapes wide and shallow.
 [[nodiscard]] std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
                                                                double reach, double height = -1.0);
+// The corners of the tile columns within `reach` of a point, across faces where they span them,
+// in order: every one with ground in reach, and a few just past it.
+[[nodiscard]] std::vector<Site> tile_columns_near(const Layers& layers, DVec3 centre, double reach);
 // One voxel taken out of a shape or built into one, given its signed distance to the shape's
 // surface (negative inside): digging leaves only the matter outside the shape, building fills
 // what's inside it, as amounts of a voxel `thickness` metres thick.
