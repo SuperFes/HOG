@@ -1,5 +1,4 @@
 #include <hog/chat/filter.hpp>
-#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/chat.hpp>
 #include <hog/client/column_meshes.hpp>
 #include <hog/client/cutaway.hpp>
@@ -16,7 +15,6 @@
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/client/sonar.hpp>
-#include <hog/client/storage_estimate.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
@@ -227,7 +225,7 @@ client::Flight start(const client::Options& options, const client::GlobeWorld& g
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
     } else {
-        const double ground = chunks::globe_ground(globe.world, planet::start_direction);
+        const double ground = globe::ground_height(globe.world, planet::start_direction);
         flight = client::start_flight(planet::start_direction, radius, ground + globe_start_height,
                                       planet::north_pole);
     }
@@ -782,11 +780,34 @@ constexpr double edit_ahead = 3.0;  // metres
 constexpr double edit_radius = 1.5; // metres
 constexpr auto edit_material = static_cast<std::uint8_t>(globe::Material::Granite);
 
+// Metres round the eye the ground held whole is drawn, at its own level.
+constexpr double held_ground = 3'000.0;
+
+// Has the ground held near the eye meshed as it moves into another tile column, and draws what's
+// been meshed.
+void show_held(client::ColumnMeshes& meshes, client::Scene& scene, const globe::World& world,
+               DVec3 eye, std::optional<globe::Site>& over) {
+    HOG_ZONE("ground");
+    const globe::Layers& layers = world.layers();
+    const globe::Cell cell = globe::cell_under(glm::normalize(eye), layers.level);
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    const globe::Site under{
+        .face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
+    if (over != under) {
+        over = under;
+        meshes.follow(eye, held_ground);
+    }
+    if (client::GroundChanges changes = meshes.collect(); !changes.empty()) {
+        scene.show_ground(std::move(changes));
+    }
+    scene.set_ground_state(held_ground, meshes.in_flight() > 0);
+}
+
 // Digs or builds as the keys ask: through the server when on one, which sends the bricks back,
 // or straight into the world when alone. Then holds the bricks the server sent, and has the
 // chunks they touch drawn again. The world is changed only with no chunk in flight.
 // Digs or builds into the world as asked, when drawing it alone.
-void edit_globe(Controls& controls, client::GlobeWorld& globe, client::Scene& scene,
+void edit_globe(Controls& controls, client::GlobeWorld& globe, client::ColumnMeshes& meshes,
                 const render::Camera& camera) {
     const bool dig = std::exchange(controls.dig, false);
     const bool asked = dig || std::exchange(controls.build, false);
@@ -794,7 +815,7 @@ void edit_globe(Controls& controls, client::GlobeWorld& globe, client::Scene& sc
         return;
     }
     const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
-    scene.finish_globe();
+    meshes.finish();
     const std::uint64_t before = globe.world.revision();
     if (dig) {
         globe::dig(globe.world, centre.metres(), edit_radius);
@@ -802,7 +823,17 @@ void edit_globe(Controls& controls, client::GlobeWorld& globe, client::Scene& sc
         globe::build(globe.world, centre.metres(), edit_radius,
                      static_cast<globe::Material>(edit_material));
     }
-    scene.change_globe(globe.world.changed_since(before));
+    std::vector<globe::Site> corners;
+    for (const globe::BrickSite brick : globe.world.changed_since(before)) {
+        constexpr std::uint32_t across = globe::Volume::tile_side / globe::brick_side;
+        corners.push_back({.face = brick.face,
+                           .i = brick.i / across * globe::Volume::tile_side,
+                           .j = brick.j / across * globe::Volume::tile_side});
+    }
+    std::ranges::sort(corners);
+    const auto [first, last] = std::ranges::unique(corners);
+    corners.erase(first, last);
+    meshes.changed(corners);
 }
 
 // Puts the player back where the server says they were when they last left.
@@ -843,7 +874,7 @@ void return_to(Connection& connection, Controls& controls, std::optional<client:
 // on from where the camera was.
 // Metres the ground drawn stands over the radius under a point.
 double drawn_ground(const client::GlobeWorld& globe, WorldPosition at) {
-    return chunks::globe_ground(globe.world, at.metres());
+    return globe::ground_height(globe.world, at.metres());
 }
 
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
@@ -974,9 +1005,9 @@ constexpr std::chrono::milliseconds alone_fade{5'000};
 
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::GlobeWorld& globe,
-                 client::Flight flight, Connection& connection, skies::WeatherKeeper* alone,
-                 const client::Options& options, const render::Device& device,
-                 render::Presenter& presenter, SDL_Window* window) {
+                 client::ColumnMeshes& meshes, client::Flight flight, Connection& connection,
+                 skies::WeatherKeeper* alone, const client::Options& options,
+                 const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
     const double radius = globe.generator.planet().radius;
     Controls controls;
     controls.timings = options.timings;
@@ -991,6 +1022,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     ChatBox chat;
     Cutaway cut;
     std::vector<globe::Pocket> pockets; // the last ping's
+    std::optional<globe::Site> over;    // the tile column the eye was last over
     bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
@@ -1022,7 +1054,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
         return_to(connection, controls, player, flight, globe);
         camera = move(controls, player, flight, globe, seconds);
-        edit_globe(controls, globe, scene, camera);
+        edit_globe(controls, globe, meshes, camera);
+        show_held(meshes, scene, globe.world, camera.eye.metres(), over);
         const double ground_height = drawn_ground(globe, camera.eye);
         change_pace(controls, clock);
         hurry_world(controls, connection);
@@ -1108,7 +1141,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     return {};
 }
 
-// Metres from the eye the client keeps the ground it's sent: a little past what the server sends.
+// Metres from the eye the server sends the ground, and the client keeps it: a little further.
+constexpr double streamed_ground = 8'000.0;
 constexpr double kept_ground = 9'000.0;
 
 // The ground the server sends, held as it comes: voxels alone, over the planet and its layers.
@@ -1158,9 +1192,10 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
         held.keep_near(layers, eye, kept_ground);
     }
     ground.meshes.changed(held.take_changed());
-    if (chunks::GlobeStream::Changes changes = ground.meshes.collect(); !changes.empty()) {
-        scene.show_chunks(std::move(changes));
+    if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
+        scene.show_ground(std::move(changes));
     }
+    scene.set_ground_state(streamed_ground, ground.meshes.in_flight() > 0);
 }
 
 // Flies over the ground the server streams until the window closes or it's time to quit, drawing
@@ -1214,7 +1249,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                                           glm::length(at.metres()) - radius, planet::north_pole);
         }
         const client::Session* session = connection.session();
-        const double ground_height = chunks::globe_ground(ground.world, flight.eye.metres());
+        const double ground_height = globe::ground_height(ground.world, flight.eye.metres());
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds}, radius,
@@ -1312,24 +1347,6 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
     return std::move(billboard).value();
 }
 
-// What storing the ground drawn at full detail, and the whole planet, would cost at this cell size.
-void print_storage_estimate(const client::Scene& scene, const client::GlobeWorld& globe) {
-    const chunks::GlobeStream* stream = scene.globe_stream();
-    if (stream == nullptr) {
-        return;
-    }
-    const globe::Layers& layers = globe.generator.layers();
-    const double radius = globe.generator.planet().radius;
-    const double planet_columns = static_cast<double>(globe::cells_at(layers.level));
-    const double cell_area = 4.0 * std::numbers::pi * radius * radius / planet_columns;
-    double area = 0.0;
-    for (const globe::Cell chunk : stream->finest()) {
-        area += globe::solid_angle(chunk) * radius * radius;
-    }
-    std::cout << client::describe_storage(area / cell_area, planet_columns, std::sqrt(cell_area),
-                                          area);
-}
-
 // Says what startup is at, and how many seconds in it is, as it starts each long stage.
 void startup(std::string_view stage) {
     static const MonotonicClock::time_point started = MonotonicClock::now();
@@ -1369,7 +1386,6 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         globe.volume = std::move(*volume);
         startup(std::format("{} tiles of ground", globe.volume.tiles()));
     }
-    globe.world.draw_as_boxes(options.surface_boxes);
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
@@ -1399,7 +1415,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         return EXIT_FAILURE;
     }
     scene->set_system(planet.system);
-    scene->follow_globe(globe.world);
+    client::ColumnMeshes meshes{globe.world, jobs};
     startup("ready");
     // Only now, as the loop begins to answer it: the server refuses a connection that says no hello
     // within seconds, and the stages above take longer.
@@ -1413,7 +1429,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         std::cerr << std::format("{}: {}\n", program, connection.error());
         return EXIT_FAILURE;
     }
-    const Result<void> flown = fly(*scene, clock, globe, flight, *connection,
+    const Result<void> flown = fly(*scene, clock, globe, meshes, flight, *connection,
                                    alone ? &*alone : nullptr, options, device, presenter, window);
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
@@ -1426,7 +1442,6 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                  device.validation_errors());
         return EXIT_FAILURE;
     }
-    print_storage_estimate(*scene, globe);
     return EXIT_SUCCESS;
 }
 

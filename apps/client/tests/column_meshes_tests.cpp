@@ -50,7 +50,7 @@ TEST_CASE("a tile column's faces are drawn as ground, and water still or the sea
     CHECK(drawn.ground.vertices.front().tiles[0] == static_cast<std::uint8_t>(Material::Granite));
     REQUIRE(drawn.water.vertices.size() == 8);
     CHECK(drawn.water.indices == std::vector<std::uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7});
-    CHECK(drawn.water.vertices[0].corner == hog::chunks::globe_sea_corner);
+    CHECK(drawn.water.vertices[0].corner == hog::client::sea_corner);
     CHECK(drawn.water.vertices[4].corner == 0);
     CHECK(drawn.ground.origin == hog::WorldPosition{mesh.origin});
 }
@@ -83,4 +83,36 @@ TEST_CASE("tile columns are meshed as they're held, and gone once they're let go
     changes = meshes.collect();
     CHECK(changes.shown.empty());
     CHECK(changes.gone == std::vector{hog::client::column_key(corner)});
+}
+
+TEST_CASE(
+    "following the eye meshes the tile columns held near it, and lets go of those left behind",
+    "[client][columns]") {
+    const hog::client::GlobeWorld& made = hog::client::testing::globe();
+    const hog::globe::Layers& layers = made.generator.layers();
+    Volume volume;
+    const hog::globe::World world{made.generator.planet(), layers, volume};
+    const hog::DVec3 here =
+        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().radius;
+    const std::vector<Site> near = hog::globe::tile_columns_near(layers, here, 300.0);
+    for (const Site corner : near) {
+        volume.set_floor(corner, 10);
+        REQUIRE(volume.set({.face = corner.face, .i = corner.i, .j = corner.j, .layer = 10},
+                           {.solid = Material::Basalt, .solid_amount = Voxel::full}));
+    }
+    hog::jobs::JobSystem jobs{2};
+    ColumnMeshes meshes{world, jobs};
+    meshes.follow(here, 300.0);
+    meshes.finish();
+    auto changes = meshes.collect();
+    CHECK(changes.shown.size() == near.size());
+    CHECK(changes.gone.empty());
+    // Again from the same place, nothing more.
+    meshes.follow(here, 300.0);
+    CHECK(meshes.collect().empty());
+    // Far off, all of it's gone.
+    meshes.follow(-here, 300.0);
+    changes = meshes.collect();
+    CHECK(changes.shown.empty());
+    CHECK(changes.gone.size() == near.size());
 }

@@ -159,12 +159,6 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 ErrorCode::InvalidArgument,
                 std::format("--voxel takes a size in metres over zero, not {}", value));
         }
-    } else if (option == "--surface") {
-        if (value != "smooth" && value != "boxes") {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("--surface takes smooth or boxes, not {}", value));
-        }
-        options.surface_boxes = value == "boxes";
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--quit-after") {
@@ -223,10 +217,6 @@ Result<void> check_together(const Options& options) {
     }
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
-    }
-    if (options.surface_boxes && options.connect) {
-        return make_error(ErrorCode::InvalidArgument,
-                          "--surface boxes is for flying alone: a server draws its own ground");
     }
     if (options.world && options.connect) {
         return make_error(ErrorCode::InvalidArgument,
@@ -298,8 +288,6 @@ options:
                          own (0.5 by default); for looking, flying alone
   --world FILE           the world's file, its ground made ahead by hog-build-world, to
                          fly over alone; without it there is no ground
-  --surface FORM         draw the ground smoothed across the voxels' solid amounts
-                         (default) or as the voxels' own boxes: smooth or boxes
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

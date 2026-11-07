@@ -1,4 +1,3 @@
-#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
@@ -153,7 +152,6 @@ Result<Scene> Scene::create(render::Device& device, const globe::Planet& planet,
     }
     Scene scene{device,
                 planet,
-                jobs,
                 calendar,
                 std::move(ocean).value(),
                 std::move(blocks).value(),
@@ -171,13 +169,13 @@ Result<Scene> Scene::create(render::Device& device, const globe::Planet& planet,
     return scene;
 }
 
-Scene::Scene(const render::Device& device, const globe::Planet& planet, jobs::JobSystem& jobs,
+Scene::Scene(const render::Device& device, const globe::Planet& planet,
              const sim::Calendar& calendar, render::Ocean ocean, render::Blocks blocks,
              render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
              render::WeatherMaps weather, render::Clouds clouds,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
-    : jobs_{&jobs}, ocean_{std::move(ocean)}, blocks_{std::move(blocks)},
+    : ocean_{std::move(ocean)}, blocks_{std::move(blocks)},
       wave_trains_{waves::planet_trains(hash_combine(planet.seed, waves_salt))},
       transients_{device, frames}, others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
@@ -185,43 +183,16 @@ Scene::Scene(const render::Device& device, const globe::Planet& planet, jobs::Jo
       glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar},
       ephemeris_{planet::System{}, calendar.day_length(), calendar.axial_tilt()} {}
 
-Scene::~Scene() {
-    if (globe_) {
-        (void)globe_->finish();
-    }
-}
+Scene::~Scene() = default;
 
-void Scene::finish_bakes() {
-    finish_globe();
-}
-
-void Scene::show_globe(chunks::GlobeStream::Changes changes) {
-    for (chunks::GlobeStream::Shown& shown : changes.shown) {
+void Scene::show_ground(GroundChanges changes) {
+    for (GroundChanges::Shown& shown : changes.shown) {
         blocks_.place(shown.key, std::move(shown.ground));
         ocean_.place_still(shown.key, std::move(shown.water));
     }
     for (const std::uint64_t key : changes.gone) {
         blocks_.remove(key);
         ocean_.remove_still(key);
-    }
-}
-
-void Scene::follow_globe(const globe::World& globe) {
-    globe_.emplace(globe, *jobs_);
-}
-
-void Scene::finish_globe() {
-    if (globe_) {
-        show_globe(globe_->finish());
-    }
-}
-
-void Scene::change_globe(std::span<const globe::BrickSite> bricks) {
-    if (!globe_) {
-        return;
-    }
-    for (const globe::BrickSite brick : bricks) {
-        globe_->changed(brick);
     }
 }
 
@@ -249,14 +220,6 @@ render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
             .sky_light = light.sky,
             .shade = shade,
             .daylight = daylight_at(calendar_, shot.time, shot.bend.up)};
-}
-
-void Scene::follow_ground(const Shot& shot) {
-    HOG_ZONE("ground");
-    if (globe_) {
-        globe_->follow(shot.camera.eye.metres());
-        show_globe(globe_->collect());
-    }
 }
 
 namespace {
@@ -389,8 +352,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     HOG_ZONE("scene");
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
-    follow_ground(shot);
-    settled_ = !(globe_ && globe_->in_flight());
+    settled_ = !ground_meshing_;
     // The ground's meshes readied once for the frame, drawn by the probe and the ground pass.
     if (Result<> prepared = blocks_.prepare(frame.slot); !prepared) {
         return prepared;
@@ -526,7 +488,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                 .air = through,
                                 .waves = drawn_waves,
                                 .behind = std::nullopt,
-                                .voxel_sea = globe_ ? globe_->covered() : 0.0};
+                                .voxel_sea = ground_covered_};
     graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
         return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
                                 shot.still);
@@ -675,7 +637,6 @@ Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& sho
         if (!recorded) {
             return std::unexpected(std::move(recorded).error());
         }
-        scene.finish_bakes();
     }
     if (!scene.settled()) {
         return make_error(

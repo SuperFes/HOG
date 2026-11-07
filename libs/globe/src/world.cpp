@@ -225,6 +225,10 @@ std::optional<double> top_of(const World& world, DVec3 direction) {
     return surface_under(world, direction, world.layers().ceiling());
 }
 
+double ground_height(const World& world, DVec3 at) {
+    return top_of(world, glm::normalize(at)).value_or(world.layers().floor) - world.planet().radius;
+}
+
 std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre, double reach,
                                                  double height) {
     const double from = glm::length(centre);

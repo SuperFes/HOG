@@ -59,8 +59,6 @@ struct Options {
     std::optional<double> voxel;
     // The world's file to fly over alone, its ground made ahead.
     std::optional<std::filesystem::path> world;
-    // Draw the voxels as their own boxes, not as a shaped surface.
-    bool surface_boxes = false;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;

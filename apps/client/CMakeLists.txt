@@ -19,7 +19,6 @@ add_library(hog_client
     src/options.cpp
     src/others.cpp
     src/picture.cpp
-    src/storage_estimate.cpp
     src/player.cpp
     src/scene.cpp
     src/sonar.cpp
@@ -29,7 +28,7 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::chunks hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
+    PUBLIC hog::atmosphere hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
         hog::protocol hog::render hog::replication hog::sim hog::terrain
     PRIVATE stb_image tomlplusplus)
 hog_target_defaults(hog_client)
@@ -53,7 +52,6 @@ hog_add_tests(hog_client
     tests/scene_tests.cpp
     tests/sonar_tests.cpp
     tests/session_tests.cpp
-    tests/storage_estimate_tests.cpp
     tests/tides_tests.cpp)
 if(TARGET hog_client_tests)
     # The server, for players to meet through.

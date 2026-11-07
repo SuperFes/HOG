@@ -1,9 +1,9 @@
 #pragma once
 
 #include <hog/atmosphere/model.hpp>
-#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/globe_view.hpp>
+#include <hog/client/ground_changes.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
@@ -112,8 +112,6 @@ public:
     // Records drawing the shot into the frame's target, leaving it a colour target. The frame's
     // slot must have finished its last submit.
     Result<> record(render::Frame& frame, const Shot& shot);
-    // Waits for the globe's chunks in flight, so they arrive with the frames to come.
-    void finish_bakes();
 
     // The last frame recorded wanted nothing more meshed, and all it wanted had arrived; and,
     // once it's finished, it took a probe just as the eye turned out under the water.
@@ -124,19 +122,14 @@ public:
     // read when the last frame was recorded; empty where the GPU can't time.
     [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
 
-    // Draws the globe's surfaces round the eye. The globe must outlive the scene, unchanged
-    // while chunks are in flight.
-    void follow_globe(const globe::World& globe);
-    // The globe's stream of surfaces, once it's followed.
-    [[nodiscard]] const chunks::GlobeStream* globe_stream() const noexcept {
-        return globe_ ? &*globe_ : nullptr;
+    // Draws the ground meshes shown in place of any under their keys, and takes the gone away.
+    void show_ground(GroundChanges changes);
+    // How far along the ground round the eye it's shown, in metres, the sea drawn from the
+    // voxels within it, and whether any is still being meshed.
+    void set_ground_state(double covered, bool meshing) noexcept {
+        ground_covered_ = covered;
+        ground_meshing_ = meshing;
     }
-    // Waits for the globe's chunks in flight, so the world may be changed; then, once it has,
-    // meshes again the chunks the changed bricks touch.
-    void finish_globe();
-    void change_globe(std::span<const globe::BrickSite> bricks);
-    // Draws surfaces a server sent in place of any under their keys, and takes the gone away.
-    void show_chunks(chunks::GlobeStream::Changes changes) { show_globe(std::move(changes)); }
     // The ground's inside drawn round the eye, in place of any shown before; none takes it away.
     void show_cutaway(std::shared_ptr<const terrain::BlockMesh> shell);
 
@@ -154,18 +147,13 @@ public:
     }
 
 private:
-    Scene(const render::Device& device, const globe::Planet& planet, jobs::JobSystem& jobs,
-          const sim::Calendar& calendar, render::Ocean ocean, render::Blocks blocks,
-          render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
-          render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
-          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
-          std::uint32_t frames);
+    Scene(const render::Device& device, const globe::Planet& planet, const sim::Calendar& calendar,
+          render::Ocean ocean, render::Blocks blocks, render::Atmosphere atmosphere,
+          render::Sky sky, render::Capsules others, render::WeatherMaps weather,
+          render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
+          render::GpuTimer timer, std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
-    // Wants the globe's chunks round the eye, and shows those that have come.
-    void follow_ground(const Shot& shot);
-    // Shows the globe's chunks that have come, and takes away those gone.
-    void show_globe(chunks::GlobeStream::Changes changes);
     // From under the water, as the sea last found the eye in `frame`'s slot, adds the pass
     // taking what's out of it all round, seen as `sky` has it; whether it did.
     [[nodiscard]] bool take_probe(render::RenderGraph& graph, const render::Frame& frame,
@@ -182,14 +170,12 @@ private:
                     const render::OceanView& sea, std::span<const render::GraphUse> through_air,
                     const render::GraphTargets& drawn);
 
-    jobs::JobSystem* jobs_ = nullptr;
     // What's out of the water all round the eye, for its surface seen from under it: a probe for
     // each frame in flight.
     std::vector<render::EnvironmentProbe> probes_;
     render::Ocean ocean_;
     render::Blocks blocks_;
     // The globe's surfaces round the eye, drawn as the blocks once followed.
-    std::optional<chunks::GlobeStream> globe_;
     std::vector<waves::Train> wave_trains_;
     render::TransientImages transients_;
     render::Capsules others_;
@@ -213,6 +199,8 @@ private:
     double falling_for_ = 0.0; // seconds what falls has been falling
     render::Gusts gusts_;
     bool settled_ = false;
+    double ground_covered_ = 0.0;
+    bool ground_meshing_ = false;
     // Whether the last frame recorded took a probe.
     bool probing_ = false;
 };
