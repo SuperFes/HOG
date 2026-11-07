@@ -31,7 +31,6 @@ constexpr int survey_level = 6;
 // A cave can carve the ground only this near it, the widest passage's radius and some.
 constexpr double cave_surface_reach = 8.0;
 
-
 struct Surveyed {
     double value;
     double area;
@@ -659,9 +658,9 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double determinant = (xx * yy) - (xy * xy);
         const double across_east = ((yy * xh) - (xy * yh)) / determinant;
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
-        made.push_back(finish(down, lod, found[k],
-                              std::sqrt((across_east * across_east) +
-                                        (across_north * across_north))));
+        made.push_back(
+            finish(down, lod, found[k],
+                   std::sqrt((across_east * across_east) + (across_north * across_north))));
     }
     return made;
 }
@@ -712,15 +711,16 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
         const double slope = slope_ * planet.radius / at;
         return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
     };
-    // Down by as far as no cave can lie within `within`, a metre at least.
-    constexpr double least = 1.0;
+    // Down by as far as no cave can lie within `within`. Nearer than a voxel's step counts as
+    // within, so every step outside a stretch is one no cave lies across.
+    const double least = std::max(lod_ / 2.0, 1.0);
     std::optional<double> top;
     double above = top_most;
     for (double radius = top_most; radius > deepest;) {
         const double away = terms::cave_bound(context, strata_, direction_, radius, ground_,
                                               cover_at(radius), lod_) -
                             within;
-        if (away < 0.0) {
+        if (away < least) {
             if (!top) {
                 // Back within reach at the next sample: the same stretch.
                 if (!found.empty() && found.back().first == above) {
@@ -744,12 +744,12 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     return found;
 }
 
-std::vector<Generator::Column::Change> Generator::Column::changes(double lowest, double highest,
-                                                                 double margin) const {
+std::vector<Generator::Column::Boundary>
+Generator::Column::boundaries(double lowest, double highest, double margin) const {
     const terms::Context context{.planet = &generator_->planet_,
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
-    std::vector<Change> found;
+    std::vector<Boundary> found;
     const auto add = [&](double bottom, double top, bool cave = false) {
         bottom -= margin;
         top += margin;
@@ -784,7 +784,9 @@ std::vector<Generator::Column::Change> Generator::Column::changes(double lowest,
             add(edge, edge);
         }
     }
-    for (const auto& [bottom, top] : caves(lowest, std::min(highest, ground_), margin)) {
+    // A cave changes a voxel from half its thickness away.
+    const double reach = margin + (generator_->layers_.thickness / 2.0);
+    for (const auto& [bottom, top] : caves(lowest, std::min(highest, ground_), reach)) {
         add(bottom, top + cave_surface_reach, true);
     }
     std::ranges::sort(found);
@@ -806,9 +808,9 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     if (caves && sample.distance < cave_surface_reach) {
         // The rock between the point and the open air over the ground.
         const double cover = std::max(0.0, -sample.distance);
-        sample.distance = std::max(
-            sample.distance,
-            -terms::cave_distance(context, strata_, direction_, radius, ground_, cover, lod_));
+        sample.distance =
+            std::max(sample.distance, -terms::cave_distance(context, strata_, direction_, radius,
+                                                            ground_, cover, lod_));
     }
     // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
     // ground.

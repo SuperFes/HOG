@@ -3,6 +3,7 @@
 #include <hog/globe/voxel.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -34,8 +35,8 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
         bool cave = false;
     };
     std::vector<Changing> changing;
-    for (const Generator::Column::Change& change :
-         column.changes(layers.floor, layers.top(top), 0.0)) {
+    for (const Generator::Column::Boundary& change :
+         column.boundaries(layers.floor, layers.top(top), 0.0)) {
         const int low = std::max(layers.layer_at(change.bottom), 0);
         const int high = std::min(layers.layer_at(change.top), top);
         if (low > high) {
@@ -90,7 +91,10 @@ Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32
         side, voxel_lod(generator));
     double highest = generator.sea_level().value_or(layers.floor);
     for (const Generator::Column& each : columns) {
-        highest = std::max(highest, each.top());
+        // Solid shows in a voxel from half its thickness over, more so across a slope.
+        const double over =
+            (layers.thickness / 2.0) * std::sqrt(1.0 + (each.slope() * each.slope()));
+        highest = std::max(highest, each.top() + over);
     }
     const int top = std::min(layers.layer_at(highest), layers.count - 1);
     std::vector<std::vector<Run>> runs;
