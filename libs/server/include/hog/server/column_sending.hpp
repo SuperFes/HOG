@@ -22,15 +22,10 @@ namespace hog::server {
 // nearest first. A player holds a column at the level last sent, until sent it at another.
 class ColumnSending {
 public:
-    // Metres from a player its ground is sent, and within which at its own level: one level
-    // coarser for each doubling of the distance past it.
+    // Metres from a player its ground is sent, each tile column at globe::level_at its distance.
     static constexpr double reach = 8000.0;
-    static constexpr double finest = 1000.0;
 
     explicit ColumnSending(const globe::Layers& layers) : layers_{layers} {}
-
-    // The level a tile column `metres` from a player is sent at.
-    [[nodiscard]] static std::uint8_t level_at(double metres) noexcept;
 
     void join(net::ConnectionId player);
     void leave(net::ConnectionId player);

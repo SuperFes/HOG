@@ -60,17 +60,6 @@ Site corner_under(DVec3 at) {
 
 } // namespace
 
-TEST_CASE("a tile column is sent at its own level near, one coarser each doubling past that",
-          "[server][columns]") {
-    CHECK(ColumnSending::level_at(0.0) == 0);
-    CHECK(ColumnSending::level_at(999.0) == 0);
-    CHECK(ColumnSending::level_at(1000.0) == 1);
-    CHECK(ColumnSending::level_at(1999.0) == 1);
-    CHECK(ColumnSending::level_at(2000.0) == 2);
-    CHECK(ColumnSending::level_at(7999.0) == 3);
-    CHECK(ColumnSending::level_at(1.0e9) == hog::globe::coarsest_level);
-}
-
 TEST_CASE("a player is sent every tile column in reach once, nearest and finest first",
           "[server][columns]") {
     const hog::globe::MemoryVolumeArchive& archive = archive_about(here());
@@ -113,7 +102,7 @@ TEST_CASE("a player is sent every tile column in reach once, nearest and finest 
     }
     CHECK(sent == wanted);
     // Those with ground in reach include some whose middles are just past it.
-    CHECK(coarsest == ColumnSending::level_at(ColumnSending::reach));
+    CHECK(coarsest == hog::globe::level_at(ColumnSending::reach));
 
     // Over the same tile column, nothing more is due; a little way on, only the columns whose
     // level changed.

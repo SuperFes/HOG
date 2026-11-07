@@ -19,6 +19,12 @@ namespace hog::globe {
 // The coarsest level a tile column is saved at besides its own: each tile one voxel.
 inline constexpr int coarsest_level = std::countr_zero(static_cast<unsigned>(Volume::tile_side));
 
+// Metres off within which a tile column is held at its own level: one level coarser for each
+// doubling of the distance past it.
+inline constexpr double finest_reach = 1000.0;
+// The level a tile column `metres` off is held at.
+[[nodiscard]] std::uint8_t level_at(double metres) noexcept;
+
 // One tile column of a volume as saved: where it stands, counted in tiles, its level, and its
 // bytes. At level n its tiles are halved n times; at 0 it's the column itself.
 struct SavedColumn {

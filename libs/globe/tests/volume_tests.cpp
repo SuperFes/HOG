@@ -278,6 +278,18 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     CHECK_FALSE(hog::globe::archived_origin(archive));
 }
 
+TEST_CASE("a tile column is held at its own level near, one coarser each doubling past that",
+          "[globe][volume]") {
+    using hog::globe::level_at;
+    CHECK(level_at(0.0) == 0);
+    CHECK(level_at(999.0) == 0);
+    CHECK(level_at(1000.0) == 1);
+    CHECK(level_at(1999.0) == 1);
+    CHECK(level_at(2000.0) == 2);
+    CHECK(level_at(7999.0) == 3);
+    CHECK(level_at(1.0e9) == hog::globe::coarsest_level);
+}
+
 TEST_CASE("tile columns are loaded where the archive holds them, and saved a few at a time",
           "[globe][volume]") {
     const hog::globe::VolumeOrigin origin = hog::globe::origin_of(earth());

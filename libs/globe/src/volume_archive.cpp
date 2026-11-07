@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <format>
 #include <iterator>
 #include <optional>
@@ -43,6 +44,14 @@ Result<std::vector<SavedColumn>> MemoryVolumeArchive::columns() const {
         }
     }
     return all;
+}
+
+std::uint8_t level_at(double metres) noexcept {
+    if (metres < finest_reach) {
+        return 0;
+    }
+    const double doublings = std::floor(std::log2(metres / finest_reach));
+    return static_cast<std::uint8_t>(std::min(1.0 + doublings, double{coarsest_level}));
 }
 
 VolumeOrigin origin_of(const Generator& generator) {
