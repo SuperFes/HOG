@@ -6,16 +6,17 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
 
 namespace hog::globe {
 
-// A cube of voxels (each a `Cube`), `side` across (a power of two), held as a tree of cubes: a cube whose voxels
-// are all alike is one leaf, whatever its size, and any cubes alike, children and all, are one
-// node however many places they stand. Every point is still a voxel: `at` tells what is there, and
-// whether it's a lone voxel or part of a larger leaf is not for the asker to know.
+// A cube of voxels (each a `Cube`), `side` across (a power of two), held as a tree of cubes: a cube
+// whose voxels are all alike is one leaf, whatever its size, and any cubes alike, children and all,
+// are one node however many places they stand. Every point is still a voxel: `at` tells what is
+// there, and whether it's a lone voxel or part of a larger leaf is not for the asker to know.
 //
 // Nodes are never changed once made; `set` makes new nodes along its path and shares the rest, and
 // cubes that come alike again are one leaf again, so the same voxels are always the same tree.
@@ -127,21 +128,51 @@ private:
     template <typename Whole, typename VoxelAt>
     [[nodiscard]] Id made(int x, int y, int z, int across, const Whole& whole,
                           const VoxelAt& voxel_at) {
-        if (const auto all = whole(x, y, z, across)) {
-            return leaf_of(*all);
+        // Cubes still being split, each with its children made so far; a finished cube's id goes
+        // to its parent, or is the answer once none are left.
+        struct Open {
+            int x = 0;
+            int y = 0;
+            int z = 0;
+            int across = 0;
+            std::size_t next = 0;
+            std::array<Id, 8> children{};
+        };
+        std::vector<Open> open;
+        const auto done = [&](int at_x, int at_y, int at_z, int at_across) -> std::optional<Id> {
+            if (const auto all = whole(at_x, at_y, at_z, at_across)) {
+                return leaf_of(*all);
+            }
+            if (at_across == 1) {
+                return leaf_of(voxel_at(at_x, at_y, at_z));
+            }
+            return std::nullopt;
+        };
+        if (const auto id = done(x, y, z, across)) {
+            return *id;
         }
-        if (across == 1) {
-            return leaf_of(voxel_at(x, y, z));
+        open.push_back({.x = x, .y = y, .z = z, .across = across});
+        while (true) {
+            Open& top = open.back();
+            if (top.next == 8) {
+                const Id id = joined(top.children);
+                open.pop_back();
+                if (open.empty()) {
+                    return id;
+                }
+                open.back().children.at(open.back().next++) = id;
+                continue;
+            }
+            const int half = top.across / 2;
+            const int at_x = top.x + (half * static_cast<int>(top.next & 1U));
+            const int at_y = top.y + (half * static_cast<int>((top.next >> 1U) & 1U));
+            const int at_z = top.z + (half * static_cast<int>((top.next >> 2U) & 1U));
+            if (const auto id = done(at_x, at_y, at_z, half)) {
+                top.children.at(top.next++) = *id;
+            } else {
+                open.push_back({.x = at_x, .y = at_y, .z = at_z, .across = half});
+            }
         }
-        const int half = across / 2;
-        std::array<Id, 8> children{};
-        for (std::size_t k = 0; k < 8; ++k) {
-            children.at(k) = made(x + (half * static_cast<int>(k & 1U)),
-                                  y + (half * static_cast<int>((k >> 1U) & 1U)),
-                                  z + (half * static_cast<int>((k >> 2U) & 1U)), half, whole,
-                                  voxel_at);
-        }
-        return joined(children);
     }
 
     // The leaf the eight children are, if they are all one; else a node of them.

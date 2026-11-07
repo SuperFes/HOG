@@ -43,12 +43,18 @@ public:
     // Puts the tile holding `site`, none where it's all air.
     void put_tile(Site site, VoxelTree tile);
     // Takes in the other's tiles and floors, over any of its own in the same places.
-    void merge(Volume&& other);
+    void merge(Volume other);
 
     // Each floor, then each tile, in order: tiles as their place and their tree's bytes.
     [[nodiscard]] std::vector<std::byte> encode() const;
     // Fails, saying why, on bytes that aren't a volume.
     [[nodiscard]] static Result<Volume> decode(std::span<const std::byte> bytes);
+
+    // The tile column holding `site`, its floor and tiles, as bytes; empty where it isn't made.
+    [[nodiscard]] std::vector<std::byte> encode_column(Site site) const;
+    // Puts back the tile column holding `site` from its bytes, in place of what was there; fails,
+    // changing nothing, on bytes that aren't one.
+    [[nodiscard]] Result<void> decode_column(Site site, std::span<const std::byte> bytes);
 
     [[nodiscard]] bool same_as(const Volume& other) const;
 

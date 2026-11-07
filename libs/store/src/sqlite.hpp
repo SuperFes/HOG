@@ -5,9 +5,12 @@
 #include <sqlite3.h>
 
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <span>
 #include <string_view>
+#include <vector>
 
 namespace hog::store::sqlite {
 
@@ -51,6 +54,19 @@ public:
 private:
     sqlite3_stmt* statement_ = nullptr;
 };
+
+inline void bind_bytes(const Statement& statement, int at, std::span<const std::byte> bytes) {
+    // An empty span's data may be null, which SQLite would store as NULL.
+    const void* data = bytes.empty() ? static_cast<const void*>("") : bytes.data();
+    sqlite3_bind_blob64(statement.get(), at, data, bytes.size(), SQLITE_STATIC);
+}
+
+[[nodiscard]] inline std::vector<std::byte> column_bytes(const Statement& statement, int at) {
+    const auto* data = static_cast<const std::byte*>(sqlite3_column_blob(statement.get(), at));
+    const auto size = static_cast<std::size_t>(sqlite3_column_bytes(statement.get(), at));
+    const std::span<const std::byte> blob{data, size};
+    return {blob.begin(), blob.end()};
+}
 
 [[nodiscard]] inline Result<void> execute(sqlite3* database, const char* sql,
                                           std::string_view doing) {

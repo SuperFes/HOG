@@ -10,6 +10,8 @@
 
 namespace hog::store {
 
+using sqlite::bind_bytes;
+using sqlite::column_bytes;
 using sqlite::execute;
 using sqlite::failure;
 using sqlite::Statement;
@@ -17,19 +19,6 @@ using sqlite::to_signed;
 using sqlite::to_unsigned;
 
 namespace {
-
-void bind_bytes(Statement& statement, int at, std::span<const std::byte> bytes) {
-    // An empty span's data may be null, which SQLite would store as NULL.
-    const void* data = bytes.empty() ? static_cast<const void*>("") : bytes.data();
-    sqlite3_bind_blob64(statement.get(), at, data, bytes.size(), SQLITE_STATIC);
-}
-
-std::vector<std::byte> column_bytes(const Statement& statement, int at) {
-    const auto* data = static_cast<const std::byte*>(sqlite3_column_blob(statement.get(), at));
-    const auto size = static_cast<std::size_t>(sqlite3_column_bytes(statement.get(), at));
-    const std::span<const std::byte> blob{data, size};
-    return {blob.begin(), blob.end()};
-}
 
 Result<void> write_locked(sqlite3* database, std::span<const std::byte> header,
                           std::span<const globe::SavedBrick> bricks,

@@ -30,6 +30,7 @@ add_library(hog_globe
     src/voxel_tree.cpp
     src/volume.cpp
     src/volume_build.cpp
+    src/volume_archive.cpp
     src/voxel_store.cpp
     src/world.cpp)
 add_library(hog::globe ALIAS hog_globe)

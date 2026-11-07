@@ -77,6 +77,69 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
     return runs;
 }
 
+// One tile's voxels, from its columns' runs between `bottom` and `top`: nothing under `bottom`,
+// and from `keep` up what the tile already held.
+struct TileSource {
+    static constexpr int side = Volume::tile_side;
+
+    const std::vector<std::vector<Run>>* runs = nullptr;
+    const VoxelTree* kept = nullptr;
+    int base = 0; // the tile's lowest layer
+    int bottom = 0;
+    int top = 0;
+    int keep = 0;
+
+    // The voxel of the column at (x, y) in `layer`, and the highest layer it runs on to.
+    [[nodiscard]] const Run& run_at(int x, int y, int layer) const {
+        const std::vector<Run>& up =
+            (*runs)[(static_cast<std::size_t>(y) * side) + static_cast<std::size_t>(x)];
+        return *std::ranges::lower_bound(up, layer, {}, &Run::high);
+    }
+
+    [[nodiscard]] std::optional<Cube> kept_whole(int x, int y, int z, int across) const {
+        if (kept == nullptr) {
+            return Cube{};
+        }
+        return kept->leaf_side(x, y, z) >= across ? std::optional{kept->at(x, y, z)} : std::nullopt;
+    }
+
+    // What every voxel of the cube `across` wide from (x, y, z) is, where it's all one.
+    [[nodiscard]] std::optional<Cube> whole(int x, int y, int z, int across) const {
+        const int low = base + z;
+        const int high = low + across - 1;
+        if (high < bottom || low > top) {
+            return Cube{};
+        }
+        if (low >= keep) {
+            return kept_whole(x, y, z, across);
+        }
+        if (low < bottom || high >= std::min(top + 1, keep)) {
+            return std::nullopt;
+        }
+        const Cube& first = run_at(x, y, low).voxel;
+        for (int b = y; b < y + across; ++b) {
+            for (int a = x; a < x + across; ++a) {
+                const Run& run = run_at(a, b, low);
+                if (run.high < high || run.voxel != first) {
+                    return std::nullopt;
+                }
+            }
+        }
+        return first;
+    }
+
+    [[nodiscard]] Cube voxel(int x, int y, int z) const {
+        const int layer = base + z;
+        if (layer < bottom || layer > top) {
+            return {};
+        }
+        if (layer >= keep) {
+            return kept == nullptr ? Cube{} : kept->at(x, y, z);
+        }
+        return run_at(x, y, layer).voxel;
+    }
+};
+
 // The tiles up the tile column at (`face`, `i`, `j`), counted in tiles, holding layers `bottom`
 // to `top`, from the columns over it. Under `bottom` they hold nothing; from `keep` up they keep
 // what the volume holds.
@@ -84,63 +147,25 @@ void build(Volume& volume, const Generator& generator,
            const std::vector<Generator::Column>& columns, std::uint8_t face, std::uint32_t i,
            std::uint32_t j, int bottom, int top, int keep) {
     constexpr int side = Volume::tile_side;
-    const Layers& layers = generator.layers();
-    const int made_top = std::min(top, keep - 1);
     std::vector<std::vector<Run>> runs;
     runs.reserve(columns.size());
     for (const Generator::Column& each : columns) {
-        runs.push_back(runs_of(each, layers, bottom, made_top));
+        runs.push_back(runs_of(each, generator.layers(), bottom, std::min(top, keep - 1)));
     }
-    // The voxel of the column at (x, y) in `layer`, and the highest layer it runs on to.
-    const auto at = [&](int x, int y, int layer) -> const Run& {
-        const std::vector<Run>& up =
-            runs[(static_cast<std::size_t>(y) * side) + static_cast<std::size_t>(x)];
-        return *std::ranges::lower_bound(up, layer, {}, &Run::high);
-    };
     for (int k = bottom / side; k <= top / side; ++k) {
         const Site place{.face = face,
                          .i = i * side,
                          .j = j * side,
                          .layer = static_cast<std::uint32_t>(k * side)};
-        const VoxelTree* kept = volume.tile_at(place);
-        const auto whole = [&](int x, int y, int z, int across) -> std::optional<Cube> {
-            const int low = (k * side) + z;
-            const int high = low + across - 1;
-            if (high < bottom || low > top) {
-                return Cube{};
-            }
-            if (low >= keep) {
-                if (kept == nullptr) {
-                    return Cube{};
-                }
-                return kept->leaf_side(x, y, z) >= across ? std::optional{kept->at(x, y, z)}
-                                                          : std::nullopt;
-            }
-            if (low < bottom || high > made_top) {
-                return std::nullopt;
-            }
-            const Cube& first = at(x, y, low).voxel;
-            for (int b = y; b < y + across; ++b) {
-                for (int a = x; a < x + across; ++a) {
-                    const Run& run = at(a, b, low);
-                    if (run.high < high || run.voxel != first) {
-                        return std::nullopt;
-                    }
-                }
-            }
-            return first;
-        };
-        const auto voxel_at = [&](int x, int y, int z) {
-            const int layer = (k * side) + z;
-            if (layer < bottom || layer > top) {
-                return Cube{};
-            }
-            if (layer >= keep) {
-                return kept == nullptr ? Cube{} : kept->at(x, y, z);
-            }
-            return at(x, y, layer).voxel;
-        };
-        VoxelTree tile = VoxelTree::build_down(side, whole, voxel_at);
+        const TileSource source{.runs = &runs,
+                                .kept = volume.tile_at(place),
+                                .base = k * side,
+                                .bottom = bottom,
+                                .top = top,
+                                .keep = keep};
+        VoxelTree tile = VoxelTree::build_down(
+            side, [&](int x, int y, int z, int across) { return source.whole(x, y, z, across); },
+            [&](int x, int y, int z) { return source.voxel(x, y, z); });
         volume.put_tile(place, std::move(tile));
     }
 }
