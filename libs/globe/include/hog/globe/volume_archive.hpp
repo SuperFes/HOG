@@ -93,4 +93,13 @@ struct VolumeOrigin {
 // Writes the volume's tile columns not saved, all or nothing, and counts them saved; how many.
 Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive, const VolumeOrigin& origin);
 
+// Puts the tile columns with these corners into the volume where the archive holds them and the
+// volume doesn't, which it says; fails on bytes that aren't one. The archive is taken to be made
+// from the volume's origin.
+[[nodiscard]] Result<std::vector<Site>> load_columns(Volume& volume, const VolumeArchive& archive,
+                                                     std::span<const Site> corners);
+// As save_volume, for those of the tile columns with these corners not saved.
+Result<std::size_t> save_columns(Volume& volume, VolumeArchive& archive, const VolumeOrigin& origin,
+                                 std::span<const Site> corners);
+
 } // namespace hog::globe

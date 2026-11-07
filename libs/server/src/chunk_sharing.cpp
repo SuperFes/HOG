@@ -1,6 +1,7 @@
 #include <hog/chunks/mesh_codec.hpp>
 #include <hog/core/log.hpp>
 #include <hog/server/chunk_sharing.hpp>
+#include <hog/server/held_ground.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -50,7 +51,7 @@ void ChunkSharing::step() {
     // Only when the world has changed, and not oftener than sync_every: each sync waits for the
     // chunks being meshed to finish, which stalls meshing; an edit is carried over at once.
     if (!syncing_) {
-        if (++ticks_ >= sync_every && source_->revision() != synced_) {
+        if (++ticks_ >= sync_every && (source_->revision() != synced_ || !columns_.empty())) {
             syncing_ = true;
         }
         if (!syncing_) {
@@ -76,6 +77,20 @@ void ChunkSharing::step() {
             player->stream.changed(site);
         }
     }
+    for (const globe::Site corner : std::exchange(columns_, {})) {
+        if (volume.floor(corner)) {
+            if (auto copied = copy_.decode_column(corner, volume.encode_column(corner)); !copied) {
+                log::error(chunks_log, "couldn't copy a tile column: {}", copied.error());
+            }
+        } else {
+            copy_.drop_column(corner);
+        }
+        for (const globe::BrickSite site : HeldGround::footprint(corner)) {
+            for (auto& [id, player] : players_) {
+                player->stream.changed(site);
+            }
+        }
+    }
     synced_ = source_->revision();
     for (auto& [id, player] : players_) {
         player->stream.hold(false);
@@ -84,12 +99,8 @@ void ChunkSharing::step() {
     ticks_ = 0;
 }
 
-void ChunkSharing::reload() {
-    for (auto& [id, player] : players_) {
-        player->stream.settle();
-    }
-    copy_ = source_->volume();
-    synced_ = source_->revision();
+void ChunkSharing::columns(std::span<const globe::Site> corners) {
+    columns_.insert(columns_.end(), corners.begin(), corners.end());
 }
 
 void ChunkSharing::edited() {

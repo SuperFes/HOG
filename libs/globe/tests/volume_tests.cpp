@@ -147,6 +147,21 @@ TEST_CASE("a tile column comes back from its bytes, in place of what was there",
     CHECK(other.floor(column) == 12U);
 }
 
+TEST_CASE("a tile column let go is as if never made, its neighbour left as it was",
+          "[globe][volume]") {
+    Volume volume = rock_to(70);
+    const Site column{.face = 2, .i = 63, .j = 5};
+    CHECK(volume.columns() ==
+          std::vector<Site>{{.face = 2, .i = 0, .j = 0}, {.face = 2, .i = 64, .j = 0}});
+    volume.drop_column(column);
+    CHECK(volume.columns() == std::vector<Site>{{.face = 2, .i = 64, .j = 0}});
+    CHECK_FALSE(volume.floor(column).has_value());
+    CHECK_FALSE(volume.made({.face = 2, .i = 63, .j = 5, .layer = 70}));
+    CHECK(volume.at({.face = 2, .i = 63, .j = 5, .layer = 70}) == Cube{});
+    CHECK(volume.unsaved() == std::vector<Site>{{.face = 2, .i = 64, .j = 0}});
+    CHECK(volume.at({.face = 2, .i = 64, .j = 5, .layer = 70}).solid == Material::Granite);
+}
+
 TEST_CASE("a volume tells the bricks changed since a revision, each once", "[globe][volume]") {
     Volume volume = rock_to(70);
     const std::uint64_t before = volume.revision();
@@ -227,6 +242,37 @@ TEST_CASE("a volume archive keeps tile columns and what they were made from", "[
     other = header;
     other.pop_back();
     CHECK_FALSE(hog::globe::origin_from(other));
+}
+
+TEST_CASE("tile columns are loaded where the archive holds them, and saved a few at a time",
+          "[globe][volume]") {
+    const hog::globe::VolumeOrigin origin = hog::globe::origin_of(earth());
+    hog::globe::MemoryVolumeArchive archive;
+    Volume made = rock_to(70);
+    REQUIRE(hog::globe::save_volume(made, archive, origin) == 2U);
+
+    const Site here{.face = 2, .i = 0, .j = 0};
+    const Site there{.face = 2, .i = 64, .j = 0};
+    const Site never{.face = 2, .i = 128, .j = 0};
+    Volume held;
+    const std::vector<Site> asked{here, never};
+    CHECK(hog::globe::load_columns(held, archive, asked) == std::vector<Site>{here});
+    CHECK(held.at({.face = 2, .i = 63, .j = 5, .layer = 70}).solid == Material::Granite);
+    CHECK(held.columns() == std::vector<Site>{here});
+    CHECK(held.unsaved().empty());
+    // What's held already isn't read again over what it holds.
+    REQUIRE(held.put_on({.face = 2, .i = 63, .j = 5, .layer = 70}, full_of(Material::Clay)));
+    CHECK(hog::globe::load_columns(held, archive, asked)->empty());
+    CHECK(held.at({.face = 2, .i = 63, .j = 5, .layer = 71}).solid == Material::Clay);
+
+    const std::vector<Site> other{there};
+    CHECK(hog::globe::save_columns(held, archive, origin, other) == 0U);
+    const std::vector<Site> mine{here};
+    CHECK(hog::globe::save_columns(held, archive, origin, mine) == 1U);
+    CHECK(held.unsaved().empty());
+    Volume again;
+    REQUIRE(hog::globe::load_columns(again, archive, mine));
+    CHECK(again.at({.face = 2, .i = 63, .j = 5, .layer = 71}).solid == Material::Clay);
 }
 
 TEST_CASE("the generator's voxels are made into the volume once, its air left out",

@@ -1,6 +1,7 @@
 #include <hog/core/bytes.hpp>
 #include <hog/globe/volume_archive.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <format>
 #include <utility>
@@ -129,7 +130,43 @@ Result<Volume> load_volume(const VolumeArchive& archive, const VolumeOrigin& ori
 
 Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive,
                                 const VolumeOrigin& origin) {
-    const std::vector<Site> unsaved = volume.unsaved();
+    return save_columns(volume, archive, origin, volume.unsaved());
+}
+
+Result<std::vector<Site>> load_columns(Volume& volume, const VolumeArchive& archive,
+                                       std::span<const Site> corners) {
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    std::vector<Site> loaded;
+    for (const Site corner : corners) {
+        if (volume.floor(corner)) {
+            continue;
+        }
+        const auto column = archive.column(corner.face, corner.i / side, corner.j / side);
+        if (!column) {
+            return std::unexpected(column.error());
+        }
+        if (!*column) {
+            continue;
+        }
+        if (auto decoded = volume.decode_column(corner, (*column)->bytes); !decoded) {
+            return make_error(decoded.error().code,
+                              std::format("tile column {} {} {}: {}", corner.face, corner.i / side,
+                                          corner.j / side, decoded.error().message));
+        }
+        loaded.push_back(corner);
+    }
+    return loaded;
+}
+
+Result<std::size_t> save_columns(Volume& volume, VolumeArchive& archive, const VolumeOrigin& origin,
+                                 std::span<const Site> corners) {
+    const std::vector<Site> all = volume.unsaved();
+    std::vector<Site> unsaved;
+    for (const Site corner : corners) {
+        if (std::ranges::binary_search(all, corner)) {
+            unsaved.push_back(corner);
+        }
+    }
     if (unsaved.empty()) {
         return 0;
     }

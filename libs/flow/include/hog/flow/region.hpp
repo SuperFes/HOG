@@ -152,6 +152,8 @@ public:
     // Lets the brick go; what it held unflushed is lost.
     void unload(globe::BrickSite site);
     [[nodiscard]] bool holds(globe::BrickSite site) const;
+    // The bricks held, in no order.
+    [[nodiscard]] std::vector<globe::BrickSite> held() const;
     [[nodiscard]] std::size_t size() const noexcept { return held_.size(); }
 
     // Precondition: its brick is held.

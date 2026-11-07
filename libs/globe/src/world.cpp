@@ -2,6 +2,7 @@
 #include <hog/globe/world.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -230,6 +231,36 @@ std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 cen
         }
     }
     return near;
+}
+
+std::vector<Site> tile_columns_near(const Layers& layers, DVec3 centre, double reach) {
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    // A tile column is a cell this many levels coarser than a voxel's.
+    constexpr int coarser = std::countr_zero(side);
+    const double from = glm::length(centre);
+    const DVec3 direction = centre / from;
+    // No tile column's ground is further than this from its middle.
+    const double slack = Volume::tile_side * layers.thickness;
+    std::set<Cell> seen{cell_under(direction, layers.level - coarser)};
+    std::vector<Cell> open{*seen.begin()};
+    while (!open.empty()) {
+        const Cell cell = open.back();
+        open.pop_back();
+        const CellNeighbors beside = sides(cell);
+        for (const Cell next : beside.all()) {
+            if (glm::length((center(next) * from) - centre) <= reach + slack &&
+                seen.insert(next).second) {
+                open.push_back(next);
+            }
+        }
+    }
+    std::vector<Site> corners;
+    corners.reserve(seen.size());
+    for (const Cell& cell : seen) {
+        corners.push_back({.face = cell.face, .i = cell.i * side, .j = cell.j * side});
+    }
+    std::ranges::sort(corners);
+    return corners;
 }
 
 void dig_voxel(Voxel& voxel, double to_shape, double thickness) {

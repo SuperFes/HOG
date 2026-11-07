@@ -27,6 +27,7 @@
 #include <memory>
 #include <thread>
 #include <utility>
+#include <vector>
 
 using namespace std::chrono_literals;
 using hog::DVec3;
@@ -97,6 +98,9 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
         build_ground(generator, directory.path(), middle);
     }
     const auto server = serving(directory.path());
+    // The bot reads the server's own world, which holds ground only where someone is.
+    const std::vector<DVec3> start_place{middle * server->generator().planet().radius};
+    server->hold(start_place);
     const hog::globe::World world = server->globe();
     auto bot = hog::bot::Bot::start(world, std::format("127.0.0.1:{}", server->players()->port()),
                                     {}, middle, 7);

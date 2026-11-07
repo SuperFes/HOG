@@ -119,6 +119,15 @@ void Region::unload(BrickSite site) {
     }
 }
 
+std::vector<BrickSite> Region::held() const {
+    std::vector<BrickSite> bricks;
+    bricks.reserve(held_.size());
+    for (const auto& [key, brick] : held_) {
+        bricks.push_back(globe::brick_at_key(key));
+    }
+    return bricks;
+}
+
 bool Region::holds(BrickSite site) const {
     return held_.contains(globe::brick_key(site));
 }
