@@ -30,6 +30,10 @@ struct TileColumn {
     [[nodiscard]] TileColumn halved() const;
 };
 
+// A brick at the foot of each column of bricks in the tile column at `corner`: for whoever looks at
+// the ground from above.
+[[nodiscard]] std::vector<BrickSite> brick_footprint(Site corner);
+
 // The world's voxels, held where they are: tiles `tile_side` voxels across along a face and up
 // through the layers, each a VoxelTree. Air is never held; a tile of nothing else is no tile.
 // Each tile column is made down to its floor only; below that nothing is made yet, not even air.

@@ -121,8 +121,8 @@ int run(std::span<const std::string_view> arguments) {
         // Scattered around the land nearest the start, so they don't stand in one spot.
         const bot::Wander spot =
             bot::pick(start, planet->radius, scatter, {.furthest = 500.0, .nearest = 10.0});
-        auto started = bot::Bot::start(globe.world, options->connect, std::move(token), spot.target,
-                                       options->seed + which);
+        auto started = bot::Bot::start(globe.generator, options->connect, std::move(token),
+                                       spot.target, options->seed + which);
         if (!started) {
             std::cerr << std::format("hog-bot: {} can't start: {}\n", name, started.error());
             return EXIT_FAILURE;

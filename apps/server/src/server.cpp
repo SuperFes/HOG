@@ -717,7 +717,7 @@ void Server::hold(std::span<const DVec3> places) {
         return;
     }
     for (const globe::Site corner : changed->loaded) {
-        for (const globe::BrickSite brick : server::HeldGround::footprint(corner)) {
+        for (const globe::BrickSite brick : globe::brick_footprint(corner)) {
             ground_.changed(brick);
         }
     }

@@ -109,7 +109,7 @@ TEST_CASE("the ground near the players is read as they come near, and saved and 
 TEST_CASE("a tile column's footprint is a brick a column, and its bricks give its corner back",
           "[server][held]") {
     const Site corner{.face = 3, .i = 128, .j = 64};
-    const std::vector<hog::globe::BrickSite> bricks = HeldGround::footprint(corner);
+    const std::vector<hog::globe::BrickSite> bricks = hog::globe::brick_footprint(corner);
     CHECK(bricks.size() == 64);
     CHECK(HeldGround::corners_of(bricks) == std::vector<Site>{corner});
     CHECK(std::ranges::all_of(bricks, [](const hog::globe::BrickSite& brick) {

@@ -23,6 +23,20 @@ bool all_air(const VoxelTree& tile) {
 
 } // namespace
 
+std::vector<BrickSite> brick_footprint(Site corner) {
+    constexpr std::uint32_t across = side / brick_side;
+    std::vector<BrickSite> bricks;
+    bricks.reserve(std::size_t{across} * across);
+    for (std::uint32_t j = 0; j < across; ++j) {
+        for (std::uint32_t i = 0; i < across; ++i) {
+            bricks.push_back({.face = corner.face,
+                              .i = (corner.i / brick_side) + i,
+                              .j = (corner.j / brick_side) + j});
+        }
+    }
+    return bricks;
+}
+
 Volume::Key Volume::key_of(Site site) noexcept {
     return {.face = site.face, .i = site.i / side, .j = site.j / side, .k = site.layer / side};
 }
