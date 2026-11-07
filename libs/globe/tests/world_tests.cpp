@@ -506,3 +506,24 @@ TEST_CASE("the tile columns near a place are all those with ground in reach, acr
     CHECK(check(glm::normalize(DVec3{0.3, 0.4, 0.86})) == 1);
     CHECK(check(glm::normalize(DVec3{1.0, 1.0 - 1e-4, 0.2})) == 2);
 }
+
+TEST_CASE("a world of voxels alone reads its volume as one made over the generator does",
+          "[globe][world]") {
+    MadeWorld made{earth()};
+    const DVec3 up = glm::normalize(DVec3{0.3, 0.4, 0.86});
+    made.cover(up);
+    const World alone{earth().planet(), earth().layers(), made.volume()};
+    CHECK_FALSE(alone.has_generator());
+    CHECK(made.world().has_generator());
+    CHECK(alone.layers() == earth().layers());
+    CHECK(&alone.planet() == &earth().planet());
+    const std::optional<double> ground = hog::globe::top_of(made.world(), up);
+    REQUIRE(ground);
+    CHECK(hog::globe::top_of(alone, up) == ground);
+    const hog::globe::Cell cell = hog::globe::cell_under(up, earth().layers().level);
+    const Site site{.face = cell.face,
+                    .i = cell.i,
+                    .j = cell.j,
+                    .layer = static_cast<std::uint32_t>(earth().layers().layer_at(ground.value_or(0.0) - 3.0))};
+    CHECK(alone.at(site) == made.world().at(site));
+}

@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 31;
+inline constexpr std::uint32_t version = 32;
 // The longest planet a welcome carries.
 inline constexpr std::size_t most_planet = 1'024;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -61,6 +61,9 @@ struct Welcome {
     // The planet it runs, as hog::globe::encode_planet has it, for a client that draws it; at most
     // most_planet bytes, none for none.
     std::vector<std::byte> planet;
+    // The voxel layers the ground it sends stands on, as hog::globe::volume_header has them; at
+    // most most_planet bytes, none for none.
+    std::vector<std::byte> ground;
 
     friend bool operator==(const Welcome&, const Welcome&) = default;
 };

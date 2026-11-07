@@ -17,9 +17,8 @@
 namespace hog::chunks {
 
 double globe_ground(const globe::World& world, DVec3 at) {
-    const globe::Generator& generator = world.generator();
-    return globe::top_of(world, glm::normalize(at)).value_or(generator.layers().floor) -
-           generator.planet().radius;
+    return globe::top_of(world, glm::normalize(at)).value_or(world.layers().floor) -
+           world.planet().radius;
 }
 
 terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
@@ -197,7 +196,7 @@ void GlobeStream::follow(DVec3 eye, DVec3 forward) {
 
 void GlobeStream::changed(globe::BrickSite brick) {
     HOG_ASSERT(working_.empty(), "the world changed under chunks being meshed");
-    const globe::Layers& layers = world_->generator().layers();
+    const globe::Layers& layers = world_->layers();
     // A chunk's grid reaches a margin of coarse boxes into the chunks beside it.
     const auto touches = [&](globe::Cell chunk) {
         if (chunk.face != brick.face) {
@@ -245,7 +244,7 @@ double GlobeStream::covered() const {
     if (!around_) {
         return 0.0;
     }
-    const double radius = world_->generator().planet().radius;
+    const double radius = world_->planet().radius;
     const DVec3 under = glm::normalize(*around_) * radius;
     double nearest = reach_;
     for (const globe::Cell chunk : order_) {
@@ -262,7 +261,7 @@ double GlobeStream::covered() const {
 void GlobeStream::start_more() {
     // Leaves a thread for drawing.
     const std::size_t most = std::max<std::size_t>(1, jobs_->thread_count() - 1);
-    const double radius = world_->generator().planet().radius;
+    const double radius = world_->planet().radius;
     while (!held_ && working_.size() < most && !queue_.empty()) {
         const globe::Cell chunk = queue_.back();
         queue_.pop_back();
@@ -291,7 +290,7 @@ void GlobeStream::take(std::size_t working) {
     }
     shown_.insert_or_assign(work.chunk, work.against);
     const globe::Generator& generator = world_->generator();
-    if (globe::detail_of(work.chunk, generator.layers()) == 0) {
+    if (globe::detail_of(work.chunk, world_->layers()) == 0) {
         finest_.insert(work.chunk);
     }
     changes_.shown.push_back(

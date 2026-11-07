@@ -108,6 +108,10 @@ public:
     void ask_chunks(std::span<const std::uint64_t> keys);
     // The planet the server runs, as it said when it welcomed; empty before.
     [[nodiscard]] const std::vector<std::byte>& planet() const noexcept { return planet_; }
+    // The voxel layers the server's ground stands on, as hog::globe::volume_header has them.
+    [[nodiscard]] const std::vector<std::byte>& ground_origin() const noexcept {
+        return ground_origin_;
+    }
     // How high the ground stands under the player, as the server last said; none before.
     [[nodiscard]] std::optional<float> ground() const noexcept { return ground_; }
 
@@ -139,6 +143,7 @@ private:
     std::vector<std::byte> token_;
     std::optional<std::uint64_t> world_;
     std::vector<std::byte> planet_;
+    std::vector<std::byte> ground_origin_;
     std::optional<float> ground_;
     std::vector<ChunkEvent> chunks_;
     State state_ = State::Connecting;

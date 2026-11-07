@@ -51,12 +51,21 @@ bool in_layers(const Layers& layers, BrickSite site) noexcept {
 }
 
 World::World(const Generator& generator, Volume& volume)
-    : generator_{&generator}, volume_{&volume} {}
+    : generator_{&generator}, planet_{&generator.planet()}, layers_{generator.layers()},
+      volume_{&volume} {}
+
+World::World(const Planet& planet, const Layers& layers, Volume& volume)
+    : planet_{&planet}, layers_{layers}, volume_{&volume} {}
+
+const Generator& World::generator() const noexcept {
+    HOG_ASSERT(generator_ != nullptr, "a world made with a generator");
+    return *generator_;
+}
 
 void World::column(Site base, int bottom, int count, int apart, std::span<Voxel> out,
                    std::size_t stride) const {
-    const Planet& planet = generator_->planet();
-    const Layers& layers = generator_->layers();
+    const Planet& planet = *planet_;
+    const Layers& layers = layers_;
     const DVec3 up = center(column_of(base, layers));
     std::optional<std::uint32_t> lowest = volume_->floor(base);
     constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
@@ -123,7 +132,7 @@ BrickVoxels World::brick(BrickSite site) const {
 
 std::vector<Voxel> World::fill(std::span<const Cell> cells, int bottom, int count,
                                int apart) const {
-    const Layers& layers = generator_->layers();
+    const Layers& layers = layers_;
     HOG_ASSERT(apart > 0 && bottom >= 0 && count >= 0 &&
                    (count == 0 || bottom + ((count - 1) * apart) < layers.count),
                "layers out of range");
@@ -149,8 +158,8 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells, int bottom, int coun
 }
 
 void World::write(BrickSite site, const BrickVoxels& voxels) {
-    const Planet& planet = generator_->planet();
-    const Layers& layers = generator_->layers();
+    const Planet& planet = *planet_;
+    const Layers& layers = layers_;
     for (int index = 0; index < brick_side * brick_side; ++index) {
         const Site base = site_in(site, index);
         const DVec3 up = center(column_of(base, layers));

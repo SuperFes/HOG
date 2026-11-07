@@ -29,11 +29,13 @@ struct Answer {
 // if the server knows its key.
 class Handshake {
 public:
-    // `world` and `planet` are told to the client in its welcome.
+    // `world`, `planet` and `ground` are told to the client in its welcome.
     explicit Handshake(MonotonicClock::time_point opened,
                        std::optional<login::PublicKey> key = std::nullopt, std::uint64_t world = 0,
-                       std::vector<std::byte> planet = {}) noexcept
-        : deadline_(opened + hello_within), key_(key), world_(world), planet_(std::move(planet)) {}
+                       std::vector<std::byte> planet = {},
+                       std::vector<std::byte> ground = {}) noexcept
+        : deadline_(opened + hello_within), key_(key), world_(world), planet_(std::move(planet)),
+          ground_(std::move(ground)) {}
 
     [[nodiscard]] bool welcomed() const noexcept { return welcomed_; }
     // Who the token let in; none when the server checks no tokens.
@@ -49,6 +51,7 @@ private:
     std::optional<login::PublicKey> key_;
     std::uint64_t world_;
     std::vector<std::byte> planet_;
+    std::vector<std::byte> ground_;
     std::optional<login::Token> player_;
     bool welcomed_ = false;
 };

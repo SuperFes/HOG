@@ -39,10 +39,16 @@ class World {
 public:
     // Precondition: the volume stands on the generator's layers.
     World(const Generator& generator, Volume& volume);
+    // A world of voxels alone, as a client holds what it's sent: no generator to ask of the
+    // planet's climate or how it was made. The planet must outlive the world.
+    World(const Planet& planet, const Layers& layers, Volume& volume);
 
-    // The planet and its climate; never the voxels.
-    [[nodiscard]] const Generator& generator() const noexcept { return *generator_; }
-    [[nodiscard]] const Layers& layers() const noexcept { return generator_->layers(); }
+    [[nodiscard]] const Planet& planet() const noexcept { return *planet_; }
+    [[nodiscard]] const Layers& layers() const noexcept { return layers_; }
+    // The planet's climate and how it was made; never the voxels.
+    [[nodiscard]] bool has_generator() const noexcept { return generator_ != nullptr; }
+    // Precondition: has_generator().
+    [[nodiscard]] const Generator& generator() const noexcept;
     [[nodiscard]] const Volume& volume() const noexcept { return *volume_; }
 
     // Whether chunks are drawn as the voxels' own boxes, nothing smoothed, in place of the shaped
@@ -80,7 +86,9 @@ private:
     void column(Site base, int bottom, int count, int apart, std::span<Voxel> out,
                 std::size_t stride) const;
 
-    const Generator* generator_;
+    const Generator* generator_ = nullptr;
+    const Planet* planet_;
+    Layers layers_;
     Volume* volume_;
     const ColumnCache* coarse_ = nullptr;
     bool as_boxes_ = false;

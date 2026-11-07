@@ -902,10 +902,12 @@ std::vector<std::byte> encode(const Message& message) {
                 write_sized(out, body.token);
             } else if constexpr (std::is_same_v<Body, Welcome>) {
                 HOG_ASSERT(body.planet.size() <= most_planet, "a planet too long to send");
+                HOG_ASSERT(body.ground.size() <= most_planet, "voxel layers too long to send");
                 out.write(static_cast<std::uint16_t>(Kind::Welcome));
                 out.write(body.version);
                 out.write(body.world);
                 write_sized(out, body.planet);
+                write_sized(out, body.ground);
             } else if constexpr (std::is_same_v<Body, Moved>) {
                 out.write(static_cast<std::uint16_t>(Kind::Moved));
                 out.write(body.sequence);
@@ -1045,9 +1047,14 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         if (!planet) {
             return std::unexpected(planet.error());
         }
+        const auto ground = read_sized(in, most_planet, "a welcome");
+        if (!ground) {
+            return std::unexpected(ground.error());
+        }
         return finished(in, Welcome{.version = *spoken,
                                     .world = *world,
-                                    .planet = {planet->begin(), planet->end()}});
+                                    .planet = {planet->begin(), planet->end()},
+                                    .ground = {ground->begin(), ground->end()}});
     }
     case Kind::Refused:
         return read_refused(in);

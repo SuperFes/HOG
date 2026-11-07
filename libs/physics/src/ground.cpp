@@ -20,7 +20,7 @@ namespace {
 // out: it isn't walked on.
 std::optional<Mesh> mesh_of(const globe::World& world, globe::Cell chunk, std::uint64_t band) {
     globe::SurfaceMesh drawn;
-    drawn.origin = globe::center(chunk) * world.generator().planet().radius;
+    drawn.origin = globe::center(chunk) * world.planet().radius;
     globe::add_chunk(drawn, world, chunk, globe::Drawn{}, globe::sight_of(band));
     Mesh mesh{.origin = WorldPosition{drawn.origin}, .vertices = {}, .triangles = {}};
     mesh.vertices.reserve(drawn.vertices.size());
@@ -92,13 +92,13 @@ void Ground::clear() noexcept {
 }
 
 Result<> Ground::keep(std::span<const WorldPosition> around) {
-    const double radius = world_.generator().planet().radius;
+    const double radius = world_.planet().radius;
     std::set<globe::Cell> wanted;
     for (const WorldPosition point : around) {
         const DVec3 direction = glm::normalize(point.metres());
         // Any chunk that lies within reach, not only one whose middle does: where a chunk is
         // wider than the reach, the one under the feet may have its middle farther than that.
-        const globe::Cell under = globe::chunk_under(direction, world_.generator().layers());
+        const globe::Cell under = globe::chunk_under(direction, world_.layers());
         const double half_across =
             glm::length(globe::corners(under)[0] - globe::center(under)) * radius;
         for (const globe::Cell chunk :

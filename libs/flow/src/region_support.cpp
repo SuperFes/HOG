@@ -155,7 +155,7 @@ bool Region::check_support(globe::BrickSite site, double seconds, Stepped& stepp
     const std::uint32_t i0 = (site.i - 1) * globe::brick_side;
     const std::uint32_t j0 = (site.j - 1) * globe::brick_side;
     const std::uint32_t l0 = (site.layer - 1) * globe::brick_side;
-    Support support{side, side, side, layers.thickness, world_->generator().planet().gravity};
+    Support support{side, side, side, layers.thickness, world_->planet().gravity};
     for (int l = 0; l < side; ++l) {
         for (int j = 0; j < side; ++j) {
             for (int i = 0; i < side; ++i) {
