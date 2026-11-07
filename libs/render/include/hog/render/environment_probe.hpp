@@ -56,17 +56,23 @@ public:
                                   const Atmosphere& atmosphere, const Sky& sky,
                                   const ProbeView& view) const;
 
-    // A cube, laid out as probe_direction() has it.
+    // A cube, laid out as probe_direction() has it, with mips each blurred from the one before,
+    // for what's mirrored rough or far to be read soft.
     [[nodiscard]] const Image& cube() const noexcept { return colour_; }
     [[nodiscard]] std::uint32_t size() const noexcept { return size_; }
+    [[nodiscard]] std::uint32_t levels() const noexcept { return levels_; }
 
 private:
     EnvironmentProbe() = default;
+    // Blurs each mip from the one before, and leaves the cube to be sampled.
+    void shrink(VkCommandBuffer commands) const;
 
     Image colour_;
     Image depth_;
     std::vector<Image> aerial_; // a face each
     std::uint32_t size_ = 0;
+    std::uint32_t levels_ = 1;
+    VkFilter shrink_ = VK_FILTER_NEAREST; // linear where the format blits so
 };
 
 } // namespace hog::render

@@ -1,9 +1,13 @@
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
+#include <hog/render/device.hpp>
 #include <hog/render/environment_probe.hpp>
 #include <hog/render/rendering.hpp>
 
+#include <algorithm>
 #include <array>
+#include <bit>
+#include <cstdint>
 #include <numbers>
 #include <utility>
 
@@ -53,12 +57,21 @@ Result<EnvironmentProbe> EnvironmentProbe::create(const Device& device, VkFormat
                                                   VkFormat depth_format, std::uint32_t size) {
     EnvironmentProbe probe;
     probe.size_ = size;
+    probe.levels_ = static_cast<std::uint32_t>(std::bit_width(size));
+    VkFormatProperties properties{};
+    vkGetPhysicalDeviceFormatProperties(device.physical(), colour_format, &properties);
+    if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) !=
+        0) {
+        probe.shrink_ = VK_FILTER_LINEAR;
+    }
     auto colour =
         make_image(device, {.format = colour_format,
                             .extent = {.width = size, .height = size},
                             .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                             .layers = probe_faces,
+                            .levels = probe.levels_,
                             .cube = true,
                             .layer_views = true});
     if (!colour) {
@@ -132,9 +145,51 @@ Result<> EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
         }
         vkCmdEndRendering(commands);
     }
-    transition(commands, colour_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::colour_target,
-               image_use::sampled);
+    shrink(commands);
     return {};
+}
+
+void EnvironmentProbe::shrink(VkCommandBuffer commands) const {
+    // Each mip blitted from the one before, all six faces at once.
+    const auto at_level = [&](std::uint32_t level, ImageUse from, ImageUse to) {
+        VkImageMemoryBarrier2 barrier =
+            image_barrier(colour_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, from, to);
+        barrier.subresourceRange.baseMipLevel = level;
+        barrier.subresourceRange.levelCount = 1;
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 0,
+                                          .pMemoryBarriers = nullptr,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 1,
+                                          .pImageMemoryBarriers = &barrier};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    };
+    at_level(0, image_use::colour_target, image_use::copy_source);
+    for (std::uint32_t level = 1; level < levels_; ++level) {
+        const auto from = static_cast<std::int32_t>(std::max(size_ >> (level - 1), 1U));
+        const auto to = static_cast<std::int32_t>(std::max(size_ >> level, 1U));
+        at_level(level, image_use::colour_target, image_use::copy_target);
+        const VkImageBlit blit{
+            .srcSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                               .mipLevel = level - 1,
+                               .baseArrayLayer = 0,
+                               .layerCount = probe_faces},
+            .srcOffsets = {VkOffset3D{.x = 0, .y = 0, .z = 0}, VkOffset3D{.x = from, .y = from, .z = 1}},
+            .dstSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                               .mipLevel = level,
+                               .baseArrayLayer = 0,
+                               .layerCount = probe_faces},
+            .dstOffsets = {VkOffset3D{.x = 0, .y = 0, .z = 0}, VkOffset3D{.x = to, .y = to, .z = 1}}};
+        vkCmdBlitImage(commands, colour_.handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       colour_.handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                       shrink_);
+        at_level(level, image_use::copy_target, image_use::copy_source);
+    }
+    transition(commands, colour_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::copy_source,
+               image_use::sampled);
 }
 
 } // namespace hog::render

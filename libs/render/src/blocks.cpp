@@ -159,7 +159,7 @@ Result<Blocks> Blocks::create(Device& device, VkFormat colour_format, VkFormat d
         return std::unexpected(std::move(empty).error());
     }
     blocks.nothing_ = std::move(empty).value();
-    auto mirror_sampler = make_sampler(device, VK_FILTER_LINEAR);
+    auto mirror_sampler = make_blurring_sampler(device);
     if (!mirror_sampler) {
         return std::unexpected(std::move(mirror_sampler).error());
     }

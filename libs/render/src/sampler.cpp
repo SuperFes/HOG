@@ -61,6 +61,27 @@ Result<Sampler> make_sampler(const Device& device, VkFilter filter) {
                                     .unnormalizedCoordinates = VK_FALSE});
 }
 
+Result<Sampler> make_blurring_sampler(const Device& device) {
+    return Sampler::create(device, {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                    .pNext = nullptr,
+                                    .flags = 0,
+                                    .magFilter = VK_FILTER_LINEAR,
+                                    .minFilter = VK_FILTER_LINEAR,
+                                    .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                                    .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                    .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                    .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                    .mipLodBias = 0.0F,
+                                    .anisotropyEnable = VK_FALSE,
+                                    .maxAnisotropy = 1.0F,
+                                    .compareEnable = VK_FALSE,
+                                    .compareOp = VK_COMPARE_OP_ALWAYS,
+                                    .minLod = 0.0F,
+                                    .maxLod = VK_LOD_CLAMP_NONE,
+                                    .borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+                                    .unnormalizedCoordinates = VK_FALSE});
+}
+
 Result<Sampler> make_tiling_sampler(const Device& device) {
     // Beyond 16, sharper ground at a glance costs more than it shows.
     const float anisotropy = std::min(device.max_anisotropy(), 16.0F);

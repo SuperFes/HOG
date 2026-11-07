@@ -308,6 +308,7 @@ private:
     std::optional<GameTime> ripple_time_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
+    Sampler blurring_sampler_; // for what the probe took, read softer where rough
     std::map<std::uint64_t, Still> still_;
     std::vector<std::pair<std::uint64_t, Still>> retiring_; // each with the draw it left at
     std::vector<Buffer> still_origins_;                     // each frame's, from the eye

@@ -87,6 +87,8 @@ static const float spokes = 128.0;
 // halfway vectors spread over half that: the glint's least spread, as a mean square slope.
 static const float sun_angular_radius = 0.004675;
 static const float sun_spread = 0.25 * sun_angular_radius * sun_angular_radius;
+// Mips of the probe the water's roughness blurs what it mirrors by, at its roughest.
+static const float mirror_blur = 40.0;
 // The mean square slope of ripples shorter than any wave, per m/s of wind: none in a calm.
 static const float ripples_per_wind = 0.0002;
 // Without the air, the glint off water this rough, as a mean square slope, peaks this bright.
@@ -495,8 +497,10 @@ AirLit air_lit(Surface surface, Facing facing, float3 looking) {
     // What's round the eye as the probe took it, where it took it that way; else the sky.
     const float3 mirror = reflect(looking, normal);
     const float3 east = push.east_faked.xyz;
+    // The rougher the water, the softer what it mirrors.
     const float4 around = environment.SampleLevel(
-        float3(dot(mirror, east), dot(mirror, up), dot(mirror, cross(up, east))), 0.0);
+        float3(dot(mirror, east), dot(mirror, up), dot(mirror, cross(up, east))),
+        clamp(1.0 + (mirror_blur * facing.roughness), 1.0, 6.0));
     lit.sky = around.a > 0.5 ? untoned(around.rgb, lighting.sun_exposure.w)
                              : sky_mirrored(air, lighting, sky_view_table, transmittance_table,
                                             lit.shade, mirror, up, sun);

@@ -23,6 +23,7 @@ public:
 private:
     friend Result<Sampler> make_sampler(const Device& device, VkFilter filter);
     friend Result<Sampler> make_tiling_sampler(const Device& device);
+    friend Result<Sampler> make_blurring_sampler(const Device& device);
 
     static Result<Sampler> create(const Device& device, const VkSamplerCreateInfo& info);
     void release() noexcept;
@@ -36,5 +37,9 @@ private:
 // For textures tiled over a surface: filtered linearly between texels and mips, as anisotropically
 // as the device allows, and repeating past the edges.
 [[nodiscard]] Result<Sampler> make_tiling_sampler(const Device& device);
+
+// For images read softer at their coarser mips: filtered linearly between texels and between mips,
+// clamped at the edges.
+[[nodiscard]] Result<Sampler> make_blurring_sampler(const Device& device);
 
 } // namespace hog::render
