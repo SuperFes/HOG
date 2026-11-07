@@ -98,27 +98,41 @@ int wear_level_for(double radius) {
     return std::clamp(static_cast<int>(std::lround(std::log2(cells))), 3, 10);
 }
 
-// What a map of the drainage's cells holds under `direction`: that of the cell it lies in and
-// those around it, weighted by nearness, so it changes smoothly from cell to cell.
+// What a map of the drainage's cells holds under `direction`: between the four cells whose
+// middles lie about it, by how near it lies to each, so it changes smoothly everywhere, over cell
+// edges and the cube's edges alike.
 double smoothed_under(const Generator::Shape& shape, const std::vector<float>& map,
                       DVec3 direction) {
-    const double spacing = std::numbers::pi / 2.0 / static_cast<double>(1 << shape.cut_level);
+    // Where it lies within its cell, to a 4096th of one, from the cell under it that much finer.
+    constexpr int finer = 12;
+    const Cell fine = cell_under(direction, shape.cut_level + finer);
+    const auto across = static_cast<double>(1U << finer);
+    const double at_i = ((static_cast<double>(fine.i) + 0.5) / across) - 0.5;
+    const double at_j = ((static_cast<double>(fine.j) + 0.5) / across) - 0.5;
+    const double low_i = std::floor(at_i);
+    const double low_j = std::floor(at_j);
+    const double share_i = at_i - low_i;
+    const double share_j = at_j - low_j;
     const Cell home = cell_under(direction, shape.cut_level);
     double total = 0.0;
     double weights = 0.0;
-    const auto add = [&](Cell cell) {
-        const double near = 1.0 - (glm::length(center(cell) - direction) / (1.5 * spacing));
-        if (near > 0.0) {
-            total += near * static_cast<double>(map[index_of(cell)]);
-            weights += near;
+    for (int dj = 0; dj <= 1; ++dj) {
+        for (int di = 0; di <= 1; ++di) {
+            const auto to_i = static_cast<std::int64_t>(low_i) + di - std::int64_t{home.i};
+            const auto to_j = static_cast<std::int64_t>(low_j) + dj - std::int64_t{home.j};
+            const std::optional<Cell> cell =
+                next_to(home, static_cast<int>(to_i), static_cast<int>(to_j));
+            // Past the cube's corner, the three cells that meet there share it.
+            if (!cell) {
+                continue;
+            }
+            const double weight =
+                (di == 1 ? share_i : 1.0 - share_i) * (dj == 1 ? share_j : 1.0 - share_j);
+            total += weight * static_cast<double>(map[index_of(*cell)]);
+            weights += weight;
         }
-    };
-    add(home);
-    const CellNeighbors beside = around(home);
-    for (const Cell cell : beside.all()) {
-        add(cell);
     }
-    return total / weights;
+    return weights > 0.0 ? total / weights : static_cast<double>(map[index_of(home)]);
 }
 
 // Metres the water has cut from the ground under `direction`.
