@@ -2,7 +2,9 @@
 #include <hog/globe/column_cache.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <iterator>
 #include <utility>
 
 namespace hog::client {
@@ -76,8 +78,7 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
         std::erase_if(working_, [&](const Work& work) { return work.corner == corner; });
         const std::optional<int> level = level_held(*world, corner);
         if (!level) {
-            changes_.gone.push_back(column_key(corner));
-            meshed_.erase(corner);
+            let_go(corner);
             continue;
         }
         meshed_.insert(corner);
@@ -89,7 +90,16 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     }
 }
 
+void ColumnMeshes::let_go(globe::Site corner) {
+    changes_.gone.push_back(column_key(corner));
+    meshed_.erase(corner);
+    if (drawn_.erase(corner) != 0 && around_) {
+        around_->drawn = 0;
+    }
+}
+
 void ColumnMeshes::show(Work& work) {
+    drawn_.insert(work.corner);
     ColumnDrawn drawn = work.job->take();
     changes_.shown.push_back(
         {.key = column_key(work.corner),
@@ -112,17 +122,47 @@ void ColumnMeshes::follow(DVec3 eye, double metres) {
             changed.push_back(corner);
         }
     }
-    for (const globe::Site corner : meshed_) {
-        if (!std::ranges::binary_search(near, corner)) {
-            changes_.gone.push_back(column_key(corner));
-        }
-    }
     const auto far = [&](const globe::Site corner) {
         return !std::ranges::binary_search(near, corner);
     };
-    std::erase_if(meshed_, far);
+    std::vector<globe::Site> left;
+    std::ranges::copy_if(meshed_, std::back_inserter(left), far);
+    for (const globe::Site corner : left) {
+        let_go(corner);
+    }
     std::erase_if(working_, [&](const Work& work) { return far(work.corner); });
     this->changed(changed);
+}
+
+double ColumnMeshes::covered(DVec3 eye, double metres) {
+    const globe::Layers& layers = world_->layers();
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    constexpr int coarser = std::countr_zero(side);
+    const auto level = static_cast<std::uint8_t>(layers.level - coarser);
+    // No point of a tile column lies further than this from its middle.
+    const double across = side * layers.thickness;
+    // Measured again only once the eye's a tile column off, as that takes milliseconds.
+    if (!around_ || around_->metres != metres || glm::length(eye - around_->from) > across) {
+        around_ = Around{.from = eye, .metres = metres, .columns = {}, .drawn = 0};
+        const double radius = glm::length(eye);
+        for (const globe::Site corner : globe::tile_columns_near(layers, eye, metres)) {
+            const globe::Cell cell{
+                .level = level, .face = corner.face, .i = corner.i / side, .j = corner.j / side};
+            around_->columns.emplace_back(glm::length((globe::center(cell) * radius) - eye),
+                                          corner);
+        }
+        std::ranges::sort(around_->columns);
+    }
+    Around& around = *around_;
+    while (around.drawn < around.columns.size() &&
+           drawn_.contains(around.columns[around.drawn].second)) {
+        ++around.drawn;
+    }
+    if (around.drawn == around.columns.size()) {
+        return metres;
+    }
+    const double slack = across + glm::length(eye - around.from);
+    return std::clamp(around.columns[around.drawn].first - slack, 0.0, metres);
 }
 
 GroundChanges ColumnMeshes::collect() {
