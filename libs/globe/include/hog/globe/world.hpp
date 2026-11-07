@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/globe/brick.hpp>
+#include <hog/globe/column_cache.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
@@ -49,6 +50,11 @@ public:
     void draw_as_boxes(bool on) noexcept { as_boxes_ = on; }
     [[nodiscard]] bool draws_as_boxes() const noexcept { return as_boxes_; }
 
+    // Where the volume holds no tile column, reads those `cache` holds coarser, each of their
+    // voxels all through the voxels it stands for; none to read nothing more. The cache must
+    // outlive the world and its copies.
+    void read_coarse(const ColumnCache* cache) noexcept { coarse_ = cache; }
+
     // Air where nothing is made; solid rock under a made column's floor.
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
@@ -76,6 +82,7 @@ private:
 
     const Generator* generator_;
     Volume* volume_;
+    const ColumnCache* coarse_ = nullptr;
     bool as_boxes_ = false;
 };
 
