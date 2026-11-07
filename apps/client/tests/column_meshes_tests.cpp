@@ -6,6 +6,7 @@
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -115,4 +116,56 @@ TEST_CASE(
     changes = meshes.collect();
     CHECK(changes.shown.empty());
     CHECK(changes.gone.size() == near.size());
+}
+
+TEST_CASE("the ground's covered out to the nearest tile column not drawn round the eye",
+          "[client][columns]") {
+    const hog::client::GlobeWorld& made = hog::client::testing::globe();
+    const hog::globe::Layers& layers = made.generator.layers();
+    Volume volume;
+    const hog::globe::World world{made.generator.planet(), layers, volume};
+    const hog::DVec3 here =
+        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().radius;
+    constexpr double reach = 300.0;
+    const std::vector<Site> near = hog::globe::tile_columns_near(layers, here, reach);
+    // The middle of a tile column, metres from here.
+    const auto away = [&](Site corner) {
+        constexpr int coarser = 6;
+        const hog::globe::Cell cell{.level = static_cast<std::uint8_t>(layers.level - coarser),
+                                    .face = corner.face,
+                                    .i = corner.i / Volume::tile_side,
+                                    .j = corner.j / Volume::tile_side};
+        return glm::length((hog::globe::center(cell) * glm::length(here)) - here);
+    };
+    std::vector<Site> by_distance = near;
+    std::ranges::sort(by_distance, {}, away);
+    const Site missing = by_distance[by_distance.size() / 2];
+    for (const Site corner : near) {
+        if (corner != missing) {
+            volume.set_floor(corner, 10);
+        }
+    }
+    hog::jobs::JobSystem jobs{2};
+    ColumnMeshes meshes{world, jobs};
+    CHECK(meshes.covered(here, reach) == 0.0);
+    meshes.follow(here, reach);
+    CHECK(meshes.covered(here, reach) < reach);
+    meshes.finish();
+    (void)meshes.collect();
+    const double slack = Volume::tile_side * layers.thickness;
+    CHECK(meshes.covered(here, reach) == Catch::Approx(away(missing) - slack));
+
+    volume.set_floor(missing, 10);
+    const std::vector<Site> changed{missing};
+    meshes.changed(changed);
+    meshes.finish();
+    (void)meshes.collect();
+    CHECK(meshes.covered(here, reach) == reach);
+
+    const Site nearest = by_distance.front();
+    volume.drop_column(nearest);
+    const std::vector<Site> dropped{nearest};
+    meshes.changed(dropped);
+    (void)meshes.collect();
+    CHECK(meshes.covered(here, reach) == 0.0);
 }

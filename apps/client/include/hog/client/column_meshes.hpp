@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/client/ground_changes.hpp>
+#include <hog/core/math.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
@@ -14,6 +15,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::client {
@@ -52,6 +54,9 @@ public:
     // What's done meshing since last asked, and what's gone.
     [[nodiscard]] GroundChanges collect();
     [[nodiscard]] std::size_t in_flight() const noexcept { return working_.size(); }
+    // Metres along the ground from `eye` within which every tile column is shown,
+    // up to `metres`: short of the nearest that isn't, as not held or not yet meshed.
+    [[nodiscard]] double covered(DVec3 eye, double metres);
 
 private:
     struct Work {
@@ -59,14 +64,26 @@ private:
         std::unique_ptr<jobs::Async<ColumnDrawn>> job;
     };
 
+    // The tile columns round a point, nearest first, and how many of them are drawn unbroken.
+    struct Around {
+        DVec3 from{0.0};
+        double metres = 0.0;
+        std::vector<std::pair<double, globe::Site>> columns;
+        std::size_t drawn = 0;
+    };
+
     // Takes the work's meshes into what's shown.
     void show(Work& work);
+    // Has the tile column's meshes gone.
+    void let_go(globe::Site corner);
 
     const globe::World* world_;
     jobs::JobSystem* jobs_;
     std::vector<Work> working_;
     GroundChanges changes_;
     std::set<globe::Site> meshed_; // corners asked for and not gone since
+    std::set<globe::Site> drawn_;  // and shown since
+    std::optional<Around> around_;
 };
 
 } // namespace hog::client

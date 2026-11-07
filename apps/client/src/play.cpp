@@ -803,7 +803,7 @@ void show_held(client::ColumnMeshes& meshes, client::Scene& scene, const globe::
     if (client::GroundChanges changes = meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
-    scene.set_ground_state(held_ground, meshes.in_flight() > 0);
+    scene.set_ground_state(meshes.covered(eye, held_ground), meshes.in_flight() > 0);
 }
 
 // Digs or builds into the world as asked, when drawing it alone, and has the tile columns it
@@ -1230,7 +1230,8 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
     if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
-    scene.set_ground_state(streamed_ground, ground.meshes.in_flight() > 0);
+    scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
+                           ground.meshes.in_flight() > 0);
 }
 
 // Flies over the ground the server streams until the window closes or it's time to quit, drawing
