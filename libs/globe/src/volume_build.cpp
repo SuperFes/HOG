@@ -1,5 +1,4 @@
 #include <hog/globe/volume_build.hpp>
-
 #include <hog/globe/voxel.hpp>
 
 #include <algorithm>
@@ -25,10 +24,11 @@ Cube made(const Generator::Column& column, const Layers& layers, int layer, bool
     return cube_of(voxel, voxel.temperature / 8.0);
 }
 
-// The column's voxels up to `top` as runs: one sample for each stretch nothing changes in, and
-// one for each voxel where something may.
-std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, int top) {
-    // Layers that may change, with whether a cave may be in them.
+// The column's voxels from `bottom` to `top` as runs: one sample for each stretch between the
+// generator's boundaries, and one for each voxel within them.
+std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, int bottom,
+                         int top) {
+    // Layers a boundary passes through, with whether a cave may be in them.
     struct Changing {
         int low = 0;
         int high = 0;
@@ -36,8 +36,8 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
     };
     std::vector<Changing> changing;
     for (const Generator::Column::Boundary& change :
-         column.boundaries(layers.floor, layers.top(top), 0.0)) {
-        const int low = std::max(layers.layer_at(change.bottom), 0);
+         column.boundaries(layers.bottom(bottom), layers.top(top), 0.0)) {
+        const int low = std::max(layers.layer_at(change.bottom), bottom);
         const int high = std::min(layers.layer_at(change.top), top);
         if (low > high) {
             continue;
@@ -61,7 +61,7 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
             runs.push_back({.low = low, .high = high, .voxel = voxel});
         }
     };
-    int next = 0;
+    int next = bottom;
     for (const Changing& stretch : changing) {
         if (next < stretch.low) {
             add(next, stretch.low - 1, made(column, layers, (next + stretch.low - 1) / 2, false));
@@ -77,30 +77,19 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
     return runs;
 }
 
-} // namespace
-
-Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32_t i,
-                      std::uint32_t j) {
+// The tiles up the tile column at (`face`, `i`, `j`), counted in tiles, holding layers `bottom`
+// to `top`, from the columns over it. Under `bottom` they hold nothing; from `keep` up they keep
+// what the volume holds.
+void build(Volume& volume, const Generator& generator,
+           const std::vector<Generator::Column>& columns, std::uint8_t face, std::uint32_t i,
+           std::uint32_t j, int bottom, int top, int keep) {
     constexpr int side = Volume::tile_side;
     const Layers& layers = generator.layers();
-    const std::vector<Generator::Column> columns = generator.columns(
-        {.level = static_cast<std::uint8_t>(layers.level),
-         .face = face,
-         .i = i * side,
-         .j = j * side},
-        side, voxel_lod(generator));
-    double highest = generator.sea_level().value_or(layers.floor);
-    for (const Generator::Column& each : columns) {
-        // Solid shows in a voxel from half its thickness over, more so across a slope.
-        const double over =
-            (layers.thickness / 2.0) * std::sqrt(1.0 + (each.slope() * each.slope()));
-        highest = std::max(highest, each.top() + over);
-    }
-    const int top = std::min(layers.layer_at(highest), layers.count - 1);
+    const int made_top = std::min(top, keep - 1);
     std::vector<std::vector<Run>> runs;
     runs.reserve(columns.size());
     for (const Generator::Column& each : columns) {
-        runs.push_back(runs_of(each, layers, top));
+        runs.push_back(runs_of(each, layers, bottom, made_top));
     }
     // The voxel of the column at (x, y) in `layer`, and the highest layer it runs on to.
     const auto at = [&](int x, int y, int layer) -> const Run& {
@@ -108,15 +97,26 @@ Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32
             runs[(static_cast<std::size_t>(y) * side) + static_cast<std::size_t>(x)];
         return *std::ranges::lower_bound(up, layer, {}, &Run::high);
     };
-    Volume volume;
-    for (int k = 0; k * side <= top; ++k) {
+    for (int k = bottom / side; k <= top / side; ++k) {
+        const Site place{.face = face,
+                         .i = i * side,
+                         .j = j * side,
+                         .layer = static_cast<std::uint32_t>(k * side)};
+        const VoxelTree* kept = volume.tile_at(place);
         const auto whole = [&](int x, int y, int z, int across) -> std::optional<Cube> {
             const int low = (k * side) + z;
             const int high = low + across - 1;
-            if (low > top) {
+            if (high < bottom || low > top) {
                 return Cube{};
             }
-            if (high > top) {
+            if (low >= keep) {
+                if (kept == nullptr) {
+                    return Cube{};
+                }
+                return kept->leaf_side(x, y, z) >= across ? std::optional{kept->at(x, y, z)}
+                                                          : std::nullopt;
+            }
+            if (low < bottom || high > made_top) {
                 return std::nullopt;
             }
             const Cube& first = at(x, y, low).voxel;
@@ -132,15 +132,68 @@ Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32
         };
         const auto voxel_at = [&](int x, int y, int z) {
             const int layer = (k * side) + z;
-            return layer > top ? Cube{} : at(x, y, layer).voxel;
+            if (layer < bottom || layer > top) {
+                return Cube{};
+            }
+            if (layer >= keep) {
+                return kept == nullptr ? Cube{} : kept->at(x, y, z);
+            }
+            return at(x, y, layer).voxel;
         };
-        volume.put_tile({.face = face,
-                         .i = i * side,
-                         .j = j * side,
-                         .layer = static_cast<std::uint32_t>(k * side)},
-                        VoxelTree::build_down(side, whole, voxel_at));
+        VoxelTree tile = VoxelTree::build_down(side, whole, voxel_at);
+        volume.put_tile(place, std::move(tile));
     }
+}
+
+std::vector<Generator::Column> columns_of(const Generator& generator, std::uint8_t face,
+                                          std::uint32_t i, std::uint32_t j) {
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    return generator.columns({.level = static_cast<std::uint8_t>(generator.layers().level),
+                              .face = face,
+                              .i = i * side,
+                              .j = j * side},
+                             Volume::tile_side, voxel_lod(generator));
+}
+
+} // namespace
+
+Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32_t i,
+                      std::uint32_t j) {
+    const Layers& layers = generator.layers();
+    const std::vector<Generator::Column> columns = columns_of(generator, face, i, j);
+    double highest = generator.sea_level().value_or(layers.floor);
+    double lowest = layers.ceiling();
+    for (const Generator::Column& each : columns) {
+        // Solid shows in a voxel from half its thickness over, more so across a slope.
+        const double over =
+            (layers.thickness / 2.0) * std::sqrt(1.0 + (each.slope() * each.slope()));
+        highest = std::max(highest, each.top() + over);
+        lowest = std::min(lowest, each.ground());
+    }
+    const int top = std::min(layers.layer_at(highest), layers.count - 1);
+    const int bottom = std::max(layers.layer_at(lowest) - made_depth, 0);
+    Volume volume;
+    build(volume, generator, columns, face, i, j, bottom, top, top + 1);
+    volume.set_floor({.face = face, .i = i * Volume::tile_side, .j = j * Volume::tile_side},
+                     static_cast<std::uint32_t>(bottom));
     return volume;
+}
+
+bool deepen(Volume& volume, const Generator& generator, std::uint8_t face, std::uint32_t i,
+            std::uint32_t j) {
+    const Site corner{.face = face, .i = i * Volume::tile_side, .j = j * Volume::tile_side};
+    const std::optional<std::uint32_t> floor = volume.floor(corner);
+    if (!floor || *floor == 0) {
+        return false;
+    }
+    const int keep = static_cast<int>(*floor);
+    constexpr int side = Volume::tile_side;
+    const int bottom = std::max(keep - side, 0);
+    // Through the old floor's tile, if it starts inside one, keeping its layers from there up.
+    const int top = keep % side == 0 ? keep - 1 : ((keep / side) * side) + side - 1;
+    build(volume, generator, columns_of(generator, face, i, j), face, i, j, bottom, top, keep);
+    volume.set_floor(corner, static_cast<std::uint32_t>(bottom));
+    return true;
 }
 
 } // namespace hog::globe
