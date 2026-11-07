@@ -1,3 +1,4 @@
+#include "built_ground.hpp"
 #include "test_planet.hpp"
 
 #include <hog/client/cutaway.hpp>
@@ -21,6 +22,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <test_device.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -39,6 +41,7 @@ using namespace std::chrono_literals;
 using Catch::Matchers::WithinAbs;
 using hog::client::Scene;
 using hog::client::Shot;
+using hog::client::testing::BuiltGround;
 using hog::client::testing::calendar;
 using hog::render::testing::test_device;
 
@@ -55,6 +58,13 @@ Shot shot_of(const hog::client::Flight& flight, const hog::globe::World& world) 
             .time = hog::client::start_time(calendar(), date, up, 0.5),
             .seconds = 0.0,
             .companion = std::nullopt};
+}
+
+// Metres over the radius an eye asked `altitude` over it is flown at: over the ground there, as
+// flying keeps it.
+double over_ground(const hog::globe::World& world, hog::DVec3 up, double altitude) {
+    constexpr double headroom = 2.0;
+    return std::max(altitude, hog::globe::ground_height(world, up) + headroom);
 }
 
 hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
@@ -133,7 +143,9 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
         REQUIRE(scene);
         const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
         const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
-        const double ground = hog::globe::ground_height(globe.world, noon);
+        BuiltGround built{globe.generator, jobs};
+        REQUIRE(built.show_round(*scene, noon));
+        const double ground = hog::globe::ground_height(built.world(), noon);
         for (const auto& [shot, height, pitch] :
              {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 60.0, 0.2},
               std::tuple{"1km", 1'000.0, -0.25}, std::tuple{"15km", 15'000.0, -0.45},
@@ -142,7 +154,7 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
                 hog::client::start_flight(noon, radius, ground + height, at);
             flight.pitch = pitch;
             const auto still = hog::client::draw_still(
-                *device, *scene, shot_of(flight, globe.world), {.width = 1600, .height = 900});
+                *device, *scene, shot_of(flight, built.world()), {.width = 1600, .height = 900});
             REQUIRE(still);
             REQUIRE(hog::client::save_picture(
                 std::filesystem::path{where} / std::format("globe_{}_{}.png", name, shot), *still));
@@ -163,6 +175,7 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
     auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
                                hog::client::still_format, 1);
     REQUIRE(scene);
+    BuiltGround built{globe.generator, jobs};
     constexpr double degree = std::numbers::pi / 180.0;
     // As --at has them: latitude, longitude, metres over the radius, heading and pitch.
     struct Spot {
@@ -232,11 +245,13 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
                                   .pitch = 4.9}}) {
         const hog::DVec3 up =
             hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
+        REQUIRE(built.show_round(*scene, up));
         const hog::client::Flight flight = hog::client::turned_to(
-            hog::client::start_flight(up, radius, spot.altitude, hog::planet::north_pole),
+            hog::client::start_flight(up, radius, over_ground(built.world(), up, spot.altitude),
+                                      hog::planet::north_pole),
             spot.heading * degree, spot.pitch * degree);
-        const auto still = hog::client::draw_still(
-            *device, *scene, shot_of(flight, globe.world), {.width = 1600, .height = 900});
+        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight, built.world()),
+                                                   {.width = 1600, .height = 900});
         REQUIRE(still);
         REQUIRE(hog::client::save_picture(
             std::filesystem::path{where} / std::format("globe_at_{}.png", spot.name), *still));
@@ -264,7 +279,9 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
             auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
                                        hog::client::still_format, 1);
             REQUIRE(scene);
-            const double ground = hog::globe::ground_height(globe.world, noon);
+            BuiltGround built{globe.generator, jobs};
+            REQUIRE(built.show_round(*scene, noon));
+            const double ground = hog::globe::ground_height(built.world(), noon);
             for (const auto& [shot, height, pitch] :
                  {std::tuple{"walk", 1.7, -0.12}, std::tuple{"low", 60.0, -0.25},
                   std::tuple{"mid", 600.0, -0.3}}) {
@@ -272,7 +289,7 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
                     hog::client::start_flight(noon, radius, ground + height, at);
                 flight.pitch = pitch;
                 const auto still =
-                    hog::client::draw_still(*device, *scene, shot_of(flight, globe.world),
+                    hog::client::draw_still(*device, *scene, shot_of(flight, built.world()),
                                             {.width = 1600, .height = 900});
                 REQUIRE(still);
                 REQUIRE(hog::client::save_picture(
@@ -309,17 +326,19 @@ TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
     auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
                                hog::client::still_format, 1);
     REQUIRE(scene);
+    BuiltGround built{globe.generator, jobs};
     for (const auto& [name, up, height, pitch] :
          {std::tuple{"ground", glm::normalize(hog::DVec3{0.6, 0.3, 0.7}), 60.0, 0.2},
           std::tuple{"tropic", glm::normalize(hog::DVec3{0.9, -0.4, 0.1}), 1'500.0, 0.15},
           std::tuple{"mid", glm::normalize(hog::DVec3{0.6, 0.3, 0.7}), 1'500.0, -0.1},
           std::tuple{"high", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 12'000.0, -0.4},
           std::tuple{"orbit", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 400'000.0, -1.5}}) {
-        const double ground = hog::globe::ground_height(globe.world, up * radius);
+        REQUIRE(built.show_round(*scene, up));
+        const double ground = hog::globe::ground_height(built.world(), up * radius);
         hog::client::Flight flight = hog::client::start_flight(
             up, radius, ground + height, glm::normalize(up + hog::DVec3{0.0, 0.0, 0.3}));
         flight.pitch = pitch;
-        Shot shot = shot_of(flight, globe.world);
+        Shot shot = shot_of(flight, built.world());
         shot.forecast = &forecast;
         shot.now = hog::MonotonicClock::time_point{};
         const auto still =
@@ -346,9 +365,12 @@ TEST_CASE("a swell on the coast, to look at", "[.look]") {
     REQUIRE(scene);
     constexpr double degree = std::numbers::pi / 180.0;
     const hog::DVec3 up = hog::planet::direction_at(-31.335428 * degree, 176.264827 * degree);
-    const hog::client::Flight flight =
-        hog::client::turned_to(hog::client::start_flight(up, radius, 6.0, hog::planet::north_pole),
-                               -33.5 * degree, -10.0 * degree);
+    BuiltGround built{globe.generator, jobs};
+    REQUIRE(built.show_round(*scene, up));
+    const hog::client::Flight flight = hog::client::turned_to(
+        hog::client::start_flight(up, radius, over_ground(built.world(), up, 6.0),
+                                  hog::planet::north_pole),
+        -33.5 * degree, -10.0 * degree);
     for (const auto& [name, east_run, north_run] :
          {std::tuple{"east", 1.0F, 0.0F}, std::tuple{"west", -1.0F, 0.0F},
           std::tuple{"north", 0.0F, 1.0F}, std::tuple{"south", 0.0F, -1.0F}}) {
@@ -356,7 +378,7 @@ TEST_CASE("a swell on the coast, to look at", "[.look]") {
         cell.wind = {east_run * 8.0F, north_run * 8.0F};
         cell.swells[0] = {.height = 2.4F, .peak = 0.7F, .heading = {east_run, north_run}};
         const auto forecast = everywhere(cell);
-        Shot shot = shot_of(flight, globe.world);
+        Shot shot = shot_of(flight, built.world());
         shot.forecast = &forecast;
         shot.now = hog::MonotonicClock::time_point{};
         const auto still =
@@ -388,7 +410,9 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
         hog::globe::land_near(globe.generator, glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 3'000.0)
             .value();
     const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
-    const double ground = hog::globe::ground_height(globe.world, noon);
+    BuiltGround built{globe.generator, jobs};
+    REQUIRE(built.show_round(*scene, noon));
+    const double ground = hog::globe::ground_height(built.world(), noon);
     REQUIRE(ground > 20.0);
     for (const double depth : {6.0, 20.0, 50.0}) {
         for (const double bubble : {8.0, 24.0}) {
@@ -396,10 +420,10 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
                 hog::client::Flight flight =
                     hog::client::start_flight(noon, planet.radius, ground - depth, at);
                 flight.pitch = pitch;
-                Shot shot = shot_of(flight, globe.world);
+                Shot shot = shot_of(flight, built.world());
                 shot.cutaway = bubble;
                 scene->show_cutaway(std::make_shared<const hog::terrain::BlockMesh>(
-                    hog::client::cutaway_shell(globe.world, flight.eye, bubble)));
+                    hog::client::cutaway_shell(built.world(), flight.eye, bubble)));
                 const auto still =
                     hog::client::draw_still(*device, *scene, shot, {.width = 1600, .height = 900});
                 REQUIRE(still);
