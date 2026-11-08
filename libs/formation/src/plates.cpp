@@ -12,6 +12,7 @@
 #include <map>
 #include <numbers>
 #include <queue>
+#include <span>
 #include <tuple>
 #include <utility>
 
@@ -96,6 +97,293 @@ std::vector<std::uint16_t> grow(const Sphere& sphere, std::span<const std::uint3
     return owner;
 }
 
+// One step of boundary on the layout, between neighbouring points on different plates.
+struct Step {
+    std::uint32_t from = 0;
+    std::uint32_t to = 0;
+    DVec3 middle{};
+    DVec3 across{}; // from `from`'s plate towards `to`'s
+};
+
+struct Steps {
+    std::vector<Step> steps;
+    std::map<std::uint32_t, std::vector<std::size_t>> by_pair;
+};
+
+Steps boundary_steps(const Plates& plates) {
+    const Sphere& layout = plates.layout();
+    Steps found;
+    for (std::uint32_t point = 0; point < layout.size(); ++point) {
+        for (const std::uint32_t other : layout.neighbors(point)) {
+            if (other < point || plates.plate(point) == plates.plate(other)) {
+                continue;
+            }
+            const DVec3 middle = glm::normalize(layout.point(point) + layout.point(other));
+            const DVec3 step = layout.point(other) - layout.point(point);
+            found.by_pair[pair_key(plates.plate(point), plates.plate(other))].push_back(
+                found.steps.size());
+            found.steps.push_back(
+                {.from = point,
+                 .to = other,
+                 .middle = middle,
+                 .across = glm::normalize(step - (glm::dot(step, middle) * middle))});
+        }
+    }
+    return found;
+}
+
+// Which way a stretch of boundary runs and how much light crust lies either side, taken over a
+// reach of the same boundary, so the kind of meeting holds along it rather than flickering with
+// the layout's steps.
+struct Sides {
+    DVec3 across{};
+    double light_a = 0.0;
+    double light_b = 0.0;
+};
+
+Sides sides_of(const Plates& plates, const Steps& found, std::span<const std::size_t> members,
+               const Step& step) {
+    const double reach = 2.5 * plates.layout().spacing();
+    const std::uint16_t a = plates.plate(step.from);
+    Sides sides;
+    for (const std::size_t near : members) {
+        const Step& other = found.steps[near];
+        if (angle(step.middle, other.middle) > reach) {
+            continue;
+        }
+        const bool same_way = plates.plate(other.from) == a;
+        sides.across += same_way ? other.across : -other.across;
+        sides.light_a += plates.light(same_way ? other.from : other.to) ? 1.0 : 0.0;
+        sides.light_b += plates.light(same_way ? other.to : other.from) ? 1.0 : 0.0;
+    }
+    sides.across -= glm::dot(sides.across, step.middle) * step.middle;
+    sides.across = glm::length(sides.across) > 0.0 ? glm::normalize(sides.across) : step.across;
+    return sides;
+}
+
+Boundary classify(const Plates& plates, const Body& body, const Step& step, const Sides& sides) {
+    const std::uint16_t a = plates.plate(step.from);
+    const std::uint16_t b = plates.plate(step.to);
+    const DVec3 relative = plates.velocity(b, step.middle) - plates.velocity(a, step.middle);
+    const double closing = -glm::dot(relative, sides.across);
+    const double total = glm::length(relative);
+    const bool even = sides.light_a == sides.light_b;
+    const bool lit_a = sides.light_a > sides.light_b || (even && sides.light_a > 0.0);
+    const bool lit_b = sides.light_b > sides.light_a || (even && sides.light_b > 0.0);
+
+    Boundary boundary{
+        .where = step.middle, .a = a, .b = b, .closing = closing, .width = body.belt_width};
+    if (total <= 0.0 || std::abs(closing) < 0.35 * total) {
+        boundary.meeting = Meeting::Transform;
+        return boundary;
+    }
+    if (closing < 0.0) {
+        boundary.meeting = (lit_a || lit_b) ? Meeting::Rift : Meeting::Ridge;
+        return boundary;
+    }
+    const double shortening = closing * plates.age(a, b);
+    if (std::min(sides.light_a, sides.light_b) > 0.0) {
+        // Crust thickens over the belt's width; past twice its own thickness it spreads sideways
+        // instead, widening the belt into a plateau.
+        boundary.meeting = Meeting::Collision;
+        const double piled = body.thickening * shortening / std::sqrt(std::numbers::pi);
+        boundary.width = std::max(body.belt_width, piled);
+        boundary.thickened = piled * body.crust_thickness / boundary.width;
+    } else if (lit_a || lit_b) {
+        boundary.meeting = Meeting::Subduction;
+        boundary.over = lit_a ? a : b;
+        const double piled = 0.5 * body.thickening * shortening / std::sqrt(std::numbers::pi);
+        boundary.thickened = std::min(piled * body.crust_thickness / body.belt_width,
+                                      0.6 * body.crust_thickness);
+    } else {
+        boundary.meeting = Meeting::IslandArc;
+        boundary.over = plates.rides_over(a, b) ? a : b;
+    }
+    return boundary;
+}
+
+std::vector<Boundary> find_boundaries(const Plates& plates, const Body& body) {
+    const Steps found = boundary_steps(plates);
+    std::vector<Boundary> boundaries;
+    boundaries.reserve(found.steps.size());
+    for (const auto& [key, members] : found.by_pair) {
+        for (const std::size_t index : members) {
+            const Step& step = found.steps[index];
+            boundaries.push_back(
+                classify(plates, body, step, sides_of(plates, found, members, step)));
+        }
+    }
+    return boundaries;
+}
+
+// Of a triangle's corners, the plate holding the most weight.
+std::uint16_t plate_most_held(const Plates& plates, const Sphere::Spot& spot) {
+    std::uint16_t best = plates.plate(spot.corners[0]);
+    double best_weight = -1.0;
+    for (std::size_t corner = 0; corner < 3; ++corner) {
+        const std::uint16_t plate = plates.plate(spot.corners[corner]);
+        double weight = 0.0;
+        for (std::size_t other = 0; other < 3; ++other) {
+            if (plates.plate(spot.corners[other]) == plate) {
+                weight += spot.weights[static_cast<glm::length_t>(other)];
+            }
+        }
+        if (weight > best_weight) {
+            best_weight = weight;
+            best = plate;
+        }
+    }
+    return best;
+}
+
+// Plates and light crust read off the layout through a warp, so their edges wander rather than
+// follow the layout's triangles; coasts get finer wiggles than the layout holds.
+void read_layout(const Sphere& sphere, const Plates& plates, const Body& body, Crust& crust) {
+    const Sphere& layout = plates.layout();
+    std::vector<double> light_at_layout(layout.size());
+    for (std::uint32_t point = 0; point < layout.size(); ++point) {
+        light_at_layout[point] = plates.light(point) ? 1.0 : 0.0;
+    }
+    const int coarse = layout.subdivisions() + 1;
+    const int fine = std::max(coarse, sphere.subdivisions());
+    const std::vector<double> warp_east =
+        sphere_noise(sphere, hash_values(body.seed, 12), coarse, coarse + 2);
+    const std::vector<double> warp_north =
+        sphere_noise(sphere, hash_values(body.seed, 13), coarse, coarse + 2);
+    const std::vector<double> wiggle =
+        sphere_noise(sphere, hash_values(body.seed, 11), coarse, fine);
+    const double warp = 1.5 * layout.spacing();
+    std::uint32_t start = 0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const DVec3& here = sphere.point(point);
+        const auto [east, north] = tangents(here);
+        const DVec3 warped = glm::normalize(
+            here + (warp * ((warp_east[point] * east) + (warp_north[point] * north))));
+        const Sphere::Spot spot = layout.locate(warped, start);
+        start = spot.corners[0];
+        crust.plate[point] = plate_most_held(plates, spot);
+        crust.light[point] =
+            smoothstep(0.35, 0.65, layout.sample(light_at_layout, spot) + (0.3 * wiggle[point]));
+    }
+}
+
+// Finds, for a fine stretch of boundary, the nearest of the layout's between the same two plates.
+class KindFinder {
+public:
+    KindFinder(const Sphere& sphere, std::span<const Boundary> boundaries)
+        : boundaries_{boundaries} {
+        std::vector<Source> sources;
+        std::uint32_t start = 0;
+        for (std::uint32_t index = 0; index < boundaries.size(); ++index) {
+            start = sphere.nearest(boundaries[index].where, start);
+            sources.push_back({.where = boundaries[index].where, .point = start});
+            by_pair_[pair_key(boundaries[index].a, boundaries[index].b)].push_back(index);
+        }
+        near_ = nearest_sources(sphere, sources);
+    }
+
+    [[nodiscard]] const Boundary* find(std::uint32_t point, const DVec3& middle, std::uint16_t a,
+                                       std::uint16_t b) const {
+        const std::uint32_t near = near_.source[point];
+        if (near != Nearest::none &&
+            pair_key(boundaries_[near].a, boundaries_[near].b) == pair_key(a, b)) {
+            return &boundaries_[near];
+        }
+        const auto found = by_pair_.find(pair_key(a, b));
+        if (found == by_pair_.end()) {
+            return &sliding_;
+        }
+        const Boundary* closest = &sliding_;
+        double distance = std::numeric_limits<double>::infinity();
+        for (const std::uint32_t index : found->second) {
+            const double here = angle(middle, boundaries_[index].where);
+            if (here < distance) {
+                distance = here;
+                closest = &boundaries_[index];
+            }
+        }
+        return closest;
+    }
+
+private:
+    std::span<const Boundary> boundaries_;
+    std::map<std::uint32_t, std::vector<std::uint32_t>> by_pair_;
+    Nearest near_;
+    Boundary sliding_{.meeting = Meeting::Transform};
+};
+
+// Fine stretches of boundary, each taking after the nearest of the layout's between the same two
+// plates; distances are kept from the fine ones.
+struct FineBoundaries {
+    std::vector<Source> sources;
+    std::vector<const Boundary*> kinds;
+    std::vector<Source> ridges;
+    std::vector<double> opening; // radians a million years each ridge pulls apart
+};
+
+FineBoundaries fine_boundaries(const Sphere& sphere, const KindFinder& finder, const Crust& crust) {
+    FineBoundaries fine;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        for (const std::uint32_t other : sphere.neighbors(point)) {
+            const std::uint16_t a = crust.plate[point];
+            const std::uint16_t b = crust.plate[other];
+            if (other < point || a == b) {
+                continue;
+            }
+            const DVec3 middle = glm::normalize(sphere.point(point) + sphere.point(other));
+            const Boundary* kind = finder.find(point, middle, a, b);
+            fine.sources.push_back({.where = middle, .point = point});
+            fine.kinds.push_back(kind);
+            if (kind->meeting == Meeting::Ridge) {
+                fine.ridges.push_back({.where = middle, .point = point});
+                fine.opening.push_back(-kind->closing);
+            }
+        }
+    }
+    return fine;
+}
+
+// What a boundary does to the crust at a point near it: metres added to how it stands, and
+// metres a year of rock pushed up.
+struct Shaped {
+    double base = 0.0;
+    double uplift = 0.0;
+};
+
+Shaped shaped_by(const Boundary& kind, double distance, double light, bool riding, double floor,
+                 const Body& body) {
+    const double x = distance / body.belt_width;
+    const double closing = kind.closing * earth_radius / 1.0e6;
+    switch (kind.meeting) {
+    case Meeting::Collision:
+        // Thickened crust spreads over the whole widened belt; rock is pushed up hardest at the
+        // active front.
+        return {.base = light * body.crust_rise * kind.thickened * bell(distance / kind.width),
+                .uplift = body.uplift_share * closing * bell(x)};
+    case Meeting::Subduction:
+        if (riding) {
+            return {.base = light * ((body.arc_height * bell((x - 0.6) / 0.3)) +
+                                     (body.crust_rise * kind.thickened * bell(x / 1.2))),
+                    .uplift = body.uplift_share * closing * bell((x - 0.5) / 0.6)};
+        }
+        return {.base = -body.trench_depth * bell(x / 0.25)};
+    case Meeting::IslandArc:
+        if (riding) {
+            const double profile = bell((x - 0.5) / 0.25);
+            return {.base = (std::abs(floor) + (0.5 * body.arc_height)) * profile,
+                    .uplift = 0.5 * body.uplift_share * closing * profile};
+        }
+        return {.base = -body.trench_depth * bell(x / 0.25)};
+    case Meeting::Rift:
+        return {.base = -light * body.rift_depth * bell(x / 0.4)};
+    case Meeting::None:
+    case Meeting::Ridge:
+    case Meeting::Transform:
+        break;
+    }
+    return {};
+}
+
 } // namespace
 
 Plates::Plates(const Body& body, const Sphere& layout)
@@ -127,93 +415,7 @@ Plates::Plates(const Body& body, const Sphere& layout)
     for (std::uint32_t point = 0; point < layout.size(); ++point) {
         light_[point] = land[point] != unclaimed ? 1 : 0;
     }
-
-    // Each stretch of boundary between neighbouring points on different plates. Which way it
-    // runs, and which side is light, are taken over a reach of the same boundary, so the kind of
-    // meeting holds along it rather than flickering with the layout's steps.
-    struct Raw {
-        std::uint32_t from;
-        std::uint32_t to;
-        DVec3 middle;
-        DVec3 across; // from `from`'s plate towards `to`'s
-    };
-    std::vector<Raw> raws;
-    std::map<std::uint32_t, std::vector<std::size_t>> by_pair;
-    for (std::uint32_t point = 0; point < layout.size(); ++point) {
-        for (const std::uint32_t other : layout.neighbors(point)) {
-            if (other < point || plates_[point] == plates_[other]) {
-                continue;
-            }
-            const DVec3 middle = glm::normalize(layout.point(point) + layout.point(other));
-            const DVec3 step = layout.point(other) - layout.point(point);
-            by_pair[pair_key(plates_[point], plates_[other])].push_back(raws.size());
-            raws.push_back({.from = point,
-                            .to = other,
-                            .middle = middle,
-                            .across = glm::normalize(step - (glm::dot(step, middle) * middle))});
-        }
-    }
-    const double reach = 2.5 * layout.spacing();
-    boundaries_.reserve(raws.size());
-    for (const auto& [key, members] : by_pair) {
-        for (const std::size_t index : members) {
-            const Raw& raw = raws[index];
-            const std::uint16_t a = plates_[raw.from];
-            const std::uint16_t b = plates_[raw.to];
-            DVec3 across{0.0};
-            double light_a = 0.0;
-            double light_b = 0.0;
-            for (const std::size_t near : members) {
-                const Raw& other = raws[near];
-                if (angle(raw.middle, other.middle) > reach) {
-                    continue;
-                }
-                const bool same_way = plates_[other.from] == a;
-                across += same_way ? other.across : -other.across;
-                light_a += light_[same_way ? other.from : other.to];
-                light_b += light_[same_way ? other.to : other.from];
-            }
-            across -= glm::dot(across, raw.middle) * raw.middle;
-            across = glm::length(across) > 0.0 ? glm::normalize(across) : raw.across;
-
-            const DVec3 relative = velocity(b, raw.middle) - velocity(a, raw.middle);
-            const double closing = -glm::dot(relative, across);
-            const double total = glm::length(relative);
-            const bool lit_a = light_a > light_b || (light_a == light_b && light_a > 0.0);
-            const bool lit_b = light_b > light_a || (light_a == light_b && light_b > 0.0);
-            const bool both_light = std::min(light_a, light_b) > 0.0;
-            const double boundary_age = age(a, b);
-
-            Boundary boundary{
-                .where = raw.middle, .a = a, .b = b, .closing = closing, .width = body.belt_width};
-            if (total <= 0.0 || std::abs(closing) < 0.35 * total) {
-                boundary.meeting = Meeting::Transform;
-            } else if (closing > 0.0) {
-                const double shortening = closing * boundary_age;
-                if (both_light) {
-                    // Crust thickens over the belt's width; past twice its own thickness it
-                    // spreads sideways instead, widening the belt into a plateau.
-                    boundary.meeting = Meeting::Collision;
-                    const double piled = body.thickening * shortening / std::sqrt(std::numbers::pi);
-                    boundary.width = std::max(body.belt_width, piled);
-                    boundary.thickened = piled * body.crust_thickness / boundary.width;
-                } else if (lit_a || lit_b) {
-                    boundary.meeting = Meeting::Subduction;
-                    boundary.over = lit_a ? a : b;
-                    const double piled =
-                        0.5 * body.thickening * shortening / std::sqrt(std::numbers::pi);
-                    boundary.thickened = std::min(piled * body.crust_thickness / body.belt_width,
-                                                  0.6 * body.crust_thickness);
-                } else {
-                    boundary.meeting = Meeting::IslandArc;
-                    boundary.over = rides_over(a, b) ? a : b;
-                }
-            } else {
-                boundary.meeting = (lit_a || lit_b) ? Meeting::Rift : Meeting::Ridge;
-            }
-            boundaries_.push_back(boundary);
-        }
-    }
+    boundaries_ = find_boundaries(*this, body);
 }
 
 double Plates::age(std::uint16_t a, std::uint16_t b) const {
@@ -228,7 +430,6 @@ bool Plates::rides_over(std::uint16_t a, std::uint16_t b) const {
 }
 
 Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
-    const Sphere& layout = plates.layout();
     const std::uint32_t size = sphere.size();
     Crust crust;
     crust.plate.resize(size);
@@ -238,159 +439,35 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
     crust.meeting.resize(size, Meeting::None);
     crust.boundary.resize(size);
     crust.floor_age.resize(size);
+    read_layout(sphere, plates, body, crust);
 
-    // Plates and light crust read off the layout through a warp, so their edges wander rather
-    // than follow the layout's triangles; coasts get finer wiggles than the layout holds.
-    std::vector<double> light_at_layout(layout.size());
-    for (std::uint32_t point = 0; point < layout.size(); ++point) {
-        light_at_layout[point] = plates.light(point) ? 1.0 : 0.0;
-    }
-    const int coarse = layout.subdivisions() + 1;
-    const int fine = std::max(coarse, sphere.subdivisions());
-    const std::vector<double> warp_east =
-        sphere_noise(sphere, hash_values(body.seed, 12), coarse, coarse + 2);
-    const std::vector<double> warp_north =
-        sphere_noise(sphere, hash_values(body.seed, 13), coarse, coarse + 2);
-    const std::vector<double> wiggle = sphere_noise(sphere, hash_values(body.seed, 11), coarse, fine);
-    const double warp = 1.5 * layout.spacing();
-    std::uint32_t start = 0;
-    for (std::uint32_t point = 0; point < size; ++point) {
-        const DVec3& here = sphere.point(point);
-        const auto [east, north] = tangents(here);
-        const DVec3 warped = glm::normalize(
-            here + (warp * ((warp_east[point] * east) + (warp_north[point] * north))));
-        const Sphere::Spot spot = layout.locate(warped, start);
-        start = spot.corners[0];
-        std::uint16_t best = plates.plate(spot.corners[0]);
-        double best_weight = -1.0;
-        for (std::size_t corner = 0; corner < 3; ++corner) {
-            const std::uint16_t plate = plates.plate(spot.corners[corner]);
-            double weight = 0.0;
-            for (std::size_t other = 0; other < 3; ++other) {
-                weight += plates.plate(spot.corners[other]) == plate
-                              ? spot.weights[static_cast<glm::length_t>(other)]
-                              : 0.0;
-            }
-            if (weight > best_weight) {
-                best_weight = weight;
-                best = plate;
-            }
-        }
-        crust.plate[point] = best;
-        crust.light[point] =
-            smoothstep(0.35, 0.65, layout.sample(light_at_layout, spot) + (0.3 * wiggle[point]));
-    }
-
-    // Each fine stretch of boundary takes after the nearest of the layout's between the same
-    // two plates; distances are kept from the fine ones.
-    const std::span<const Boundary> boundaries = plates.boundaries();
-    std::vector<Source> coarse_sources;
-    std::map<std::uint32_t, std::vector<std::uint32_t>> by_pair;
-    start = 0;
-    for (std::uint32_t index = 0; index < boundaries.size(); ++index) {
-        start = sphere.nearest(boundaries[index].where, start);
-        coarse_sources.push_back({.where = boundaries[index].where, .point = start});
-        by_pair[pair_key(boundaries[index].a, boundaries[index].b)].push_back(index);
-    }
-    const Nearest coarse_near = nearest_sources(sphere, coarse_sources);
-    const Boundary sliding{.meeting = Meeting::Transform};
-
-    std::vector<Source> sources;
-    std::vector<const Boundary*> kinds;
-    std::vector<Source> ridges;
-    std::vector<double> ridge_opening;
-    for (std::uint32_t point = 0; point < size; ++point) {
-        for (const std::uint32_t other : sphere.neighbors(point)) {
-            const std::uint16_t a = crust.plate[point];
-            const std::uint16_t b = crust.plate[other];
-            if (other < point || a == b) {
-                continue;
-            }
-            const DVec3 middle = glm::normalize(sphere.point(point) + sphere.point(other));
-            const Boundary* kind = &sliding;
-            const std::uint32_t near = coarse_near.source[point];
-            if (near != Nearest::none && pair_key(boundaries[near].a, boundaries[near].b) ==
-                                             pair_key(a, b)) {
-                kind = &boundaries[near];
-            } else if (const auto found = by_pair.find(pair_key(a, b)); found != by_pair.end()) {
-                double closest = std::numeric_limits<double>::infinity();
-                for (const std::uint32_t index : found->second) {
-                    const double distance = angle(middle, boundaries[index].where);
-                    if (distance < closest) {
-                        closest = distance;
-                        kind = &boundaries[index];
-                    }
-                }
-            }
-            sources.push_back({.where = middle, .point = point});
-            kinds.push_back(kind);
-            if (kind->meeting == Meeting::Ridge) {
-                ridges.push_back({.where = middle, .point = point});
-                ridge_opening.push_back(-kind->closing);
-            }
-        }
-    }
-
-    const Nearest nearest = nearest_sources(sphere, sources);
-    const Nearest ridge = nearest_sources(sphere, ridges);
-    const double to_metres_a_year = earth_radius / 1.0e6;
+    const KindFinder finder{sphere, plates.boundaries()};
+    const FineBoundaries fine = fine_boundaries(sphere, finder, crust);
+    const Nearest nearest = nearest_sources(sphere, fine.sources);
+    const Nearest ridge = nearest_sources(sphere, fine.ridges);
     for (std::uint32_t point = 0; point < size; ++point) {
         const double light = crust.light[point];
         double age = oldest_floor;
         if (ridge.source[point] != Nearest::none) {
-            const double half_rate = 0.5 * ridge_opening[ridge.source[point]];
+            const double half_rate = 0.5 * fine.opening[ridge.source[point]];
             age = std::min(oldest_floor, ridge.distance[point] / std::max(half_rate, 1e-9));
         }
         crust.floor_age[point] = age;
         const double floor =
             std::max(body.abyss_depth, body.ridge_depth - (body.floor_sinking * std::sqrt(age)));
-        double base = (light * body.continent_height) + ((1.0 - light) * floor);
-        double uplift = light * 1.0e-5;
-
-        if (nearest.source[point] != Nearest::none) {
-            const Boundary& kind = *kinds[nearest.source[point]];
-            const double distance = nearest.distance[point];
-            const double x = distance / body.belt_width;
-            const double closing = kind.closing * to_metres_a_year;
-            const bool riding = kind.over == crust.plate[point];
-            crust.boundary[point] = distance;
-            crust.meeting[point] = x < 3.0 ? kind.meeting : Meeting::None;
-            switch (kind.meeting) {
-            case Meeting::Collision:
-                // Thickened crust spreads over the whole widened belt; rock is pushed up hardest
-                // at the active front.
-                base += light * body.crust_rise * kind.thickened * bell(distance / kind.width);
-                uplift += body.uplift_share * closing * bell(x);
-                break;
-            case Meeting::Subduction:
-                if (riding) {
-                    base += light * ((body.arc_height * bell((x - 0.6) / 0.3)) +
-                                     (body.crust_rise * kind.thickened * bell(x / 1.2)));
-                    uplift += body.uplift_share * closing * bell((x - 0.5) / 0.6);
-                } else {
-                    base -= body.trench_depth * bell(x / 0.25);
-                }
-                break;
-            case Meeting::IslandArc:
-                if (riding) {
-                    const double profile = bell((x - 0.5) / 0.25);
-                    base += (std::abs(floor) + (0.5 * body.arc_height)) * profile;
-                    uplift += 0.5 * body.uplift_share * closing * profile;
-                } else {
-                    base -= body.trench_depth * bell(x / 0.25);
-                }
-                break;
-            case Meeting::Rift:
-                base -= light * body.rift_depth * bell(x / 0.4);
-                break;
-            case Meeting::None:
-            case Meeting::Ridge:
-            case Meeting::Transform:
-                break;
-            }
+        crust.base[point] = (light * body.continent_height) + ((1.0 - light) * floor);
+        crust.uplift[point] = light * 1.0e-5;
+        if (nearest.source[point] == Nearest::none) {
+            continue;
         }
-        crust.base[point] = base;
-        crust.uplift[point] = uplift;
+        const Boundary& kind = *fine.kinds[nearest.source[point]];
+        const double distance = nearest.distance[point];
+        crust.boundary[point] = distance;
+        crust.meeting[point] = distance < 3.0 * body.belt_width ? kind.meeting : Meeting::None;
+        const Shaped shaped =
+            shaped_by(kind, distance, light, kind.over == crust.plate[point], floor, body);
+        crust.base[point] += shaped.base;
+        crust.uplift[point] += shaped.uplift;
     }
     return crust;
 }

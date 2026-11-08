@@ -19,6 +19,7 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string>
@@ -108,6 +109,164 @@ double seconds_since(std::chrono::steady_clock::time_point from) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
 }
 
+// What every map is drawn with: where it goes, how wide, and the sphere results are held on.
+struct Canvas {
+    const Options* options = nullptr;
+    const Sphere* sphere = nullptr;
+    double step = 0.0; // radians between the samples relief is lit from
+
+    [[nodiscard]] bool draw(std::string_view name,
+                            const std::function<Rgb(const DVec3&, const Sphere::Spot&)>& colour) const {
+        std::uint32_t start = 0;
+        return write(options->out / name,
+                     hog::formation_lab::map_picture(options->width, [&](const DVec3& direction) {
+                         const Sphere::Spot spot = sphere->locate(direction, start);
+                         start = spot.corners[0];
+                         return colour(direction, spot);
+                     }));
+    }
+
+    [[nodiscard]] double light(std::span<const double> heights, const DVec3& direction,
+                               std::uint32_t& start) const {
+        return hog::formation_lab::shade(*sphere, heights, direction, options->body.radius, step,
+                                         1.0, start);
+    }
+};
+
+int river_width(double share) {
+    if (share > 0.1) {
+        return 3;
+    }
+    return share > 0.02 ? 2 : 1;
+}
+
+bool draw_crust(const Canvas& canvas, const hog::formation::Crust& crust) {
+    const Sphere& sphere = *canvas.sphere;
+    bool ok = canvas.draw("plates.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (crust.meeting[near] != hog::formation::Meeting::None &&
+            crust.boundary[near] < 1.2 * sphere.spacing()) {
+            return hog::formation_lab::meeting_colour(crust.meeting[near]);
+        }
+        const Rgb plate = hog::formation_lab::plate_colour(crust.plate[near]);
+        return hog::formation_lab::scaled(plate, 0.55 + (0.5 * crust.light[near]));
+    });
+    std::uint32_t lit = 0;
+    ok = canvas.draw("base.png",
+                     [&](const DVec3& direction, const Sphere::Spot& spot) {
+                         const double height = sphere.sample(crust.base, spot);
+                         const double light = canvas.light(crust.base, direction, lit);
+                         return hog::formation_lab::scaled(
+                             hog::formation_lab::height_colour(height), height < 0.0 ? 1.0 : light);
+                     }) &&
+         ok;
+    const double most = std::max(1e-12, *std::ranges::max_element(crust.uplift));
+    static constexpr std::array<Rgb, 5> heat{hog::formation_lab::rgb(20, 20, 30),
+                                             hog::formation_lab::rgb(60, 40, 120),
+                                             hog::formation_lab::rgb(180, 50, 90),
+                                             hog::formation_lab::rgb(240, 140, 40),
+                                             hog::formation_lab::rgb(250, 240, 160)};
+    return canvas.draw("uplift.png",
+                       [&](const DVec3&, const Sphere::Spot& spot) {
+                           const double share = sphere.sample(crust.uplift, spot) / most;
+                           return hog::formation_lab::ramp(std::sqrt(std::max(share, 0.0)), heat);
+                       }) &&
+           ok;
+}
+
+bool draw_climate(const Canvas& canvas, const hog::formation::Crust& crust,
+                  const hog::formation::Climate& climate) {
+    const Sphere& sphere = *canvas.sphere;
+    static constexpr std::array<Rgb, 6> cold_to_hot{
+        hog::formation_lab::rgb(40, 40, 140),  hog::formation_lab::rgb(80, 140, 220),
+        hog::formation_lab::rgb(220, 230, 230), hog::formation_lab::rgb(240, 200, 80),
+        hog::formation_lab::rgb(220, 90, 40),  hog::formation_lab::rgb(120, 20, 20)};
+    const bool ok = canvas.draw("temperature.png", [&](const DVec3&, const Sphere::Spot& spot) {
+        const double celsius = sphere.sample(climate.temperature, spot);
+        const Rgb colour = hog::formation_lab::ramp((celsius + 40.0) / 80.0, cold_to_hot);
+        const bool sea = sphere.sample(crust.base, spot) < 0.0;
+        return sea ? hog::formation_lab::scaled(colour, 0.7) : colour;
+    });
+    static constexpr std::array<Rgb, 5> dry_to_wet{
+        hog::formation_lab::rgb(150, 90, 40), hog::formation_lab::rgb(220, 200, 120),
+        hog::formation_lab::rgb(120, 190, 90), hog::formation_lab::rgb(30, 120, 70),
+        hog::formation_lab::rgb(20, 60, 140)};
+    return canvas.draw("rain.png",
+                       [&](const DVec3&, const Sphere::Spot& spot) {
+                           const double metres = sphere.sample(climate.rain, spot);
+                           const Rgb colour = hog::formation_lab::ramp(
+                               std::sqrt(std::max(metres, 0.0) / 3.0), dry_to_wet);
+                           const bool sea = sphere.sample(crust.base, spot) < 0.0;
+                           return sea ? hog::formation_lab::scaled(colour, 0.45) : colour;
+                       }) &&
+           ok;
+}
+
+bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
+                 const hog::formation::Rivers& rivers) {
+    const Sphere& sphere = *canvas.sphere;
+    std::uint32_t start = 0;
+    std::uint32_t lit = 0;
+    hog::Image map =
+        hog::formation_lab::map_picture(canvas.options->width, [&](const DVec3& direction) {
+            const Sphere::Spot spot = sphere.locate(direction, start);
+            start = spot.corners[0];
+            const double height = sphere.sample(rivers.height, spot);
+            if (height < 0.0) {
+                return hog::formation_lab::height_colour(height);
+            }
+            return hog::formation_lab::scaled(hog::formation_lab::height_colour(height),
+                                              canvas.light(rivers.height, direction, lit));
+        });
+    // Each river drawn from a point to where its water goes, wider as more passes.
+    double biggest = 1.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.base[point] >= 0.0) {
+            biggest = std::max(biggest, rivers.discharge[point]);
+        }
+    }
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double share = rivers.discharge[point] / biggest;
+        if (crust.base[point] >= 0.0 && share >= 0.003) {
+            hog::formation_lab::draw_line(map, sphere.point(point),
+                                          sphere.point(rivers.receiver[point]),
+                                          hog::formation_lab::rgb(40, 90, 200), river_width(share));
+        }
+    }
+    return write(canvas.options->out / "height.png", map);
+}
+
+bool draw_soil(const Canvas& canvas, const hog::formation::Rivers& rivers,
+               const hog::formation::Soil& soil) {
+    const Sphere& sphere = *canvas.sphere;
+    static constexpr std::array<Rgb, 5> bare_to_deep{
+        hog::formation_lab::rgb(150, 150, 150), hog::formation_lab::rgb(210, 190, 140),
+        hog::formation_lab::rgb(170, 120, 70), hog::formation_lab::rgb(110, 70, 40),
+        hog::formation_lab::rgb(60, 35, 20)};
+    std::uint32_t lit = 0;
+    return canvas.draw("soil.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        if (sphere.sample(rivers.height, spot) < 0.0) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        const double depth = sphere.sample(soil.depth, spot);
+        return hog::formation_lab::scaled(hog::formation_lab::ramp(depth / 2.5, bare_to_deep),
+                                          canvas.light(rivers.height, direction, lit));
+    });
+}
+
+double soiled_share(const Sphere& sphere, const hog::formation::Crust& crust,
+                    const hog::formation::Soil& soil) {
+    double soiled = 0.0;
+    double land = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.base[point] >= 0.0) {
+            land += sphere.area(point);
+            soiled += soil.depth[point] > 0.0 ? sphere.area(point) : 0.0;
+        }
+    }
+    return soiled / std::max(land, 1e-12);
+}
+
 int run(const Options& options) {
     const hog::formation::Body& body = options.body;
     auto at = std::chrono::steady_clock::now();
@@ -115,155 +274,33 @@ int run(const Options& options) {
     const Sphere sphere{options.detail, body.seed + 1};
     std::cout << std::format("spheres: {} and {} points in {:.2f} s\n", layout.size(),
                              sphere.size(), seconds_since(at));
+    std::filesystem::create_directories(options.out);
+    const Canvas canvas{
+        .options = &options, .sphere = &sphere, .step = std::numbers::pi / (options.width / 2.0)};
+
     at = std::chrono::steady_clock::now();
     const hog::formation::Plates plates{body, layout};
     const hog::formation::Crust crust = hog::formation::crust_on(sphere, plates, body);
     std::cout << std::format("plates and crust in {:.2f} s\n", seconds_since(at));
-
-    std::filesystem::create_directories(options.out);
-    const double step = 3.14159265358979 / (options.width / 2.0);
-    bool ok = true;
-
-    std::uint32_t start = 0;
-    ok = write(options.out / "plates.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   start = sphere.nearest(direction, start);
-                   if (crust.meeting[start] != hog::formation::Meeting::None &&
-                       crust.boundary[start] < 1.2 * sphere.spacing()) {
-                       return hog::formation_lab::meeting_colour(crust.meeting[start]);
-                   }
-                   const Rgb plate = hog::formation_lab::plate_colour(crust.plate[start]);
-                   return hog::formation_lab::scaled(plate, 0.55 + (0.5 * crust.light[start]));
-               })) &&
-         ok;
-
-    std::uint32_t lit = 0;
-    ok = write(options.out / "base.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   const Sphere::Spot spot = sphere.locate(direction, start);
-                   start = spot.corners[0];
-                   const double height = sphere.sample(crust.base, spot);
-                   const double light = hog::formation_lab::shade(
-                       sphere, crust.base, direction, body.radius, step, 1.0, lit);
-                   return hog::formation_lab::scaled(hog::formation_lab::height_colour(height),
-                                                     height < 0.0 ? 1.0 : light);
-               })) &&
-         ok;
-
-    const double most = std::max(1e-12, *std::ranges::max_element(crust.uplift));
-    static constexpr std::array<Rgb, 5> heat{
-        {{20, 20, 30}, {60, 40, 120}, {180, 50, 90}, {240, 140, 40}, {250, 240, 160}}};
-    ok = write(options.out / "uplift.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   const Sphere::Spot spot = sphere.locate(direction, start);
-                   start = spot.corners[0];
-                   const double share = sphere.sample(crust.uplift, spot) / most;
-                   return hog::formation_lab::ramp(std::sqrt(std::max(share, 0.0)), heat);
-               })) &&
-         ok;
+    bool ok = draw_crust(canvas, crust);
 
     at = std::chrono::steady_clock::now();
-    const hog::formation::Climate climate =
-        hog::formation::climate_on(sphere, crust.base, body);
+    const hog::formation::Climate climate = hog::formation::climate_on(sphere, crust.base, body);
     std::cout << std::format("climate in {:.2f} s\n", seconds_since(at));
-    static constexpr std::array<Rgb, 6> cold_to_hot{{{40, 40, 140},
-                                                     {80, 140, 220},
-                                                     {220, 230, 230},
-                                                     {240, 200, 80},
-                                                     {220, 90, 40},
-                                                     {120, 20, 20}}};
-    ok = write(options.out / "temperature.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   const Sphere::Spot spot = sphere.locate(direction, start);
-                   start = spot.corners[0];
-                   const double celsius = sphere.sample(climate.temperature, spot);
-                   const Rgb colour = hog::formation_lab::ramp((celsius + 40.0) / 80.0, cold_to_hot);
-                   return sphere.sample(crust.base, spot) < 0.0
-                              ? hog::formation_lab::scaled(colour, 0.7)
-                              : colour;
-               })) &&
-         ok;
-    static constexpr std::array<Rgb, 5> dry_to_wet{
-        {{150, 90, 40}, {220, 200, 120}, {120, 190, 90}, {30, 120, 70}, {20, 60, 140}}};
-    ok = write(options.out / "rain.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   const Sphere::Spot spot = sphere.locate(direction, start);
-                   start = spot.corners[0];
-                   const double metres = sphere.sample(climate.rain, spot);
-                   const Rgb colour =
-                       hog::formation_lab::ramp(std::sqrt(std::max(metres, 0.0) / 3.0), dry_to_wet);
-                   return sphere.sample(crust.base, spot) < 0.0
-                              ? hog::formation_lab::scaled(colour, 0.45)
-                              : colour;
-               })) &&
-         ok;
+    ok = draw_climate(canvas, crust, climate) && ok;
 
     at = std::chrono::steady_clock::now();
-    const hog::formation::Rivers rivers =
-        hog::formation::rivers_on(sphere, crust, climate, body);
-    const double top = *std::ranges::max_element(rivers.height);
+    const hog::formation::Rivers rivers = hog::formation::rivers_on(sphere, crust, climate, body);
     std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m\n",
-                             seconds_since(at), rivers.rounds, top);
-    // Rivers drawn where more water passes than a share of the biggest river's.
-    double biggest = 0.0;
-    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        if (crust.base[point] >= 0.0) {
-            biggest = std::max(biggest, rivers.discharge[point]);
-        }
-    }
-    hog::Image height_map =
-        hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-            const Sphere::Spot spot = sphere.locate(direction, start);
-            start = spot.corners[0];
-            const double height = sphere.sample(rivers.height, spot);
-            if (height < 0.0) {
-                return hog::formation_lab::height_colour(height);
-            }
-            const double light = hog::formation_lab::shade(sphere, rivers.height, direction,
-                                                           body.radius, step, 1.0, lit);
-            return hog::formation_lab::scaled(hog::formation_lab::height_colour(height), light);
-        });
-    // Each river drawn from a point to where its water goes, wider as more passes.
-    const Rgb river{40, 90, 200};
-    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        const double share = rivers.discharge[point] / std::max(biggest, 1.0);
-        if (crust.base[point] < 0.0 || share < 0.003) {
-            continue;
-        }
-        const int width = share > 0.1 ? 3 : (share > 0.02 ? 2 : 1);
-        hog::formation_lab::draw_line(height_map, sphere.point(point),
-                                      sphere.point(rivers.receiver[point]), river, width);
-    }
-    ok = write(options.out / "height.png", height_map) && ok;
+                             seconds_since(at), rivers.rounds,
+                             *std::ranges::max_element(rivers.height));
+    ok = draw_rivers(canvas, crust, rivers) && ok;
 
     const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
-    double soiled = 0.0;
-    double land_area = 0.0;
-    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        if (crust.base[point] >= 0.0) {
-            land_area += sphere.area(point);
-            soiled += soil.depth[point] > 0.0 ? sphere.area(point) : 0.0;
-        }
-    }
     std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",
-                             100.0 * soiled / std::max(land_area, 1e-12),
+                             100.0 * soiled_share(sphere, crust, soil),
                              *std::ranges::max_element(soil.depth));
-    static constexpr std::array<Rgb, 5> bare_to_deep{
-        {{150, 150, 150}, {210, 190, 140}, {170, 120, 70}, {110, 70, 40}, {60, 35, 20}}};
-    ok = write(options.out / "soil.png",
-               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
-                   const Sphere::Spot spot = sphere.locate(direction, start);
-                   start = spot.corners[0];
-                   if (sphere.sample(rivers.height, spot) < 0.0) {
-                       return Rgb{20, 30, 60};
-                   }
-                   const double depth = sphere.sample(soil.depth, spot);
-                   const double light = hog::formation_lab::shade(sphere, rivers.height, direction,
-                                                                  body.radius, step, 1.0, lit);
-                   return hog::formation_lab::scaled(
-                       hog::formation_lab::ramp(depth / 2.5, bare_to_deep), light);
-               })) &&
-         ok;
+    ok = draw_soil(canvas, rivers, soil) && ok;
     return ok ? 0 : 1;
 }
 

@@ -19,7 +19,7 @@ TEST_CASE("a map is twice as wide as high, a pixel's colour each", "[formation][
     int calls = 0;
     const hog::Image image = map_picture(64, [&](const DVec3&) {
         ++calls;
-        return Rgb{1, 2, 3};
+        return hog::formation_lab::rgb(1, 2, 3);
     });
     CHECK(image.width == 64);
     CHECK(image.height == 32);
@@ -37,7 +37,9 @@ TEST_CASE("a map's top row looks north and its middle along the equator", "[form
 }
 
 TEST_CASE("a ramp runs from its first stop to its last", "[formation][pictures]") {
-    const std::array<Rgb, 3> stops{{{0, 0, 0}, {100, 100, 100}, {200, 0, 50}}};
+    const std::array<Rgb, 3> stops{hog::formation_lab::rgb(0, 0, 0),
+                                   hog::formation_lab::rgb(100, 100, 100),
+                                   hog::formation_lab::rgb(200, 0, 50)};
     CHECK(ramp(0.0, stops).r == 0);
     CHECK(ramp(0.5, stops).g == 100);
     CHECK(ramp(1.0, stops).r == 200);

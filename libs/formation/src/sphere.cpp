@@ -20,6 +20,16 @@ double angle_between(const DVec3& a, const DVec3& b) noexcept {
     return maths::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
 
+glm::length_t smallest_of(const DVec3& values) noexcept {
+    glm::length_t smallest = 0;
+    for (glm::length_t at = 1; at < 3; ++at) {
+        if (values[at] < values[smallest]) {
+            smallest = at;
+        }
+    }
+    return smallest;
+}
+
 // Uniform in [0, 1) from the top 53 bits.
 double unit(std::uint64_t bits) noexcept {
     return static_cast<double>(bits >> 11U) * 0x1.0p-53;
@@ -188,8 +198,7 @@ Sphere::Spot Sphere::locate(const DVec3& direction, std::uint32_t start) const {
     }
     DVec3 volumes = volumes_in(current);
     for (std::size_t step = 0; step < points_.size() && worst_of(volumes) < 0.0; ++step) {
-        const glm::length_t beyond =
-            volumes.x <= volumes.y ? (volumes.x <= volumes.z ? 0 : 2) : (volumes.y <= volumes.z ? 1 : 2);
+        const glm::length_t beyond = smallest_of(volumes);
         const Triangle& triangle = triangles_[current];
         const std::uint32_t from = triangle[static_cast<std::size_t>((beyond + 1) % 3)];
         const std::uint32_t to = triangle[static_cast<std::size_t>((beyond + 2) % 3)];
