@@ -27,11 +27,17 @@ namespace hog::client {
 
 // The tiles the server sends, held as they come and meshed on the jobs, for the scene to draw.
 // A tile is drawn until the finer tiles sent after it are meshed all through it, and finer tiles
-// until one sent over them is meshed, so the ground never shows a hole between levels.
+// until one sent over them is meshed, so the ground never shows a hole between levels. What's
+// drawn is worked out only about what's changed: a tile come, or meshed.
 class TileMeshes {
 public:
     // The jobs must outlive it.
     TileMeshes(const globe::Planet& planet, const globe::Layers& layers, jobs::JobSystem& jobs);
+    TileMeshes(const TileMeshes&) = delete;
+    TileMeshes& operator=(const TileMeshes&) = delete;
+    TileMeshes(TileMeshes&&) = delete;
+    TileMeshes& operator=(TileMeshes&&) = delete;
+    ~TileMeshes();
 
     // Holds the tile, to be meshed at the next collect; fails on bytes that aren't a tile.
     Result<void> take(const protocol::SentTile& sent);
@@ -45,7 +51,8 @@ public:
     }
     [[nodiscard]] bool holds(globe::TileKey key) const { return held_.contains(key); }
     [[nodiscard]] bool drawn(globe::TileKey key) const;
-    // Metres from `eye` within which all that's held is drawn, up to `metres`.
+    // Metres from `eye` within which the ground is drawn with no hole in it, up to `metres`; all
+    // round the planet once the whole of it is.
     [[nodiscard]] double covered(DVec3 eye, double metres) const;
 
 private:
@@ -56,38 +63,61 @@ private:
         std::shared_ptr<const terrain::BlockMesh> water;
         bool meshed = false;
         bool shown = false;
+        bool stale = false; // a tile sent over it since, which it's drawn for till that's meshed
     };
     struct Work {
         globe::TileKey key;
         std::uint64_t arrived = 0;
         std::unique_ptr<jobs::Async<ColumnDrawn>> job;
     };
+    // Coarser first, so a tile's decided after those over it.
+    struct CoarseFirst {
+        bool operator()(globe::TileKey a, globe::TileKey b) const noexcept {
+            return a.level != b.level ? a.level > b.level : a < b;
+        }
+    };
 
     // Meshes the tile on the jobs, the tiles beside it as held now.
     void mesh(globe::TileKey key);
     // Takes the meshing done in, waiting for it all if `wait`.
     void gather(bool wait);
-    // Each held tile's meshed cover: the oldest arrival of finer tiles meshed all through it,
-    // none where they aren't.
-    [[nodiscard]] std::map<globe::TileKey, std::uint64_t> covers() const;
-    // The oldest cover of the cube's children, none where any isn't covered.
-    [[nodiscard]] std::uint64_t
-    finer_cover(globe::TileKey key, const std::map<globe::TileKey, std::uint64_t>& cover) const;
-    // Whether a tile held over `key` is meshed and came after it.
+    // The tiles held under `key`.
+    [[nodiscard]] std::vector<globe::TileKey> under(globe::TileKey key) const;
+    // Whether every child of the cube is filled: drawn right through by fresh meshed tiles.
+    [[nodiscard]] bool children_filled(globe::TileKey key) const;
+    // The tile is filled, and so is each cube over it all of whose children now are.
+    void fill(globe::TileKey key);
+    // The cube isn't filled, nor any over it that was filled only through it.
+    void unfill(globe::TileKey key);
+    // Whether a tile held over `key` is drawn, or fresh and meshed, so drawn in its place.
+    [[nodiscard]] bool under_drawn(globe::TileKey key) const;
+    // Whether a tile held over `key`, fresh, meshed and sent after it, has replaced it.
     [[nodiscard]] bool replaced(globe::TileKey key, const Held& held) const;
-    // Whether a tile held over `key` is meshed: it's drawn instead.
-    [[nodiscard]] bool under_meshed(globe::TileKey key) const;
-    [[nodiscard]] bool in_shell(globe::TileKey key) const noexcept;
+    // Works out again whether the tile is dropped or drawn, and those under it where that
+    // changes what they're drawn for.
+    void decide(globe::TileKey key);
     void drop(globe::TileKey key);
+    [[nodiscard]] bool in_shell(globe::TileKey key) const noexcept;
+    // The face and the place on its level in Morton order, so the cubes under one are a run.
+    [[nodiscard]] static std::uint64_t code(globe::TileKey key) noexcept;
 
     globe::Layers layers_;
     std::optional<double> sea_;
     jobs::JobSystem* jobs_;
     std::map<globe::TileKey, Held> held_;
-    std::set<globe::TileKey> waiting_; // to mesh at the next collect
+    std::vector<std::map<std::uint64_t, globe::TileKey>> by_level_; // held, by code
+    std::set<globe::TileKey> filled_;
+    std::vector<globe::TileKey> roots_;
+    std::set<globe::TileKey> waiting_;              // to mesh at the next collect
+    std::set<globe::TileKey, CoarseFirst> touched_; // to decide at the next collect
+    std::set<globe::TileKey> bare_;                 // held with nothing drawn for it yet
     std::vector<Work> working_;
+    // Meshing no longer wanted, kept till done so it's never waited on.
+    std::vector<std::unique_ptr<jobs::Async<ColumnDrawn>>> abandoned_;
     std::uint64_t taken_ = 0;
-    GroundChanges changes_;
+    // What's to be drawn under each key since last collected, the last word on each: shown, or
+    // gone where none.
+    std::map<std::uint64_t, std::optional<GroundChanges::Shown>> changes_;
 };
 
 } // namespace hog::client
