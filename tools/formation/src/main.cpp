@@ -757,7 +757,10 @@ int run(const Options& options) {
     ok = draw_climate(canvas, crust, climate) && ok;
 
     at = std::chrono::steady_clock::now();
-    const hog::formation::Rivers worn = hog::formation::rivers_on(sphere, crust, climate, body);
+    const hog::formation::Bedrock bedrock = hog::formation::bedrock_on(sphere, crust, body);
+    const hog::formation::Rivers worn = hog::formation::rivers_on(
+        sphere, crust, climate, hog::formation::standing_strength(sphere, crust, bedrock, body),
+        body);
     std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m\n",
                              seconds_since(at), worn.rounds,
                              *std::ranges::max_element(worn.height));
@@ -767,7 +770,6 @@ int run(const Options& options) {
     report_ice(sphere, crust, rivers, ice, seconds_since(at));
     ok = draw_ice(canvas, crust, rivers, ice) && ok;
 
-    const hog::formation::Bedrock bedrock = hog::formation::bedrock_on(sphere, crust, body);
     const hog::formation::Outcrop outcrop =
         hog::formation::outcrop_on(sphere, crust, bedrock, rivers, body);
     report_bedrock(sphere, rivers, bedrock, outcrop);

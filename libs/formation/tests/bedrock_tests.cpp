@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 
 using Catch::Matchers::WithinRel;
 using hog::formation::Bedrock;
@@ -22,7 +23,9 @@ using hog::formation::Plates;
 using hog::formation::Rivers;
 using hog::formation::rivers_on;
 using hog::formation::Rock;
+using hog::formation::rock_strength;
 using hog::formation::Sphere;
+using hog::formation::standing_strength;
 
 namespace {
 
@@ -109,6 +112,21 @@ TEST_CASE("lava lies behind trenches, along rifts and where great floods spread"
     }
     const Made with;
     CHECK(total(with.bedrock.lava) > total(without.bedrock.lava));
+}
+
+TEST_CASE("rock that rises fast stands as strong as what wear lays bare", "[formation][bedrock]") {
+    const Made made;
+    const std::vector<double> strength =
+        standing_strength(made.sphere, made.crust, made.bedrock, made.body);
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        CHECK(strength[point] >= 0.0);
+        CHECK(strength[point] <= 1.0);
+        const double eroded = made.crust.uplift[point] * made.body.exhumed_years;
+        if (made.crust.light[point] >= 0.5 &&
+            eroded > made.bedrock.lava[point] + made.bedrock.cover[point]) {
+            CHECK(strength[point] == rock_strength(Rock::Basement, 0.0, 0.0));
+        }
+    }
 }
 
 TEST_CASE("wear strips lava, then layered rock, down to the basement", "[formation][bedrock]") {

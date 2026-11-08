@@ -6,6 +6,7 @@
 #include <hog/formation/sphere.hpp>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace hog::formation {
@@ -28,5 +29,9 @@ struct Rivers {
 
 [[nodiscard]] Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
                                const Body& body);
+// The same over rock of `strength` at each point, 0 to 1: strong rock wears slower and stands
+// steeper, soft rock faster; empty is rock of middling strength everywhere.
+[[nodiscard]] Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
+                               std::span<const double> strength, const Body& body);
 
 } // namespace hog::formation

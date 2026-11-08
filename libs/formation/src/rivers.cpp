@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <numbers>
 #include <queue>
 #include <ranges>
 #include <span>
@@ -194,6 +195,11 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
 
 Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
                  const Body& body) {
+    return rivers_on(sphere, crust, climate, {}, body);
+}
+
+Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
+                 std::span<const double> strength, const Body& body) {
     const std::uint32_t size = sphere.size();
     Rivers rivers;
     rivers.height = crust.base;
@@ -215,8 +221,12 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
         // Plants take hold where it's wet and warm enough, and hold the ground against wear.
         rivers.cover[point] = smoothstep(0.15, 1.0, climate.rain[point]) *
                               smoothstep(-5.0, 5.0, climate.temperature[point]);
-        ground.erodibility[point] =
-            body.erodibility * (1.0 - (body.cover_holding * rivers.cover[point]));
+        // Rock of middling strength wears as `erodibility` says; the strongest and softest a power
+        // of ten of `rock_hardness` apart either side.
+        const double strong = point < strength.size() ? strength[point] - 0.5 : 0.0;
+        ground.erodibility[point] = body.erodibility *
+                                    (1.0 - (body.cover_holding * rivers.cover[point])) *
+                                    maths::exp(-std::numbers::ln10 * body.rock_hardness * strong);
     }
     flood_from_sea(ground, rivers.receiver);
 

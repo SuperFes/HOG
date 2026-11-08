@@ -45,4 +45,14 @@ inline constexpr double folded = 0.5;
 [[nodiscard]] Outcrop outcrop_on(const Sphere& sphere, const Crust& crust, const Bedrock& bedrock,
                                  const Rivers& rivers, const Body& body);
 
+// How well rock stands in steep faces and against wear, 0 to 1: crystalline basement best, lava
+// and sea-floor basalt nearly as well, folded beds less, flat beds as well as their hard beds and
+// limestone let them.
+[[nodiscard]] double rock_strength(Rock rock, double layering, double soluble);
+
+// The strength of the rock wear brings to the surface, before the rivers are known: where land has
+// come to balance, it wears down as fast as it's pushed up.
+[[nodiscard]] std::vector<double> standing_strength(const Sphere& sphere, const Crust& crust,
+                                                    const Bedrock& bedrock, const Body& body);
+
 } // namespace hog::formation
