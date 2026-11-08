@@ -237,3 +237,36 @@ TEST_CASE("a tile column held coarser meshes as its coarser voxels", "[globe][vo
     CHECK(hog::globe::mesh_tile_column(world, {.face = 2, .i = 30 * tile, .j = 4 * tile}, 0)
               .vertices.empty());
 }
+
+TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where there are any",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const VoxelTree rock = flat().tiles.front().second;
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
+    const VoxelMesh mesh = hog::globe::mesh_tile(layers, key, rock);
+    CHECK(quads(mesh) == std::size_t{tile} * tile);
+    const double top = layers.bottom(static_cast<int>(ground) + 1);
+    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
+        const hog::DVec3 at = mesh.origin + hog::DVec3{vertex.position};
+        CHECK(std::abs(glm::length(at) - top) < 0.01);
+        CHECK(glm::dot(hog::DVec3{vertex.normal}, glm::normalize(at)) > 0.99);
+    }
+    CHECK(hog::globe::mesh_tile(layers, key, VoxelTree{Volume::tile_side}).indices.empty());
+
+    // Open air beside it across: its rock shows its side there.
+    const VoxelTree air{Volume::tile_side};
+    const auto beside = [&](hog::globe::TileKey at) -> const VoxelTree* {
+        return at.i == key.i + 1 && at.j == key.j && at.k == key.k ? &air : nullptr;
+    };
+    CHECK(quads(hog::globe::mesh_tile(layers, key, rock, beside)) ==
+          quads(mesh) + (std::size_t{tile} * (ground + 1)));
+
+    // Coarser, each voxel stands for a cube of them as wide.
+    const hog::globe::TileKey coarse{.level = 2, .face = 2, .i = 2, .j = 2, .k = 0};
+    const VoxelMesh wide = hog::globe::mesh_tile(layers, coarse, rock);
+    CHECK(quads(wide) == std::size_t{tile} * tile);
+    const double coarse_top = layers.bottom((static_cast<int>(ground) + 1) * 4);
+    for (const hog::globe::VoxelVertex& vertex : wide.vertices) {
+        CHECK(std::abs(glm::length(wide.origin + hog::DVec3{vertex.position}) - coarse_top) < 0.01);
+    }
+}

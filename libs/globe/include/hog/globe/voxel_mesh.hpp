@@ -3,9 +3,11 @@
 #include <hog/core/math.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/voxel.hpp>
+#include <hog/globe/voxel_tree.hpp>
 #include <hog/globe/world.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace hog::globe {
@@ -32,5 +34,14 @@ struct VoxelMesh {
 // the column's floor, under which all is rock, up through its tiles; nothing where the world
 // holds none of it.
 [[nodiscard]] VoxelMesh mesh_tile_column(const World& world, Site corner, int level);
+
+// The tile at a key of its level, where there's one.
+using TileAt = std::function<const VoxelTree*(TileKey)>;
+
+// The faces of the tile at `key`, its voxels `tile`, drawn as mesh_tile_column draws a column's.
+// Past its sides the tiles of its level on its face are read from `beside` where it has them;
+// elsewhere the tile is taken to go on as its edge does.
+[[nodiscard]] VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
+                                  const TileAt& beside = {});
 
 } // namespace hog::globe
