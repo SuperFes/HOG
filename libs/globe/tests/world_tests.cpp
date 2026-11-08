@@ -3,6 +3,7 @@
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/held_tiles.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
@@ -196,9 +198,9 @@ TEST_CASE("a ball given as a shape digs and builds as a ball does", "[globe][wor
     hog::globe::dig(ball_world, centre, 3.0);
     hog::globe::dig_shape(shape_world, centre, 3.0, 3.0, ball);
     hog::globe::build(ball_world, centre, 2.0, Material::Granite);
-    hog::globe::build_shape(shape_world, centre, 2.0, 2.0, [&](DVec3 at) {
-        return glm::length(at - centre) - 2.0;
-    }, Material::Granite);
+    hog::globe::build_shape(
+        shape_world, centre, 2.0, 2.0, [&](DVec3 at) { return glm::length(at - centre) - 2.0; },
+        Material::Granite);
     CHECK(shape_world.changed_since(0) == ball_world.changed_since(0));
     const hog::globe::Cell cell = hog::globe::cell_under(direction, earth().layers().level);
     for (int layer = -6; layer <= 6; ++layer) {
@@ -445,12 +447,11 @@ TEST_CASE("the ground's top is read from the voxels, as generated, dug or built"
     const double thickness = earth().layers().thickness;
     const double lod = hog::globe::voxel_lod(earth());
     for (std::uint64_t k = 0; k < 8; ++k) {
-        const DVec3 direction = hog::globe::center(
-            hog::globe::cell_under(somewhere(k + 50), earth().layers().level));
+        const DVec3 direction =
+            hog::globe::center(hog::globe::cell_under(somewhere(k + 50), earth().layers().level));
         made.cover(direction, 1);
         const double generated = hog::globe::ground_below(earth(), direction, lod).value_or(0.0);
-        CHECK(std::abs(hog::globe::top_of(world, direction).value_or(0.0) - generated) <
-              thickness);
+        CHECK(std::abs(hog::globe::top_of(world, direction).value_or(0.0) - generated) < thickness);
     }
 
     const DVec3 direction =
@@ -527,9 +528,59 @@ TEST_CASE("a world of voxels alone reads its volume as one made over the generat
     REQUIRE(ground);
     CHECK(hog::globe::top_of(alone, up) == ground);
     const hog::globe::Cell cell = hog::globe::cell_under(up, earth().layers().level);
-    const Site site{.face = cell.face,
-                    .i = cell.i,
-                    .j = cell.j,
-                    .layer = static_cast<std::uint32_t>(earth().layers().layer_at(ground.value_or(0.0) - 3.0))};
+    const Site site{
+        .face = cell.face,
+        .i = cell.i,
+        .j = cell.j,
+        .layer = static_cast<std::uint32_t>(earth().layers().layer_at(ground.value_or(0.0) - 3.0))};
     CHECK(alone.at(site) == made.world().at(site));
+}
+
+TEST_CASE("a world of tiles held alone reads them as the world they were made from",
+          "[globe][world]") {
+    MadeWorld made{earth()};
+    const DVec3 up = glm::normalize(DVec3{-0.5, 0.2, 0.84});
+    made.cover(up);
+    const hog::globe::Cell cell = hog::globe::cell_under(up, earth().layers().level);
+    const Site base{.face = cell.face, .i = cell.i, .j = cell.j};
+    const std::optional<hog::globe::TileColumn> column = made.volume().column(base);
+    REQUIRE(column);
+    hog::globe::HeldTiles held;
+    constexpr std::uint32_t side = hog::globe::Volume::tile_side;
+    for (const auto& [k, tree] : column->tiles) {
+        held.put({.level = 0, .face = cell.face, .i = cell.i / side, .j = cell.j / side, .k = k},
+                 std::make_shared<const hog::globe::VoxelTree>(tree));
+    }
+    hog::globe::Volume empty;
+    World alone{earth().planet(), earth().layers(), empty};
+    CHECK_FALSE(hog::globe::top_of(alone, up));
+    alone.read_tiles(&held);
+    const std::optional<double> ground = hog::globe::top_of(made.world(), up);
+    REQUIRE(ground);
+    CHECK(hog::globe::top_of(alone, up) == ground);
+    for (const double under : {0.5, 3.0, 12.0}) {
+        const Site site{.face = cell.face,
+                        .i = cell.i,
+                        .j = cell.j,
+                        .layer =
+                            static_cast<std::uint32_t>(earth().layers().layer_at(*ground - under))};
+        CHECK(alone.at(site) == made.world().at(site));
+    }
+    const hog::globe::TileKey key{.level = 0,
+                                  .face = cell.face,
+                                  .i = cell.i / side,
+                                  .j = cell.j / side,
+                                  .k = column->tiles.back().first};
+    CHECK(alone.tile(key) == held.tile(key));
+    CHECK(alone.tile_over(key)->key == key);
+
+    // Held only coarser, a voxel is the coarse one standing for it.
+    const hog::globe::TileKey coarse{.level = 3, .face = cell.face, .i = 0, .j = 0, .k = 0};
+    held.put(coarse,
+             std::make_shared<const hog::globe::VoxelTree>(
+                 side, hog::globe::Cube{.solid = Material::Basalt, .solid_amount = Voxel::full}));
+    const hog::globe::TileKey under{.level = 0, .face = cell.face, .i = 2, .j = 5, .k = 1};
+    CHECK(alone.tile_over(under)->key == coarse);
+    CHECK(alone.at({.face = cell.face, .i = 2 * side, .j = 5 * side, .layer = side}).solid ==
+          Material::Basalt);
 }

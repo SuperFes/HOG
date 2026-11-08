@@ -102,6 +102,10 @@ void World::column(Site base, int bottom, int count, int apart, std::span<Voxel>
             lowest = coarse->column.floor;
         }
     }
+    if (!lowest && coarse == nullptr && tiles_ != nullptr) {
+        held_column(base, up, bottom, count, apart, out, stride);
+        return;
+    }
     const std::uint32_t shift = coarse != nullptr ? coarse->level : 0;
     const std::uint32_t across = side >> shift;
     const auto x = static_cast<int>((base.i % side) >> shift);
@@ -136,6 +140,60 @@ void World::column(Site base, int bottom, int count, int apart, std::span<Voxel>
         out[static_cast<std::size_t>(step) * stride] =
             voxel_of(cube, place_temperature(planet, up, layers.middle(static_cast<int>(layer))));
     }
+}
+
+void World::held_column(Site base, DVec3 up, int bottom, int count, int apart, std::span<Voxel> out,
+                        std::size_t stride) const {
+    constexpr auto side = static_cast<std::int64_t>(Volume::tile_side);
+    std::optional<HeldTile> held;
+    std::int64_t from = 0; // the layers the tile read spans
+    std::int64_t to = 0;
+    for (int step = 0; step < count; ++step) {
+        const auto layer = static_cast<std::uint32_t>(bottom + (step * apart));
+        if (std::cmp_less(layer, from) || std::cmp_greater_equal(layer, to)) {
+            held = tiles_->finest_over({.level = 0,
+                                        .face = base.face,
+                                        .i = base.i / Volume::tile_side,
+                                        .j = base.j / Volume::tile_side,
+                                        .k = layer / Volume::tile_side});
+            const unsigned level = held ? held->key.level : 0U;
+            const std::int64_t k = held ? held->key.k : layer / side;
+            from = (k * side) << level;
+            to = ((k + 1) * side) << level;
+        }
+        Cube cube;
+        if (held) {
+            const unsigned level = held->key.level;
+            const auto place = [&](std::uint32_t at, std::uint32_t tile) {
+                return static_cast<int>((at >> level) - (tile * Volume::tile_side));
+            };
+            cube = held->tree->at(place(base.i, held->key.i), place(base.j, held->key.j),
+                                  place(layer, held->key.k));
+        }
+        out[static_cast<std::size_t>(step) * stride] = voxel_of(
+            cube, place_temperature(*planet_, up, layers_.middle(static_cast<int>(layer))));
+    }
+}
+
+const VoxelTree* World::tile(TileKey key) const {
+    if (const VoxelTree* found = volume_->tile(key)) {
+        return found;
+    }
+    return tiles_ != nullptr ? tiles_->tile(key) : nullptr;
+}
+
+std::optional<HeldTile> World::tile_over(TileKey key) const {
+    const auto corner = [&](std::uint32_t at) { return (at << key.level) * Volume::tile_side; };
+    if (const auto over = volume_->finest_over(
+            {.face = key.face, .i = corner(key.i), .j = corner(key.j), .layer = corner(key.k)},
+            key.level)) {
+        TileKey found = key;
+        for (std::uint8_t level = key.level; level < over->first; ++level) {
+            found = found.parent();
+        }
+        return HeldTile{.key = found, .tree = over->second};
+    }
+    return tiles_ != nullptr ? tiles_->finest_over(key) : std::nullopt;
 }
 
 Voxel World::at(Site site) const {
@@ -204,8 +262,11 @@ void World::write(BrickSite site, const BrickVoxels& voxels) {
 }
 
 std::optional<int> highest_layer(const World& world, Cell cell) {
-    const std::optional<std::uint32_t> top =
-        world.volume().top({.face = cell.face, .i = cell.i, .j = cell.j, .layer = 0});
+    const Site site{.face = cell.face, .i = cell.i, .j = cell.j, .layer = 0};
+    std::optional<std::uint32_t> top = world.volume().top(site);
+    if (!top && !world.volume().floor(site) && world.tiles() != nullptr) {
+        top = world.tiles()->top(site, static_cast<std::uint32_t>(world.layers().count));
+    }
     if (!top) {
         return std::nullopt;
     }

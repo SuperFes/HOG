@@ -4,6 +4,7 @@
 #include <hog/globe/brick.hpp>
 #include <hog/globe/column_cache.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/held_tiles.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
@@ -56,6 +57,16 @@ public:
     // outlive the world and its copies.
     void read_coarse(const ColumnCache* cache) noexcept { coarse_ = cache; }
     [[nodiscard]] const ColumnCache* coarse() const noexcept { return coarse_; }
+    // Where the volume holds no tile column, reads the tiles held, each voxel as the finest of them
+    // over it has it; none to read nothing more. They must outlive the world and its copies.
+    void read_tiles(const HeldTiles* tiles) noexcept { tiles_ = tiles; }
+    [[nodiscard]] const HeldTiles* tiles() const noexcept { return tiles_; }
+
+    // The tile at `key`, at any level, from the volume or else the tiles held; none where neither
+    // holds it.
+    [[nodiscard]] const VoxelTree* tile(TileKey key) const;
+    // The finest tile over `key` the same way: itself, or coarser.
+    [[nodiscard]] std::optional<HeldTile> tile_over(TileKey key) const;
 
     // Air where nothing is made; solid rock under a made column's floor.
     [[nodiscard]] Voxel at(Site site) const;
@@ -81,12 +92,16 @@ private:
     // layers, into `out` every `stride`.
     void column(Site base, int bottom, int count, int apart, std::span<Voxel> out,
                 std::size_t stride) const;
+    // The same from the tiles held, `up` the column's direction.
+    void held_column(Site base, DVec3 up, int bottom, int count, int apart, std::span<Voxel> out,
+                     std::size_t stride) const;
 
     const Generator* generator_ = nullptr;
     const Planet* planet_;
     Layers layers_;
     Volume* volume_;
     const ColumnCache* coarse_ = nullptr;
+    const HeldTiles* tiles_ = nullptr;
 };
 
 // The highest layer of the column through `cell` holding matter; none where it holds nothing.
