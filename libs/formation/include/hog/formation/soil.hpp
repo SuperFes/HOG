@@ -26,8 +26,12 @@ enum class Parent : std::uint8_t {
 // turns to soil fastest when bare and slower under deeper soil, while the ground wears away).
 // It forms down from the top of what was laid: through the rivers' alluvium or the lake beds
 // first, then the till ice laid before them, then the rock.
+// Plants darken its top with humus from their dying roots, and what dies above ground lies on it
+// as litter, or as peat where waterlogged ground keeps the air from rotting it.
 struct Soil {
-    std::vector<double> depth;     // metres of soil
+    std::vector<double> depth;     // metres of soil, topsoil and subsoil
+    std::vector<double> topsoil;   // metres of its top darkened with humus
+    std::vector<double> organic;   // metres of litter or peat lying on it
     std::vector<double> alluvium;  // metres of what rivers laid, left under the soil
     std::vector<double> lake_beds; // metres of what settled in hollows, left under the soil
     std::vector<double> till;      // metres of what ice laid, left under those
@@ -37,11 +41,13 @@ struct Soil {
 };
 
 // What lies at a depth under the ground, from the top down.
-enum class Layer : std::uint8_t { Soil, Alluvium, LakeBed, Till, Rock };
+enum class Layer : std::uint8_t { Organic, Topsoil, Subsoil, Alluvium, LakeBed, Till, Rock };
 
 // How thick each layer is anywhere on the sphere, read between the points that hold them.
 struct Profile {
-    double soil = 0.0;
+    double organic = 0.0;
+    double topsoil = 0.0;
+    double subsoil = 0.0;
     double alluvium = 0.0;
     double lake_beds = 0.0;
     double till = 0.0;
@@ -54,6 +60,18 @@ struct Profile {
 [[nodiscard]] double balanced_depth(double making, double wear, const Body& body);
 // The depth soil grows to from bare ground over `years`, tending to the balanced depth.
 [[nodiscard]] double grown_depth(double making, double wear, double years, const Body& body);
+
+// Kilograms a square metre plants grow a year where they stand, by the lesser of what warmth and
+// rain allow (Lieth's Miami model), only while the ground is thawed.
+[[nodiscard]] double plant_growth(double celsius, double rain, const Body& body);
+// Rain against what the air would take off open water: over 1, more falls than can dry.
+[[nodiscard]] double wetness(double celsius, double rain, const Body& body);
+// Share of the ground waterlogged, so that air can't reach what dies in it.
+[[nodiscard]] double waterlogged(double wetness);
+// Per year humus rots in the soil: faster warm, slower dry, frozen or waterlogged.
+[[nodiscard]] double rotting_rate(double celsius, double wetness, const Body& body);
+// What a store fed `gain` a year and losing `rate` of itself a year holds after `years`, from none.
+[[nodiscard]] double gathered(double gain, double rate, double years);
 
 // Soil on rock alone, as though nothing had been laid down and no ice had ever lain.
 [[nodiscard]] Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,

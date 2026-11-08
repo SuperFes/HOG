@@ -42,8 +42,8 @@ constexpr std::string_view usage =
     "plates.png (plates, light crust, and how they meet), base.png (how the crust stands),\n"
     "uplift.png (where rock is pushed up), temperature.png and rain.png (yearly means),\n"
     "height.png (land worn by its rivers and carved by ice), ice.png (ice now, and what the\n"
-    "coldest times' ice carved), sediment.png (what rivers laid down) and soil.png (how deep\n"
-    "soil lies).\n";
+    "coldest times' ice carved), sediment.png (what rivers laid down), soil.png (how deep\n"
+    "soil lies) and topsoil.png (how dark its top is with humus, and where peat lies).\n";
 
 struct Options {
     hog::formation::Body body;
@@ -361,6 +361,42 @@ bool draw_soil(const Canvas& canvas, const hog::formation::Rivers& rivers,
     });
 }
 
+// What lies on top: peat purple-black by thickness over 30 cm, otherwise topsoil from pale (none)
+// to near black; ice, standing water and salt drawn over it.
+bool draw_topsoil(const Canvas& canvas, const hog::formation::Rivers& rivers,
+                  const hog::formation::Ice& ice, const hog::formation::Lakes& lakes,
+                  const hog::formation::Sediment& sediment, const hog::formation::Soil& soil) {
+    const Sphere& sphere = *canvas.sphere;
+    static constexpr std::array<Rgb, 4> pale_to_dark{
+        hog::formation_lab::rgb(200, 185, 150), hog::formation_lab::rgb(150, 115, 70),
+        hog::formation_lab::rgb(85, 60, 35), hog::formation_lab::rgb(35, 25, 15)};
+    static constexpr std::array<Rgb, 3> peat{hog::formation_lab::rgb(90, 70, 70),
+                                             hog::formation_lab::rgb(60, 35, 55),
+                                             hog::formation_lab::rgb(25, 10, 25)};
+    std::uint32_t lit = 0;
+    return canvas.draw("topsoil.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        const double light = canvas.light(rivers.height, direction, lit);
+        if (ice.thickness[near] > 0.0) {
+            return hog::formation_lab::scaled(ice_white, light);
+        }
+        if (const auto water = water_colour(lakes, sediment, near)) {
+            return *water;
+        }
+        const double organic = sphere.sample(soil.organic, spot);
+        if (organic > 0.3) {
+            return hog::formation_lab::scaled(hog::formation_lab::ramp((organic - 0.3) / 1.5, peat),
+                                              light);
+        }
+        const double topsoil = sphere.sample(soil.topsoil, spot);
+        return hog::formation_lab::scaled(hog::formation_lab::ramp(topsoil / 0.5, pale_to_dark),
+                                          light);
+    });
+}
+
 // Land area soiled, and mean soil depth on each parent where soil forms at all.
 void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
                  const hog::formation::Soil& soil) {
@@ -407,6 +443,23 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
                              *std::ranges::max_element(soil.alluvium),
                              *std::ranges::max_element(soil.lake_beds),
                              *std::ranges::max_element(soil.till));
+    double dark = 0.0;
+    double topsoil = 0.0;
+    double peat = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.sea[point] == 0 && soil.topsoil[point] > 0.0) {
+            dark += sphere.area(point);
+            topsoil += soil.topsoil[point] * sphere.area(point);
+        }
+        peat += crust.sea[point] == 0 && soil.organic[point] > 0.3 ? sphere.area(point) : 0.0;
+    }
+    std::cout << std::format(
+        "topsoil on {:.0f}% of the land, {:.2f} m on average, deepest "
+        "{:.2f} m; litter or peat deepest {:.2f} m, peat over 30 cm on {:.1f}% "
+        "of the land\n",
+        100.0 * dark / std::max(land, 1e-12), topsoil / std::max(dark, 1e-12),
+        *std::ranges::max_element(soil.topsoil), *std::ranges::max_element(soil.organic),
+        100.0 * peat / std::max(land, 1e-12));
 }
 
 void report_ice(const Sphere& sphere, const hog::formation::Crust& crust,
@@ -507,6 +560,7 @@ int run(const Options& options) {
         hog::formation::soil_on(sphere, rivers, climate, ice, lakes, sediment, body);
     report_soil(sphere, crust, soil);
     ok = draw_soil(canvas, rivers, ice, lakes, sediment, soil) && ok;
+    ok = draw_topsoil(canvas, rivers, ice, lakes, sediment, soil) && ok;
     return ok ? 0 : 1;
 }
 
