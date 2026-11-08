@@ -1,3 +1,4 @@
+#include <hog/formation/plates.hpp>
 #include <hog/formation/soil.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,10 +12,20 @@ using hog::formation::balanced_depth;
 using hog::formation::Body;
 using hog::formation::Climate;
 using hog::formation::climate_on;
+using hog::formation::Crust;
 using hog::formation::crust_on;
+using hog::formation::grown_depth;
+using hog::formation::Ice;
+using hog::formation::ice_on;
+using hog::formation::ice_shaped;
+using hog::formation::Lakes;
+using hog::formation::lakes_on;
+using hog::formation::Parent;
 using hog::formation::Plates;
 using hog::formation::Rivers;
 using hog::formation::rivers_on;
+using hog::formation::Sediment;
+using hog::formation::sediment_on;
 using hog::formation::Soil;
 using hog::formation::soil_making;
 using hog::formation::soil_on;
@@ -39,6 +50,28 @@ TEST_CASE("soil lies as deep as making balances wear", "[formation][soil]") {
     CHECK_THAT(making * std::exp(-body.soil_falloff * depth), WithinRel(1.0e-5, 1e-9));
     CHECK(balanced_depth(making, 2.0e-4, body) == 0.0);
     CHECK(balanced_depth(making, 0.0, body) == balanced_depth(making, body.slowest_wear, body));
+}
+
+TEST_CASE("soil grows from bare ground towards the depth that balances wear", "[formation][soil]") {
+    const Body body;
+    const double making = 1.0e-4;
+    const double wear = 1.0e-5;
+    CHECK(grown_depth(making, wear, 0.0, body) == 0.0);
+    CHECK(grown_depth(making, wear, 1'000.0, body) < grown_depth(making, wear, 10'000.0, body));
+    CHECK_THAT(grown_depth(making, wear, 1.0e8, body),
+               WithinRel(balanced_depth(making, wear, body), 1e-9));
+    CHECK(grown_depth(making, 2.0e-4, 1.0e8, body) == 0.0);
+    // It grows as fast as bare ground turns to soil, slowing as the soil thickens.
+    const double years = 5'000.0;
+    const double depth = grown_depth(making, wear, years, body);
+    const double rate = (grown_depth(making, wear, years + 1.0, body) -
+                         grown_depth(making, wear, years - 1.0, body)) /
+                        2.0;
+    CHECK_THAT(rate, WithinRel((making * std::exp(-body.soil_falloff * depth)) - wear, 1e-5));
+    Body still = body;
+    still.slowest_wear = 0.0;
+    CHECK_THAT(grown_depth(making, 0.0, years, still),
+               WithinRel(std::log1p(body.soil_falloff * making * years) / body.soil_falloff, 1e-9));
 }
 
 TEST_CASE("fast-rising mountains are bare and still lowlands soiled", "[formation][soil]") {
@@ -66,4 +99,83 @@ TEST_CASE("fast-rising mountains are bare and still lowlands soiled", "[formatio
     }
     REQUIRE(land > 0);
     CHECK(soiled > land / 2);
+}
+
+namespace {
+
+struct Made {
+    Body body;
+    Sphere layout{5, body.seed};
+    Sphere sphere{6, body.seed + 1};
+    Plates plates{body, layout};
+    Crust crust = crust_on(sphere, plates, body);
+    Climate climate = climate_on(sphere, crust.base, crust.sea, body);
+    Rivers worn = rivers_on(sphere, crust, climate, body);
+    Ice ice = ice_on(sphere, crust, climate, worn, body);
+    Rivers rivers = ice_shaped(sphere, worn, ice);
+    Lakes lakes = lakes_on(sphere, rivers, climate, body);
+    Sediment sediment = sediment_on(sphere, rivers, lakes, ice.outwash, body);
+    Soil soil = soil_on(sphere, rivers, climate, ice, lakes, sediment, body);
+    Soil on_rock = soil_on(sphere, rivers, climate, body);
+};
+
+} // namespace
+
+TEST_CASE("no soil forms under ice, standing water or salt", "[formation][soil]") {
+    const Made made;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const bool covered =
+            made.rivers.receiver[point] == point || made.ice.thickness[point] > 0.0 ||
+            made.sediment.lake_depth[point] > 0.0 || made.lakes.salt_flat[point] != 0;
+        CHECK((made.soil.parent[point] == Parent::None) == covered);
+        if (covered) {
+            CHECK(made.soil.depth[point] == 0.0);
+        }
+    }
+}
+
+TEST_CASE("loose deposits turn to soil faster than rock, and are soil or loose all through",
+          "[formation][soil]") {
+    const Made made;
+    int on_till = 0;
+    int on_alluvium = 0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const Parent parent = made.soil.parent[point];
+        const double laid = made.ice.till[point] + made.sediment.alluvium[point];
+        CHECK(made.soil.loose[point] >= 0.0);
+        CHECK(made.soil.loose[point] <= laid + 1e-9);
+        if (parent == Parent::None) {
+            continue;
+        }
+        if (made.soil.loose[point] > 0.0) {
+            CHECK_THAT(made.soil.depth[point] + made.soil.loose[point], WithinRel(laid, 1e-9));
+        }
+        if (made.soil.years[point] == made.body.soil_years) {
+            CHECK(made.soil.depth[point] >= made.on_rock.depth[point]);
+        }
+        on_till += parent == Parent::Till ? 1 : 0;
+        on_alluvium += parent == Parent::Alluvium ? 1 : 0;
+    }
+    CHECK(on_till > 0);
+    CHECK(on_alluvium > 0);
+}
+
+TEST_CASE("where the coldest times' ice lay, soil is young and thin on rock", "[formation][soil]") {
+    const Made made;
+    int young = 0;
+    int thinner = 0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        if (made.soil.parent[point] == Parent::None) {
+            continue;
+        }
+        const bool iced = made.ice.coldest[point] > 0.0;
+        CHECK(made.soil.years[point] == (iced ? made.body.ice_left_years : made.body.soil_years));
+        if (iced && made.soil.parent[point] == Parent::Rock) {
+            ++young;
+            CHECK(made.soil.depth[point] <= made.on_rock.depth[point]);
+            thinner += made.soil.depth[point] < made.on_rock.depth[point] ? 1 : 0;
+        }
+    }
+    REQUIRE(young > 0);
+    CHECK(thinner > 0);
 }
