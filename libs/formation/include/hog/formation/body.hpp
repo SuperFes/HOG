@@ -63,6 +63,11 @@ struct Body {
     double lake_loss = 1.2;        // metres a year open water loses to the air at 15 °C
     double shallowest_lake = 1.0;  // metres of hollow under which standing water isn't kept
 
+    // What rivers carry and lay down.
+    double carrying = 1.0;            // sediment carried per water times slope: on lowland
+                                      // slopes a ten-thousandth of the water, torrents a few %
+    double sediment_age = 100'000.0;  // years the land has had to gather what its rivers carry
+
     // Rock turning to soil (Heimsath's soil production).
     double soil_making = 2.0e-4;   // metres a year bare rock weathers at 15 °C, well watered
     double soil_falloff = 2.0;     // per metre: how much slower under deeper soil

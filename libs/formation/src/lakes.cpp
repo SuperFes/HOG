@@ -99,6 +99,7 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
     Lakes lakes;
     lakes.depth.assign(sphere.size(), 0.0);
     lakes.lake.assign(sphere.size(), Lakes::none);
+    lakes.basin.assign(sphere.size(), Lakes::none);
     lakes.salt_flat.assign(sphere.size(), 0);
     lakes.discharge = rivers.discharge;
 
@@ -119,6 +120,11 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
         }
         const double inflow = lakes.discharge[hollow.outlet];
         const Filling filling = fill_hollow(ground, loss, inflow, hollow.spill);
+        const auto basin = static_cast<std::uint32_t>(lakes.basins.size());
+        for (const std::uint32_t point : hollow.points) {
+            lakes.basin[point] = basin;
+        }
+        lakes.basins.push_back({.outlet = hollow.outlet});
         if (filling.covered == 0) {
             lakes.salt_flat[hollow.points.front()] = 1;
             take_downstream(rivers, lakes.discharge, hollow.outlet, inflow);
@@ -136,7 +142,10 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
             lakes.lake[point] = id;
             lake.area += sphere.area(point) * earth_radius * earth_radius;
             lake.loss += loss[at];
+            lakes.basins.back().room +=
+                lakes.depth[point] * sphere.area(point) * earth_radius * earth_radius;
         }
+        lakes.basins.back().lake = id;
         take_downstream(rivers, lakes.discharge, hollow.outlet, std::min(inflow, lake.loss));
         lakes.to_air += std::min(inflow, lake.loss);
         lakes.lakes.push_back(lake);

@@ -24,13 +24,22 @@ struct Lake {
     std::uint32_t outlet = 0; // where its water would leave the hollow
 };
 
+// A hollow, wet or dry: everything that runs into it gathers at its outlet.
+struct Basin {
+    std::uint32_t outlet = 0;
+    std::uint32_t lake = 0xFFFF'FFFFU; // the lake standing in it, if any
+    double room = 0.0;                 // cubic metres of water it holds
+};
+
 struct Lakes {
     static constexpr std::uint32_t none = 0xFFFF'FFFFU;
     std::vector<double> depth;           // metres of standing water over the ground; 0 where none
     std::vector<std::uint32_t> lake;     // which lake covers each point, or none
+    std::vector<std::uint32_t> basin;    // which hollow each point lies in, or none
     std::vector<std::uint8_t> salt_flat; // 1 where a hollow dries out
     std::vector<double> discharge;       // the rivers' water after lakes have taken theirs
     std::vector<Lake> lakes;
+    std::vector<Basin> basins;
     double to_air = 0.0; // cubic metres a year lakes and salt flats give the air
 };
 
