@@ -46,6 +46,44 @@ Result<std::vector<SavedColumn>> MemoryVolumeArchive::columns() const {
     return all;
 }
 
+Result<void> MemoryVolumeArchive::write_tiles(std::span<const std::byte> header,
+                                              std::span<const SavedTile> tiles) {
+    header_.assign(header.begin(), header.end());
+    for (const SavedTile& tile : tiles) {
+        tiles_.insert_or_assign(tile.key, tile.bytes);
+    }
+    return {};
+}
+
+Result<std::optional<std::vector<std::byte>>> MemoryVolumeArchive::tile(TileKey key) const {
+    const auto found = tiles_.find(key);
+    if (found == tiles_.end()) {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+Result<std::vector<std::uint32_t>> MemoryVolumeArchive::tiles_up(TileKey base) const {
+    std::vector<std::uint32_t> up;
+    base.k = 0;
+    for (auto tile = tiles_.lower_bound(base);
+         tile != tiles_.end() && tile->first.level == base.level && tile->first.face == base.face &&
+         tile->first.i == base.i && tile->first.j == base.j;
+         ++tile) {
+        up.push_back(tile->first.k);
+    }
+    return up;
+}
+
+Result<std::vector<TileKey>> MemoryVolumeArchive::tiles_at(std::uint8_t level) const {
+    std::vector<TileKey> keys;
+    for (auto tile = tiles_.lower_bound({.level = level});
+         tile != tiles_.end() && tile->first.level == level; ++tile) {
+        keys.push_back(tile->first);
+    }
+    return keys;
+}
+
 std::uint8_t level_at(double metres) noexcept {
     if (metres < finest_reach) {
         return 0;
@@ -155,6 +193,26 @@ Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive,
     return save_columns(volume, archive, origin, volume.unsaved());
 }
 
+std::uint8_t top_level(const Layers& layers) noexcept {
+    constexpr int coarser = std::countr_zero(static_cast<unsigned>(Volume::tile_side));
+    return static_cast<std::uint8_t>(std::max(layers.level - coarser, 0));
+}
+
+Result<std::size_t> save_tiles(std::span<const TileKey> keys, const Volume& volume,
+                               VolumeArchive& archive, const VolumeOrigin& origin) {
+    std::vector<SavedTile> saved;
+    saved.reserve(keys.size());
+    for (const TileKey key : keys) {
+        if (const VoxelTree* tile = volume.tile(key)) {
+            saved.push_back({.key = key, .bytes = tile->encode()});
+        }
+    }
+    if (auto written = archive.write_tiles(volume_header(origin), saved); !written) {
+        return std::unexpected(written.error());
+    }
+    return saved.size();
+}
+
 std::vector<SavedColumn> saved_levels(const TileColumn& column, std::uint8_t face, std::uint32_t i,
                                       std::uint32_t j) {
     std::vector<SavedColumn> levels;
@@ -223,6 +281,18 @@ Result<std::size_t> save_columns(Volume& volume, VolumeArchive& archive, const V
                           std::back_inserter(columns));
     }
     if (auto written = archive.write(volume_header(origin), columns); !written) {
+        return std::unexpected(written.error());
+    }
+    std::vector<TileKey> tiles;
+    for (const Site corner : unsaved) {
+        const std::optional<std::uint32_t> floor = volume.floor(corner);
+        for (std::uint32_t k = floor.value_or(0) / side;
+             floor && k < volume.held_top(corner) / side; ++k) {
+            tiles.push_back(
+                {.face = corner.face, .i = corner.i / side, .j = corner.j / side, .k = k});
+        }
+    }
+    if (auto written = save_tiles(tiles, volume, archive, origin); !written) {
         return std::unexpected(written.error());
     }
     for (const Site corner : unsaved) {

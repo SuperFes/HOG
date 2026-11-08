@@ -120,3 +120,35 @@ TEST_CASE("a volume write that fails leaves the file as it was", "[store][volume
     CHECK(query(file.path(), "SELECT count(*) FROM volume_columns") == 1);
     CHECK(archive.column(1, 1, 2, 0) == std::nullopt);
 }
+
+TEST_CASE("tiles are kept a row each, at every level, and come back after reopening",
+          "[store][volume]") {
+    using hog::globe::SavedTile;
+    using hog::globe::TileKey;
+    const TemporaryFile file;
+    const auto bytes_of = [](Material material) {
+        return hog::globe::VoxelTree{Volume::tile_side,
+                                     Cube{.solid = material, .solid_amount = Voxel::full}}
+            .encode();
+    };
+    const SavedTile low{.key = {.face = 1, .i = 4, .j = 5, .k = 2},
+                        .bytes = bytes_of(Material::Basalt)};
+    const SavedTile high{.key = {.face = 1, .i = 4, .j = 5, .k = 7},
+                         .bytes = bytes_of(Material::Clay)};
+    const SavedTile coarse{.key = {.level = 3, .face = 1}, .bytes = bytes_of(Material::Granite)};
+    {
+        SqliteVolumeArchive archive = opened(file);
+        REQUIRE(
+            archive.write_tiles(hog::globe::volume_header(origin), std::vector{high, coarse, low}));
+        REQUIRE(archive.write_tiles(hog::globe::volume_header(origin), std::vector{high}));
+    }
+    CHECK(query(file.path(), "SELECT count(*) FROM volume_tiles") == 3);
+    const SqliteVolumeArchive archive = opened(file);
+    CHECK(archive.tile(low.key) == low.bytes);
+    CHECK(archive.tile(coarse.key) == coarse.bytes);
+    CHECK(archive.tile({.face = 1, .i = 4, .j = 5, .k = 3}) == std::nullopt);
+    CHECK(archive.tiles_up({.face = 1, .i = 4, .j = 5}) == std::vector<std::uint32_t>{2, 7});
+    CHECK(archive.tiles_up({.level = 1, .face = 1, .i = 4, .j = 5})->empty());
+    CHECK(archive.tiles_at(0) == std::vector<TileKey>{low.key, high.key});
+    CHECK(archive.tiles_at(3) == std::vector<TileKey>{coarse.key});
+}
