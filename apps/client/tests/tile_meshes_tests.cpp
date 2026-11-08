@@ -96,6 +96,37 @@ TEST_CASE("a tile is drawn once meshed, until the finer sent after it are drawn 
     }
 }
 
+TEST_CASE("a tile is meshed again when a coarser tile beside it comes, reading it at its edge",
+          "[client][tiles]") {
+    const hog::client::GlobeWorld& made = hog::client::testing::globe();
+    hog::jobs::JobSystem jobs{2};
+    TileMeshes meshes{made.generator.planet(), made.generator.layers(), jobs};
+    const auto all_of = [](TileKey key, hog::globe::Cube cube) {
+        return hog::protocol::SentTile{
+            .level = key.level,
+            .face = key.face,
+            .i = key.i,
+            .j = key.j,
+            .k = key.k,
+            .bytes = hog::globe::VoxelTree{hog::globe::Volume::tile_side, cube}.encode()};
+    };
+    // Rock to its top, with nothing known over it: it goes on up, so nothing of it shows.
+    const TileKey rock{.level = 0, .face = 2, .i = 6, .j = 6, .k = 3};
+    REQUIRE(meshes.take(all_of(
+        rock, {.solid = hog::globe::Material::Granite, .solid_amount = hog::globe::Voxel::full})));
+    GroundChanges changes = settle(meshes);
+    REQUIRE(has(changes.shown, rock));
+    CHECK(changes.shown.front().ground->vertices.empty());
+
+    // Air sent two levels coarser over it: its top shows.
+    const TileKey air{.level = 2, .face = 2, .i = 1, .j = 1, .k = 1};
+    REQUIRE(meshes.take(all_of(air, {})));
+    changes = settle(meshes);
+    const auto shown = std::ranges::find(changes.shown, tile_key(rock), &GroundChanges::Shown::key);
+    REQUIRE(shown != changes.shown.end());
+    CHECK_FALSE(shown->ground->vertices.empty());
+}
+
 TEST_CASE("tiles that aren't, or aren't on the planet, are refused", "[client][tiles]") {
     const hog::client::GlobeWorld& made = hog::client::testing::globe();
     hog::jobs::JobSystem jobs{2};
