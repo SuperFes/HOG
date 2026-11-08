@@ -59,6 +59,23 @@ struct Body {
     double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
     double steepest = 0.05;        // steepest mean slope land holds across tens of kilometres
 
+    // Snow lying through summers, gathering into ice that flows and carves.
+    double freezing = 0.0;          // °C the liquid freezes at
+    double sea_freezing = -1.8;     // °C the open sea freezes at, its salt holding it off
+    double season_swing = 20.0;     // °C the year swings either side of its mean near the poles,
+                                    // over land at Earth's tilt; none at the equator or no tilt
+    double sea_swing = 0.4;         // share of that swing over open liquid, which holds heat
+    double melt_rate = 0.005;       // metres of water a day melted per °C over freezing
+    double gravity = 9.81;          // metres a second squared
+    double ice_density = 917.0;     // kilograms a cubic metre
+    double ice_strength = 100'000.0; // pascals of shear ice stands on its bed before it flows
+    double ice_cooling = 6.0;       // °C colder in the coldest times the planet has known
+    double glaciated_years = 100'000.0; // years the coldest times' ice has had to carve
+    double glacial_erosion = 2.7e-7;    // carving per sliding speed to the power below
+    double glacial_erosion_power = 2.02; // (Herman et al. 2021, metres and years)
+    double overdeepening = 1.5;     // steepest a bed rises against the ice, over the ice surface's
+                                    // slope, before meltwater freezes and carving stops
+
     // Water standing in hollows.
     double lake_loss = 1.2;        // metres a year open water loses to the air at 15 °C
     double shallowest_lake = 1.0;  // metres of hollow under which standing water isn't kept
