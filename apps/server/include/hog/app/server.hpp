@@ -7,6 +7,7 @@
 #include <hog/core/time.hpp>
 #include <hog/flow/simulation.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/land.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/vents.hpp>
 #include <hog/globe/volume.hpp>
@@ -19,7 +20,6 @@
 #include <hog/protocol/handshake.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/catch_up.hpp>
-#include <hog/server/column_sending.hpp>
 #include <hog/server/held_ground.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
@@ -27,6 +27,7 @@
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
+#include <hog/server/tile_sending.hpp>
 #include <hog/skies/weather_keeper.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
@@ -143,9 +144,9 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
-    // Sends each player the tile columns due to them, as their connection has room, once those
-    // the world changed are due again.
-    void tell_columns();
+    // Sends each player the tiles due to them, as their connection has room, and cuts the land
+    // afresh for one that's moved on, in the background, the land left to it meanwhile.
+    void tell_tiles();
     // Tells each player the grain in flight near them, and once more when there's none.
     void tell_grains();
     // Sends each player a snapshot of those near them.
@@ -165,6 +166,8 @@ private:
     server::ServerConfig config_;
     std::uint64_t world_id_;
     globe::Generator generator_;
+    // The ground as players see it, made as they come near it.
+    globe::Land land_;
     globe::Volume volume_;
     globe::World globe_;
     flow::Simulation flow_;
@@ -187,9 +190,9 @@ private:
     flecs::world entities_;
     server::Persistence persistence_;
     jobs::JobSystem jobs_;
-    // The tile columns each player is sent, and the world's revision they're told up to.
-    server::ColumnSending columns_;
-    std::uint64_t columns_told_ = 0;
+    server::TileSending tiles_;
+    // The land being cut for a player, after the land and the jobs it uses.
+    std::unique_ptr<jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>> cutting_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
@@ -225,7 +228,7 @@ private:
     metrics::Counter& corrected_moves_;
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
-    metrics::Counter& columns_sent_;
+    metrics::Counter& tiles_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;
