@@ -2,6 +2,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/land.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/voxel_tree.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/server/tile_sending.hpp>
@@ -184,6 +185,8 @@ TEST_CASE("first view cost", "[.bench][server][tiles]") {
     std::size_t bytes = 0;
     std::array<double, 16> window_time{};
     std::array<double, 16> encode_time{};
+    std::array<std::size_t, 16> quads{};
+    std::array<std::size_t, 16> within{};
     for (const TileKey key : keys) {
         auto one = std::chrono::steady_clock::now();
         const auto tree = land.tile(key);
@@ -191,10 +194,15 @@ TEST_CASE("first view cost", "[.bench][server][tiles]") {
         one = std::chrono::steady_clock::now();
         bytes += tree.encode().size();
         encode_time.at(key.level) += seconds(one);
+        quads.at(key.level) +=
+            hog::globe::mesh_tile(generator.layers(), key, tree).indices.size() / 6;
+        within.at(key.level) +=
+            hog::server::metres_to(generator.layers(), key, here) < 8'000.0 ? 1 : 0;
     }
-    for (std::size_t level = 0; level < 7; ++level) {
+    for (std::size_t level = 0; level < 8; ++level) {
         WARN("level " << level << ": windows " << window_time.at(level) << " s, encode "
-                      << encode_time.at(level) << " s");
+                      << encode_time.at(level) << " s, " << quads.at(level) << " quads, "
+                      << within.at(level) << " tiles within 8 km");
     }
     WARN("wanted " << keys.size() << " tiles in " << cut << " s on " << jobs.thread_count()
                    << " threads; windows and bytes " << seconds(at) << " s, " << bytes / 1024

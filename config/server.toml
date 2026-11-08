@@ -1,6 +1,6 @@
 # Development server. Paths are relative to this file.
 [server]
-world = "../var/world.db"
+world = "../var/planet"
 planet = "planet.toml"
 tick_rate = 20
 
