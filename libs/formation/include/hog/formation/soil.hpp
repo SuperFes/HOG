@@ -18,17 +18,33 @@ enum class Parent : std::uint8_t {
     None,     // under ice, standing water or salt: no soil forms
     Rock,     // the rock itself
     Till,     // what ice laid down
-    Alluvium, // what rivers and lakes laid down
+    Alluvium, // what rivers laid down
+    LakeBed,  // what settled in a hollow, wet or dry
 };
 
 // How deep soil has grown over the time it has had (Heimsath's soil production: what it forms from
 // turns to soil fastest when bare and slower under deeper soil, while the ground wears away).
+// It forms down from the top of what was laid: through the rivers' alluvium or the lake beds
+// first, then the till ice laid before them, then the rock.
 struct Soil {
-    std::vector<double> depth;  // metres of soil
-    std::vector<double> loose;  // metres of loose till or alluvium under it, not yet soil
-    std::vector<double> making; // metres a year its bare parent turns to soil there
-    std::vector<double> years;  // years it has had to grow
+    std::vector<double> depth;     // metres of soil
+    std::vector<double> alluvium;  // metres of what rivers laid, left under the soil
+    std::vector<double> lake_beds; // metres of what settled in hollows, left under the soil
+    std::vector<double> till;      // metres of what ice laid, left under those
+    std::vector<double> making;    // metres a year its bare parent turns to soil there
+    std::vector<double> years;     // years it has had to grow
     std::vector<Parent> parent;
+};
+
+// What lies at a depth under the ground, from the top down.
+enum class Layer : std::uint8_t { Soil, Alluvium, LakeBed, Till, Rock };
+
+// How thick each layer is anywhere on the sphere, read between the points that hold them.
+struct Profile {
+    double soil = 0.0;
+    double alluvium = 0.0;
+    double lake_beds = 0.0;
+    double till = 0.0;
 };
 
 // Metres a year bare rock turns to soil: rotting faster where it's warm and wet, shattered by frost
@@ -46,5 +62,9 @@ struct Soil {
 [[nodiscard]] Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
                            const Ice& ice, const Lakes& lakes, const Sediment& sediment,
                            const Body& body);
+
+[[nodiscard]] Profile profile_at(const Sphere& sphere, const Soil& soil, const Sphere::Spot& spot);
+// The layer `depth` metres under the top of the ground; rock under everything laid.
+[[nodiscard]] Layer layer_at(const Profile& profile, double depth);
 
 } // namespace hog::formation
