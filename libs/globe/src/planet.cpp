@@ -1,5 +1,5 @@
-#include <hog/core/hash.hpp>
 #include <hog/core/bytes.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/globe/maths.hpp>
 #include <hog/globe/planet.hpp>
 
@@ -205,7 +205,8 @@ Derived derive(const Planet& planet) {
     derived.vertical = planet.lateral_scale * planet.radius / Planet{}.radius;
     derived.strength_height = strength_height(planet.high, planet.gravity);
     const double earth = strength_height({.rock = Material::Granite}, earth_gravity);
-    derived.crater_transition = earth_transition * derived.strength_height / earth * derived.vertical;
+    derived.crater_transition =
+        earth_transition * derived.strength_height / earth * derived.vertical;
     derived.tallest = earth_tallest * derived.strength_height / earth * derived.vertical;
     const auto floats = [&](const Crust& crust) {
         return crust.thickness * derived.vertical *
@@ -279,6 +280,9 @@ Result<void> validate(const Planet& planet) {
         {within(planet.weathering, 0.0, 100.0), "weathering must be 0 to 100 metres"},
         {planet.sea_fraction >= 0.0 && planet.sea_fraction < 1.0,
          "sea_fraction must be at least 0 and below 1"},
+        {planet.formed_detail == 0.0 || (within(planet.formed_detail, 4.0, 9.0) &&
+                                         planet.formed_detail == std::floor(planet.formed_detail)),
+         "formed_detail must be 0, or a whole 4 to 9 splits"},
     });
     for (const auto& [holds, message] : checks) {
         if (!holds) {
@@ -300,14 +304,13 @@ std::uint64_t world_id(const Planet& planet) noexcept {
         bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
         bits(planet.equator_temperature), bits(planet.pole_temperature),
         static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear),
-        bits(planet.weathering));
+        bits(planet.weathering), bits(planet.formed_detail));
 }
-
 
 namespace {
 
 // The knobs' version in the bytes, so a planet from another is refused, not misread.
-constexpr std::uint8_t planet_bytes_version = 2;
+constexpr std::uint8_t planet_bytes_version = 3;
 
 void write_double(ByteWriter& out, double value) {
     out.write(std::bit_cast<std::uint64_t>(value));
@@ -340,6 +343,7 @@ std::vector<std::byte> encode_planet(const Planet& planet) {
     write_double(out, planet.sea_fraction);
     write_double(out, planet.wear);
     write_double(out, planet.weathering);
+    write_double(out, planet.formed_detail);
     return std::move(out).take();
 }
 
@@ -389,7 +393,7 @@ Result<Planet> decode_planet(std::span<const std::byte> bytes) {
         read_double(planet.pressure) && read_double(planet.equator_temperature) &&
         read_double(planet.pole_temperature) && read_byte(volatiles) &&
         read_double(planet.sea_fraction) && read_double(planet.wear) &&
-        read_double(planet.weathering);
+        read_double(planet.weathering) && read_double(planet.formed_detail);
     if (!whole) {
         return cut();
     }

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -16,6 +17,8 @@
 #include <vector>
 
 namespace hog::globe {
+
+class Formed;
 
 namespace terms {
 struct Ground;
@@ -41,6 +44,15 @@ struct Strata {
     DVec3 fold_tilt{0.0};  // how much more, per metre across
     DVec3 cover_tilt{0.0}; // how much more `cover`, per metre across
     Material basement = Material::Basalt;
+    // What a formed world laid over its beds, metres each, from the top down; within `cover`.
+    double ice = 0.0;
+    double organic = 0.0; // dead plant matter: litter, or peat
+    double topsoil = 0.0;
+    double subsoil = 0.0;
+    double alluvium = 0.0;  // what rivers laid
+    double lake_beds = 0.0; // what settled in hollows
+    double till = 0.0;      // what ice laid
+    double lava = 0.0;
 };
 
 // A block of rock fallen from a cliff and lying on the ground below it, as an ellipsoid sunk
@@ -206,6 +218,8 @@ public:
         };
         std::unordered_map<std::uint64_t, Pond>
             ponds{}; // NOLINT(readability-redundant-member-init)
+        // The world formed stage by stage the land is read from, on a planet asking for one.
+        std::shared_ptr<const Formed> formed{}; // NOLINT(readability-redundant-member-init)
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 

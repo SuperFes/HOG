@@ -39,7 +39,8 @@ Drainage drain(std::span<const float> ground, int level, double radius, double s
                      .ground = {ground.begin(), ground.end()},
                      .filled = {ground.begin(), ground.end()},
                      .receiver = std::vector<std::uint32_t>(count, none),
-                     .catchment = std::vector<double>(count)};
+                     .catchment = std::vector<double>(count),
+                     .order = {}};
 
     std::priority_queue<Waiting> frontier;
     const auto outlet = [&](std::uint32_t cell) {
