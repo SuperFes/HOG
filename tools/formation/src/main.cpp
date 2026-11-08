@@ -332,8 +332,11 @@ bool draw_sediment(const Canvas& canvas, const hog::formation::Rivers& rivers,
     });
 }
 
+// Soil from bare grey through tan to dark, deeper darker; ice, standing water and salt drawn over
+// it.
 bool draw_soil(const Canvas& canvas, const hog::formation::Rivers& rivers,
-               const hog::formation::Soil& soil) {
+               const hog::formation::Ice& ice, const hog::formation::Lakes& lakes,
+               const hog::formation::Sediment& sediment, const hog::formation::Soil& soil) {
     const Sphere& sphere = *canvas.sphere;
     static constexpr std::array<Rgb, 5> bare_to_deep{
         hog::formation_lab::rgb(150, 150, 150), hog::formation_lab::rgb(210, 190, 140),
@@ -341,26 +344,60 @@ bool draw_soil(const Canvas& canvas, const hog::formation::Rivers& rivers,
         hog::formation_lab::rgb(60, 35, 20)};
     std::uint32_t lit = 0;
     return canvas.draw("soil.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
-        if (sphere.sample(rivers.height, spot) < 0.0) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
             return hog::formation_lab::rgb(20, 30, 60);
+        }
+        const double light = canvas.light(rivers.height, direction, lit);
+        if (ice.thickness[near] > 0.0) {
+            return hog::formation_lab::scaled(ice_white, light);
+        }
+        if (const auto water = water_colour(lakes, sediment, near)) {
+            return *water;
         }
         const double depth = sphere.sample(soil.depth, spot);
         return hog::formation_lab::scaled(hog::formation_lab::ramp(depth / 2.5, bare_to_deep),
-                                          canvas.light(rivers.height, direction, lit));
+                                          light);
     });
 }
 
-double soiled_share(const Sphere& sphere, const hog::formation::Crust& crust,
-                    const hog::formation::Soil& soil) {
-    double soiled = 0.0;
+// Land area soiled, and mean soil depth on each parent where soil forms at all.
+void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
+                 const hog::formation::Soil& soil) {
+    using hog::formation::Parent;
     double land = 0.0;
+    double soiled = 0.0;
+    std::array<double, 4> area{};
+    std::array<double, 4> depth{};
+    double young = 0.0;
+    double young_depth = 0.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        if (crust.sea[point] == 0) {
-            land += sphere.area(point);
-            soiled += soil.depth[point] > 0.0 ? sphere.area(point) : 0.0;
+        if (crust.sea[point] != 0) {
+            continue;
+        }
+        const double here = sphere.area(point);
+        land += here;
+        soiled += soil.depth[point] > 0.0 ? here : 0.0;
+        const auto kind = static_cast<std::size_t>(soil.parent[point]);
+        area.at(kind) += here;
+        depth.at(kind) += soil.depth[point] * here;
+        if (soil.parent[point] != Parent::None && soil.years[point] < 1.0e5) {
+            young += here;
+            young_depth += soil.depth[point] * here;
         }
     }
-    return soiled / std::max(land, 1e-12);
+    const auto mean = [&](Parent parent) {
+        const auto kind = static_cast<std::size_t>(parent);
+        return depth.at(kind) / std::max(area.at(kind), 1e-12);
+    };
+    const auto share = [&](double part) { return 100.0 * part / std::max(land, 1e-12); };
+    std::cout << std::format(
+        "soil on {:.0f}% of the land, deepest {:.2f} m; on rock {:.0f}% ({:.2f} m), till {:.1f}% "
+        "({:.2f} m), alluvium {:.0f}% ({:.2f} m); where ice left {:.0f}% ({:.2f} m); deepest "
+        "loose earth under it {:.0f} m\n",
+        share(soiled), *std::ranges::max_element(soil.depth), share(area.at(1)), mean(Parent::Rock),
+        share(area.at(2)), mean(Parent::Till), share(area.at(3)), mean(Parent::Alluvium),
+        share(young), young_depth / std::max(young, 1e-12), *std::ranges::max_element(soil.loose));
 }
 
 void report_ice(const Sphere& sphere, const hog::formation::Crust& crust,
@@ -457,11 +494,10 @@ int run(const Options& options) {
     ok = draw_rivers(canvas, rivers, ice, lakes, sediment) && ok;
     ok = draw_sediment(canvas, rivers, ice, sediment) && ok;
 
-    const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
-    std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",
-                             100.0 * soiled_share(sphere, crust, soil),
-                             *std::ranges::max_element(soil.depth));
-    ok = draw_soil(canvas, rivers, soil) && ok;
+    const hog::formation::Soil soil =
+        hog::formation::soil_on(sphere, rivers, climate, ice, lakes, sediment, body);
+    report_soil(sphere, crust, soil);
+    ok = draw_soil(canvas, rivers, ice, lakes, sediment, soil) && ok;
     return ok ? 0 : 1;
 }
 
