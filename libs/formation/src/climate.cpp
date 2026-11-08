@@ -92,6 +92,97 @@ double capacity(double celsius) noexcept {
     return maths::exp(0.07 * (celsius - 15.0));
 }
 
+// Air rises at the equator and every second cell boundary towards the poles and sinks between;
+// faster spin makes more, narrower cells. Surface winds turn east or west by cell.
+void set_temperature_and_winds(const Sphere& sphere, std::span<const double> heights,
+                               const Body& body, Climate& climate, std::vector<double>& rising) {
+    const std::array<double, rows> table = temperature_rows(body);
+    const double hours = std::max(std::abs(body.day), 0.1);
+    const int cells = std::max(1, static_cast<int>(std::lround(3.0 * std::sqrt(24.0 / hours))));
+    const double cell_width = 0.5 * std::numbers::pi / cells;
+    const double turning = body.day < 0.0 ? -1.0 : 1.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const DVec3& here = sphere.point(point);
+        const double latitude = asin(std::clamp(here.z, -1.0, 1.0));
+        climate.temperature[point] =
+            read_rows(table, latitude) - (body.lapse_rate * std::max(heights[point], 0.0));
+        const double phase = std::abs(latitude) / cell_width;
+        rising[point] = 0.5 * (1.0 + maths::cos(std::numbers::pi * phase));
+        const DVec3 east_axis = glm::cross(DVec3{0.0, 0.0, 1.0}, here);
+        if (glm::length(east_axis) < 1e-9) {
+            climate.wind[point] = DVec3{1.0, 0.0, 0.0};
+            continue;
+        }
+        const DVec3 east = glm::normalize(east_axis);
+        const DVec3 equatorwards = glm::cross(here, east) * (latitude > 0.0 ? -1.0 : 1.0);
+        const bool first_of_pair = static_cast<int>(phase) % 2 == 0;
+        const DVec3 along = east * (first_of_pair ? -turning : turning);
+        const DVec3 meridional = equatorwards * (first_of_pair ? 0.35 : -0.35);
+        climate.wind[point] = glm::normalize(along + meridional);
+    }
+}
+
+// Moisture arriving at a land point on the wind from its upwind neighbours, and how much of it
+// is kept rather than falling on the way: less over distance, less again up a slope.
+struct Arriving {
+    double moisture = 0.0;
+    double kept = 0.0;
+    bool any = false;
+};
+
+Arriving arriving_at(const Sphere& sphere, std::span<const double> heights, const Body& body,
+                     const DVec3& wind, std::span<const double> moisture, std::uint32_t point) {
+    const DVec3& here = sphere.point(point);
+    double weights = 0.0;
+    Arriving arriving;
+    for (const std::uint32_t from : sphere.neighbors(point)) {
+        const DVec3 step = here - sphere.point(from);
+        const double length = glm::length(step);
+        const double weight = std::max(0.0, glm::dot(wind, step / length));
+        if (weight <= 0.0) {
+            continue;
+        }
+        const double rise = std::max(0.0, heights[point] - std::max(heights[from], 0.0));
+        const double keep = maths::exp(-(length / body.rain_reach) - (rise / body.vapour_height));
+        weights += weight;
+        arriving.moisture += weight * moisture[from];
+        arriving.kept += weight * moisture[from] * keep;
+    }
+    if (weights > 0.0) {
+        arriving.moisture /= weights;
+        arriving.kept /= weights;
+        arriving.any = true;
+    }
+    return arriving;
+}
+
+// Moisture comes off the liquid and rides the wind inland, falling as it goes and as the air is
+// pushed up slopes; air that cools holds less, so the rest falls there too.
+void carry_moisture(const Sphere& sphere, std::span<const double> heights, const Body& body,
+                    const Climate& climate, std::vector<double>& moisture,
+                    std::vector<double>& lost) {
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        moisture[point] = heights[point] < 0.0 ? capacity(climate.temperature[point]) : 0.0;
+    }
+    std::vector<double> next = moisture;
+    const int rounds =
+        std::clamp(static_cast<int>(5.0 * body.rain_reach / sphere.spacing()), 20, 800);
+    for (int round = 0; round < rounds; ++round) {
+        for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+            if (heights[point] < 0.0) {
+                continue;
+            }
+            const Arriving arriving =
+                arriving_at(sphere, heights, body, climate.wind[point], moisture, point);
+            const double kept =
+                arriving.any ? std::min(arriving.kept, capacity(climate.temperature[point])) : 0.0;
+            next[point] = kept;
+            lost[point] = arriving.any ? arriving.moisture - kept : 0.0;
+        }
+        std::swap(moisture, next);
+    }
+}
+
 } // namespace
 
 double sea_level_temperature(const Body& body, double latitude) {
@@ -100,87 +191,16 @@ double sea_level_temperature(const Body& body, double latitude) {
 
 Climate climate_on(const Sphere& sphere, std::span<const double> heights, const Body& body) {
     const std::uint32_t size = sphere.size();
-    const std::array<double, rows> table = temperature_rows(body);
     Climate climate;
     climate.temperature.resize(size);
     climate.rain.resize(size);
     climate.wind.resize(size);
-
-    // Air rises at the equator and every second cell boundary towards the poles and sinks between;
-    // faster spin makes more, narrower cells. Surface winds turn east or west by cell.
-    const double hours = std::max(std::abs(body.day), 0.1);
-    const int cells = std::max(1, static_cast<int>(std::lround(3.0 * std::sqrt(24.0 / hours))));
-    const double cell_width = 0.5 * std::numbers::pi / cells;
-    const double turning = body.day < 0.0 ? -1.0 : 1.0;
     std::vector<double> rising(size);
-    for (std::uint32_t point = 0; point < size; ++point) {
-        const DVec3& here = sphere.point(point);
-        const double latitude = asin(std::clamp(here.z, -1.0, 1.0));
-        climate.temperature[point] =
-            read_rows(table, latitude) - (body.lapse_rate * std::max(heights[point], 0.0));
-        const double phase = std::abs(latitude) / cell_width;
-        rising[point] = 0.5 * (1.0 + maths::cos(std::numbers::pi * phase));
-        const auto cell = static_cast<int>(phase);
-        const DVec3 pole{0.0, 0.0, 1.0};
-        const DVec3 east_axis = glm::cross(pole, here);
-        if (glm::length(east_axis) < 1e-9) {
-            climate.wind[point] = DVec3{1.0, 0.0, 0.0};
-            continue;
-        }
-        const DVec3 east = glm::normalize(east_axis);
-        const DVec3 equatorwards = glm::cross(here, east) * (latitude > 0.0 ? -1.0 : 1.0);
-        const bool first_of_pair = cell % 2 == 0;
-        const DVec3 along = east * (first_of_pair ? -turning : turning);
-        const DVec3 meridional = equatorwards * (first_of_pair ? 0.35 : -0.35);
-        climate.wind[point] = glm::normalize(along + meridional);
-    }
+    set_temperature_and_winds(sphere, heights, body, climate, rising);
 
-    // Moisture comes off the liquid and rides the wind inland, falling as it goes and as the air
-    // is pushed up slopes; air that cools holds less, so the rest falls there too.
     std::vector<double> moisture(size);
     std::vector<double> lost(size, 0.0);
-    for (std::uint32_t point = 0; point < size; ++point) {
-        moisture[point] = heights[point] < 0.0 ? capacity(climate.temperature[point]) : 0.0;
-    }
-    std::vector<double> next = moisture;
-    const int rounds =
-        std::clamp(static_cast<int>(5.0 * body.rain_reach / sphere.spacing()), 20, 800);
-    for (int round = 0; round < rounds; ++round) {
-        for (std::uint32_t point = 0; point < size; ++point) {
-            if (heights[point] < 0.0) {
-                continue;
-            }
-            const DVec3& here = sphere.point(point);
-            double weights = 0.0;
-            double arriving = 0.0;
-            double kept = 0.0;
-            for (const std::uint32_t from : sphere.neighbors(point)) {
-                const DVec3 step = here - sphere.point(from);
-                const double length = glm::length(step);
-                const double weight =
-                    std::max(0.0, glm::dot(climate.wind[point], step / length));
-                if (weight <= 0.0) {
-                    continue;
-                }
-                const double rise = std::max(0.0, heights[point] - std::max(heights[from], 0.0));
-                const double keep =
-                    maths::exp(-(length / body.rain_reach) - (rise / body.vapour_height));
-                weights += weight;
-                arriving += weight * moisture[from];
-                kept += weight * moisture[from] * keep;
-            }
-            if (weights <= 0.0) {
-                next[point] = 0.0;
-                lost[point] = 0.0;
-                continue;
-            }
-            arriving /= weights;
-            kept = std::min(kept / weights, capacity(climate.temperature[point]));
-            next[point] = kept;
-            lost[point] = arriving - kept;
-        }
-        std::swap(moisture, next);
-    }
+    carry_moisture(sphere, heights, body, climate, moisture, lost);
 
     double total = 0.0;
     double area = 0.0;

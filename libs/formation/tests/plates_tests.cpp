@@ -44,10 +44,12 @@ TEST_CASE("plates move along the surface, and pairs agree on their boundary", "[
     const Body body;
     const Sphere layout{4, body.seed};
     const Plates plates{body, layout};
-    for (std::uint16_t a = 0; a < plates.count(); ++a) {
+    for (int one = 0; one < plates.count(); ++one) {
+        const auto a = static_cast<std::uint16_t>(one);
         CHECK_THAT(glm::dot(plates.velocity(a, layout.point(a)), layout.point(a)),
                    WithinAbs(0.0, 1e-15));
-        for (std::uint16_t b = 0; b < plates.count(); ++b) {
+        for (int other = 0; other < plates.count(); ++other) {
+            const auto b = static_cast<std::uint16_t>(other);
             CHECK(plates.age(a, b) == plates.age(b, a));
             if (a != b) {
                 CHECK(plates.rides_over(a, b) != plates.rides_over(b, a));

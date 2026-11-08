@@ -48,7 +48,7 @@ void draw_line(Image& image, const DVec3& from, const DVec3& to, Rgb colour, int
                 const int px = (((x + dx) % image.width) + image.width) % image.width;
                 const int py = std::clamp(y + dy, 0, image.height - 1);
                 const std::size_t at_pixel =
-                    (static_cast<std::size_t>(py) * static_cast<std::size_t>(image.width) +
+                    ((static_cast<std::size_t>(py) * static_cast<std::size_t>(image.width)) +
                      static_cast<std::size_t>(px)) *
                     3;
                 image.pixels[at_pixel] = colour.r;
@@ -67,19 +67,19 @@ Rgb ramp(double t, std::span<const Rgb> stops) {
     const auto below = std::min(static_cast<std::size_t>(along), stops.size() - 2);
     const double share = along - static_cast<double>(below);
     const auto mix = [share](std::uint8_t a, std::uint8_t b) {
-        return static_cast<std::uint8_t>(std::lround(a + ((b - a) * share)));
+        return static_cast<int>(std::lround(a + ((b - a) * share)));
     };
     const Rgb& a = stops[below];
     const Rgb& b = stops[below + 1];
-    return {mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b)};
+    return rgb(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b));
 }
 
 Rgb height_colour(double metres) {
-    static constexpr std::array<Rgb, 4> sea{
-        {{8, 20, 60}, {16, 50, 110}, {40, 100, 170}, {110, 170, 210}}};
-    static constexpr std::array<Rgb, 6> land{
-        {{70, 120, 60}, {120, 150, 80}, {170, 160, 100}, {140, 110, 80}, {170, 160, 150},
-         {245, 245, 245}}};
+    static constexpr std::array<Rgb, 4> sea{rgb(8, 20, 60), rgb(16, 50, 110), rgb(40, 100, 170),
+                                            rgb(110, 170, 210)};
+    static constexpr std::array<Rgb, 6> land{rgb(70, 120, 60),   rgb(120, 150, 80),
+                                             rgb(170, 160, 100), rgb(140, 110, 80),
+                                             rgb(170, 160, 150), rgb(245, 245, 245)};
     if (metres < 0.0) {
         return ramp(1.0 + (metres / 7'000.0), sea);
     }
@@ -88,37 +88,36 @@ Rgb height_colour(double metres) {
 
 Rgb plate_colour(std::uint16_t plate) {
     const std::uint64_t bits = hash_values(0x51A7E5, plate);
-    return {static_cast<std::uint8_t>(80 + (bits & 0x7FU)),
-            static_cast<std::uint8_t>(80 + ((bits >> 8U) & 0x7FU)),
-            static_cast<std::uint8_t>(80 + ((bits >> 16U) & 0x7FU))};
+    return rgb(static_cast<int>(80 + (bits & 0x7FU)), static_cast<int>(80 + ((bits >> 8U) & 0x7FU)),
+               static_cast<int>(80 + ((bits >> 16U) & 0x7FU)));
 }
 
 Rgb meeting_colour(formation::Meeting meeting) {
     using formation::Meeting;
     switch (meeting) {
     case Meeting::Collision:
-        return {200, 30, 30};
+        return rgb(200, 30, 30);
     case Meeting::Subduction:
-        return {230, 120, 20};
+        return rgb(230, 120, 20);
     case Meeting::IslandArc:
-        return {230, 200, 30};
+        return rgb(230, 200, 30);
     case Meeting::Ridge:
-        return {30, 200, 230};
+        return rgb(30, 200, 230);
     case Meeting::Rift:
-        return {160, 60, 200};
+        return rgb(160, 60, 200);
     case Meeting::Transform:
-        return {240, 240, 240};
+        return rgb(240, 240, 240);
     case Meeting::None:
         break;
     }
-    return {0, 0, 0};
+    return rgb(0, 0, 0);
 }
 
 Rgb scaled(Rgb colour, double by) {
     const auto one = [by](std::uint8_t channel) {
-        return static_cast<std::uint8_t>(std::clamp(std::lround(channel * by), 0L, 255L));
+        return static_cast<int>(std::clamp(std::lround(channel * by), 0L, 255L));
     };
-    return {one(colour.r), one(colour.g), one(colour.b)};
+    return rgb(one(colour.r), one(colour.g), one(colour.b));
 }
 
 double shade(const formation::Sphere& sphere, std::span<const double> heights,

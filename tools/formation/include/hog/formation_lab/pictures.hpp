@@ -17,6 +17,13 @@ struct Rgb {
     std::uint8_t b = 0;
 };
 
+// Precondition: each channel within 0 to 255.
+[[nodiscard]] constexpr Rgb rgb(int r, int g, int b) noexcept {
+    return {.r = static_cast<std::uint8_t>(r),
+            .g = static_cast<std::uint8_t>(g),
+            .b = static_cast<std::uint8_t>(b)};
+}
+
 // The direction from the planet's middle through a map's pixel: longitude across from -180° at
 // the left, latitude down from 90° at the top.
 [[nodiscard]] DVec3 map_direction(int x, int y, int width, int height);
