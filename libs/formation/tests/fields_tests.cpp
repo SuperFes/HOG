@@ -16,7 +16,8 @@ using hog::formation::Source;
 using hog::formation::Sphere;
 using hog::formation::sphere_noise;
 
-TEST_CASE("sphere noise stays in range, varies, and is the same for a seed", "[formation][fields]") {
+TEST_CASE("sphere noise stays in range, varies, and is the same for a seed",
+          "[formation][fields]") {
     const Sphere sphere{5, 1};
     const std::vector<double> noise = sphere_noise(sphere, 99, 2, 5);
     const std::vector<double> again = sphere_noise(sphere, 99, 2, 5);

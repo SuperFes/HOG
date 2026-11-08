@@ -1,7 +1,6 @@
-#include <hog/formation/fields.hpp>
-
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/fields.hpp>
 
 #include <functional>
 #include <limits>

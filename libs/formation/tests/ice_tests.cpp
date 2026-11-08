@@ -1,5 +1,4 @@
 #include <hog/formation/ice.hpp>
-
 #include <hog/formation/plates.hpp>
 
 #include <catch2/catch_test_macros.hpp>

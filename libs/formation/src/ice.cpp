@@ -1,6 +1,5 @@
-#include <hog/formation/ice.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/ice.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -84,8 +83,8 @@ void balance(const Land& land, double cooling, Cover& cover) {
         const double latitude = asin(std::clamp(land.sphere->point(point).z, -1.0, 1.0));
         const double swing = seasonal_swing(latitude, false, body);
         const double raised = cover.surface[point] - std::max(land.crust->base[point], 0.0);
-        const double celsius = land.climate->temperature[point] - cooling -
-                               (body.lapse_rate * raised) - body.freezing;
+        const double celsius =
+            land.climate->temperature[point] - cooling - (body.lapse_rate * raised) - body.freezing;
         cover.balance[point] =
             (std::max(land.climate->rain[point], 0.0) * cold_share(celsius, swing)) -
             (body.melt_rate * degree_days(celsius, swing));
@@ -248,15 +247,14 @@ std::vector<double> carve(const Land& land, const Cover& cold) {
         if (rivers.height[point] - rivers.ground[point] > body.shallowest_lake) {
             continue;
         }
-        const double through = std::max(cold.reaching[point], cold.flux[point]) *
-                               (water_density / body.ice_density);
+        const double through =
+            std::max(cold.reaching[point], cold.flux[point]) * (water_density / body.ice_density);
         const double first = std::max(cold.thickness[point], 1.0);
-        const double deepened =
-            maths::pow(maths::pow(first, power) +
-                           (power * body.glacial_erosion *
-                            maths::pow(through / across, body.glacial_erosion_power) *
-                            body.glaciated_years),
-                       1.0 / power);
+        const double deepened = maths::pow(
+            maths::pow(first, power) +
+                (power * body.glacial_erosion *
+                 maths::pow(through / across, body.glacial_erosion_power) * body.glaciated_years),
+            1.0 / power);
         const double cut = deepened - first;
         const std::uint32_t down = cold.parent[point];
         const bool sea = in_sea(rivers, down);
@@ -296,9 +294,9 @@ double cold_share(double mean, double swing) {
 double seasonal_swing(double latitude, bool sea, const Body& body) {
     const double earth_tilt = 23.44 * std::numbers::pi / 180.0;
     const double tilt = std::abs(body.tilt) * std::numbers::pi / 180.0;
-    const double swing = body.season_swing * std::abs(maths::sin(latitude)) *
-                         (maths::sin(std::min(tilt, std::numbers::pi / 2.0)) /
-                          maths::sin(earth_tilt));
+    const double swing =
+        body.season_swing * std::abs(maths::sin(latitude)) *
+        (maths::sin(std::min(tilt, std::numbers::pi / 2.0)) / maths::sin(earth_tilt));
     return sea ? swing * body.sea_swing : swing;
 }
 

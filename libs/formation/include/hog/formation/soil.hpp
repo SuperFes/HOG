@@ -12,8 +12,8 @@ namespace hog::formation {
 // How deep soil lies where rock turning to soil has come to balance the ground wearing away
 // (Heimsath's soil production: rock weathers fastest when bare and slower under deeper soil).
 struct Soil {
-    std::vector<double> depth;   // metres of soil over rock
-    std::vector<double> making;  // metres a year bare rock turns to soil there
+    std::vector<double> depth;  // metres of soil over rock
+    std::vector<double> making; // metres a year bare rock turns to soil there
 };
 
 // Metres a year bare rock turns to soil: rotting faster where it's warm and wet, shattered by frost

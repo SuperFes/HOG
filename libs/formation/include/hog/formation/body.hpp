@@ -13,10 +13,10 @@ struct Body {
 
     // Plates, and the thick light crust riding on them.
     int plates = 14;
-    int continents = 6;           // pieces the light crust lies in
-    double land_share = 0.3;      // of the surface under light crust
-    double plate_speed = 0.45;    // degrees of arc a million years, a typical plate's
-    double boundary_age = 40.0;   // millions of years a boundary has typically been at work
+    int continents = 6;         // pieces the light crust lies in
+    double land_share = 0.3;    // of the surface under light crust
+    double plate_speed = 0.45;  // degrees of arc a million years, a typical plate's
+    double boundary_age = 40.0; // millions of years a boundary has typically been at work
 
     // How crust stands: light crust floats high, sea floor sinks as it ages and cools.
     double crust_thickness = 35'000.0; // metres of light crust
@@ -37,14 +37,14 @@ struct Body {
     double uplift_share = 0.15;    // of the closing speed that pushes rock up in a belt
 
     // Sunlight and the air's hold on heat (Budyko's 1969 balance and numbers).
-    double star_flux = 1'361.0;     // watts a square metre where the planet orbits
-    double tilt = 23.44;            // degrees
-    double day = 24.0;              // hours; under 0 spins backwards
-    double albedo = 0.32;           // of sunlight thrown back
-    double ice_albedo = 0.62;       // where it's cold enough for ice to lie, under -10 °C
-    double greenhouse = 202.0;      // W/m² radiated at 0 °C; less holds more heat in
-    double heat_transport = 3.04;   // W/m² per °C carried polewards
-    double lapse_rate = 0.0065;     // °C colder per metre up
+    double star_flux = 1'361.0;   // watts a square metre where the planet orbits
+    double tilt = 23.44;          // degrees
+    double day = 24.0;            // hours; under 0 spins backwards
+    double albedo = 0.32;         // of sunlight thrown back
+    double ice_albedo = 0.62;     // where it's cold enough for ice to lie, under -10 °C
+    double greenhouse = 202.0;    // W/m² radiated at 0 °C; less holds more heat in
+    double heat_transport = 3.04; // W/m² per °C carried polewards
+    double lapse_rate = 0.0065;   // °C colder per metre up
 
     // Water in the air.
     double rain_mean = 1.0;         // metres a year over the whole planet
@@ -52,42 +52,42 @@ struct Body {
     double vapour_height = 2'500.0; // metres of rise that wring out most of the air's water
 
     // Running water wearing the land (stream power, at Earth's scale).
-    double erodibility = 2.0e-6;   // how readily bare rock wears, per year
-    double discharge_power = 0.5;  // how much more a bigger river cuts
-    double cover_holding = 0.5;    // share of wear plants hold back where they cover the ground
-    double driest_wear = 0.05;     // metres a year of rain wear acts as if on at least: flash floods
+    double erodibility = 2.0e-6;  // how readily bare rock wears, per year
+    double discharge_power = 0.5; // how much more a bigger river cuts
+    double cover_holding = 0.5;   // share of wear plants hold back where they cover the ground
+    double driest_wear = 0.05;    // metres a year of rain wear acts as if on at least: flash floods
     double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
-    double steepest = 0.05;        // steepest mean slope land holds across tens of kilometres
+    double steepest = 0.05;         // steepest mean slope land holds across tens of kilometres
 
     // Snow lying through summers, gathering into ice that flows and carves.
-    double freezing = 0.0;          // °C the liquid freezes at
-    double sea_freezing = -1.8;     // °C the open sea freezes at, its salt holding it off
-    double season_swing = 20.0;     // °C the year swings either side of its mean near the poles,
-                                    // over land at Earth's tilt; none at the equator or no tilt
-    double sea_swing = 0.4;         // share of that swing over open liquid, which holds heat
-    double melt_rate = 0.005;       // metres of water a day melted per °C over freezing
-    double gravity = 9.81;          // metres a second squared
-    double ice_density = 917.0;     // kilograms a cubic metre
+    double freezing = 0.0;           // °C the liquid freezes at
+    double sea_freezing = -1.8;      // °C the open sea freezes at, its salt holding it off
+    double season_swing = 20.0;      // °C the year swings either side of its mean near the poles,
+                                     // over land at Earth's tilt; none at the equator or no tilt
+    double sea_swing = 0.4;          // share of that swing over open liquid, which holds heat
+    double melt_rate = 0.005;        // metres of water a day melted per °C over freezing
+    double gravity = 9.81;           // metres a second squared
+    double ice_density = 917.0;      // kilograms a cubic metre
     double ice_strength = 100'000.0; // pascals of shear ice stands on its bed before it flows
-    double ice_cooling = 6.0;       // °C colder in the coldest times the planet has known
-    double glaciated_years = 100'000.0; // years the coldest times' ice has had to carve
-    double glacial_erosion = 2.7e-7;    // carving per sliding speed to the power below
+    double ice_cooling = 6.0;        // °C colder in the coldest times the planet has known
+    double glaciated_years = 100'000.0;  // years the coldest times' ice has had to carve
+    double glacial_erosion = 2.7e-7;     // carving per sliding speed to the power below
     double glacial_erosion_power = 2.02; // (Herman et al. 2021, metres and years)
-    double overdeepening = 1.5;     // steepest a bed rises against the ice, over the ice surface's
-                                    // slope, before meltwater freezes and carving stops
+    double overdeepening = 1.5; // steepest a bed rises against the ice, over the ice surface's
+                                // slope, before meltwater freezes and carving stops
 
     // Water standing in hollows.
-    double lake_loss = 1.2;        // metres a year open water loses to the air at 15 °C
-    double shallowest_lake = 1.0;  // metres of hollow under which standing water isn't kept
+    double lake_loss = 1.2;       // metres a year open water loses to the air at 15 °C
+    double shallowest_lake = 1.0; // metres of hollow under which standing water isn't kept
 
     // What rivers carry and lay down.
-    double carrying = 1.0;            // sediment carried per water times slope: on lowland
-                                      // slopes a ten-thousandth of the water, torrents a few %
-    double sediment_age = 100'000.0;  // years the land has had to gather what its rivers carry
+    double carrying = 1.0;           // sediment carried per water times slope: on lowland
+                                     // slopes a ten-thousandth of the water, torrents a few %
+    double sediment_age = 100'000.0; // years the land has had to gather what its rivers carry
 
     // Rock turning to soil (Heimsath's soil production).
-    double soil_making = 2.0e-4;   // metres a year bare rock weathers at 15 °C, well watered
-    double soil_falloff = 2.0;     // per metre: how much slower under deeper soil
+    double soil_making = 2.0e-4;      // metres a year bare rock weathers at 15 °C, well watered
+    double soil_falloff = 2.0;        // per metre: how much slower under deeper soil
     double weathering_warmth = 0.065; // per °C faster as it warms
     double frost_weathering = 0.5; // frost shattering at its peak near -5 °C, against soil_making
     double slowest_wear = 5.0e-6;  // metres a year even the stillest land wears down

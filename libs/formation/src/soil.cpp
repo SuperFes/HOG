@@ -1,6 +1,5 @@
-#include <hog/formation/soil.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/soil.hpp>
 
 #include <algorithm>
 

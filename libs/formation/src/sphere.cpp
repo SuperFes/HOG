@@ -1,8 +1,7 @@
-#include <hog/formation/sphere.hpp>
-
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/sphere.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -37,8 +36,9 @@ double unit(std::uint64_t bits) noexcept {
 
 void icosahedron(std::vector<DVec3>& points, std::vector<Triangle>& triangles) {
     const double phi = std::numbers::phi;
-    points = {{-1, phi, 0}, {1, phi, 0},  {-1, -phi, 0}, {1, -phi, 0}, {0, -1, phi}, {0, 1, phi},
-              {0, -1, -phi}, {0, 1, -phi}, {phi, 0, -1},  {phi, 0, 1},  {-phi, 0, -1}, {-phi, 0, 1}};
+    points = {{-1, phi, 0}, {1, phi, 0}, {-1, -phi, 0}, {1, -phi, 0},
+              {0, -1, phi}, {0, 1, phi}, {0, -1, -phi}, {0, 1, -phi},
+              {phi, 0, -1}, {phi, 0, 1}, {-phi, 0, -1}, {-phi, 0, 1}};
     for (DVec3& point : points) {
         point = glm::normalize(point);
     }
@@ -53,7 +53,8 @@ void subdivide(std::vector<DVec3>& points, std::vector<Triangle>& triangles) {
     middles.reserve(triangles.size() * 3 / 2);
     const auto middle = [&](std::uint32_t a, std::uint32_t b) {
         const std::uint64_t key = (std::uint64_t{std::min(a, b)} << 32U) | std::max(a, b);
-        const auto [at, added] = middles.try_emplace(key, static_cast<std::uint32_t>(points.size()));
+        const auto [at, added] =
+            middles.try_emplace(key, static_cast<std::uint32_t>(points.size()));
         if (added) {
             points.push_back(glm::normalize(points[a] + points[b]));
         }
@@ -119,8 +120,8 @@ Sphere::Sphere(int subdivisions, std::uint64_t seed, double jitter) : subdivisio
         const DVec3 north = glm::cross(point, east);
         const double turn = 2.0 * std::numbers::pi * unit(hash_values(seed, index, 0));
         const double distance = reach * unit(hash_values(seed, index, 1));
-        point = glm::normalize(point + (distance * ((maths::cos(turn) * east) +
-                                                    (maths::sin(turn) * north))));
+        point = glm::normalize(
+            point + (distance * ((maths::cos(turn) * east) + (maths::sin(turn) * north))));
     }
     spacing_ = mean_spacing();
 
@@ -217,7 +218,8 @@ Sphere::Spot Sphere::locate(const DVec3& direction, std::uint32_t start) const {
     }
     // Rounding can leave a hair outside every triangle; such weights are clamped.
     const DVec3 kept = glm::max(volumes, DVec3{0.0});
-    return {.corners = triangles_[current], .weights = kept / std::max(kept.x + kept.y + kept.z, 1e-300)};
+    return {.corners = triangles_[current],
+            .weights = kept / std::max(kept.x + kept.y + kept.z, 1e-300)};
 }
 
 } // namespace hog::formation

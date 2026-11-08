@@ -1,3 +1,4 @@
+#include <hog/core/image.hpp>
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
 #include <hog/formation/ice.hpp>
@@ -8,8 +9,6 @@
 #include <hog/formation/soil.hpp>
 #include <hog/formation/sphere.hpp>
 #include <hog/formation_lab/pictures.hpp>
-
-#include <hog/core/image.hpp>
 
 #include <algorithm>
 #include <array>
@@ -120,8 +119,9 @@ struct Canvas {
     const Sphere* sphere = nullptr;
     double step = 0.0; // radians between the samples relief is lit from
 
-    [[nodiscard]] bool draw(std::string_view name,
-                            const std::function<Rgb(const DVec3&, const Sphere::Spot&)>& colour) const {
+    [[nodiscard]] bool
+    draw(std::string_view name,
+         const std::function<Rgb(const DVec3&, const Sphere::Spot&)>& colour) const {
         std::uint32_t start = 0;
         return write(options->out / name,
                      hog::formation_lab::map_picture(options->width, [&](const DVec3& direction) {
@@ -157,35 +157,30 @@ bool draw_crust(const Canvas& canvas, const hog::formation::Crust& crust) {
         return hog::formation_lab::scaled(plate, 0.55 + (0.5 * crust.light[near]));
     });
     std::uint32_t lit = 0;
-    ok = canvas.draw("base.png",
-                     [&](const DVec3& direction, const Sphere::Spot& spot) {
-                         const double height = sphere.sample(crust.base, spot);
-                         const double light = canvas.light(crust.base, direction, lit);
-                         return hog::formation_lab::scaled(
-                             hog::formation_lab::height_colour(height), height < 0.0 ? 1.0 : light);
-                     }) &&
-         ok;
+    ok = canvas.draw("base.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const double height = sphere.sample(crust.base, spot);
+        const double light = canvas.light(crust.base, direction, lit);
+        return hog::formation_lab::scaled(hog::formation_lab::height_colour(height),
+                                          height < 0.0 ? 1.0 : light);
+    }) && ok;
     const double most = std::max(1e-12, *std::ranges::max_element(crust.uplift));
-    static constexpr std::array<Rgb, 5> heat{hog::formation_lab::rgb(20, 20, 30),
-                                             hog::formation_lab::rgb(60, 40, 120),
-                                             hog::formation_lab::rgb(180, 50, 90),
-                                             hog::formation_lab::rgb(240, 140, 40),
-                                             hog::formation_lab::rgb(250, 240, 160)};
-    return canvas.draw("uplift.png",
-                       [&](const DVec3&, const Sphere::Spot& spot) {
-                           const double share = sphere.sample(crust.uplift, spot) / most;
-                           return hog::formation_lab::ramp(std::sqrt(std::max(share, 0.0)), heat);
-                       }) &&
-           ok;
+    static constexpr std::array<Rgb, 5> heat{
+        hog::formation_lab::rgb(20, 20, 30), hog::formation_lab::rgb(60, 40, 120),
+        hog::formation_lab::rgb(180, 50, 90), hog::formation_lab::rgb(240, 140, 40),
+        hog::formation_lab::rgb(250, 240, 160)};
+    return canvas.draw("uplift.png", [&](const DVec3&, const Sphere::Spot& spot) {
+        const double share = sphere.sample(crust.uplift, spot) / most;
+        return hog::formation_lab::ramp(std::sqrt(std::max(share, 0.0)), heat);
+    }) && ok;
 }
 
 bool draw_climate(const Canvas& canvas, const hog::formation::Crust& crust,
                   const hog::formation::Climate& climate) {
     const Sphere& sphere = *canvas.sphere;
     static constexpr std::array<Rgb, 6> cold_to_hot{
-        hog::formation_lab::rgb(40, 40, 140),  hog::formation_lab::rgb(80, 140, 220),
+        hog::formation_lab::rgb(40, 40, 140),   hog::formation_lab::rgb(80, 140, 220),
         hog::formation_lab::rgb(220, 230, 230), hog::formation_lab::rgb(240, 200, 80),
-        hog::formation_lab::rgb(220, 90, 40),  hog::formation_lab::rgb(120, 20, 20)};
+        hog::formation_lab::rgb(220, 90, 40),   hog::formation_lab::rgb(120, 20, 20)};
     const bool ok = canvas.draw("temperature.png", [&](const DVec3&, const Sphere::Spot& spot) {
         const double celsius = sphere.sample(climate.temperature, spot);
         const Rgb colour = hog::formation_lab::ramp((celsius + 40.0) / 80.0, cold_to_hot);
@@ -196,15 +191,13 @@ bool draw_climate(const Canvas& canvas, const hog::formation::Crust& crust,
         hog::formation_lab::rgb(150, 90, 40), hog::formation_lab::rgb(220, 200, 120),
         hog::formation_lab::rgb(120, 190, 90), hog::formation_lab::rgb(30, 120, 70),
         hog::formation_lab::rgb(20, 60, 140)};
-    return canvas.draw("rain.png",
-                       [&](const DVec3&, const Sphere::Spot& spot) {
-                           const double metres = sphere.sample(climate.rain, spot);
-                           const Rgb colour = hog::formation_lab::ramp(
-                               std::sqrt(std::max(metres, 0.0) / 3.0), dry_to_wet);
-                           const bool sea = sphere.sample(crust.base, spot) < 0.0;
-                           return sea ? hog::formation_lab::scaled(colour, 0.45) : colour;
-                       }) &&
-           ok;
+    return canvas.draw("rain.png", [&](const DVec3&, const Sphere::Spot& spot) {
+        const double metres = sphere.sample(climate.rain, spot);
+        const Rgb colour =
+            hog::formation_lab::ramp(std::sqrt(std::max(metres, 0.0) / 3.0), dry_to_wet);
+        const bool sea = sphere.sample(crust.base, spot) < 0.0;
+        return sea ? hog::formation_lab::scaled(colour, 0.45) : colour;
+    }) && ok;
 }
 
 // Standing water over the land, if any: open lakes blue, closed ones greener, salt flats white.
@@ -405,7 +398,8 @@ int run(const Options& options) {
     bool ok = draw_crust(canvas, crust);
 
     at = std::chrono::steady_clock::now();
-    const hog::formation::Climate climate = hog::formation::climate_on(sphere, crust.base, crust.sea, body);
+    const hog::formation::Climate climate =
+        hog::formation::climate_on(sphere, crust.base, crust.sea, body);
     std::cout << std::format("climate in {:.2f} s\n", seconds_since(at));
     ok = draw_climate(canvas, crust, climate) && ok;
 
@@ -421,10 +415,10 @@ int run(const Options& options) {
     ok = draw_ice(canvas, crust, rivers, ice) && ok;
 
     const hog::formation::Lakes lakes = hog::formation::lakes_on(sphere, rivers, climate, body);
-    const auto open = std::ranges::count_if(lakes.lakes, [](const auto& lake) { return lake.open; });
-    std::cout << std::format("{} lakes, {} open and {} closed; {} salt flats\n",
-                             lakes.lakes.size(), open,
-                             static_cast<std::ptrdiff_t>(lakes.lakes.size()) - open,
+    const auto open =
+        std::ranges::count_if(lakes.lakes, [](const auto& lake) { return lake.open; });
+    std::cout << std::format("{} lakes, {} open and {} closed; {} salt flats\n", lakes.lakes.size(),
+                             open, static_cast<std::ptrdiff_t>(lakes.lakes.size()) - open,
                              std::ranges::count(lakes.salt_flat, std::uint8_t{1}));
     const hog::formation::Sediment sediment =
         hog::formation::sediment_on(sphere, rivers, lakes, body);

@@ -68,8 +68,8 @@ TEST_CASE("all the rain on land comes out at the coasts", "[formation][rivers]")
     constexpr double earth_radius = 6'371'000.0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (on_land(made, point)) {
-            fallen += made.climate.rain[point] * made.sphere.area(point) * earth_radius *
-                      earth_radius;
+            fallen +=
+                made.climate.rain[point] * made.sphere.area(point) * earth_radius * earth_radius;
             if (!on_land(made, made.rivers.receiver[point])) {
                 out += made.rivers.discharge[point];
             }
@@ -107,7 +107,8 @@ TEST_CASE("the flow settles, and wear balances uplift where the crust doesn't ho
     CHECK(held > 0);
 }
 
-TEST_CASE("softer rock wears to lower land, and none stands over its crust", "[formation][rivers]") {
+TEST_CASE("softer rock wears to lower land, and none stands over its crust",
+          "[formation][rivers]") {
     Body soft;
     soft.erodibility *= 2.0;
     const Made firm;

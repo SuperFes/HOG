@@ -72,11 +72,11 @@ private:
 // starting height and how fast rock is pushed up, which the stages after read.
 struct Crust {
     std::vector<std::uint16_t> plate;
-    std::vector<double> light;    // share of light crust, 0 to 1
-    std::vector<double> base;     // metres, how the crust stands before anything wears it
-    std::vector<double> uplift;   // metres a year rock is pushed up, at Earth's scale
-    std::vector<Meeting> meeting; // the nearest boundary's kind
-    std::vector<double> boundary; // radians to the nearest boundary
+    std::vector<double> light;     // share of light crust, 0 to 1
+    std::vector<double> base;      // metres, how the crust stands before anything wears it
+    std::vector<double> uplift;    // metres a year rock is pushed up, at Earth's scale
+    std::vector<Meeting> meeting;  // the nearest boundary's kind
+    std::vector<double> boundary;  // radians to the nearest boundary
     std::vector<double> floor_age; // millions of years since the sea floor was made
     std::vector<std::uint8_t> sea; // 1 under open sea; basins under the level elsewhere are land
 };

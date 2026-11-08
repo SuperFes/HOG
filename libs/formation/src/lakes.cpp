@@ -1,6 +1,5 @@
-#include <hog/formation/lakes.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/lakes.hpp>
 
 #include <algorithm>
 #include <numeric>
@@ -78,8 +77,7 @@ void take_downstream(const Rivers& rivers, std::vector<double>& discharge, std::
 } // namespace
 
 double open_water_loss(double celsius, const Body& body) {
-    return body.lake_loss * maths::exp(0.06 * (celsius - 15.0)) *
-           smoothstep(-15.0, 5.0, celsius);
+    return body.lake_loss * maths::exp(0.06 * (celsius - 15.0)) * smoothstep(-15.0, 5.0, celsius);
 }
 
 Filling fill_hollow(std::span<const double> ground, std::span<const double> loss, double inflow,

@@ -40,7 +40,8 @@ TEST_CASE("light crust covers about the share asked for", "[formation][plates]")
     CHECK_THAT(area / (4.0 * std::numbers::pi), WithinAbs(body.land_share, 0.01));
 }
 
-TEST_CASE("plates move along the surface, and pairs agree on their boundary", "[formation][plates]") {
+TEST_CASE("plates move along the surface, and pairs agree on their boundary",
+          "[formation][plates]") {
     const Body body;
     const Sphere layout{4, body.seed};
     const Plates plates{body, layout};
