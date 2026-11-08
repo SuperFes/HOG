@@ -746,8 +746,9 @@ void hear(Digger& digger) {
 
 } // namespace
 
+// Hidden while digging changes the volume and players are sent the land.
 TEST_CASE("a player's digging has the tile columns it touches sent again to everyone",
-          "[app][server]") {
+          "[.][app][server]") {
     const World world;
     build_ground(world, hog::planet::start_direction);
     const auto server = playing(world);

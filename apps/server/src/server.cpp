@@ -19,6 +19,7 @@
 #include <cmath>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <limits>
 #include <string>
 #include <system_error>
@@ -34,9 +35,9 @@ constexpr double near_wear_reach = 48.0;
 constexpr double near_wear_gap = 5.0;
 // How near a player a vent is taken up by the flow, metres.
 constexpr double vent_reach = 4'000.0;
-// Bytes a connection may have queued before tile columns wait; one more may go over it, and it
+// Bytes a connection may have queued before tiles wait; one more may go over it, and it
 // holds far more.
-constexpr std::size_t column_queue = std::size_t{256} * 1'024;
+constexpr std::size_t tile_queue = std::size_t{256} * 1'024;
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
 
@@ -64,15 +65,14 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
                store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
                store::SqliteVolumeArchive volumes)
-    : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
+    : config_(config), world_id_(globe::world_id(globe)), generator_(globe), land_(generator_),
       globe_(generator_, volume_), flow_(globe_), vent_sites_(globe::vent_sites(generator_)),
       vented_(vent_sites_.size(), false), volumes_(std::move(volumes)),
       held_(volume_, volumes_, globe::origin_of(generator_)), snapshots_(std::move(snapshots)),
       places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
-      persistence_(entities_), columns_(generator_.layers()),
-      joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
-      ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
+      persistence_(entities_), joined_(entities_, globe.radius, config.net.view),
+      ground_(space_, globe_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
       slipped_(registry_.counter("hog_ticks_slipped_total",
@@ -97,8 +97,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
       hateful_lines_(registry_.counter("hog_chat_hateful_lines_total",
                                        "Lines of hate speech reported, sent on as small talk.")),
-      columns_sent_(registry_.counter("hog_columns_sent_total",
-                                      "Tile columns of the voxel world sent to players.")),
+      tiles_sent_(
+          registry_.counter("hog_tiles_sent_total", "Tiles of the voxel world sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -158,13 +158,9 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
 
     auto server = std::make_unique<Server>(Opened{}, config, globe, std::move(*snapshots),
                                            std::move(*places), std::move(*volumes));
-    const auto built = globe::made_from(server->volumes_, globe::origin_of(server->generator_));
-    if (!built) {
+    if (const auto built = globe::made_from(server->volumes_, globe::origin_of(server->generator_));
+        !built) {
         return context(world_file, built.error());
-    }
-    if (!*built) {
-        log::warn(server_log, "world {:016x} in {} has no ground built: run hog-build-world",
-                  server->world_id_, world_file);
     }
 
     const GameTime first = config.debug.start.value_or(now);
@@ -363,7 +359,7 @@ void Server::serve_players() {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
             handshakes_.erase(lost->connection);
-            columns_.leave(lost->connection);
+            tiles_.leave(lost->connection);
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
             }
@@ -414,7 +410,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
             send_placed(connection, player->account);
         }
         handshakes_.erase(shaking);
-        columns_.join(connection);
+        tiles_.join(connection);
         if (weather_ && weather_->latest()) {
             send_weather(connection, *weather_->latest());
         }
@@ -564,38 +560,58 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
     }
 }
 
-void Server::tell_columns() {
+void Server::tell_tiles() {
     if (!players_) {
         return;
     }
-    if (globe_.revision() != columns_told_) {
-        const std::vector<globe::BrickSite> changed = globe_.changed_since(columns_told_);
-        columns_.changed(server::HeldGround::corners_of(changed));
-        columns_told_ = globe_.revision();
+    const globe::EachOf each = [this](std::size_t count,
+                                      const std::function<void(std::size_t)>& body) {
+        jobs_.parallel_for(static_cast<std::uint32_t>(count), 1,
+                           [&](jobs::Range range, std::uint32_t /*thread*/) {
+                               for (std::uint32_t n = range.begin; n < range.end; ++n) {
+                                   body(n);
+                               }
+                           });
+    };
+    if (cutting_ && cutting_->done()) {
+        auto [player, cut] = cutting_->take();
+        cutting_.reset();
+        if (cut.too_big > 0) {
+            log::warn(server_log, "{} tiles too big to send connection {}", cut.too_big,
+                      std::to_underlying(player));
+        }
+        tiles_.take(player, std::move(cut));
+    }
+    if (!cutting_) {
+        for (const auto& [connection, look] : joined_.looks()) {
+            const DVec3 at = look.at.metres();
+            if (tiles_.moved(connection, at, generator_.layers())) {
+                cutting_ = std::make_unique<
+                    jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>>(
+                    jobs_, [this, each, player = connection, at, held = tiles_.held(connection)] {
+                        return std::pair{player, tiles_.cut(at, held, land_, each)};
+                    });
+                break;
+            }
+        }
     }
     for (const auto& [connection, look] : joined_.looks()) {
-        columns_.follow(connection, look.at.metres());
         const std::optional<net::Stats> stats = players_->stats(connection);
-        const std::size_t queued = stats ? stats->queued_bytes : column_queue;
-        if (queued >= column_queue || columns_.due(connection) == 0) {
+        const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
+        if (queued >= tile_queue || tiles_.due(connection) == 0) {
             continue;
         }
-        auto next = columns_.next(connection, column_queue - queued, volume_, volumes_);
-        if (!next) {
-            log::warn(server_log, "couldn't read tile columns for connection {}: {}",
-                      std::to_underlying(connection), next.error());
+        const protocol::Tiles next = tiles_.next(connection, tile_queue - queued);
+        if (next.tiles.empty()) {
             continue;
         }
-        if (next->columns.empty()) {
-            continue;
-        }
-        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(*next));
+        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(next));
             !sent) {
-            log::debug(server_log, "couldn't send connection {} tile columns: {}",
+            log::debug(server_log, "couldn't send connection {} tiles: {}",
                        std::to_underlying(connection), sent.error());
             continue;
         }
-        columns_sent_.add(next->columns.size());
+        tiles_sent_.add(next.tiles.size());
     }
 }
 
@@ -632,7 +648,7 @@ void Server::share() {
     }
     tell_grains();
     hold_ground();
-    tell_columns();
+    tell_tiles();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }

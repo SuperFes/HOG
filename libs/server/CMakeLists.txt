@@ -13,7 +13,8 @@ add_library(hog_server
     src/snapshot_writer.cpp
     src/spatial_index.cpp
     src/spatial_tracking.cpp
-    src/tick_clock.cpp)
+    src/tick_clock.cpp
+    src/tile_sending.cpp)
 add_library(hog::server ALIAS hog_server)
 
 target_include_directories(hog_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -42,7 +43,8 @@ hog_add_tests(hog_server
     tests/spatial_index_tests.cpp
     tests/spatial_tracking_tests.cpp
     tests/tick_clock_tests.cpp
-    tests/tick_loop_tests.cpp)
+    tests/tick_loop_tests.cpp
+    tests/tile_sending_tests.cpp)
 
 if(TARGET hog_server_tests)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
