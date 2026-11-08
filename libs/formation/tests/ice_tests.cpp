@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 
 using Catch::Matchers::WithinAbs;
@@ -167,6 +168,47 @@ TEST_CASE("water still finds its way down the land ice shaped", "[formation][ice
         const double below = shaped.receiver[down] == down ? 0.0 : shaped.height[down];
         CHECK(shaped.height[point] > below);
         CHECK(shaped.height[point] >= shaped.ground[point]);
+    }
+}
+
+TEST_CASE("water rerouted round the ice all still reaches the sea, filling only true hollows",
+          "[formation][ice]") {
+    const Made made;
+    const Rivers shaped = ice_shaped(made.sphere, made.rivers, made.ice);
+    const auto into_sea = [&](const Rivers& rivers) {
+        double reaching = 0.0;
+        for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+            if (rivers.receiver[point] != point &&
+                rivers.receiver[rivers.receiver[point]] == rivers.receiver[point]) {
+                reaching += rivers.discharge[point];
+            }
+        }
+        return reaching;
+    };
+    // Only the rain falling where the sea came into troughs is the sea's now.
+    std::vector<double> own = made.rivers.discharge;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        if (made.rivers.receiver[point] != point) {
+            own[made.rivers.receiver[point]] -= made.rivers.discharge[point];
+        }
+    }
+    double drowned = 0.0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const bool was_land = made.rivers.receiver[point] != point;
+        drowned += was_land && shaped.receiver[point] == point ? own[point] : 0.0;
+    }
+    CHECK_THAT(into_sea(shaped) + drowned, WithinRel(into_sea(made.rivers), 1e-9));
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        if (shaped.receiver[point] == point) {
+            continue;
+        }
+        // A point lifted over its ground stands no higher than its lowest neighbour, plus the
+        // faint fall water needs across a filled hollow.
+        double lowest = std::numeric_limits<double>::infinity();
+        for (const std::uint32_t next : made.sphere.neighbors(point)) {
+            lowest = std::min(lowest, shaped.receiver[next] == next ? 0.0 : shaped.height[next]);
+        }
+        CHECK(shaped.height[point] <= std::max(shaped.ground[point], lowest + 1.0));
     }
 }
 
