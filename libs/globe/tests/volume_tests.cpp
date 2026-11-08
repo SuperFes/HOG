@@ -325,6 +325,23 @@ TEST_CASE("tile columns are loaded where the archive holds them, and saved a few
     CHECK(again.at({.face = 2, .i = 63, .j = 5, .layer = 71}).solid == Material::Clay);
 }
 
+TEST_CASE("a tile column saved writes its tiles too, a row each", "[globe][volume]") {
+    using hog::globe::TileKey;
+    const hog::globe::VolumeOrigin origin = hog::globe::origin_of(earth());
+    CHECK(hog::globe::top_level(origin.layers) == origin.layers.level - 6);
+    hog::globe::MemoryVolumeArchive archive;
+    Volume made = rock_to(70);
+    REQUIRE(hog::globe::save_volume(made, archive, origin));
+    const std::vector<TileKey> tiles{{.face = 2, .i = 0, .j = 0, .k = 0},
+                                     {.face = 2, .i = 0, .j = 0, .k = 1},
+                                     {.face = 2, .i = 1, .j = 0, .k = 0},
+                                     {.face = 2, .i = 1, .j = 0, .k = 1}};
+    CHECK(archive.tiles_at(0) == tiles);
+    CHECK(archive.tiles_at(1)->empty());
+    CHECK(archive.tiles_up({.face = 2, .i = 1}) == std::vector<std::uint32_t>{0, 1});
+    CHECK(archive.tile(tiles[1]) == made.tile(tiles[1])->encode());
+}
+
 TEST_CASE("the generator's voxels are made into the volume once, its air left out",
           "[globe][volume]") {
     const Generator& generator = earth();

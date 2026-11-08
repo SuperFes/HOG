@@ -37,6 +37,14 @@ struct SavedColumn {
     friend bool operator==(const SavedColumn&, const SavedColumn&) = default;
 };
 
+// One tile of a volume as saved: where it stands, at its level, and its tree's bytes.
+struct SavedTile {
+    TileKey key;
+    std::vector<std::byte> bytes;
+
+    friend bool operator==(const SavedTile&, const SavedTile&) = default;
+};
+
 // Durable storage for a volume, a tile column at a time so the world needn't all be held at once,
 // and a header saying what it was made from. Backends are chosen at runtime, so this is an
 // interface.
@@ -56,6 +64,17 @@ public:
     // Every tile column written, at level 0, in order.
     [[nodiscard]] virtual Result<std::vector<SavedColumn>> columns() const = 0;
 
+    // Sets the header and writes `tiles` over any in the same places, all or nothing.
+    virtual Result<void> write_tiles(std::span<const std::byte> header,
+                                     std::span<const SavedTile> tiles) = 0;
+    // The bytes of the tile at `key`, none where it was never written.
+    [[nodiscard]] virtual Result<std::optional<std::vector<std::byte>>> tile(TileKey key) const = 0;
+    // How far up, counted in tiles, each tile written stands through `base`'s place at its level,
+    // bottom up.
+    [[nodiscard]] virtual Result<std::vector<std::uint32_t>> tiles_up(TileKey base) const = 0;
+    // Where every tile written at `level` stands, in order.
+    [[nodiscard]] virtual Result<std::vector<TileKey>> tiles_at(std::uint8_t level) const = 0;
+
 protected:
     VolumeArchive(const VolumeArchive&) = default;
     VolumeArchive(VolumeArchive&&) = default;
@@ -72,9 +91,15 @@ public:
     [[nodiscard]] Result<std::optional<SavedColumn>>
     column(std::uint8_t face, std::uint32_t i, std::uint32_t j, std::uint8_t level) const override;
     [[nodiscard]] Result<std::vector<SavedColumn>> columns() const override;
+    Result<void> write_tiles(std::span<const std::byte> header,
+                             std::span<const SavedTile> tiles) override;
+    [[nodiscard]] Result<std::optional<std::vector<std::byte>>> tile(TileKey key) const override;
+    [[nodiscard]] Result<std::vector<std::uint32_t>> tiles_up(TileKey base) const override;
+    [[nodiscard]] Result<std::vector<TileKey>> tiles_at(std::uint8_t level) const override;
 
 private:
     std::vector<std::byte> header_;
+    std::map<TileKey, std::vector<std::byte>> tiles_;
     std::map<std::tuple<std::uint8_t, std::uint32_t, std::uint32_t, std::uint8_t>,
              std::vector<std::byte>>
         columns_;
@@ -108,6 +133,13 @@ struct VolumeOrigin {
 [[nodiscard]] Result<Volume> load_volume(const VolumeArchive& archive, const VolumeOrigin& origin);
 // Writes the volume's tile columns not saved, all or nothing, and counts them saved; how many.
 Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive, const VolumeOrigin& origin);
+
+// The level of the coarsest tiles over layers like these: one across each of the planet's faces.
+[[nodiscard]] std::uint8_t top_level(const Layers& layers) noexcept;
+
+// The tiles at `keys`, as `volume` holds them, written all together; how many.
+Result<std::size_t> save_tiles(std::span<const TileKey> keys, const Volume& volume,
+                               VolumeArchive& archive, const VolumeOrigin& origin);
 
 // The tile column at every level, its own first, as saved at (`face`, `i`, `j`).
 [[nodiscard]] std::vector<SavedColumn> saved_levels(const TileColumn& column, std::uint8_t face,

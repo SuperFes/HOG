@@ -46,6 +46,49 @@ Result<void> write_locked(sqlite3* database, std::span<const std::byte> header,
     return {};
 }
 
+Result<void> write_tiles_locked(sqlite3* database, std::span<const std::byte> header,
+                                std::span<const globe::SavedTile> tiles) {
+    Statement set_header{database, "INSERT OR REPLACE INTO volume_header (id, data) VALUES (0, ?)"};
+    Statement put{database, "INSERT OR REPLACE INTO volume_tiles (level, face, i, j, k, data) "
+                            "VALUES (?, ?, ?, ?, ?, ?)"};
+    if (!set_header.ok() || !put.ok()) {
+        return failure(database, "preparing a tile write");
+    }
+    bind_bytes(set_header, 1, header);
+    if (set_header.step() != SQLITE_DONE) {
+        return failure(database, "writing the volume header");
+    }
+    for (const globe::SavedTile& tile : tiles) {
+        put.reset();
+        sqlite3_bind_int(put.get(), 1, tile.key.level);
+        sqlite3_bind_int(put.get(), 2, tile.key.face);
+        sqlite3_bind_int64(put.get(), 3, tile.key.i);
+        sqlite3_bind_int64(put.get(), 4, tile.key.j);
+        sqlite3_bind_int64(put.get(), 5, tile.key.k);
+        bind_bytes(put, 6, tile.bytes);
+        if (put.step() != SQLITE_DONE) {
+            return failure(database, "writing a tile");
+        }
+    }
+    return {};
+}
+
+// All or nothing.
+template <typename Write>
+Result<void> in_transaction(sqlite3* database, const Write& write) {
+    if (auto begun = execute(database, "BEGIN IMMEDIATE", "starting a volume write"); !begun) {
+        return begun;
+    }
+    auto written = write();
+    if (written) {
+        written = execute(database, "COMMIT", "committing a volume write");
+    }
+    if (!written) {
+        sqlite3_exec(database, "ROLLBACK", nullptr, nullptr, nullptr);
+    }
+    return written;
+}
+
 } // namespace
 
 SqliteVolumeArchive::SqliteVolumeArchive(Database database) : database_{std::move(database)} {}
@@ -61,17 +104,80 @@ Result<SqliteVolumeArchive> SqliteVolumeArchive::open(const std::filesystem::pat
 Result<void> SqliteVolumeArchive::write(std::span<const std::byte> header,
                                         std::span<const globe::SavedColumn> columns) {
     sqlite3* database = database_.get();
-    if (auto begun = execute(database, "BEGIN IMMEDIATE", "starting a volume write"); !begun) {
-        return begun;
+    return in_transaction(database, [&] { return write_locked(database, header, columns); });
+}
+
+Result<void> SqliteVolumeArchive::write_tiles(std::span<const std::byte> header,
+                                              std::span<const globe::SavedTile> tiles) {
+    sqlite3* database = database_.get();
+    return in_transaction(database, [&] { return write_tiles_locked(database, header, tiles); });
+}
+
+Result<std::optional<std::vector<std::byte>>> SqliteVolumeArchive::tile(globe::TileKey key) const {
+    sqlite3* database = database_.get();
+    Statement read{database, "SELECT data FROM volume_tiles WHERE level = ? AND face = ? AND "
+                             "i = ? AND j = ? AND k = ?"};
+    if (!read.ok()) {
+        return failure(database, "preparing a tile read");
     }
-    auto written = write_locked(database, header, columns);
-    if (written) {
-        written = execute(database, "COMMIT", "committing a volume write");
+    sqlite3_bind_int(read.get(), 1, key.level);
+    sqlite3_bind_int(read.get(), 2, key.face);
+    sqlite3_bind_int64(read.get(), 3, key.i);
+    sqlite3_bind_int64(read.get(), 4, key.j);
+    sqlite3_bind_int64(read.get(), 5, key.k);
+    const int found = read.step();
+    if (found == SQLITE_ROW) {
+        return column_bytes(read, 0);
     }
-    if (!written) {
-        sqlite3_exec(database, "ROLLBACK", nullptr, nullptr, nullptr);
+    if (found != SQLITE_DONE) {
+        return failure(database, "reading a tile");
     }
-    return written;
+    return std::nullopt;
+}
+
+Result<std::vector<std::uint32_t>> SqliteVolumeArchive::tiles_up(globe::TileKey base) const {
+    sqlite3* database = database_.get();
+    Statement read{database, "SELECT k FROM volume_tiles WHERE level = ? AND face = ? AND i = ? "
+                             "AND j = ? ORDER BY k"};
+    if (!read.ok()) {
+        return failure(database, "preparing a tile stack read");
+    }
+    sqlite3_bind_int(read.get(), 1, base.level);
+    sqlite3_bind_int(read.get(), 2, base.face);
+    sqlite3_bind_int64(read.get(), 3, base.i);
+    sqlite3_bind_int64(read.get(), 4, base.j);
+    std::vector<std::uint32_t> up;
+    int step = read.step();
+    for (; step == SQLITE_ROW; step = read.step()) {
+        up.push_back(static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 0)));
+    }
+    if (step != SQLITE_DONE) {
+        return failure(database, "reading a tile stack");
+    }
+    return up;
+}
+
+Result<std::vector<globe::TileKey>> SqliteVolumeArchive::tiles_at(std::uint8_t level) const {
+    sqlite3* database = database_.get();
+    Statement read{database, "SELECT face, i, j, k FROM volume_tiles WHERE level = ? "
+                             "ORDER BY face, i, j, k"};
+    if (!read.ok()) {
+        return failure(database, "preparing a tiles read");
+    }
+    sqlite3_bind_int(read.get(), 1, level);
+    std::vector<globe::TileKey> keys;
+    int step = read.step();
+    for (; step == SQLITE_ROW; step = read.step()) {
+        keys.push_back({.level = level,
+                        .face = static_cast<std::uint8_t>(sqlite3_column_int(read.get(), 0)),
+                        .i = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 1)),
+                        .j = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 2)),
+                        .k = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 3))});
+    }
+    if (step != SQLITE_DONE) {
+        return failure(database, "reading the tiles");
+    }
+    return keys;
 }
 
 Result<std::vector<std::byte>> SqliteVolumeArchive::header() const {
