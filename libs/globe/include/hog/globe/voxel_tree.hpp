@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -21,12 +22,15 @@ namespace hog::globe {
 // Nodes are never changed once made; `set` makes new nodes along its path and shares the rest, and
 // cubes that come alike again are one leaf again, so the same voxels are always the same tree.
 // Nodes no longer reachable are not yet taken back.
+//
+// A leaf may be open: made coarsely, by the generator at a level coarser than the finest, with
+// finer still to come. Its mark is 1 + that level; 0 is a leaf as fine as it goes.
 class VoxelTree {
 public:
     using Id = std::uint32_t;
 
-    // A tree of `side` across, all `fill`.
-    explicit VoxelTree(int side, const Cube& fill = {});
+    // A tree of `side` across, all `fill`, open as marked.
+    explicit VoxelTree(int side, const Cube& fill = {}, std::uint8_t open = 0);
 
     // Builds from `voxel_at(x, y, z)`, the voxels of the cube from its corner.
     template <typename VoxelAt>
@@ -94,6 +98,21 @@ public:
     // The size of the leaf holding a point, in voxels across.
     [[nodiscard]] int leaf_side(int x, int y, int z) const;
 
+    // The cube `across` wide from the corner (x, y, z), as a tree each of whose voxels stands for a
+    // cube `voxel` wide of this one; a leaf as wide or wider keeps its mark, and a cube finer than
+    // it is cut off as one voxel marked `cut`. Precondition: powers of two, `voxel` no wider than
+    // `across`, the cube within the tree and on its own grid.
+    [[nodiscard]] VoxelTree window(int x, int y, int z, int across, int voxel,
+                                   std::uint8_t cut) const;
+    // The greatest mark of the leaves in that cube, those finer than `voxel` aside: 0 where all are
+    // as fine as it goes, or finer than `voxel`.
+    [[nodiscard]] std::uint8_t coarsest(int x, int y, int z, int across, int voxel) const;
+    // Puts `part` in at the corner (x, y, z), each of its voxels standing for a cube `voxel` wide
+    // here and each of its leaves open as marked or as `open`, whichever is coarser, where it knows
+    // the voxels more finely than this tree does: over leaves here marked coarser than `open`, and
+    // nowhere else. Precondition: `voxel` a power of two, the part within the tree on its grid.
+    void graft(int x, int y, int z, const VoxelTree& part, int voxel, std::uint8_t open);
+
     // Nodes reachable from the root, each counted once however often it is shared, and as if none
     // were: what the tree costs, and what it would cost with no sharing.
     [[nodiscard]] std::size_t nodes() const;
@@ -114,8 +133,8 @@ private:
     struct Node {
         bool leaf = true;
         Cube voxel; // a cube of eight's as `halved` has them, which its children decide
-
         std::array<Id, 8> child{};
+        std::uint8_t open = 0; // a leaf's
     };
     struct Hash {
         std::size_t operator()(const Node& node) const noexcept;
@@ -126,8 +145,22 @@ private:
 
     // The id of a node alike to this one, made if there's none.
     Id intern(const Node& node);
-    [[nodiscard]] Id leaf_of(const Cube& voxel);
+    [[nodiscard]] Id leaf_of(const Cube& voxel, std::uint8_t open = 0);
+    // The node at the cube `across` wide holding the point, and its size: a leaf as wide or wider
+    // where one holds it.
+    [[nodiscard]] std::pair<Id, int> node_at(int x, int y, int z, int across) const;
+    // `part`'s node in this tree's storage, its leaves marked as `graft` has them.
+    [[nodiscard]] Id imported(const VoxelTree& part, Id node, std::uint8_t open);
+    // `node` with `part` put in over it as `graft` has it.
+    [[nodiscard]] Id merged(Id node, const VoxelTree& part, std::uint8_t open);
     [[nodiscard]] Id with(Id node, int side, int x, int y, int z, const Cube& voxel);
+    // A cube passed on the way down, and which of its eight was gone into.
+    struct Step {
+        Id node;
+        std::size_t child;
+    };
+    // The nodes back up the path, each with its one new child, joining where they come alike.
+    [[nodiscard]] Id rejoined(const std::vector<Step>& path, Id replacement);
 
     template <typename Whole, typename VoxelAt>
     [[nodiscard]] Id made(int x, int y, int z, int across, const Whole& whole,
