@@ -82,6 +82,26 @@ TEST_CASE("the nearest point walked to is the nearest of all", "[formation][sphe
     }
 }
 
+TEST_CASE("the triangle located holds the direction, even far from its nearest point",
+          "[formation][sphere]") {
+    const Sphere sphere{3, 13};
+    std::uint32_t start = 0;
+    for (int n = 0; n < 20'000; ++n) {
+        const double z = std::fmod((n * 0.618034) + 0.01, 2.0) - 1.0;
+        const double turn = n * 2.399963;
+        const double across = std::sqrt(1.0 - (z * z));
+        const DVec3 direction{across * std::cos(turn), across * std::sin(turn), z};
+        const Sphere::Spot spot = sphere.locate(direction, start);
+        start = spot.corners[0];
+        const DVec3& a = sphere.point(spot.corners[0]);
+        const DVec3& b = sphere.point(spot.corners[1]);
+        const DVec3& c = sphere.point(spot.corners[2]);
+        CHECK(glm::dot(direction, glm::cross(b, c)) >= -1e-15);
+        CHECK(glm::dot(direction, glm::cross(c, a)) >= -1e-15);
+        CHECK(glm::dot(direction, glm::cross(a, b)) >= -1e-15);
+    }
+}
+
 TEST_CASE("a field read between points follows it smoothly", "[formation][sphere]") {
     const Sphere sphere{5, 2};
     std::vector<double> heights(sphere.size());
