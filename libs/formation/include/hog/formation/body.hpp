@@ -56,6 +56,13 @@ struct Body {
     double driest_wear = 0.05;     // metres a year of rain wear acts as if on at least: flash floods
     double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
     double steepest = 0.05;        // steepest mean slope land holds across tens of kilometres
+
+    // Rock turning to soil (Heimsath's soil production).
+    double soil_making = 2.0e-4;   // metres a year bare rock weathers at 15 °C, well watered
+    double soil_falloff = 2.0;     // per metre: how much slower under deeper soil
+    double weathering_warmth = 0.065; // per °C faster as it warms
+    double frost_weathering = 0.5; // frost shattering at its peak near -5 °C, against soil_making
+    double slowest_wear = 5.0e-6;  // metres a year even the stillest land wears down
 };
 
 } // namespace hog::formation
