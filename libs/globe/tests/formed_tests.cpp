@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 
 using Catch::Matchers::WithinAbs;
@@ -142,6 +143,42 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
     }
     REQUIRE(walked > 0);
     CHECK(wet * 2 > walked);
+}
+
+TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double radius = generator.planet().radius;
+    for (const double pole : {1.0, -1.0}) {
+        for (int ring = 0; ring < 40; ++ring) {
+            const double from_pole = 0.002 * (ring + 1);
+            const auto top = [&](double turn) {
+                const DVec3 direction{std::sin(from_pole) * std::cos(turn),
+                                      std::sin(from_pole) * std::sin(turn),
+                                      pole * std::cos(from_pole)};
+                return formed.at(direction).top.value;
+            };
+            constexpr int steps = 100;
+            for (int n = 0; n < steps; ++n) {
+                double near = 2.0 * std::numbers::pi * n / steps;
+                double far = 2.0 * std::numbers::pi * (n + 1) / steps;
+                REQUIRE(std::isfinite(top(near)));
+                // However steep, narrowing in on the steepest stretch shrinks the change; a
+                // break in the ground would keep it.
+                for (int halving = 0; halving < 12; ++halving) {
+                    const double half = 0.5 * (near + far);
+                    if (std::abs(top(half) - top(near)) >= std::abs(top(far) - top(half))) {
+                        far = half;
+                    } else {
+                        near = half;
+                    }
+                }
+                const double metres = (far - near) * std::sin(from_pole) * radius;
+                CHECK(std::abs(top(far) - top(near)) < 1.0 + (5.0 * metres));
+            }
+        }
+    }
 }
 
 TEST_CASE("how finely a planet's land is formed is one of its knobs", "[globe][formed]") {
