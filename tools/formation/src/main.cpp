@@ -1,4 +1,5 @@
 #include <hog/formation/body.hpp>
+#include <hog/formation/climate.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/sphere.hpp>
 #include <hog/formation_lab/pictures.hpp>
@@ -34,7 +35,7 @@ constexpr std::string_view usage =
     "                     [--layout SPLITS] [--detail SPLITS] [--width N] [--out DIR]\n"
     "Forms a planet in stages and writes a map of each stage's result to DIR:\n"
     "plates.png (plates, light crust, and how they meet), base.png (how the crust stands),\n"
-    "uplift.png (where rock is pushed up).\n";
+    "uplift.png (where rock is pushed up), temperature.png and rain.png (yearly means).\n";
 
 struct Options {
     hog::formation::Body body;
@@ -155,6 +156,42 @@ int run(const Options& options) {
                    start = spot.corners[0];
                    const double share = sphere.sample(crust.uplift, spot) / most;
                    return hog::formation_lab::ramp(std::sqrt(std::max(share, 0.0)), heat);
+               })) &&
+         ok;
+
+    at = std::chrono::steady_clock::now();
+    const hog::formation::Climate climate =
+        hog::formation::climate_on(sphere, crust.base, body);
+    std::cout << std::format("climate in {:.2f} s\n", seconds_since(at));
+    static constexpr std::array<Rgb, 6> cold_to_hot{{{40, 40, 140},
+                                                     {80, 140, 220},
+                                                     {220, 230, 230},
+                                                     {240, 200, 80},
+                                                     {220, 90, 40},
+                                                     {120, 20, 20}}};
+    ok = write(options.out / "temperature.png",
+               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
+                   const Sphere::Spot spot = sphere.locate(direction, start);
+                   start = spot.corners[0];
+                   const double celsius = sphere.sample(climate.temperature, spot);
+                   const Rgb colour = hog::formation_lab::ramp((celsius + 40.0) / 80.0, cold_to_hot);
+                   return sphere.sample(crust.base, spot) < 0.0
+                              ? hog::formation_lab::scaled(colour, 0.7)
+                              : colour;
+               })) &&
+         ok;
+    static constexpr std::array<Rgb, 5> dry_to_wet{
+        {{150, 90, 40}, {220, 200, 120}, {120, 190, 90}, {30, 120, 70}, {20, 60, 140}}};
+    ok = write(options.out / "rain.png",
+               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
+                   const Sphere::Spot spot = sphere.locate(direction, start);
+                   start = spot.corners[0];
+                   const double metres = sphere.sample(climate.rain, spot);
+                   const Rgb colour =
+                       hog::formation_lab::ramp(std::sqrt(std::max(metres, 0.0) / 3.0), dry_to_wet);
+                   return sphere.sample(crust.base, spot) < 0.0
+                              ? hog::formation_lab::scaled(colour, 0.45)
+                              : colour;
                })) &&
          ok;
     return ok ? 0 : 1;
