@@ -189,4 +189,17 @@ private:
 // heat on average, and the condition of the least whole. Precondition: wider than one voxel.
 [[nodiscard]] VoxelTree halved(const VoxelTree& tree);
 
+// One of the eight cubes a parent tree stands for: a tree, or all one voxel where there's none.
+struct Octant {
+    const VoxelTree* tree = nullptr;
+    Cube fill;
+};
+
+// The tree `side` across standing for its eight children, each as wide, by bits 1 across, 2 along
+// and 4 up: each voxel stands for the eight it covers, as `halved` has them. Where a child has no
+// tree and there's a tree `kept`, its eighth is kept from that. Precondition: `side` is wider than
+// one voxel.
+[[nodiscard]] VoxelTree parent_of(const std::array<Octant, 8>& children, int side,
+                                  const VoxelTree* kept = nullptr);
+
 } // namespace hog::globe

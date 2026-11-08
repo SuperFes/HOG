@@ -17,6 +17,39 @@
 
 namespace hog::globe {
 
+// Where a tile stands: its level, at which each of its voxels stands for 2^level of the finest a
+// side, its face, and its place counted in tiles of that level.
+struct TileKey {
+    std::uint8_t level = 0;
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint32_t k = 0;
+
+    // The tile a level coarser holding this one, and which of its eight this is: bits 1 across,
+    // 2 along and 4 up.
+    [[nodiscard]] constexpr TileKey parent() const noexcept {
+        return {.level = static_cast<std::uint8_t>(level + 1),
+                .face = face,
+                .i = i / 2,
+                .j = j / 2,
+                .k = k / 2};
+    }
+    [[nodiscard]] constexpr std::size_t octant() const noexcept {
+        return (i % 2) + (2 * (j % 2)) + (4 * (k % 2));
+    }
+    // Precondition: a level coarser than the finest.
+    [[nodiscard]] constexpr TileKey child(std::size_t octant) const noexcept {
+        return {.level = static_cast<std::uint8_t>(level - 1),
+                .face = face,
+                .i = (2 * i) + static_cast<std::uint32_t>(octant & 1U),
+                .j = (2 * j) + static_cast<std::uint32_t>((octant >> 1U) & 1U),
+                .k = (2 * k) + static_cast<std::uint32_t>((octant >> 2U) & 1U)};
+    }
+
+    friend constexpr auto operator<=>(const TileKey&, const TileKey&) noexcept = default;
+};
+
 // A tile column's floor and tiles as they're stored and sent. Halved, its tiles are each half as
 // wide and its floor counted in voxels twice as tall.
 struct TileColumn {
@@ -36,6 +69,7 @@ struct TileColumn {
 
 // The world's voxels, held where they are: tiles `tile_side` voxels across along a face and up
 // through the layers, each a VoxelTree. Air is never held; a tile of nothing else is no tile.
+// Coarser tiles over them each stand for the eight a level finer.
 // Each tile column is made down to its floor only; below that nothing is made yet, not even air.
 class Volume {
 public:
@@ -67,6 +101,20 @@ public:
     [[nodiscard]] const VoxelTree* tile_at(Site site) const;
     // Puts the tile holding `site`, none where it's all air.
     void put_tile(Site site, VoxelTree tile);
+
+    // The tile at `key`, at any level; none where none is held.
+    [[nodiscard]] const VoxelTree* tile(TileKey key) const;
+    // Holds `tile` at a level coarser than the finest, in place of any there.
+    void put_coarse(TileKey key, VoxelTree tile);
+    // The finest tile held over `site`, at `level` or coarser, and its level; none where none is.
+    [[nodiscard]] std::optional<std::pair<std::uint8_t, const VoxelTree*>>
+    finest_over(Site site, std::uint8_t level = 0) const;
+    // The voxel at `site` as the finest tile held over it has it, standing for those it covers;
+    // air where none is.
+    [[nodiscard]] Cube finest_at(Site site) const;
+    // Makes the tiles over `key` again from theirs under them, up to `top`: each a level coarser
+    // than what it's made from, an eighth from each it holds, and the rest kept as it was.
+    void refresh_over(TileKey key, std::uint8_t top);
     // Takes in the other's tiles and floors, over any of its own in the same places.
     void merge(Volume other);
 
@@ -101,13 +149,7 @@ public:
     void saved(Site site) { unsaved_.erase(column_of(site)); }
 
 private:
-    struct Key {
-        std::uint8_t face = 0;
-        std::uint32_t i = 0;
-        std::uint32_t j = 0;
-        std::uint32_t k = 0;
-        friend constexpr auto operator<=>(const Key&, const Key&) noexcept = default;
-    };
+    using Key = TileKey;
     struct Column {
         std::uint8_t face = 0;
         std::uint32_t i = 0;
@@ -119,6 +161,7 @@ private:
 
     std::map<Column, std::uint32_t> floors_;
     std::map<Key, VoxelTree> tiles_;
+    std::uint8_t coarsest_ = 0; // the coarsest level any tile is held at
     std::uint64_t revision_ = 0;
     std::vector<std::pair<std::uint64_t, BrickSite>> log_; // revision and brick, in order
     std::set<Column> unsaved_;
