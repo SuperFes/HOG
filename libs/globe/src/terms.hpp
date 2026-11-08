@@ -122,6 +122,7 @@ struct Ground {
     double height = 0.0;              // the rock's, over the raw radius
     double surface_temperature = 0.0; // kelvin, at the reference level
     Layering layers;
+    std::optional<double> lake; // a formed world's lake's water, over the raw radius
 };
 
 [[nodiscard]] Ground ground(const Context& context, DVec3 direction, double lod) noexcept;

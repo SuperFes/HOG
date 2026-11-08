@@ -6,6 +6,7 @@ add_library(hog_globe
     src/crust.cpp
     src/drainage.cpp
     src/erosion.cpp
+    src/formed.cpp
     src/generator.cpp
     src/grip.cpp
     src/layers.cpp
@@ -35,7 +36,7 @@ add_library(hog_globe
 add_library(hog::globe ALIAS hog_globe)
 
 target_include_directories(hog_globe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_globe PUBLIC hog::core PRIVATE tomlplusplus)
+target_link_libraries(hog_globe PUBLIC hog::core hog::formation PRIVATE tomlplusplus)
 hog_target_defaults(hog_globe)
 
 hog_add_tests(hog_globe
@@ -45,6 +46,7 @@ hog_add_tests(hog_globe
     tests/cell_tests.cpp
     tests/craters_tests.cpp
     tests/drainage_tests.cpp
+    tests/formed_tests.cpp
     tests/generator_tests.cpp
     tests/grip_tests.cpp
     tests/land_tests.cpp

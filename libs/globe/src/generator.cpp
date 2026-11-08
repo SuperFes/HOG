@@ -1,3 +1,4 @@
+#include "formed.hpp"
 #include "terms.hpp"
 
 #include <hog/core/assert.hpp>
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <queue>
@@ -481,6 +483,20 @@ Generator::Generator(const Planet& planet, const Progress& progress)
         shape_.province_threshold = quantile(fields, 1.0 - planet_.high_fraction);
     }
 
+    if (planet_.formed_detail > 0.0) {
+        // A formed world's heights are already over its own sea, and its rivers have worn it.
+        say("forming the land");
+        const auto formed = std::make_shared<const Formed>(planet_, derived_);
+        shape_.sea = derived_.liquid && formed->has_sea();
+        shape_.lowest = formed->lowest();
+        shape_.highest = formed->highest();
+        shape_.formed = formed;
+        say("laying out the voxel layers");
+        layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
+                               planet_.sky_height, planet_.voxel);
+        return;
+    }
+
     say("surveying the heights");
     // The radius stands at the sea, filling its share of the surface, or at the mean ground.
     const double lod = planet_.radius * std::numbers::pi / 2.0 / (1 << survey_level);
@@ -689,6 +705,9 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         // lies under the level.
         if (const auto lake = pond_at(down); lake && column.ground_ < *lake) {
             column.water_ = std::max(column.water_, *lake);
+        }
+        if (made.lake) {
+            column.water_ = std::max(column.water_, planet_.radius + *made.lake - shape_.datum);
         }
     }
     if (!shape_.table.empty()) {
@@ -965,7 +984,28 @@ std::optional<double> ground_below(const Generator& generator, DVec3 direction, 
 
 namespace terms {
 
+namespace {
+
+// A formed world's ground: its heights, layers and lakes all read from what formed it.
+Ground formed_ground(const Context& context, DVec3 direction) {
+    const Formed::Here here = context.shape->formed->at(direction);
+    Ground made;
+    made.rock = {.height = here.top, .high = here.light, .built = here.folding};
+    const double latitude = maths::atan2(
+        direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
+    made.surface_temperature = temperature_at(*context.planet, latitude);
+    made.layers = here.layers;
+    made.height = here.top.value;
+    made.lake = here.lake;
+    return made;
+}
+
+} // namespace
+
 Column column(const Context& context, DVec3 direction, double lod) noexcept {
+    if (context.shape->formed) {
+        return formed_ground(context, direction).rock;
+    }
     return column(context, direction, lod, craters(context, direction, lod));
 }
 
@@ -1001,10 +1041,21 @@ Ground ground_on(const Context& context, DVec3 direction, Column rock) noexcept 
 } // namespace
 
 Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
+    if (context.shape->formed) {
+        return formed_ground(context, direction);
+    }
     return ground_on(context, direction, column(context, direction, lod));
 }
 
 std::vector<Ground> ground(const Context& context, std::span<const Cell> cells, double lod) {
+    if (context.shape->formed) {
+        std::vector<Ground> made;
+        made.reserve(cells.size());
+        for (const Cell& cell : cells) {
+            made.push_back(formed_ground(context, center(cell)));
+        }
+        return made;
+    }
     std::vector<Noise> struck(cells.size());
     craters(context, cells, lod, struck);
     std::vector<Ground> made;

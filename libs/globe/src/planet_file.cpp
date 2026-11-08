@@ -38,6 +38,7 @@ constexpr std::array numbers{
     std::pair{"sea_fraction"sv, &Planet::sea_fraction},
     std::pair{"wear"sv, &Planet::wear},
     std::pair{"weathering"sv, &Planet::weathering},
+    std::pair{"formed_detail"sv, &Planet::formed_detail},
 };
 
 constexpr std::array regimes{std::pair{"plates"sv, Regime::Plates},

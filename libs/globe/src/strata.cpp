@@ -3,8 +3,10 @@
 #include <hog/core/hash.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 
 namespace hog::globe::terms {
 namespace {
@@ -64,6 +66,24 @@ Layering layering(const Context& context, DVec3 direction, const Column& column,
 
 Material material_at(const Context& context, const Layering& layers, double depth,
                      double radius) noexcept {
+    // What a formed world laid over its beds, from the top down.
+    const std::array<std::pair<double, Material>, 8> laid{{
+        {layers.ice, Material::Ice},
+        {layers.organic, Material::Soil},
+        {layers.topsoil, Material::Soil},
+        {layers.subsoil, Material::Clay},
+        {layers.alluvium, Material::Sediment},
+        {layers.lake_beds, Material::Clay},
+        {layers.till, Material::Gravel},
+        {layers.lava, Material::Basalt},
+    }};
+    double bottom = 0.0;
+    for (const auto& [thickness, material] : laid) {
+        bottom += thickness;
+        if (depth < bottom) {
+            return material;
+        }
+    }
     if (depth >= layers.cover) {
         return layers.basement;
     }

@@ -68,6 +68,10 @@ struct Planet {
     // Metres of loose ground rock has weathered into on level ground in a temperate climate;
     // the climate and the rock make it more or less.
     double weathering = 8.0;
+    // Splits of the sphere the land is formed on, stage by stage from plates to soil
+    // (hog::formation), its heights, ice, lakes and layers then read from it; none at 0, the
+    // generator's own terms shaping the land instead.
+    double formed_detail = 0.0;
 };
 
 // What follows from the knobs by known physics.
