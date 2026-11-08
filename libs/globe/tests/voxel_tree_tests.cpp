@@ -392,6 +392,43 @@ TEST_CASE("a tree halved from its big leaves is the tree halved voxel by voxel",
     CHECK(half.same_as(by_voxel));
 }
 
+TEST_CASE("a tree's cubes of every size stand for their voxels as the tree halved so often",
+          "[globe][voxel_tree]") {
+    VoxelTree tree = VoxelTree::build(16, [](int x, int y, int z) {
+        if (z < 5) {
+            return rock();
+        }
+        return z < 11 ? scattered(x, y, z) : Cube{};
+    });
+    const auto agrees = [](const VoxelTree& checked) {
+        VoxelTree half = checked;
+        for (int across = 2; across <= checked.side(); across *= 2) {
+            half = hog::globe::halved(half);
+            for (int z = 0; z < checked.side(); ++z) {
+                for (int y = 0; y < checked.side(); ++y) {
+                    for (int x = 0; x < checked.side(); ++x) {
+                        if (!(checked.average(x, y, z, across) ==
+                              half.at(x / across, y / across, z / across))) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    };
+    CHECK(agrees(tree));
+    CHECK(tree.average(3, 4, 5, 1) == tree.at(3, 4, 5));
+
+    // Kept as voxels are set, and as the tree is read back from bytes.
+    tree.set(7, 9, 10, water());
+    tree.set(0, 0, 0, Cube{});
+    CHECK(agrees(tree));
+    const auto decoded = VoxelTree::decode(tree.encode());
+    REQUIRE(decoded.has_value());
+    CHECK(agrees(*decoded));
+}
+
 TEST_CASE("a parent tree stands for its eight children, as the tree twice as wide halved",
           "[globe][voxel_tree]") {
     const VoxelTree whole = VoxelTree::build(16, [](int x, int y, int z) {

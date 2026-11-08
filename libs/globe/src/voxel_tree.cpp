@@ -15,6 +15,55 @@
 
 namespace hog::globe {
 
+namespace {
+
+// One of a cube's matters over eight voxels: the material holding most of it, and its average.
+struct Share {
+    std::array<std::uint32_t, material_count> by{};
+
+    void add(Material material, std::uint16_t amount) {
+        by.at(static_cast<std::size_t>(material)) += amount;
+    }
+    [[nodiscard]] std::pair<Material, std::uint16_t> taken() const {
+        // Air holds nothing of a matter, so is never the most of one.
+        std::size_t most = 1;
+        std::uint32_t total = 0;
+        for (std::size_t k = 1; k < by.size(); ++k) {
+            total += by.at(k);
+            if (by.at(k) > by.at(most)) {
+                most = k;
+            }
+        }
+        const auto amount = static_cast<std::uint16_t>((total + 4) / 8);
+        return amount == 0 ? std::pair{Material::Air, std::uint16_t{0}}
+                           : std::pair{static_cast<Material>(most), amount};
+    }
+};
+
+Cube summed(const std::array<Cube, 8>& eight) {
+    Share solid;
+    Share grain;
+    Share liquid;
+    std::uint32_t heat = 0;
+    std::uint8_t condition = Voxel::sound;
+    for (const Cube& cube : eight) {
+        solid.add(cube.solid, cube.solid_amount);
+        grain.add(cube.grain, cube.grain_amount);
+        liquid.add(cube.liquid, cube.liquid_amount);
+        heat += cube.heat;
+        condition = std::min(condition, cube.condition);
+    }
+    Cube out;
+    std::tie(out.solid, out.solid_amount) = solid.taken();
+    std::tie(out.grain, out.grain_amount) = grain.taken();
+    std::tie(out.liquid, out.liquid_amount) = liquid.taken();
+    out.heat = static_cast<std::uint8_t>((heat + 4) / 8);
+    out.condition = out.solid == Material::Air ? Voxel::sound : condition;
+    return out;
+}
+
+} // namespace
+
 std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
     if (node.leaf) {
         const Cube& v = node.voxel;
@@ -59,7 +108,11 @@ VoxelTree::Id VoxelTree::joined(const std::array<Id, 8>& children) {
     if (alike) {
         return children[0];
     }
-    return intern({.leaf = false, .voxel = {}, .child = children});
+    std::array<Cube, 8> eight;
+    for (std::size_t k = 0; k < eight.size(); ++k) {
+        eight.at(k) = nodes_[children.at(k)].voxel;
+    }
+    return intern({.leaf = false, .voxel = summed(eight), .child = children});
 }
 
 Cube VoxelTree::at(int x, int y, int z) const {
@@ -68,6 +121,25 @@ Cube VoxelTree::at(int x, int y, int z) const {
     Id node = root_;
     int size = side_;
     while (!nodes_[node].leaf) {
+        const int half = size / 2;
+        const std::size_t k = (x >= half ? 1U : 0U) | (y >= half ? 2U : 0U) | (z >= half ? 4U : 0U);
+        node = nodes_[node].child[k];
+        x %= half;
+        y %= half;
+        z %= half;
+        size = half;
+    }
+    return nodes_[node].voxel;
+}
+
+Cube VoxelTree::average(int x, int y, int z, int across) const {
+    HOG_ASSERT(x >= 0 && y >= 0 && z >= 0 && x < side_ && y < side_ && z < side_,
+               "a point in the tree");
+    HOG_ASSERT(across > 0 && across <= side_ && (across & (across - 1)) == 0,
+               "a cube a power of two across, no wider than the tree");
+    Id node = root_;
+    int size = side_;
+    while (!nodes_[node].leaf && size > across) {
         const int half = size / 2;
         const std::size_t k = (x >= half ? 1U : 0U) | (y >= half ? 2U : 0U) | (z >= half ? 4U : 0U);
         node = nodes_[node].child[k];
@@ -320,11 +392,11 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
                 child = ids[static_cast<std::size_t>(k - *back)];
             }
             // Bytes made by encode never hold eight leaves alike; refusing them keeps one form.
-            if (tree.joined(children) !=
-                tree.intern({.leaf = false, .voxel = {}, .child = children})) {
+            const Id joined = tree.joined(children);
+            if (tree.nodes_[joined].leaf) {
                 return fail("a cube of eight alike leaves is not in its joined form");
             }
-            ids.push_back(tree.intern({.leaf = false, .voxel = {}, .child = children}));
+            ids.push_back(joined);
         } else {
             return fail("a node is neither a leaf nor a cube");
         }
@@ -362,66 +434,6 @@ bool VoxelTree::same_as(const VoxelTree& other) const {
     return true;
 }
 
-namespace {
-
-// One of a cube's matters over eight voxels: the material holding most of it, and its average.
-struct Share {
-    std::array<std::uint32_t, material_count> by{};
-
-    void add(Material material, std::uint16_t amount) {
-        by.at(static_cast<std::size_t>(material)) += amount;
-    }
-    [[nodiscard]] std::pair<Material, std::uint16_t> taken() const {
-        // Air holds nothing of a matter, so is never the most of one.
-        std::size_t most = 1;
-        std::uint32_t total = 0;
-        for (std::size_t k = 1; k < by.size(); ++k) {
-            total += by.at(k);
-            if (by.at(k) > by.at(most)) {
-                most = k;
-            }
-        }
-        const auto amount = static_cast<std::uint16_t>((total + 4) / 8);
-        return amount == 0 ? std::pair{Material::Air, std::uint16_t{0}}
-                           : std::pair{static_cast<Material>(most), amount};
-    }
-};
-
-Cube summed(const std::array<Cube, 8>& eight) {
-    Share solid;
-    Share grain;
-    Share liquid;
-    std::uint32_t heat = 0;
-    std::uint8_t condition = Voxel::sound;
-    for (const Cube& cube : eight) {
-        solid.add(cube.solid, cube.solid_amount);
-        grain.add(cube.grain, cube.grain_amount);
-        liquid.add(cube.liquid, cube.liquid_amount);
-        heat += cube.heat;
-        condition = std::min(condition, cube.condition);
-    }
-    Cube out;
-    std::tie(out.solid, out.solid_amount) = solid.taken();
-    std::tie(out.grain, out.grain_amount) = grain.taken();
-    std::tie(out.liquid, out.liquid_amount) = liquid.taken();
-    out.heat = static_cast<std::uint8_t>((heat + 4) / 8);
-    out.condition = out.solid == Material::Air ? Voxel::sound : condition;
-    return out;
-}
-
-// The eight voxels of `tree` from (2x, 2y, 2z), as one.
-Cube summed_at(const VoxelTree& tree, int x, int y, int z) {
-    std::array<Cube, 8> eight;
-    for (std::size_t k = 0; k < eight.size(); ++k) {
-        eight.at(k) =
-            tree.at((2 * x) + static_cast<int>(k & 1U), (2 * y) + static_cast<int>((k >> 1U) & 1U),
-                    (2 * z) + static_cast<int>((k >> 2U) & 1U));
-    }
-    return summed(eight);
-}
-
-} // namespace
-
 VoxelTree halved(const VoxelTree& tree) {
     HOG_ASSERT(tree.side() > 1, "a tree wider than one voxel");
     // A cube within one leaf of the finer tree is that leaf's voxel all through.
@@ -433,7 +445,7 @@ VoxelTree halved(const VoxelTree& tree) {
         }
         return std::nullopt;
     };
-    const auto voxel_at = [&](int x, int y, int z) { return summed_at(tree, x, y, z); };
+    const auto voxel_at = [&](int x, int y, int z) { return tree.average(2 * x, 2 * y, 2 * z, 2); };
     return VoxelTree::build_down(tree.side() / 2, whole, voxel_at);
 }
 
@@ -456,7 +468,7 @@ VoxelTree parent_of(const std::array<Octant, 8>& children, int side, const Voxel
             const int at_y = y % half;
             const int at_z = z % half;
             return child.tree->leaf_side(2 * at_x, 2 * at_y, 2 * at_z) >= 2 * across
-                       ? std::optional{summed_at(*child.tree, at_x, at_y, at_z)}
+                       ? std::optional{child.tree->average(2 * at_x, 2 * at_y, 2 * at_z, 2)}
                        : std::nullopt;
         }
         if (kept != nullptr) {
@@ -468,7 +480,7 @@ VoxelTree parent_of(const std::array<Octant, 8>& children, int side, const Voxel
     const auto voxel_at = [&](int x, int y, int z) {
         const Octant& child = octant(x, y, z);
         if (child.tree != nullptr) {
-            return summed_at(*child.tree, x % half, y % half, z % half);
+            return child.tree->average(2 * (x % half), 2 * (y % half), 2 * (z % half), 2);
         }
         return kept != nullptr ? kept->at(x, y, z) : child.fill;
     };
