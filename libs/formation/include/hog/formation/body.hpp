@@ -33,6 +33,21 @@ struct Body {
     double arc_height = 2'000.0;   // metres volcanoes build behind a trench
     double rift_depth = 1'500.0;   // metres a continent sags where it's pulled apart
     double uplift_share = 0.15;    // of the closing speed that pushes rock up in a belt
+
+    // Sunlight and the air's hold on heat (Budyko's 1969 balance and numbers).
+    double star_flux = 1'361.0;     // watts a square metre where the planet orbits
+    double tilt = 23.44;            // degrees
+    double day = 24.0;              // hours; under 0 spins backwards
+    double albedo = 0.32;           // of sunlight thrown back
+    double ice_albedo = 0.62;       // where it's cold enough for ice to lie, under -10 °C
+    double greenhouse = 202.0;      // W/m² radiated at 0 °C; less holds more heat in
+    double heat_transport = 3.04;   // W/m² per °C carried polewards
+    double lapse_rate = 0.0065;     // °C colder per metre up
+
+    // Water in the air.
+    double rain_mean = 1.0;         // metres a year over the whole planet
+    double rain_reach = 0.3;        // radians moist air carries inland before most has fallen
+    double vapour_height = 2'500.0; // metres of rise that wring out most of the air's water
 };
 
 } // namespace hog::formation
