@@ -20,10 +20,12 @@ namespace {
 
 constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
 
-// A tile column's ground as the world holds it at its own level, the liquid's surface left out:
-// it isn't walked on.
-std::optional<Mesh> mesh_of(const globe::World& world, globe::Site corner) {
-    const globe::VoxelMesh drawn = globe::mesh_tile_column(world, corner, 0);
+// A tile's ground as the world holds it, the tiles beside it read from the world, the liquid's
+// surface left out: it isn't walked on.
+std::optional<Mesh> mesh_of(const globe::World& world, globe::TileKey key,
+                            const globe::VoxelTree& tile) {
+    const globe::VoxelMesh drawn = globe::mesh_tile(
+        world.layers(), key, tile, [&](globe::TileKey at) { return world.tile(at); });
     Mesh mesh{.origin = WorldPosition{drawn.origin}, .vertices = {}, .triangles = {}};
     mesh.vertices.reserve(drawn.vertices.size());
     for (const globe::VoxelVertex& vertex : drawn.vertices) {
@@ -53,8 +55,8 @@ Ground::~Ground() {
 
 Ground::Ground(Ground&& other) noexcept
     : space_(std::exchange(other.space_, nullptr)), world_(other.world_),
-      settings_(other.settings_), columns_(std::move(other.columns_)) {
-    other.columns_.clear();
+      settings_(other.settings_), tiles_(std::move(other.tiles_)) {
+    other.tiles_.clear();
 }
 
 Ground& Ground::operator=(Ground&& other) noexcept {
@@ -63,108 +65,127 @@ Ground& Ground::operator=(Ground&& other) noexcept {
         space_ = std::exchange(other.space_, nullptr);
         world_ = other.world_;
         settings_ = other.settings_;
-        columns_ = std::move(other.columns_);
-        other.columns_.clear();
+        tiles_ = std::move(other.tiles_);
+        other.tiles_.clear();
     }
     return *this;
 }
 
 std::size_t Ground::size() const noexcept {
     return static_cast<std::size_t>(
-        std::ranges::count_if(columns_, [](const auto& held) { return held.second.has_value(); }));
+        std::ranges::count_if(tiles_, [](const auto& held) { return held.second.has_value(); }));
 }
 
-void Ground::let_go(globe::Site corner) noexcept {
-    const auto held = columns_.find(corner);
-    if (held == columns_.end()) {
+void Ground::let_go(globe::TileKey key) noexcept {
+    const auto held = tiles_.find(key);
+    if (held == tiles_.end()) {
         return;
     }
     if (held->second) {
         space_->remove(*held->second);
     }
-    columns_.erase(held);
+    tiles_.erase(held);
 }
 
 void Ground::clear() noexcept {
     if (space_ == nullptr) {
         return;
     }
-    for (const auto& [corner, body] : columns_) {
+    for (const auto& [key, body] : tiles_) {
         if (body) {
             space_->remove(*body);
         }
     }
-    columns_.clear();
+    tiles_.clear();
+}
+
+std::set<globe::TileKey> Ground::near(std::span<const WorldPosition> around, double reach) const {
+    const globe::Layers& layers = world_.layers();
+    std::set<globe::TileKey> found;
+    for (const WorldPosition point : around) {
+        const double radius = glm::length(point.metres());
+        // Ground within reach across can stand further up or down than that on a steep slope.
+        const auto tile_of = [&](double at) {
+            return static_cast<std::uint32_t>(std::clamp(layers.layer_at(at), 0, layers.count - 1) /
+                                              globe::Volume::tile_side);
+        };
+        const std::uint32_t lowest = tile_of(radius - (2.0 * reach));
+        const std::uint32_t highest = tile_of(radius + (2.0 * reach));
+        for (const globe::Site corner : globe::tile_columns_near(layers, point.metres(), reach)) {
+            for (std::uint32_t k = lowest; k <= highest; ++k) {
+                const globe::TileKey finest{.level = 0,
+                                            .face = corner.face,
+                                            .i = corner.i / side,
+                                            .j = corner.j / side,
+                                            .k = k};
+                const std::optional<globe::HeldTile> over = world_.tile_over(finest);
+                found.insert(over ? over->key : finest);
+            }
+        }
+    }
+    return found;
 }
 
 Result<> Ground::keep(std::span<const WorldPosition> around) {
-    std::set<globe::Site> wanted;
-    std::set<globe::Site> near;
-    for (const WorldPosition point : around) {
-        for (const globe::Site corner :
-             globe::tile_columns_near(world_.layers(), point.metres(), settings_.reach)) {
-            wanted.insert(corner);
-        }
-        for (const globe::Site corner :
-             globe::tile_columns_near(world_.layers(), point.metres(), 2.0 * settings_.reach)) {
-            near.insert(corner);
+    const std::set<globe::TileKey> wanted = near(around, settings_.reach);
+    const std::set<globe::TileKey> close = near(around, 2.0 * settings_.reach);
+    std::vector<globe::TileKey> far;
+    for (const auto& [key, body] : tiles_) {
+        if (!close.contains(key)) {
+            far.push_back(key);
         }
     }
-    std::vector<globe::Site> far;
-    for (const auto& [corner, body] : columns_) {
-        if (!near.contains(corner)) {
-            far.push_back(corner);
-        }
+    for (const globe::TileKey key : far) {
+        let_go(key);
     }
-    for (const globe::Site corner : far) {
-        let_go(corner);
-    }
-    for (const globe::Site corner : wanted) {
-        if (columns_.contains(corner)) {
+    for (const globe::TileKey key : wanted) {
+        if (tiles_.contains(key)) {
             continue;
         }
-        const std::optional<Mesh> mesh = mesh_of(world_, corner);
+        const globe::VoxelTree* tile = world_.tile(key);
+        const std::optional<Mesh> mesh =
+            tile != nullptr ? mesh_of(world_, key, *tile) : std::nullopt;
         if (!mesh) {
-            columns_.emplace(corner, std::nullopt);
+            tiles_.emplace(key, std::nullopt);
             continue;
         }
         auto body = space_->add(*mesh);
         if (!body) {
             return std::unexpected(body.error());
         }
-        columns_.emplace(corner, *body);
+        tiles_.emplace(key, *body);
     }
     return {};
 }
 
 void Ground::changed(globe::BrickSite brick) {
-    constexpr std::uint32_t across = side / globe::brick_side;
-    const globe::Cell column{
-        .level = static_cast<std::uint8_t>(world_.layers().level - std::countr_zero(side)),
-        .face = brick.face,
-        .i = brick.i / across,
-        .j = brick.j / across};
-    const auto corner_of = [](globe::Cell cell) {
-        return globe::Site{.face = cell.face, .i = cell.i * side, .j = cell.j * side};
-    };
-    let_go(corner_of(column));
-    // Its faces on the column's edge are drawn by the column beside it too.
-    const auto edge = [](std::uint32_t at) {
-        if (at % across == 0) {
-            return -1;
-        }
-        return at % across == across - 1 ? 1 : 0;
-    };
-    const int di = edge(brick.i);
-    const int dj = edge(brick.j);
-    for (const auto [step_i, step_j] : {std::pair{di, 0}, std::pair{0, dj}}) {
-        if (step_i == 0 && step_j == 0) {
-            continue;
-        }
-        if (const std::optional<globe::Cell> beside = globe::next_to(column, step_i, step_j)) {
-            let_go(corner_of(*beside));
+    constexpr std::uint32_t bricks = side / globe::brick_side;
+    changed(globe::TileKey{.level = 0,
+                           .face = brick.face,
+                           .i = brick.i / bricks,
+                           .j = brick.j / bricks,
+                           .k = brick.layer / bricks});
+}
+
+void Ground::changed(globe::TileKey key) {
+    std::vector<globe::TileKey> touched;
+    for (const auto& [kept, body] : tiles_) {
+        if (globe::meets(kept, key)) {
+            touched.push_back(kept);
         }
     }
+    for (const globe::TileKey kept : touched) {
+        let_go(kept);
+    }
+}
+
+bool Ground::holds(globe::TileKey key) const {
+    for (int up = 0; up < 32 && key.level < UINT8_MAX; ++up, key = key.parent()) {
+        if (tiles_.contains(key)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace hog::physics

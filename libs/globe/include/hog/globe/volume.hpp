@@ -50,6 +50,20 @@ struct TileKey {
     friend constexpr auto operator<=>(const TileKey&, const TileKey&) noexcept = default;
 };
 
+// Whether two tiles of any levels share any of their space, or meet at a side, an edge or a corner.
+[[nodiscard]] constexpr bool meets(TileKey a, TileKey b) noexcept {
+    if (a.face != b.face) {
+        return false;
+    }
+    const auto along = [&](std::uint32_t from_a, std::uint32_t from_b) {
+        const std::uint64_t low_a = std::uint64_t{from_a} << a.level;
+        const std::uint64_t low_b = std::uint64_t{from_b} << b.level;
+        return low_a <= low_b + (std::uint64_t{1} << b.level) &&
+               low_b <= low_a + (std::uint64_t{1} << a.level);
+    };
+    return along(a.i, b.i) && along(a.j, b.j) && along(a.k, b.k);
+}
+
 // A tile column's floor and tiles as they're stored and sent. Halved, its tiles are each half as
 // wide and its floor counted in voxels twice as tall.
 struct TileColumn {

@@ -34,20 +34,6 @@ std::vector<globe::TileKey> beside(globe::TileKey key) {
     return next;
 }
 
-// Whether two tiles, neither inside the other, meet at a side, an edge or a corner.
-bool touching(globe::TileKey a, globe::TileKey b) {
-    if (a.face != b.face) {
-        return false;
-    }
-    const auto meets = [&](std::uint32_t from_a, std::uint32_t from_b) {
-        const std::uint64_t low_a = std::uint64_t{from_a} << a.level;
-        const std::uint64_t low_b = std::uint64_t{from_b} << b.level;
-        return low_a <= low_b + (std::uint64_t{1} << b.level) &&
-               low_b <= low_a + (std::uint64_t{1} << a.level);
-    };
-    return meets(a.i, b.i) && meets(a.j, b.j) && meets(a.k, b.k);
-}
-
 // The bits of `value`, 21 of them, spread to every third bit.
 std::uint64_t spread(std::uint32_t value) noexcept {
     std::uint64_t bits = value & 0x1F'FFFFU;
@@ -131,7 +117,7 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
             waiting_.insert(next);
         }
         for (const globe::TileKey finer : under(next)) {
-            if (touching(finer, key)) {
+            if (globe::meets(finer, key)) {
                 waiting_.insert(finer);
             }
         }

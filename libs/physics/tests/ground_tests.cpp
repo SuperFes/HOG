@@ -1,7 +1,9 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/held_tiles.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
@@ -16,6 +18,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <set>
 #include <utility>
@@ -51,11 +54,16 @@ DVec3 land() {
     return globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
 }
 
-// The corner of the tile column under a place.
-globe::Site column_under(WorldPosition at) {
+// The finest tile holding a place.
+globe::TileKey tile_at(WorldPosition at) {
     constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
-    const globe::Cell cell = globe::cell_under(glm::normalize(at.metres()), earth().layers().level);
-    return {.face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
+    const globe::Layers& layers = earth().layers();
+    const globe::Cell cell = globe::cell_under(glm::normalize(at.metres()), layers.level);
+    return {.level = 0,
+            .face = cell.face,
+            .i = cell.i / side,
+            .j = cell.j / side,
+            .k = static_cast<std::uint32_t>(layers.layer_at(glm::length(at.metres()))) / side};
 }
 
 } // namespace
@@ -69,9 +77,14 @@ TEST_CASE("the ground is where its voxels are drawn", "[physics][ground]") {
     const WorldPosition standing = over(land());
     const std::array around{standing};
     REQUIRE(ground.keep(around));
-    const globe::Site column = column_under(standing);
-    REQUIRE(ground.holds(column));
-    const globe::VoxelMesh drawn = globe::mesh_tile_column(world, column, 0);
+    // The tile holding the ground under it.
+    const DVec3 up = glm::normalize(standing.metres());
+    const globe::TileKey key = tile_at(standing - (up * 10.5));
+    REQUIRE(ground.holds(key));
+    const globe::VoxelTree* tile = world.tile(key);
+    REQUIRE(tile != nullptr);
+    const globe::VoxelMesh drawn = globe::mesh_tile(
+        world.layers(), key, *tile, [&](globe::TileKey at) { return world.tile(at); });
     // Through the middles of the tops of boxes, where the ground is walked on: Jolt's rays can
     // slip between triangles at a vertex.
     std::vector<std::size_t> tops;
@@ -92,8 +105,8 @@ TEST_CASE("the ground is where its voxels are drawn", "[physics][ground]") {
             middle += DVec3{drawn.vertices[drawn.indices[corner + n]].position} / 3.0;
         }
         const WorldPosition on = WorldPosition{drawn.origin} + middle;
-        const DVec3 up = glm::normalize(on.metres());
-        const auto cast = space.cast_ray(on + (up * 2.0), up * -4.0, Faces::Both);
+        const DVec3 out = glm::normalize(on.metres());
+        const auto cast = space.cast_ray(on + (out * 2.0), out * -4.0, Faces::Both);
         REQUIRE(cast);
         const Hit hit = cast.value_or(Hit{});
         CHECK(glm::length(hit.at - on) < 1e-3);
@@ -111,10 +124,10 @@ TEST_CASE("the ground is kept near the points, and let go far from them", "[phys
     const WorldPosition here = over(land());
     const std::array around{here};
     REQUIRE(ground.keep(around));
-    const globe::Site under = column_under(here);
+    const globe::TileKey under = tile_at(here);
     CHECK(ground.holds(under));
     const std::size_t held = ground.size();
-    CHECK(held >= 4);
+    CHECK(held >= 1);
     CHECK(space.size() == held);
 
     const std::array twice{here, here};
@@ -128,7 +141,7 @@ TEST_CASE("the ground is kept near the points, and let go far from them", "[phys
     const std::array away{over(there)};
     REQUIRE(ground.keep(away));
     CHECK_FALSE(ground.holds(under));
-    CHECK(ground.holds(column_under(away[0])));
+    CHECK(ground.holds(tile_at(away[0])));
     CHECK(space.size() == ground.size());
 }
 
@@ -139,7 +152,7 @@ TEST_CASE("ground not made is kept as none, adding nothing to the space", "[phys
     Ground ground{space, world, {.reach = 30.0}};
     const std::array around{over(land())};
     REQUIRE(ground.keep(around));
-    CHECK(ground.holds(column_under(around[0])));
+    CHECK(ground.holds(tile_at(around[0])));
     CHECK(ground.size() == 0);
     CHECK(space.size() == 0);
 }
@@ -155,9 +168,9 @@ TEST_CASE("the ground over a cube face's edge is kept on both faces", "[physics]
     REQUIRE(ground.keep(around));
     std::set<int> faces;
     for (const DVec3 side : {DVec3{1.0, 0.9999, 0.3}, DVec3{0.9999, 1.0, 0.3}}) {
-        const globe::Site corner = column_under(WorldPosition{glm::normalize(side)});
-        if (ground.holds(corner)) {
-            faces.insert(corner.face);
+        const globe::TileKey key = tile_at(over(glm::normalize(side)));
+        if (ground.holds(key)) {
+            faces.insert(key.face);
         }
     }
     CHECK(faces.size() == 2);
@@ -205,9 +218,9 @@ TEST_CASE("a brick dug lets go of the ground over it, which comes back with the 
     for (const globe::BrickSite brick : changed) {
         ground.changed(brick);
     }
-    CHECK_FALSE(ground.holds(column_under(standing)));
+    CHECK_FALSE(ground.holds(tile_at(standing)));
     REQUIRE(ground.keep(around));
-    CHECK(ground.holds(column_under(standing)));
+    CHECK(ground.holds(tile_at(standing)));
     CHECK(drop() > before + 1.5);
 }
 
@@ -256,4 +269,54 @@ TEST_CASE("there is ground under and round a walker, whatever the cell size", "[
         CHECK(tried > 0);
         CHECK(missed == 0);
     }
+}
+
+TEST_CASE("ground is kept from tiles held alone, and kept anew when coarser ones replace them",
+          "[physics][ground]") {
+    globe::MadeWorld made{earth()};
+    made.cover(land());
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    globe::HeldTiles held;
+    for (const globe::Site corner : made.volume().columns()) {
+        for (const auto& [k, tree] : made.volume().column(corner)->tiles) {
+            held.put({.level = 0,
+                      .face = corner.face,
+                      .i = corner.i / side,
+                      .j = corner.j / side,
+                      .k = k},
+                     std::make_shared<const globe::VoxelTree>(tree));
+        }
+    }
+    globe::Volume none;
+    globe::World alone{earth().planet(), earth().layers(), none};
+    alone.read_tiles(&held);
+    Space space;
+    Ground ground{space, alone, {.reach = 30.0}};
+    const DVec3 up = land();
+    const WorldPosition standing = over(up);
+    const std::array around{standing};
+    REQUIRE(ground.keep(around));
+    const auto drop = [&] {
+        const auto cast = space.cast_ray(standing, up * -200.0, Faces::Both);
+        REQUIRE(cast);
+        return glm::length(cast.value_or(Hit{}).at - standing);
+    };
+    CHECK(drop() == Approx(10.0).margin(earth().layers().thickness));
+
+    // Sent coarser over it, rock to well under where it stood: walked on there instead.
+    globe::TileKey coarse = tile_at(standing);
+    coarse = coarse.parent().parent();
+    const double depth = glm::length(standing.metres()) -
+                         earth().layers().bottom(static_cast<int>(coarse.k * side * 4));
+    held.put(coarse, std::make_shared<const globe::VoxelTree>(
+                         globe::VoxelTree::build(globe::Volume::tile_side, [](int, int, int z) {
+                             return z < 2 ? globe::Cube{.solid = globe::Material::Granite,
+                                                        .solid_amount = globe::Voxel::full}
+                                          : globe::Cube{};
+                         })));
+    ground.changed(coarse);
+    CHECK_FALSE(ground.holds(tile_at(standing)));
+    REQUIRE(ground.keep(around));
+    CHECK(ground.holds(tile_at(standing)));
+    CHECK(drop() == Approx(depth - (8.0 * earth().layers().thickness)).margin(0.5));
 }
