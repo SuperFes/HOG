@@ -29,10 +29,6 @@ struct Landforms {
     std::vector<double> slope;        // rise over run to the steepest neighbour
 };
 
-// How well rock stands in steep faces: crystalline basement best, lava and sea-floor basalt
-// nearly as well, folded beds less, flat beds as well as their hard beds and limestone let them.
-[[nodiscard]] double rock_strength(Rock rock, double layering, double soluble);
-
 [[nodiscard]] Landforms landforms_on(const Sphere& sphere, const Crust& crust,
                                      const Bedrock& bedrock, const Outcrop& outcrop,
                                      const Climate& climate, const Rivers& rivers, const Ice& ice,

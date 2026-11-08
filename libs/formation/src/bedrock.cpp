@@ -116,6 +116,30 @@ Bedrock bedrock_on(const Sphere& sphere, const Crust& crust, const Body& body) {
     return bedrock;
 }
 
+namespace {
+
+struct Stripped {
+    Rock rock = Rock::Basement;
+    double cover = 0.0;
+    double lava = 0.0;
+};
+
+// Wear takes the lava first, then the layered rock, down to the basement.
+Stripped stripped(const Crust& crust, const Bedrock& bedrock, std::uint32_t point, double eroded) {
+    const double lava = std::max(0.0, bedrock.lava[point] - eroded);
+    const double cover =
+        std::max(0.0, bedrock.cover[point] - std::max(0.0, eroded - bedrock.lava[point]));
+    Rock rock = crust.light[point] >= 0.5 ? Rock::Basement : Rock::SeaFloor;
+    if (lava > 0.0) {
+        rock = Rock::Lava;
+    } else if (cover > 0.0) {
+        rock = bedrock.folding[point] >= folded ? Rock::Folded : Rock::Layered;
+    }
+    return {.rock = rock, .cover = cover, .lava = lava};
+}
+
+} // namespace
+
 Outcrop outcrop_on(const Sphere& sphere, const Crust& crust, const Bedrock& bedrock,
                    const Rivers& rivers, const Body& body) {
     const std::uint32_t size = sphere.size();
@@ -125,23 +149,42 @@ Outcrop outcrop_on(const Sphere& sphere, const Crust& crust, const Bedrock& bedr
     outcrop.cover.assign(size, 0.0);
     outcrop.lava.assign(size, 0.0);
     for (std::uint32_t point = 0; point < size; ++point) {
-        // Wear takes the lava first, then the layered rock, down to the basement.
         const double eroded = std::max(rivers.wear[point], 0.0) * std::max(body.exhumed_years, 0.0);
-        const double lava = std::max(0.0, bedrock.lava[point] - eroded);
-        const double cover =
-            std::max(0.0, bedrock.cover[point] - std::max(0.0, eroded - bedrock.lava[point]));
-        Rock rock = crust.light[point] >= 0.5 ? Rock::Basement : Rock::SeaFloor;
-        if (lava > 0.0) {
-            rock = Rock::Lava;
-        } else if (cover > 0.0) {
-            rock = bedrock.folding[point] >= folded ? Rock::Folded : Rock::Layered;
-        }
-        outcrop.rock[point] = rock;
+        const Stripped top = stripped(crust, bedrock, point, eroded);
+        outcrop.rock[point] = top.rock;
         outcrop.eroded[point] = eroded;
-        outcrop.cover[point] = cover;
-        outcrop.lava[point] = lava;
+        outcrop.cover[point] = top.cover;
+        outcrop.lava[point] = top.lava;
     }
     return outcrop;
+}
+
+double rock_strength(Rock rock, double layering, double soluble) {
+    switch (rock) {
+    case Rock::Basement:
+        return 1.0;
+    case Rock::Lava:
+        return 0.85;
+    case Rock::SeaFloor:
+        return 0.8;
+    case Rock::Folded:
+        return 0.6;
+    case Rock::Layered:
+        break;
+    }
+    return std::clamp(0.3 + (0.4 * layering) + (0.2 * soluble), 0.0, 1.0);
+}
+
+std::vector<double> standing_strength(const Sphere& sphere, const Crust& crust,
+                                      const Bedrock& bedrock, const Body& body) {
+    std::vector<double> strength(sphere.size(), 0.0);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double eroded =
+            std::max(crust.uplift[point], 0.0) * std::max(body.exhumed_years, 0.0);
+        const Stripped top = stripped(crust, bedrock, point, eroded);
+        strength[point] = rock_strength(top.rock, bedrock.layering[point], bedrock.soluble[point]);
+    }
+    return strength;
 }
 
 } // namespace hog::formation

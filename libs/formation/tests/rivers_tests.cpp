@@ -131,6 +131,31 @@ TEST_CASE("softer rock wears to lower land, and none stands over its crust",
     CHECK(mean_land(softer) < 0.9 * mean_land(firm));
 }
 
+TEST_CASE("strong rock stands higher than weak, and middling rock as if unknown",
+          "[formation][rivers]") {
+    const Made made;
+    const std::vector<double> weak(made.sphere.size(), 0.0);
+    const std::vector<double> middling(made.sphere.size(), 0.5);
+    const std::vector<double> strong(made.sphere.size(), 1.0);
+    const auto mean_land = [&](const Rivers& rivers) {
+        double sum = 0.0;
+        int count = 0;
+        for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+            if (on_land(made, point)) {
+                sum += rivers.height[point];
+                ++count;
+            }
+        }
+        return sum / count;
+    };
+    const Rivers on_weak = rivers_on(made.sphere, made.crust, made.climate, weak, made.body);
+    const Rivers on_strong = rivers_on(made.sphere, made.crust, made.climate, strong, made.body);
+    CHECK(mean_land(on_strong) > mean_land(on_weak));
+    const Rivers on_middling =
+        rivers_on(made.sphere, made.crust, made.climate, middling, made.body);
+    CHECK(on_middling.height == made.rivers.height);
+}
+
 TEST_CASE("the same body wears the same land", "[formation][rivers]") {
     const Made one;
     const Made two;

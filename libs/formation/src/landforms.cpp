@@ -87,22 +87,6 @@ double cap_of(Rock rock, double layering) {
 
 } // namespace
 
-double rock_strength(Rock rock, double layering, double soluble) {
-    switch (rock) {
-    case Rock::Basement:
-        return 1.0;
-    case Rock::Lava:
-        return 0.85;
-    case Rock::SeaFloor:
-        return 0.8;
-    case Rock::Folded:
-        return 0.6;
-    case Rock::Layered:
-        break;
-    }
-    return std::clamp(0.3 + (0.4 * layering) + (0.2 * soluble), 0.0, 1.0);
-}
-
 Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& bedrock,
                        const Outcrop& outcrop, const Climate& climate, const Rivers& rivers,
                        const Ice& ice, const Body& body) {
