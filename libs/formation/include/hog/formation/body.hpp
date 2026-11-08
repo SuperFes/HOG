@@ -94,6 +94,19 @@ struct Body {
     double loose_weathering = 5.0; // how much faster loose till and alluvium turn to soil than rock
     double soil_years = 1'000'000.0;  // years soil has had where the coldest times' ice never lay
     double ice_left_years = 12'000.0; // years since the coldest times' ice melted back
+
+    // Dead plant matter in and on the soil (Lieth's Miami model of growth; Clymo's peat).
+    double plant_growth = 1.0;     // how fast plants grow against Earth's, warmth and rain alike
+    double root_share = 0.4;       // share of what plants grow that dies underground
+    double humus_share = 0.5;      // share of dead roots that become lasting humus in the soil
+    double rotting = 0.03;         // per year humus rots at 10 °C in damp, thawed ground
+    double litter_rotting = 10.0;  // how much faster dead matter on top rots than humus, in air
+    double drowned_rotting = 0.01; // how much slower anything rots in waterlogged ground
+    double peat_burial = 0.1;    // share of what dies on waterlogged ground sinking under the water
+                                 // before it rots in the air at the top (Clymo)
+    double topsoil_humus = 40.0; // kilograms of humus in a cubic metre of topsoil
+    double peat_density =
+        100.0; // kilograms of dead plant matter in a cubic metre of litter or peat
 };
 
 } // namespace hog::formation

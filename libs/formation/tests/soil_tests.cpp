@@ -16,6 +16,7 @@ using hog::formation::Climate;
 using hog::formation::climate_on;
 using hog::formation::Crust;
 using hog::formation::crust_on;
+using hog::formation::gathered;
 using hog::formation::grown_depth;
 using hog::formation::Ice;
 using hog::formation::ice_on;
@@ -25,17 +26,21 @@ using hog::formation::lakes_on;
 using hog::formation::Layer;
 using hog::formation::layer_at;
 using hog::formation::Parent;
+using hog::formation::plant_growth;
 using hog::formation::Plates;
 using hog::formation::Profile;
 using hog::formation::profile_at;
 using hog::formation::Rivers;
 using hog::formation::rivers_on;
+using hog::formation::rotting_rate;
 using hog::formation::Sediment;
 using hog::formation::sediment_on;
 using hog::formation::Soil;
 using hog::formation::soil_making;
 using hog::formation::soil_on;
 using hog::formation::Sphere;
+using hog::formation::waterlogged;
+using hog::formation::wetness;
 
 TEST_CASE("rock weathers faster warm and wet, not at all frozen", "[formation][soil]") {
     const Body body;
@@ -193,13 +198,15 @@ TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         const auto spot = made.sphere.locate(made.sphere.point(point), point);
         const Profile profile = profile_at(made.sphere, made.soil, spot);
-        CHECK_THAT(profile.soil, WithinAbs(made.soil.depth[point], 1e-9));
+        CHECK_THAT(profile.topsoil + profile.subsoil, WithinAbs(made.soil.depth[point], 1e-9));
+        CHECK_THAT(profile.organic, WithinAbs(made.soil.organic[point], 1e-9));
         CHECK_THAT(profile.till, WithinAbs(made.soil.till[point], 1e-9));
         if (made.soil.depth[point] > 0.0 && made.soil.till[point] > 0.0) {
             ++layered;
             chosen = point;
-            CHECK(layer_at(profile, 0.0) == Layer::Soil);
-            CHECK(layer_at(profile, profile.soil + profile.alluvium + profile.lake_beds +
+            const double soil = profile.organic + profile.topsoil + profile.subsoil;
+            CHECK(layer_at(profile, soil / 2.0) <= Layer::Subsoil);
+            CHECK(layer_at(profile, soil + profile.alluvium + profile.lake_beds +
                                         (profile.till / 2.0)) == Layer::Till);
         }
     }
@@ -209,10 +216,11 @@ TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
     const DVec3 between = glm::normalize(made.sphere.point(chosen) + made.sphere.point(around[0]) +
                                          made.sphere.point(around[1]));
     const Profile profile = profile_at(made.sphere, made.soil, made.sphere.locate(between, chosen));
-    CHECK(profile.soil > 0.0);
+    CHECK(profile.topsoil + profile.subsoil > 0.0);
     CHECK(profile.till > 0.0);
-    const double laid = profile.soil + profile.alluvium + profile.lake_beds + profile.till;
-    auto previous = Layer::Soil;
+    const double laid = profile.organic + profile.topsoil + profile.subsoil + profile.alluvium +
+                        profile.lake_beds + profile.till;
+    auto previous = Layer::Organic;
     constexpr int steps = 10'000;
     for (int step = 0; step <= steps; ++step) {
         const Layer layer = layer_at(profile, (laid + 10.0) * step / steps);
@@ -240,4 +248,63 @@ TEST_CASE("where the coldest times' ice lay, soil is young and thin on rock", "[
     }
     REQUIRE(young > 0);
     CHECK(thinner > 0);
+}
+
+TEST_CASE("plants grow by the lesser of what warmth and rain allow", "[formation][soil]") {
+    const Body body;
+    CHECK(plant_growth(25.0, 2.0, body) > plant_growth(5.0, 2.0, body));
+    CHECK(plant_growth(25.0, 2.0, body) > plant_growth(25.0, 0.2, body));
+    CHECK(plant_growth(25.0, 0.0, body) == 0.0);
+    CHECK(plant_growth(-20.0, 2.0, body) == 0.0);
+    // Half a metre of rain a year holds plants back more than 10 °C does.
+    CHECK_THAT(plant_growth(10.0, 0.5, body), WithinRel(3.0 * (1.0 - std::exp(-0.332)), 1e-12));
+}
+
+TEST_CASE("dead matter rots faster warm, slower dry, frozen or waterlogged", "[formation][soil]") {
+    const Body body;
+    CHECK_THAT(rotting_rate(20.0, 1.0, body), WithinRel(2.0 * rotting_rate(10.0, 1.0, body), 1e-9));
+    CHECK(rotting_rate(10.0, 0.1, body) < rotting_rate(10.0, 1.0, body));
+    CHECK(rotting_rate(-20.0, 1.0, body) == 0.0);
+    CHECK(rotting_rate(10.0, 3.0, body) < 0.05 * rotting_rate(10.0, 1.0, body));
+    CHECK(waterlogged(0.5) == 0.0);
+    CHECK(waterlogged(3.0) == 1.0);
+    CHECK(wetness(10.0, 2.0, body) > wetness(25.0, 2.0, body));
+}
+
+TEST_CASE("a store fed and rotting fills towards what it gains over how fast it rots",
+          "[formation][soil]") {
+    CHECK(gathered(1.0, 0.01, 0.0) == 0.0);
+    CHECK_THAT(gathered(1.0, 0.01, 1.0e6), WithinRel(100.0, 1e-9));
+    CHECK_THAT(gathered(1.0, 0.0, 50.0), WithinRel(50.0, 1e-12));
+    const double held = gathered(1.0, 0.01, 80.0);
+    const double rate = (gathered(1.0, 0.01, 81.0) - gathered(1.0, 0.01, 79.0)) / 2.0;
+    CHECK_THAT(rate, WithinRel(1.0 - (0.01 * held), 1e-4));
+}
+
+TEST_CASE("plants darken the soil's top, and peat gathers where the ground is waterlogged",
+          "[formation][soil]") {
+    const Made made;
+    int dark = 0;
+    double in_air = 0.0;
+    double drowned = 0.0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        CHECK(made.soil.topsoil[point] >= 0.0);
+        CHECK(made.soil.topsoil[point] <= made.soil.depth[point]);
+        CHECK(made.soil.organic[point] >= 0.0);
+        if (made.soil.parent[point] == Parent::None) {
+            CHECK(made.soil.topsoil[point] == 0.0);
+            CHECK(made.soil.organic[point] == 0.0);
+            continue;
+        }
+        dark += made.soil.topsoil[point] > 0.0 ? 1 : 0;
+        const double wet =
+            wetness(made.climate.temperature[point], made.climate.rain[point], made.body);
+        if (waterlogged(wet) == 0.0) {
+            in_air = std::max(in_air, made.soil.organic[point]);
+        } else if (waterlogged(wet) == 1.0) {
+            drowned = std::max(drowned, made.soil.organic[point]);
+        }
+    }
+    CHECK(dark > 0);
+    CHECK(drowned > 10.0 * in_air);
 }

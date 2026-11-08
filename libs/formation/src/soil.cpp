@@ -2,6 +2,7 @@
 #include <hog/formation/soil.hpp>
 
 #include <algorithm>
+#include <numbers>
 
 namespace hog::formation {
 
@@ -51,6 +52,46 @@ double grown_depth(double making, double wear, double years, const Body& body) {
     return grown > 1.0 ? maths::log(grown) / falloff : 0.0;
 }
 
+double plant_growth(double celsius, double rain, const Body& body) {
+    const double warmth = 3.0 / (1.0 + maths::exp(1.315 - (0.119 * celsius)));
+    const double water = 3.0 * (1.0 - maths::exp(-0.664 * std::max(rain, 0.0)));
+    // Plants grow only while the ground is thawed, little in a short summer.
+    return body.plant_growth * std::min(warmth, water) * smoothstep(-15.0, 5.0, celsius);
+}
+
+double wetness(double celsius, double rain, const Body& body) {
+    return std::max(rain, 0.0) / std::max(open_water_loss(celsius, body), 1e-3);
+}
+
+double waterlogged(double wetness) {
+    return smoothstep(1.0, 2.5, wetness);
+}
+
+namespace {
+
+// Per year dead matter rots in air: doubling every 10 °C, stopped by frost, slowed by drought.
+double rotting_in_air(double celsius, double wetness, const Body& body) {
+    const double thawed = smoothstep(-15.0, 5.0, celsius);
+    const double damp = wetness / (wetness + 0.3);
+    return body.rotting * maths::exp(std::numbers::ln2 * (celsius - 10.0) / 10.0) * thawed * damp;
+}
+
+} // namespace
+
+double rotting_rate(double celsius, double wetness, const Body& body) {
+    const double drowned = waterlogged(wetness);
+    return rotting_in_air(celsius, wetness, body) *
+           ((1.0 - drowned) + (body.drowned_rotting * drowned));
+}
+
+double gathered(double gain, double rate, double years) {
+    const double time = std::max(years, 0.0);
+    if (rate * time < 1e-9) {
+        return gain * time;
+    }
+    return gain / rate * (1.0 - maths::exp(-rate * time));
+}
+
 namespace {
 
 // What was laid at a point, top down: what water laid (in a hollow or along a river), then the till
@@ -78,6 +119,8 @@ double grown_over(double rock_making, double wear, double laid, double years, co
 Soil bare(std::uint32_t size) {
     Soil soil;
     soil.depth.assign(size, 0.0);
+    soil.topsoil.assign(size, 0.0);
+    soil.organic.assign(size, 0.0);
     soil.alluvium.assign(size, 0.0);
     soil.lake_beds.assign(size, 0.0);
     soil.till.assign(size, 0.0);
@@ -119,6 +162,27 @@ void grow(Soil& soil, std::uint32_t point, const Laid& laid, double rock_making,
     soil.parent[point] = parent;
 }
 
+// What plants leave over `years`: humus from their dying roots
+// darkening the soil's top, and what dies above ground lying on it as litter rotting in the air;
+// where the ground is waterlogged, a share sinks under the water first and lasts as peat (Clymo's
+// two layers). Both are worn away as the ground wears.
+void rot(Soil& soil, std::uint32_t point, double celsius, double rain, double wear, double years,
+         const Body& body) {
+    const double wet = wetness(celsius, rain, body);
+    const double growing = plant_growth(celsius, rain, body);
+    const double humus = gathered(growing * body.root_share * body.humus_share,
+                                  rotting_rate(celsius, wet, body), years);
+    soil.topsoil[point] = std::min(soil.depth[point], humus / body.topsoil_humus);
+    const double in_air = rotting_in_air(celsius, wet, body);
+    const double falling = growing * (1.0 - body.root_share) / body.peat_density;
+    const double litter =
+        gathered(std::max(falling - wear, 0.0), in_air * body.litter_rotting, years);
+    const double sinking = falling * waterlogged(wet) * body.peat_burial;
+    const double peat =
+        gathered(std::max(sinking - wear, 0.0), in_air * body.drowned_rotting, years);
+    soil.organic[point] = litter + peat;
+}
+
 } // namespace
 
 Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate, const Body& body) {
@@ -127,8 +191,11 @@ Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
         if (rivers.receiver[point] == point) {
             continue; // under the liquid
         }
-        const double making = soil_making(climate.temperature[point], climate.rain[point], body);
-        grow(soil, point, {}, making, rivers.wear[point], body.soil_years, body);
+        const double celsius = climate.temperature[point];
+        const double rain = climate.rain[point];
+        grow(soil, point, {}, soil_making(celsius, rain, body), rivers.wear[point], body.soil_years,
+             body);
+        rot(soil, point, celsius, rain, rivers.wear[point], body.soil_years, body);
     }
     return soil;
 }
@@ -150,23 +217,38 @@ Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
         }
         // Where the coldest times' ice lay, it scraped the older soil away.
         const double years = ice.coldest[point] > 0.0 ? body.ice_left_years : body.soil_years;
-        const double making = soil_making(climate.temperature[point], climate.rain[point], body);
-        grow(soil, point, laid, making, rivers.wear[point], years, body);
+        const double celsius = climate.temperature[point];
+        const double rain = climate.rain[point];
+        // Ground gathering what's laid on it isn't wearing away.
+        const double wear = laid.water + laid.till > 0.0 ? 0.0 : rivers.wear[point];
+        grow(soil, point, laid, soil_making(celsius, rain, body), rivers.wear[point], years, body);
+        rot(soil, point, celsius, rain, wear, years, body);
     }
     return soil;
 }
 
 Profile profile_at(const Sphere& sphere, const Soil& soil, const Sphere::Spot& spot) {
-    return {.soil = sphere.sample(soil.depth, spot),
+    const double topsoil = sphere.sample(soil.topsoil, spot);
+    return {.organic = sphere.sample(soil.organic, spot),
+            .topsoil = topsoil,
+            .subsoil = std::max(0.0, sphere.sample(soil.depth, spot) - topsoil),
             .alluvium = sphere.sample(soil.alluvium, spot),
             .lake_beds = sphere.sample(soil.lake_beds, spot),
             .till = sphere.sample(soil.till, spot)};
 }
 
 Layer layer_at(const Profile& profile, double depth) {
-    double bottom = profile.soil;
+    double bottom = profile.organic;
     if (depth < bottom) {
-        return Layer::Soil;
+        return Layer::Organic;
+    }
+    bottom += profile.topsoil;
+    if (depth < bottom) {
+        return Layer::Topsoil;
+    }
+    bottom += profile.subsoil;
+    if (depth < bottom) {
+        return Layer::Subsoil;
     }
     bottom += profile.alluvium;
     if (depth < bottom) {
