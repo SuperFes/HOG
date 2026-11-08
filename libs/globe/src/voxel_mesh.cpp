@@ -38,6 +38,15 @@ Held held_of(const Voxel& voxel) {
             .liquid_share = std::min(1.0, liquid)};
 }
 
+Held held_of(const Cube& cube) {
+    return held_of(Voxel{.solid = cube.solid,
+                         .grain = cube.grain,
+                         .grain_amount = cube.grain_amount,
+                         .liquid = cube.liquid,
+                         .liquid_amount = cube.liquid_amount,
+                         .solid_amount = cube.solid_amount});
+}
+
 // Part of a voxel's height drawn as one matter, as shares of it from its bottom.
 struct Piece {
     double from = 0.0;
@@ -411,7 +420,95 @@ void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, in
     }
 }
 
+// The cube at (x, y, z) from the tile's corner, a voxel past it at most: from the tile beside
+// where `beside` has it, else from the tile's own nearest edge.
+Cube cube_near(TileKey key, const VoxelTree& tile, const TileAt& beside, int x, int y, int z) {
+    const int across = Volume::tile_side;
+    const auto step = [&](int at) {
+        if (at < 0) {
+            return -1;
+        }
+        return at >= across ? 1 : 0;
+    };
+    const int dx = step(x);
+    const int dy = step(y);
+    const int dz = step(z);
+    if (dx == 0 && dy == 0 && dz == 0) {
+        return tile.at(x, y, z);
+    }
+    const auto moved = [](std::uint32_t at, int by) -> std::optional<std::uint32_t> {
+        if (by < 0 && at == 0) {
+            return std::nullopt;
+        }
+        return by < 0 ? at - 1 : at + static_cast<std::uint32_t>(by);
+    };
+    const auto i = moved(key.i, dx);
+    const auto j = moved(key.j, dy);
+    const auto k = moved(key.k, dz);
+    if (beside && i && j && k) {
+        if (const VoxelTree* next =
+                beside({.level = key.level, .face = key.face, .i = *i, .j = *j, .k = *k});
+            next != nullptr) {
+            return next->at(x - (dx * across), y - (dy * across), z - (dz * across));
+        }
+    }
+    return tile.at(std::clamp(x, 0, across - 1), std::clamp(y, 0, across - 1),
+                   std::clamp(z, 0, across - 1));
+}
+
 } // namespace
+
+VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
+                    const TileAt& beside) {
+    VoxelMesh mesh;
+    constexpr int across = Volume::tile_side;
+    if (tile.leaf_side(0, 0, 0) == across && tile.at(0, 0, 0) == Cube{}) {
+        return mesh;
+    }
+    const int size = 1 << key.level;
+    const int base = static_cast<int>(key.k) * across;
+    const int top = std::min(base + across, (layers.count + size - 1) / size);
+    if (top <= base) {
+        return mesh;
+    }
+    const Cell first{.level = static_cast<std::uint8_t>(layers.level - key.level),
+                     .face = key.face,
+                     .i = key.i * static_cast<std::uint32_t>(across),
+                     .j = key.j * static_cast<std::uint32_t>(across)};
+    const Cell whole{
+        .level = static_cast<std::uint8_t>(layers.level - key.level - std::countr_zero(side)),
+        .face = key.face,
+        .i = key.i,
+        .j = key.j};
+    mesh.origin = center(whole) * layers.bottom(base * size);
+
+    Block block{across, base - 1, across + 2};
+    std::vector<Held> column(static_cast<std::size_t>(across + 2));
+    for (int y = -1; y <= across; ++y) {
+        for (int x = -1; x <= across; ++x) {
+            // Those past its corners are never looked at.
+            if ((x < 0 || x >= across) && (y < 0 || y >= across)) {
+                continue;
+            }
+            for (std::size_t n = 0; n < column.size(); ++n) {
+                const int z = static_cast<int>(n) - 1;
+                column[n] =
+                    base + z < top ? held_of(cube_near(key, tile, beside, x, y, z)) : Held{};
+            }
+            block.stand(x, y, column);
+        }
+    }
+    for (int z = base; z < top; ++z) {
+        const double low = layers.bottom(z * size);
+        const double high = layers.bottom((z + 1) * size);
+        for (int y = 0; y < across; ++y) {
+            for (int x = 0; x < across; ++x) {
+                add_voxel(mesh, block, first, x, y, z, low, high);
+            }
+        }
+    }
+    return mesh;
+}
 
 VoxelMesh mesh_tile_column(const World& world, Site corner, int level) {
     const Layers& layers = world.layers();
