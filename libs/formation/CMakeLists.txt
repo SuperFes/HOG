@@ -1,4 +1,5 @@
 add_library(hog_formation
+    src/bedrock.cpp
     src/climate.cpp
     src/fields.cpp
     src/ice.cpp
@@ -15,6 +16,7 @@ target_link_libraries(hog_formation PUBLIC hog::core)
 hog_target_defaults(hog_formation)
 
 hog_add_tests(hog_formation
+    tests/bedrock_tests.cpp
     tests/climate_tests.cpp
     tests/fields_tests.cpp
     tests/ice_tests.cpp

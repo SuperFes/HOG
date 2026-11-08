@@ -36,6 +36,20 @@ struct Body {
     double rift_depth = 1'500.0;   // metres a continent sags where it's pulled apart
     double uplift_share = 0.15;    // of the closing speed that pushes rock up in a belt
 
+    // Rock as it lies, by what shapes the land: layered rock laid over a hard basement, folded
+    // where plates collided, lava over both. What the planet's history laid where is seeded.
+    double cover_thickness = 3'000.0;  // metres of layered rock laid on low-standing light crust
+    double rift_fill = 4'000.0;        // metres more laid in a rift's sagging valley
+    double sea_floor_mud = 5.0;        // metres of mud settling on the sea floor a million years
+    double layering = 0.5;             // how strongly hard and soft beds alternate, on average
+    double soluble_share = 0.25;       // share of layered rock that dissolves, on average
+    double old_folds = 1.0;            // how much of the light crust worn-down old ranges folded
+    double arc_lava = 2'000.0;         // metres of lava and ash volcanoes lay behind a trench
+    int lava_floods = 6;               // great floods of lava the light crust has known
+    double lava_flood_reach = 0.12;    // radians across a typical flood
+    double lava_flood_depth = 1'500.0; // metres of lava at a flood's heart
+    double exhumed_years = 10.0e6;     // years the land has worn down at today's pace
+
     // Sunlight and the air's hold on heat (Budyko's 1969 balance and numbers).
     double star_flux = 1'361.0;   // watts a square metre where the planet orbits
     double tilt = 23.44;          // degrees
