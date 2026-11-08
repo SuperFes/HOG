@@ -42,7 +42,7 @@ OnCube on_cube(DVec3 direction) noexcept {
 } // namespace
 
 Formed::Formed(const Planet& planet, const Derived& derived)
-    : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)}, smooth_{world_.sphere},
+    : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)}, smooth_{world_.sphere, 2.0},
       radius_{planet.radius}, vertical_{derived.vertical} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
