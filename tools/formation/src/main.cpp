@@ -2,6 +2,7 @@
 #include <hog/formation/climate.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
+#include <hog/formation/soil.hpp>
 #include <hog/formation/sphere.hpp>
 #include <hog/formation_lab/pictures.hpp>
 
@@ -36,7 +37,8 @@ constexpr std::string_view usage =
     "                     [--layout SPLITS] [--detail SPLITS] [--width N] [--out DIR]\n"
     "Forms a planet in stages and writes a map of each stage's result to DIR:\n"
     "plates.png (plates, light crust, and how they meet), base.png (how the crust stands),\n"
-    "uplift.png (where rock is pushed up), temperature.png and rain.png (yearly means).\n";
+    "uplift.png (where rock is pushed up), temperature.png and rain.png (yearly means),\n"
+    "height.png (land worn by its rivers) and soil.png (how deep soil lies).\n";
 
 struct Options {
     hog::formation::Body body;
@@ -233,6 +235,35 @@ int run(const Options& options) {
                                       sphere.point(rivers.receiver[point]), river, width);
     }
     ok = write(options.out / "height.png", height_map) && ok;
+
+    const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
+    double soiled = 0.0;
+    double land_area = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.base[point] >= 0.0) {
+            land_area += sphere.area(point);
+            soiled += soil.depth[point] > 0.0 ? sphere.area(point) : 0.0;
+        }
+    }
+    std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",
+                             100.0 * soiled / std::max(land_area, 1e-12),
+                             *std::ranges::max_element(soil.depth));
+    static constexpr std::array<Rgb, 5> bare_to_deep{
+        {{150, 150, 150}, {210, 190, 140}, {170, 120, 70}, {110, 70, 40}, {60, 35, 20}}};
+    ok = write(options.out / "soil.png",
+               hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
+                   const Sphere::Spot spot = sphere.locate(direction, start);
+                   start = spot.corners[0];
+                   if (sphere.sample(rivers.height, spot) < 0.0) {
+                       return Rgb{20, 30, 60};
+                   }
+                   const double depth = sphere.sample(soil.depth, spot);
+                   const double light = hog::formation_lab::shade(sphere, rivers.height, direction,
+                                                                  body.radius, step, 1.0, lit);
+                   return hog::formation_lab::scaled(
+                       hog::formation_lab::ramp(depth / 2.5, bare_to_deep), light);
+               })) &&
+         ok;
     return ok ? 0 : 1;
 }
 
