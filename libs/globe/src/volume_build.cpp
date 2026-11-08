@@ -250,12 +250,12 @@ Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32
         highest = std::max(highest, each.top() + over);
         lowest = std::min(lowest, each.ground());
     }
+    constexpr int side = Volume::tile_side;
     const int top = std::min(layers.layer_at(highest), layers.count - 1);
-    const int bottom = std::max(layers.layer_at(lowest) - made_depth, 0);
+    // From the foot of the tile it starts in, so the column's lowest tile is whole.
+    const int bottom = (std::max(layers.layer_at(lowest) - made_depth, 0) / side) * side;
     Volume volume;
     build(volume, generator, columns, face, i, j, bottom, top, top + 1);
-    volume.set_floor({.face = face, .i = i * Volume::tile_side, .j = j * Volume::tile_side},
-                     static_cast<std::uint32_t>(bottom));
     return volume;
 }
 
@@ -267,12 +267,8 @@ bool deepen(Volume& volume, const Generator& generator, std::uint8_t face, std::
         return false;
     }
     const int keep = static_cast<int>(*floor);
-    constexpr int side = Volume::tile_side;
-    const int bottom = std::max(keep - side, 0);
-    // Through the old floor's tile, if it starts inside one, keeping its layers from there up.
-    const int top = keep % side == 0 ? keep - 1 : ((keep / side) * side) + side - 1;
-    build(volume, generator, columns_of(generator, face, i, j), face, i, j, bottom, top, keep);
-    volume.set_floor(corner, static_cast<std::uint32_t>(bottom));
+    build(volume, generator, columns_of(generator, face, i, j), face, i, j,
+          keep - Volume::tile_side, keep - 1, keep);
     return true;
 }
 

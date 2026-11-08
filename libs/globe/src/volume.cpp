@@ -20,10 +20,6 @@ int within(std::uint32_t at) {
     return static_cast<int>(at % side);
 }
 
-bool all_air(const VoxelTree& tile) {
-    return tile.leaf_side(0, 0, 0) == Volume::tile_side && tile.at(0, 0, 0) == Cube{};
-}
-
 } // namespace
 
 std::vector<BrickSite> brick_footprint(Site corner) {
@@ -49,12 +45,21 @@ Volume::Column Volume::column_of(Site site) noexcept {
 }
 
 std::optional<std::uint32_t> Volume::floor(Site site) const {
-    const auto found = floors_.find(column_of(site));
-    return found == floors_.end() ? std::nullopt : std::optional{found->second};
+    const Column column = column_of(site);
+    const auto lowest = tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j});
+    if (lowest == tiles_.end() || lowest->first.level != 0 || lowest->first.face != column.face ||
+        lowest->first.i != column.i || lowest->first.j != column.j) {
+        return std::nullopt;
+    }
+    return lowest->first.k * side;
 }
 
 void Volume::set_floor(Site site, std::uint32_t layer) {
-    floors_.insert_or_assign(column_of(site), layer);
+    const Key key = key_of({.face = site.face, .i = site.i, .j = site.j, .layer = layer});
+    const std::optional<std::uint32_t> lowest = floor(site);
+    for (std::uint32_t k = key.k; k < (lowest ? *lowest / side : key.k + 1); ++k) {
+        tiles_.try_emplace({.face = key.face, .i = key.i, .j = key.j, .k = k}, tile_side);
+    }
     unsaved_.insert(column_of(site));
 }
 
@@ -120,9 +125,6 @@ bool Volume::set(Site site, const Cube& voxel) {
         return true;
     }
     tile.set(within(site.i), within(site.j), within(site.layer), voxel);
-    if (all_air(tile)) {
-        tiles_.erase(found);
-    }
     // Runs of sets within a brick are logged once, at the last.
     const BrickSite brick = brick_of(site);
     ++revision_;
@@ -150,10 +152,6 @@ const VoxelTree* Volume::tile_at(Site site) const {
 
 void Volume::put_tile(Site site, VoxelTree tile) {
     unsaved_.insert(column_of(site));
-    if (all_air(tile)) {
-        tiles_.erase(key_of(site));
-        return;
-    }
     tiles_.insert_or_assign(key_of(site), std::move(tile));
 }
 
@@ -204,9 +202,6 @@ void Volume::refresh_over(TileKey key, std::uint8_t top) {
 }
 
 void Volume::merge(Volume other) {
-    for (const auto& [column, layer] : other.floors_) {
-        floors_.insert_or_assign(column, layer);
-    }
     for (auto& [key, tile] : other.tiles_) {
         tiles_.insert_or_assign(key, std::move(tile));
     }
@@ -215,13 +210,6 @@ void Volume::merge(Volume other) {
 
 std::vector<std::byte> Volume::encode() const {
     ByteWriter out;
-    out.write_varint(floors_.size());
-    for (const auto& [column, layer] : floors_) {
-        out.write(column.face);
-        out.write_varint(column.i);
-        out.write_varint(column.j);
-        out.write_varint(layer);
-    }
     out.write_varint(tiles_.size());
     for (const auto& [key, tile] : tiles_) {
         out.write(key.level);
@@ -242,23 +230,6 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
     };
     ByteReader in{bytes};
     Volume volume;
-    const auto floors = in.read_varint();
-    if (!floors || *floors > bytes.size()) {
-        return fail("a volume's floor count is cut short or out of range");
-    }
-    for (std::uint64_t n = 0; n < *floors; ++n) {
-        const auto face = in.read<std::uint8_t>();
-        const auto i = in.read_varint();
-        const auto j = in.read_varint();
-        const auto layer = in.read_varint();
-        if (!face || !i || !j || !layer) {
-            return fail("a volume's floors are cut short");
-        }
-        volume.floors_.emplace(Column{.face = *face,
-                                      .i = static_cast<std::uint32_t>(*i),
-                                      .j = static_cast<std::uint32_t>(*j)},
-                               static_cast<std::uint32_t>(*layer));
-    }
     const auto count = in.read_varint();
     if (!count || *count > bytes.size()) {
         return fail("a volume's tile count is cut short or out of range");
@@ -390,13 +361,16 @@ Result<void> Volume::decode_column(Site site, std::span<const std::byte> bytes) 
         tiles_.insert_or_assign({.face = column.face, .i = column.i, .j = column.j, .k = k},
                                 std::move(tree));
     }
-    floors_.insert_or_assign(column, decoded->floor);
+    if (decoded->tiles.empty()) {
+        // Made though all air: its floor's tile is held for it.
+        set_floor(site, decoded->floor);
+    }
     unsaved_.erase(column);
     return {};
 }
 
 bool Volume::same_as(const Volume& other) const {
-    if (floors_ != other.floors_ || tiles_.size() != other.tiles_.size()) {
+    if (tiles_.size() != other.tiles_.size()) {
         return false;
     }
     for (auto a = tiles_.begin(), b = other.tiles_.begin(); a != tiles_.end(); ++a, ++b) {
@@ -417,7 +391,6 @@ std::vector<BrickSite> Volume::changed_since(std::uint64_t revision) const {
 
 void Volume::drop_column(Site site) {
     const Column column = column_of(site);
-    floors_.erase(column);
     unsaved_.erase(column);
     tiles_.erase(
         tiles_.lower_bound({.face = column.face, .i = column.i, .j = column.j}),
@@ -426,9 +399,14 @@ void Volume::drop_column(Site site) {
 
 std::vector<Site> Volume::columns() const {
     std::vector<Site> corners;
-    corners.reserve(floors_.size());
-    for (const auto& [column, layer] : floors_) {
-        corners.push_back({.face = column.face, .i = column.i * side, .j = column.j * side});
+    for (const auto& [key, tile] : tiles_) {
+        if (key.level != 0) {
+            break;
+        }
+        const Site corner{.face = key.face, .i = key.i * side, .j = key.j * side};
+        if (corners.empty() || corners.back() != corner) {
+            corners.push_back(corner);
+        }
     }
     return corners;
 }

@@ -78,7 +78,7 @@ TEST_CASE("tile columns saved to the world's file load back after it's reopened"
     const SavedColumn column = saved->value_or(SavedColumn{});
     REQUIRE_FALSE(column.bytes.empty());
     REQUIRE(volume.decode_column({.face = 5, .i = 255 * 64, .j = 255 * 64}, column.bytes));
-    CHECK(volume.floor({.face = 5, .i = 255 * 64, .j = 255 * 64}) == 10U);
+    CHECK(volume.floor({.face = 5, .i = 255 * 64, .j = 255 * 64}) == 0U);
     CHECK(volume.at({.face = 5, .i = (255 * 64) + 5, .j = 255 * 64, .layer = 300}).solid ==
           Material::Basalt);
 }

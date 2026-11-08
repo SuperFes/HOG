@@ -50,17 +50,20 @@ Volume rock_to(std::uint32_t top) {
 
 } // namespace
 
-TEST_CASE("a volume holds no air", "[globe][volume]") {
+TEST_CASE("a tile made is held, all air or not, and over the highest is air", "[globe][volume]") {
     Volume volume;
     volume.set_floor({.face = 1, .i = 9, .j = 9}, 0);
-    CHECK(volume.at({.face = 1, .i = 9, .j = 9, .layer = 9}) == Cube{});
-    volume.set({.face = 1, .i = 9, .j = 9, .layer = 9}, Cube{});
-    CHECK(volume.tiles() == 0);
-    volume.set({.face = 1, .i = 9, .j = 9, .layer = 9}, full_of(Material::Basalt));
     CHECK(volume.tiles() == 1);
+    CHECK(volume.at({.face = 1, .i = 9, .j = 9, .layer = 9}) == Cube{});
+    volume.set({.face = 1, .i = 9, .j = 9, .layer = 9}, full_of(Material::Basalt));
     CHECK(volume.at({.face = 1, .i = 9, .j = 9, .layer = 9}).solid == Material::Basalt);
     volume.remove({.face = 1, .i = 9, .j = 9, .layer = 9});
-    CHECK(volume.tiles() == 0);
+    CHECK(volume.tiles() == 1);
+    CHECK(volume.at({.face = 1, .i = 9, .j = 9, .layer = 200}) == Cube{});
+    volume.set({.face = 1, .i = 9, .j = 9, .layer = 200}, Cube{});
+    CHECK(volume.tiles() == 1);
+    volume.set({.face = 1, .i = 9, .j = 9, .layer = 200}, full_of(Material::Snow));
+    CHECK(volume.tiles() == 2);
 }
 
 TEST_CASE("dirt is put on the rock as a voxel on top, and taken off by removing it",
@@ -100,12 +103,13 @@ TEST_CASE("nothing is put or taken under a tile column's floor", "[globe][volume
     const Site deep{.face = 3, .i = 70, .j = 70, .layer = 100};
     CHECK_FALSE(volume.made(deep));
     CHECK_FALSE(volume.set(deep, full_of(Material::Granite)));
-    volume.set_floor(deep, 128);
+    volume.set_floor(deep, 130);
+    CHECK(volume.floor(deep) == 128U);
     CHECK_FALSE(volume.made(deep));
     CHECK_FALSE(volume.set(deep, full_of(Material::Granite)));
     CHECK_FALSE(
         volume.put_on({.face = 3, .i = 70, .j = 70, .layer = 127}, full_of(Material::Soil)));
-    CHECK(volume.tiles() == 0);
+    CHECK(volume.tiles() == 1);
     // The floor is per tile column.
     CHECK_FALSE(volume.made({.face = 3, .i = 64 + 64, .j = 70, .layer = 200}));
     CHECK(volume.made({.face = 3, .i = 64, .j = 127, .layer = 128}));
@@ -127,7 +131,6 @@ TEST_CASE("a volume comes back from its bytes as it was", "[globe][volume]") {
 TEST_CASE("a tile column comes back from its bytes, in place of what was there",
           "[globe][volume]") {
     Volume volume = rock_to(70);
-    volume.set_floor({.face = 2, .i = 0, .j = 5}, 12);
     const Site column{.face = 2, .i = 63, .j = 5};
     const std::vector<std::byte> bytes = volume.encode_column(column);
     REQUIRE_FALSE(bytes.empty());
@@ -135,7 +138,7 @@ TEST_CASE("a tile column comes back from its bytes, in place of what was there",
 
     Volume other = rock_to(90);
     REQUIRE(other.decode_column(column, bytes));
-    CHECK(other.floor(column) == 12U);
+    CHECK(other.floor(column) == 0U);
     CHECK(other.at({.face = 2, .i = 63, .j = 5, .layer = 70}).solid == Material::Granite);
     CHECK(other.at({.face = 2, .i = 63, .j = 5, .layer = 80}) == Cube{});
     // Its neighbour, another tile column, is left as it was.
@@ -144,7 +147,7 @@ TEST_CASE("a tile column comes back from its bytes, in place of what was there",
     std::vector<std::byte> cut = bytes;
     cut.pop_back();
     CHECK_FALSE(other.decode_column(column, cut));
-    CHECK(other.floor(column) == 12U);
+    CHECK(other.floor(column) == 0U);
 }
 
 TEST_CASE("a tile column let go is as if never made, its neighbour left as it was",
@@ -165,17 +168,16 @@ TEST_CASE("a tile column let go is as if never made, its neighbour left as it wa
 TEST_CASE("a tile column halved is half as fine, its floor counted in its taller voxels",
           "[globe][volume]") {
     Volume volume = rock_to(70);
-    volume.set_floor({.face = 2, .i = 0, .j = 5}, 12);
     REQUIRE(volume.column({.face = 2, .i = 63, .j = 5}));
     const hog::globe::TileColumn column =
         volume.column({.face = 2, .i = 63, .j = 5}).value_or(hog::globe::TileColumn{});
-    CHECK(column.floor == 12);
+    CHECK(column.floor == 0);
     REQUIRE(column.tiles.size() == 2);
     CHECK(column.encode() == volume.encode_column({.face = 2, .i = 63, .j = 5}));
     CHECK_FALSE(volume.column({.face = 2, .i = 300, .j = 5}));
 
     const hog::globe::TileColumn half = column.halved();
-    CHECK(half.floor == 6);
+    CHECK(half.floor == 0);
     REQUIRE(half.tiles.size() == 2);
     CHECK(half.tiles[1].first == 1);
     CHECK(half.tiles[1].second.side() == Volume::tile_side / 2);
@@ -186,7 +188,7 @@ TEST_CASE("a tile column halved is half as fine, its floor counted in its taller
 
     const auto back = hog::globe::TileColumn::decode(half.encode(), Volume::tile_side / 2);
     REQUIRE(back);
-    CHECK(back->floor == 6);
+    CHECK(back->floor == 0);
     CHECK(back->tiles[1].second.same_as(half.tiles[1].second));
     CHECK_FALSE(hog::globe::TileColumn::decode(half.encode(), Volume::tile_side));
 }
@@ -358,14 +360,15 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
         return layer / Volume::tile_side * Volume::tile_side;
     };
 
-    // Made from `made_depth` under the lowest ground.
     double lowest = columns.front().ground();
     for (const Generator::Column& each : columns) {
         lowest = std::min(lowest, each.ground());
     }
     const std::uint32_t floor = volume.floor(corner).value_or(0);
-    CHECK(std::cmp_equal(floor, layers.layer_at(lowest) - hog::globe::made_depth));
-    REQUIRE(floor > Volume::tile_side);
+    // From the foot of the tile `made_depth` under the lowest ground is in.
+    CHECK(std::cmp_equal(floor, tile_from(static_cast<std::uint32_t>(layers.layer_at(lowest) -
+                                                                     hog::globe::made_depth))));
+    REQUIRE(floor >= Volume::tile_side);
     const Site under{.face = cell.face, .i = corner.i, .j = corner.j, .layer = floor - 1};
     CHECK_FALSE(volume.made(under));
     CHECK(volume.made({.face = cell.face, .i = corner.i, .j = corner.j, .layer = floor}));
