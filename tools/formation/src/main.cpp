@@ -1,5 +1,6 @@
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
+#include <hog/formation/lakes.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
 #include <hog/formation/soil.hpp>
@@ -202,8 +203,20 @@ bool draw_climate(const Canvas& canvas, const hog::formation::Crust& crust,
            ok;
 }
 
+// Standing water over the land, if any: open lakes blue, closed ones greener, salt flats white.
+std::optional<Rgb> water_colour(const hog::formation::Lakes& lakes, std::uint32_t near) {
+    if (lakes.salt_flat[near] != 0) {
+        return hog::formation_lab::rgb(235, 230, 215);
+    }
+    if (lakes.lake[near] == hog::formation::Lakes::none) {
+        return std::nullopt;
+    }
+    return lakes.lakes[lakes.lake[near]].open ? hog::formation_lab::rgb(50, 110, 200)
+                                              : hog::formation_lab::rgb(60, 150, 150);
+}
+
 bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
-                 const hog::formation::Rivers& rivers) {
+                 const hog::formation::Rivers& rivers, const hog::formation::Lakes& lakes) {
     const Sphere& sphere = *canvas.sphere;
     std::uint32_t start = 0;
     std::uint32_t lit = 0;
@@ -212,8 +225,11 @@ bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
             const Sphere::Spot spot = sphere.locate(direction, start);
             start = spot.corners[0];
             const double height = sphere.sample(rivers.height, spot);
-            if (height < 0.0) {
+            if (height < 0.0 && crust.sea[sphere.nearest(direction, start)] != 0) {
                 return hog::formation_lab::height_colour(height);
+            }
+            if (const auto water = water_colour(lakes, sphere.nearest(direction, start))) {
+                return *water;
             }
             return hog::formation_lab::scaled(hog::formation_lab::height_colour(height),
                                               canvas.light(rivers.height, direction, lit));
@@ -221,13 +237,14 @@ bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
     // Each river drawn from a point to where its water goes, wider as more passes.
     double biggest = 1.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        if (crust.base[point] >= 0.0) {
-            biggest = std::max(biggest, rivers.discharge[point]);
+        if (crust.sea[point] == 0) {
+            biggest = std::max(biggest, lakes.discharge[point]);
         }
     }
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        const double share = rivers.discharge[point] / biggest;
-        if (crust.base[point] >= 0.0 && share >= 0.003) {
+        const double share = lakes.discharge[point] / biggest;
+        const bool in_lake = lakes.lake[point] != hog::formation::Lakes::none;
+        if (crust.sea[point] == 0 && !in_lake && share >= 0.003) {
             hog::formation_lab::draw_line(map, sphere.point(point),
                                           sphere.point(rivers.receiver[point]),
                                           hog::formation_lab::rgb(40, 90, 200), river_width(share));
@@ -259,7 +276,7 @@ double soiled_share(const Sphere& sphere, const hog::formation::Crust& crust,
     double soiled = 0.0;
     double land = 0.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        if (crust.base[point] >= 0.0) {
+        if (crust.sea[point] == 0) {
             land += sphere.area(point);
             soiled += soil.depth[point] > 0.0 ? sphere.area(point) : 0.0;
         }
@@ -285,7 +302,7 @@ int run(const Options& options) {
     bool ok = draw_crust(canvas, crust);
 
     at = std::chrono::steady_clock::now();
-    const hog::formation::Climate climate = hog::formation::climate_on(sphere, crust.base, body);
+    const hog::formation::Climate climate = hog::formation::climate_on(sphere, crust.base, crust.sea, body);
     std::cout << std::format("climate in {:.2f} s\n", seconds_since(at));
     ok = draw_climate(canvas, crust, climate) && ok;
 
@@ -294,7 +311,13 @@ int run(const Options& options) {
     std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m\n",
                              seconds_since(at), rivers.rounds,
                              *std::ranges::max_element(rivers.height));
-    ok = draw_rivers(canvas, crust, rivers) && ok;
+    const hog::formation::Lakes lakes = hog::formation::lakes_on(sphere, rivers, climate, body);
+    const auto open = std::ranges::count_if(lakes.lakes, [](const auto& lake) { return lake.open; });
+    std::cout << std::format("{} lakes, {} open and {} closed; {} salt flats\n",
+                             lakes.lakes.size(), open,
+                             static_cast<std::ptrdiff_t>(lakes.lakes.size()) - open,
+                             std::ranges::count(lakes.salt_flat, std::uint8_t{1}));
+    ok = draw_rivers(canvas, crust, rivers, lakes) && ok;
 
     const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
     std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",

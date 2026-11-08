@@ -469,6 +469,7 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
         crust.base[point] += shaped.base;
         crust.uplift[point] += shaped.uplift;
     }
+    crust.sea = open_sea(sphere, crust.base, body.smallest_sea);
     return crust;
 }
 

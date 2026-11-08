@@ -60,6 +60,32 @@ TEST_CASE("the nearest source spread over the points is the truly nearest", "[fo
     }
 }
 
+TEST_CASE("open sea is water under the level joined up widely; a small hollow is not",
+          "[formation][fields]") {
+    const Sphere sphere{5, 6};
+    // Land over the northern hemisphere, a hollow under the level near its pole covering about a
+    // thousandth of the surface.
+    std::vector<double> heights(sphere.size(), -1'000.0);
+    int hollow = 0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double z = sphere.point(point).z;
+        if (z > 0.1) {
+            heights[point] = z > 0.998 ? -50.0 : 300.0;
+            hollow += z > 0.998 ? 1 : 0;
+        }
+    }
+    REQUIRE(hollow > 3);
+    const std::vector<std::uint8_t> sea = hog::formation::open_sea(sphere, heights, 0.002);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double z = sphere.point(point).z;
+        if (z < 0.0) {
+            CHECK(sea[point] == 1);
+        } else if (z > 0.1) {
+            CHECK(sea[point] == 0);
+        }
+    }
+}
+
 TEST_CASE("with no sources nothing is near", "[formation][fields]") {
     const Sphere sphere{2, 4};
     const Nearest nearest = nearest_sources(sphere, {});

@@ -25,6 +25,8 @@ struct Body {
     double ridge_depth = -2'600.0;     // metres, where new sea floor is made
     double abyss_depth = -5'500.0;     // metres, the deepest old sea floor
     double floor_sinking = 350.0;      // metres per square root of a million years of age
+    double smallest_sea = 0.002;       // share of the surface water under the level must join up
+                                       // over to be open sea; smaller is a basin on land
 
     // What happens where plates meet.
     double belt_width = 0.035;     // radians from a boundary to a belt's edge
@@ -56,6 +58,10 @@ struct Body {
     double driest_wear = 0.05;     // metres a year of rain wear acts as if on at least: flash floods
     double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
     double steepest = 0.05;        // steepest mean slope land holds across tens of kilometres
+
+    // Water standing in hollows.
+    double lake_loss = 1.2;        // metres a year open water loses to the air at 15 °C
+    double shallowest_lake = 1.0;  // metres of hollow under which standing water isn't kept
 
     // Rock turning to soil (Heimsath's soil production).
     double soil_making = 2.0e-4;   // metres a year bare rock weathers at 15 °C, well watered
