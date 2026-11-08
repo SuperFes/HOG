@@ -1,0 +1,38 @@
+#pragma once
+
+#include <cstdint>
+
+namespace hog::formation {
+
+// The planet's knobs. Distances along the surface are radians of arc, so a feature keeps its
+// share of the planet at any radius; heights are metres. Defaults make an Earth-like world, which
+// is only a starting point.
+struct Body {
+    std::uint64_t seed = 1;
+    double radius = 115'000.0; // metres
+
+    // Plates, and the thick light crust riding on them.
+    int plates = 14;
+    int continents = 6;           // pieces the light crust lies in
+    double land_share = 0.3;      // of the surface under light crust
+    double plate_speed = 0.45;    // degrees of arc a million years, a typical plate's
+    double boundary_age = 40.0;   // millions of years a boundary has typically been at work
+
+    // How crust stands: light crust floats high, sea floor sinks as it ages and cools.
+    double crust_thickness = 35'000.0; // metres of light crust
+    double crust_rise = 0.15;          // metres light crust rises per metre it thickens
+    double continent_height = 400.0;   // metres over the liquid, unthickened
+    double ridge_depth = -2'600.0;     // metres, where new sea floor is made
+    double abyss_depth = -5'500.0;     // metres, the deepest old sea floor
+    double floor_sinking = 350.0;      // metres per square root of a million years of age
+
+    // What happens where plates meet.
+    double belt_width = 0.035;     // radians from a boundary to a belt's edge
+    double thickening = 0.25;      // share of a collision's shortening kept as thicker crust
+    double trench_depth = 3'000.0; // metres under the sea floor beside it
+    double arc_height = 2'000.0;   // metres volcanoes build behind a trench
+    double rift_depth = 1'500.0;   // metres a continent sags where it's pulled apart
+    double uplift_share = 0.15;    // of the closing speed that pushes rock up in a belt
+};
+
+} // namespace hog::formation

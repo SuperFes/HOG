@@ -65,7 +65,7 @@ void subdivide(std::vector<DVec3>& points, std::vector<Triangle>& triangles) {
 
 } // namespace
 
-Sphere::Sphere(int subdivisions, std::uint64_t seed, double jitter) {
+Sphere::Sphere(int subdivisions, std::uint64_t seed, double jitter) : subdivisions_{subdivisions} {
     HOG_ASSERT(subdivisions >= 0 && subdivisions <= max_subdivisions, "subdivisions out of range");
     HOG_ASSERT(jitter >= 0.0 && jitter <= 0.3, "jitter out of range");
     icosahedron(points_, triangles_);
@@ -164,28 +164,51 @@ std::uint32_t Sphere::nearest(const DVec3& direction, std::uint32_t start) const
 }
 
 Sphere::Spot Sphere::locate(const DVec3& direction, std::uint32_t start) const {
+    // Signed volumes against each edge, each opposite its corner; the triangle holding the
+    // direction has none negative.
+    const auto volumes_in = [&](std::uint32_t triangle) {
+        const DVec3& a = points_[triangles_[triangle][0]];
+        const DVec3& b = points_[triangles_[triangle][1]];
+        const DVec3& c = points_[triangles_[triangle][2]];
+        return DVec3{glm::dot(direction, glm::cross(b, c)), glm::dot(direction, glm::cross(c, a)),
+                     glm::dot(direction, glm::cross(a, b))};
+    };
+    const auto worst_of = [](const DVec3& volumes) {
+        return std::min({volumes.x, volumes.y, volumes.z});
+    };
+
+    // The nearest point is usually a corner of the triangle holding the direction, not always,
+    // so from the best triangle round it, walk over whichever edge the direction lies beyond.
     const std::uint32_t near = nearest(direction, start);
-    // Signed volumes against each edge; the triangle holding the direction has none negative.
-    // Where rounding leaves none clean, the one least outside is taken.
-    Spot best;
-    double best_worst = -1.0;
-    for (std::uint32_t at = touching_offsets_[near]; at < touching_offsets_[near + 1]; ++at) {
-        const Triangle& triangle = triangles_[touching_[at]];
-        const DVec3& a = points_[triangle[0]];
-        const DVec3& b = points_[triangle[1]];
-        const DVec3& c = points_[triangle[2]];
-        const DVec3 volumes{glm::dot(direction, glm::cross(b, c)),
-                            glm::dot(direction, glm::cross(c, a)),
-                            glm::dot(direction, glm::cross(a, b))};
-        const double worst = std::min({volumes.x, volumes.y, volumes.z});
-        if (best_worst < 0.0 && worst > best_worst) {
-            best_worst = worst;
-            const double sum = volumes.x + volumes.y + volumes.z;
-            best.corners = triangle;
-            best.weights = glm::max(volumes, DVec3{0.0}) / std::max(sum, 1e-300);
+    std::uint32_t current = touching_[touching_offsets_[near]];
+    for (std::uint32_t at = touching_offsets_[near] + 1; at < touching_offsets_[near + 1]; ++at) {
+        if (worst_of(volumes_in(touching_[at])) > worst_of(volumes_in(current))) {
+            current = touching_[at];
         }
     }
-    return best;
+    DVec3 volumes = volumes_in(current);
+    for (std::size_t step = 0; step < points_.size() && worst_of(volumes) < 0.0; ++step) {
+        const glm::length_t beyond =
+            volumes.x <= volumes.y ? (volumes.x <= volumes.z ? 0 : 2) : (volumes.y <= volumes.z ? 1 : 2);
+        const Triangle& triangle = triangles_[current];
+        const std::uint32_t from = triangle[static_cast<std::size_t>((beyond + 1) % 3)];
+        const std::uint32_t to = triangle[static_cast<std::size_t>((beyond + 2) % 3)];
+        std::uint32_t across = current;
+        for (std::uint32_t at = touching_offsets_[from]; at < touching_offsets_[from + 1]; ++at) {
+            const Triangle& other = triangles_[touching_[at]];
+            if (touching_[at] != current && std::ranges::find(other, to) != other.end()) {
+                across = touching_[at];
+            }
+        }
+        if (across == current) {
+            break;
+        }
+        current = across;
+        volumes = volumes_in(current);
+    }
+    // Rounding can leave a hair outside every triangle; such weights are clamped.
+    const DVec3 kept = glm::max(volumes, DVec3{0.0});
+    return {.corners = triangles_[current], .weights = kept / std::max(kept.x + kept.y + kept.z, 1e-300)};
 }
 
 } // namespace hog::formation

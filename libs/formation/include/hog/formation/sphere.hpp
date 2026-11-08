@@ -19,6 +19,7 @@ public:
     // Precondition: 0 <= subdivisions <= max_subdivisions, 0 <= jitter <= 0.3.
     Sphere(int subdivisions, std::uint64_t seed, double jitter = 0.3);
 
+    [[nodiscard]] int subdivisions() const noexcept { return subdivisions_; }
     [[nodiscard]] std::uint32_t size() const noexcept {
         return static_cast<std::uint32_t>(points_.size());
     }
@@ -62,6 +63,7 @@ private:
     std::vector<double> areas_;
     std::vector<std::array<std::uint32_t, 3>> triangles_;
     double spacing_ = 0.0;
+    int subdivisions_ = 0;
 };
 
 // Points a sphere split `subdivisions` times has.
