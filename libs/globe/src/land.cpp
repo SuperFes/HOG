@@ -45,8 +45,8 @@ VoxelTree& Land::root_for(TileKey key) {
 bool Land::known(TileKey key) const {
     const Place place = place_of(key);
     const VoxelTree* tree = root(place.root);
-    return tree != nullptr && tree->coarsest(place.x, place.y, place.z, place.across,
-                                             place.voxel) <= made_at(key.level);
+    return tree != nullptr &&
+           tree->coarsest(place.x, place.y, place.z, place.across) <= made_at(key.level);
 }
 
 void Land::put(TileKey key, const VoxelTree& tile) {

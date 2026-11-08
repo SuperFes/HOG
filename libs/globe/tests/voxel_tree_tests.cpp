@@ -470,7 +470,7 @@ TEST_CASE("an open leaf keeps its mark, apart from a fine leaf alike, through it
           "[globe][voxel_tree]") {
     const VoxelTree open{8, rock(), 3};
     CHECK_FALSE(open.same_as(VoxelTree{8, rock()}));
-    CHECK(open.coarsest(0, 0, 0, 8, 1) == 3);
+    CHECK(open.coarsest(0, 0, 0, 8) == 3);
     const auto decoded = VoxelTree::decode(open.encode());
     REQUIRE(decoded.has_value());
     CHECK(decoded->same_as(open));
@@ -502,8 +502,8 @@ TEST_CASE("a window stands each of its voxels for a cube of the tree", "[globe][
         }
     }
     // Rock down low was a leaf as wide, so is as fine as it goes; cut cubes are marked.
-    CHECK(window.coarsest(0, 0, 0, 2, 1) == 0);
-    CHECK(window.coarsest(0, 0, 2, 4, 1) == 5);
+    CHECK(window.coarsest(0, 0, 0, 2) == 0);
+    CHECK(window.coarsest(0, 0, 2, 4) == 5);
 }
 
 TEST_CASE("a part grafted in is kept only where the tree knew its voxels more coarsely",
@@ -518,11 +518,11 @@ TEST_CASE("a part grafted in is kept only where the tree knew its voxels more co
             }
         }
     }
-    CHECK(tree.coarsest(4, 8, 4, 4, 1) == 2);
+    CHECK(tree.coarsest(4, 8, 4, 4) == 2);
     // The rest of what it stood in is still open as it was.
     CHECK(tree.at(0, 0, 0) == rock());
-    CHECK(tree.coarsest(0, 0, 0, 4, 1) == 5);
-    CHECK(tree.coarsest(0, 0, 0, 16, 1) == 5);
+    CHECK(tree.coarsest(0, 0, 0, 4) == 5);
+    CHECK(tree.coarsest(0, 0, 0, 16) == 5);
     // Its cubes stand for the part's voxels.
     CHECK(tree.average(4, 8, 4, 4) == part.average(0, 0, 0, 4));
 
@@ -532,7 +532,7 @@ TEST_CASE("a part grafted in is kept only where the tree knew its voxels more co
     CHECK(tree.at(5, 9, 6) == part.at(1, 1, 2));
     tree.graft(4, 8, 4, water_part, 1, 0);
     CHECK(tree.at(5, 9, 6) == water());
-    CHECK(tree.coarsest(4, 8, 4, 4, 1) == 0);
+    CHECK(tree.coarsest(4, 8, 4, 4) == 0);
     // And a fine tree takes nothing in.
     VoxelTree fine{8, rock()};
     fine.graft(0, 0, 0, water_part, 1, 0);
@@ -552,6 +552,19 @@ TEST_CASE("a coarse part grafted in stands each voxel for a wider cube", "[globe
     }
     CHECK(tree.window(8, 0, 8, 8, 2, 2)
               .same_as(tree.window(8, 0, 8, 8, 1, 2).window(0, 0, 0, 8, 2, 2)));
-    CHECK(tree.coarsest(8, 0, 8, 8, 2) == 2);
-    CHECK(tree.coarsest(0, 0, 0, 8, 2) == 9);
+    CHECK(tree.coarsest(8, 0, 8, 8) == 2);
+    CHECK(tree.coarsest(0, 0, 0, 8) == 9);
+}
+
+TEST_CASE("a cube is marked as coarsely as anything in it, however fine", "[globe][voxel_tree]") {
+    VoxelTree tree{16, Cube{}, 255};
+    tree.graft(0, 0, 0, VoxelTree::build(4, scattered), 1, 0);
+    CHECK(tree.coarsest(0, 0, 0, 4) == 0);
+    CHECK(tree.coarsest(0, 0, 0, 8) == 255);
+    // Cut off coarser than what it holds, it keeps its own mark.
+    CHECK(tree.window(0, 0, 0, 16, 8, 3).coarsest(0, 0, 0, 1) == 255);
+    tree.graft(0, 0, 0, VoxelTree{8, rock()}, 1, 4);
+    CHECK(tree.coarsest(0, 0, 0, 8) == 4);
+    CHECK(tree.window(0, 0, 0, 16, 8, 3).coarsest(0, 0, 0, 1) == 4);
+    CHECK(tree.at(1, 2, 3) == scattered(1, 2, 3));
 }

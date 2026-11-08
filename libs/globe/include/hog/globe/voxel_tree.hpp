@@ -24,7 +24,8 @@ namespace hog::globe {
 // Nodes no longer reachable are not yet taken back.
 //
 // A leaf may be open: made coarsely, by the generator at a level coarser than the finest, with
-// finer still to come. Its mark is 1 + that level; 0 is a leaf as fine as it goes.
+// finer still to come. Its mark is 1 + that level, and it's at least as wide as that level's
+// voxels; 0 is a leaf as fine as it goes. A cube's mark is the coarsest of the leaves in it.
 class VoxelTree {
 public:
     using Id = std::uint32_t;
@@ -100,13 +101,13 @@ public:
 
     // The cube `across` wide from the corner (x, y, z), as a tree each of whose voxels stands for a
     // cube `voxel` wide of this one; a leaf as wide or wider keeps its mark, and a cube finer than
-    // it is cut off as one voxel marked `cut`. Precondition: powers of two, `voxel` no wider than
-    // `across`, the cube within the tree and on its own grid.
+    // it is cut off as one voxel marked `cut`, or its own mark where that's coarser. Precondition:
+    // powers of two, `voxel` no wider than `across`, the cube within the tree and on its own grid.
     [[nodiscard]] VoxelTree window(int x, int y, int z, int across, int voxel,
                                    std::uint8_t cut) const;
-    // The greatest mark of the leaves in that cube, those finer than `voxel` aside: 0 where all are
-    // as fine as it goes, or finer than `voxel`.
-    [[nodiscard]] std::uint8_t coarsest(int x, int y, int z, int across, int voxel) const;
+    // The mark of the cube `across` wide from the corner (x, y, z): 0 where all in it is as fine
+    // as it goes.
+    [[nodiscard]] std::uint8_t coarsest(int x, int y, int z, int across) const;
     // Puts `part` in at the corner (x, y, z), each of its voxels standing for a cube `voxel` wide
     // here and each of its leaves open as marked or as `open`, whichever is coarser, where it knows
     // the voxels more finely than this tree does: over leaves here marked coarser than `open`, and
@@ -134,7 +135,7 @@ private:
         bool leaf = true;
         Cube voxel; // a cube of eight's as `halved` has them, which its children decide
         std::array<Id, 8> child{};
-        std::uint8_t open = 0; // a leaf's
+        std::uint8_t open = 0; // a leaf's, or the coarsest of those under it
     };
     struct Hash {
         std::size_t operator()(const Node& node) const noexcept;
