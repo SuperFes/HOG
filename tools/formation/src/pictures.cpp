@@ -32,6 +32,33 @@ Image map_picture(int width, const std::function<Rgb(const DVec3&)>& colour) {
     return image;
 }
 
+void draw_line(Image& image, const DVec3& from, const DVec3& to, Rgb colour, int width) {
+    const double across = std::acos(std::clamp(glm::dot(from, to), -1.0, 1.0));
+    const double pixel = std::numbers::pi / image.height;
+    const int steps = std::max(1, static_cast<int>(std::ceil(across / (0.5 * pixel))));
+    const int reach = std::max(0, (width - 1) / 2);
+    for (int step = 0; step <= steps; ++step) {
+        const DVec3 at = glm::normalize(glm::mix(from, to, static_cast<double>(step) / steps));
+        const double longitude = std::atan2(at.y, at.x);
+        const double latitude = std::asin(std::clamp(at.z, -1.0, 1.0));
+        const auto x = static_cast<int>(((longitude / std::numbers::pi) + 1.0) * 0.5 * image.width);
+        const auto y = static_cast<int>((0.5 - (latitude / std::numbers::pi)) * image.height);
+        for (int dy = -reach; dy <= reach; ++dy) {
+            for (int dx = -reach; dx <= reach; ++dx) {
+                const int px = (((x + dx) % image.width) + image.width) % image.width;
+                const int py = std::clamp(y + dy, 0, image.height - 1);
+                const std::size_t at_pixel =
+                    (static_cast<std::size_t>(py) * static_cast<std::size_t>(image.width) +
+                     static_cast<std::size_t>(px)) *
+                    3;
+                image.pixels[at_pixel] = colour.r;
+                image.pixels[at_pixel + 1] = colour.g;
+                image.pixels[at_pixel + 2] = colour.b;
+            }
+        }
+    }
+}
+
 Rgb ramp(double t, std::span<const Rgb> stops) {
     if (stops.size() == 1) {
         return stops.front();

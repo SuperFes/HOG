@@ -2,6 +2,7 @@ add_library(hog_formation
     src/climate.cpp
     src/fields.cpp
     src/plates.cpp
+    src/rivers.cpp
     src/sphere.cpp)
 add_library(hog::formation ALIAS hog_formation)
 
@@ -13,4 +14,5 @@ hog_add_tests(hog_formation
     tests/climate_tests.cpp
     tests/fields_tests.cpp
     tests/plates_tests.cpp
+    tests/rivers_tests.cpp
     tests/sphere_tests.cpp)

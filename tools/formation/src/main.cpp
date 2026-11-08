@@ -1,6 +1,7 @@
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
 #include <hog/formation/plates.hpp>
+#include <hog/formation/rivers.hpp>
 #include <hog/formation/sphere.hpp>
 #include <hog/formation_lab/pictures.hpp>
 
@@ -194,6 +195,44 @@ int run(const Options& options) {
                               : colour;
                })) &&
          ok;
+
+    at = std::chrono::steady_clock::now();
+    const hog::formation::Rivers rivers =
+        hog::formation::rivers_on(sphere, crust, climate, body);
+    const double top = *std::ranges::max_element(rivers.height);
+    std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m\n",
+                             seconds_since(at), rivers.rounds, top);
+    // Rivers drawn where more water passes than a share of the biggest river's.
+    double biggest = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.base[point] >= 0.0) {
+            biggest = std::max(biggest, rivers.discharge[point]);
+        }
+    }
+    hog::Image height_map =
+        hog::formation_lab::map_picture(options.width, [&](const DVec3& direction) {
+            const Sphere::Spot spot = sphere.locate(direction, start);
+            start = spot.corners[0];
+            const double height = sphere.sample(rivers.height, spot);
+            if (height < 0.0) {
+                return hog::formation_lab::height_colour(height);
+            }
+            const double light = hog::formation_lab::shade(sphere, rivers.height, direction,
+                                                           body.radius, step, 1.0, lit);
+            return hog::formation_lab::scaled(hog::formation_lab::height_colour(height), light);
+        });
+    // Each river drawn from a point to where its water goes, wider as more passes.
+    const Rgb river{40, 90, 200};
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double share = rivers.discharge[point] / std::max(biggest, 1.0);
+        if (crust.base[point] < 0.0 || share < 0.003) {
+            continue;
+        }
+        const int width = share > 0.1 ? 3 : (share > 0.02 ? 2 : 1);
+        hog::formation_lab::draw_line(height_map, sphere.point(point),
+                                      sphere.point(rivers.receiver[point]), river, width);
+    }
+    ok = write(options.out / "height.png", height_map) && ok;
     return ok ? 0 : 1;
 }
 
