@@ -72,7 +72,9 @@ Bedrock bedrock_on(const Sphere& sphere, const Crust& crust, const Body& body) {
         // Light crust standing low gathered layered rock in its shallow seas and basins; rifts
         // filled as they sagged. The sea floor gathers mud as it ages.
         const double standing = smoothstep(2'500.0, 0.0, crust.base[point]);
-        double on_light = body.cover_thickness * standing * std::clamp(1.0 + laid[point], 0.0, 2.0);
+        // Some of it sank into platforms and gathered; some stood as shields and gathered none.
+        double on_light =
+            body.cover_thickness * standing * std::clamp(0.5 + (1.5 * laid[point]), 0.0, 2.0);
         if (meeting == Meeting::Rift) {
             on_light += body.rift_fill * bell(near);
         }
