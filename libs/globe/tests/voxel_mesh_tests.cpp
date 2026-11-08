@@ -270,3 +270,30 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
         CHECK(std::abs(glm::length(wide.origin + hog::DVec3{vertex.position}) - coarse_top) < 0.01);
     }
 }
+
+TEST_CASE("water over ground soaked through stands on it, its pores' water unseen",
+          "[globe][voxel_mesh]") {
+    const auto soaked = VoxelTree::build(Volume::tile_side, [](int, int, int z) {
+        if (z < 10) {
+            return Cube{.solid = Material::Granite,
+                        .solid_amount = Voxel::full,
+                        .liquid = Material::Water,
+                        .liquid_amount = Voxel::full / 8};
+        }
+        if (z < 13) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return Cube{};
+    });
+    const VoxelMesh mesh =
+        hog::globe::mesh_tile(earth().layers(), {.level = 4, .face = 1, .i = 3, .j = 3}, soaked);
+    CHECK(std::ranges::count(mesh.vertices, Material::Water, &hog::globe::VoxelVertex::material) ==
+          4 * tile * tile);
+    const double surface = earth().layers().bottom(13 * 16);
+    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
+        if (vertex.material == Material::Water) {
+            CHECK(std::abs(glm::length(mesh.origin + hog::DVec3{vertex.position}) - surface) <
+                  0.01);
+        }
+    }
+}

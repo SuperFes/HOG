@@ -131,18 +131,23 @@ void stand_ground(Standing& standing) {
 }
 
 // Liquid stands over the ground as high as all of it makes, with the ground no ground stands on
-// lying in it.
+// lying in it. What's in the pores of ground drawn right through stays in it, unseen.
 void stand_liquid(Standing& standing) {
     const int count = standing.count();
+    const auto open = [&](int z) {
+        const Piece& ground = standing.slot(z).ground;
+        return standing.held(z).liquid_share > 0.0 &&
+               (ground.empty() || ground.from > 0.0 || ground.to < 1.0);
+    };
     for (int z = 0; z < count;) {
-        if (standing.held(z).liquid_share <= 0.0) {
+        if (!open(z)) {
             ++z;
             continue;
         }
         const int first = z;
         const Material material = standing.held(z).liquid;
         double total = 0.0;
-        for (; z < count && standing.held(z).liquid_share > 0.0; ++z) {
+        for (; z < count && open(z); ++z) {
             total += standing.held(z).liquid_share +
                      (standing.taken(z) ? 0.0 : standing.held(z).ground_share);
         }
