@@ -9,8 +9,10 @@
 #include <limits>
 #include <numbers>
 #include <queue>
+#include <ranges>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace hog::formation {
 
@@ -450,23 +452,90 @@ Ice ice_on(const Sphere& sphere, const Crust& crust, const Climate& climate, con
     return ice;
 }
 
+namespace {
+
+// Each land point's own water, as the routing `rivers` gathered it: what passes it less what ran
+// in.
+std::vector<double> own_share(const Rivers& rivers, std::span<const double> gathered) {
+    std::vector<double> own(gathered.begin(), gathered.end());
+    for (std::uint32_t point = 0; point < rivers.receiver.size(); ++point) {
+        if (!in_sea(rivers, point)) {
+            own[rivers.receiver[point]] -= gathered[point];
+        }
+    }
+    for (std::uint32_t point = 0; point < rivers.receiver.size(); ++point) {
+        own[point] = in_sea(rivers, point) ? 0.0 : std::max(own[point], 0.0);
+    }
+    return own;
+}
+
+// `own` gathered down the receivers, from the highest ground down.
+std::vector<double> gathered_down(const Rivers& rivers, std::vector<double> own) {
+    std::vector<std::uint32_t> order = lowest_first(rivers);
+    for (const std::uint32_t point : std::views::reverse(order)) {
+        own[rivers.receiver[point]] += own[point];
+    }
+    return own;
+}
+
+} // namespace
+
 Rivers ice_shaped(const Sphere& sphere, const Rivers& rivers, const Ice& ice) {
     Rivers shaped = rivers;
-    for (const std::uint32_t point : lowest_first(rivers)) {
-        const double ground =
-            rivers.ground[point] - ice.carved[point] + ice.till[point] + ice.thickness[point];
-        const std::uint32_t down = shaped.receiver[point];
-        if (in_sea(shaped, down) && ground < 0.0) {
-            shaped.receiver[point] = point;
-            shaped.ground[point] = ground;
-            shaped.height[point] = ground;
+    const std::uint32_t size = sphere.size();
+    // Flooded inwards from the sea over the land as ice left it, lowest first: water finds the
+    // lowest way out, and only a hollow truly walled in, by rock or ice, fills to its spill.
+    std::vector<std::uint8_t> reached(size, 0);
+    using Entry = std::pair<double, std::uint32_t>;
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> open;
+    for (std::uint32_t point = 0; point < size; ++point) {
+        if (in_sea(rivers, point)) {
+            reached[point] = 1;
+            open.emplace(0.0, point);
+        }
+    }
+    while (!open.empty()) {
+        const auto [level, point] = open.top();
+        open.pop();
+        const bool sea = in_sea(shaped, point);
+        for (const std::uint32_t next : sphere.neighbors(point)) {
+            if (reached[next] != 0) {
+                continue;
+            }
+            reached[next] = 1;
+            const double ground =
+                rivers.ground[next] - ice.carved[next] + ice.till[next] + ice.thickness[next];
+            shaped.ground[next] = ground;
+            // The sea comes into troughs below its level that open onto it.
+            if (sea && ground < 0.0) {
+                shaped.receiver[next] = next;
+                shaped.height[next] = ground;
+                open.emplace(0.0, next);
+                continue;
+            }
+            const double length = angle(sphere.point(point), sphere.point(next)) * earth_radius;
+            shaped.height[next] = std::max(ground, level + (1e-6 * length));
+            open.emplace(shaped.height[next], next);
+        }
+    }
+    // Then each point sends its water down the steepest fall of that surface.
+    for (std::uint32_t point = 0; point < size; ++point) {
+        if (in_sea(shaped, point)) {
             continue;
         }
-        const double below = in_sea(shaped, down) ? 0.0 : shaped.height[down];
-        const double length = angle(sphere.point(point), sphere.point(down)) * earth_radius;
-        shaped.ground[point] = ground;
-        shaped.height[point] = std::max(ground, below + (1e-6 * length));
+        double steepest = 0.0;
+        for (const std::uint32_t next : sphere.neighbors(point)) {
+            const double below = in_sea(shaped, next) ? 0.0 : shaped.height[next];
+            const double length = angle(sphere.point(point), sphere.point(next)) * earth_radius;
+            const double fall = (shaped.height[point] - below) / length;
+            if (fall > steepest) {
+                steepest = fall;
+                shaped.receiver[point] = next;
+            }
+        }
     }
+    shaped.discharge = gathered_down(shaped, own_share(rivers, rivers.discharge));
+    shaped.flood = gathered_down(shaped, own_share(rivers, rivers.flood));
     return shaped;
 }
 
