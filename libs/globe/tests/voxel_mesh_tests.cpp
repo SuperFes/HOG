@@ -261,6 +261,25 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
     CHECK(quads(hog::globe::mesh_tile(layers, key, rock, beside)) ==
           quads(mesh) + (std::size_t{tile} * (ground + 1)));
 
+    // Rock filled to its top with nothing known over it goes on up, showing no lid; held only
+    // coarser beside it, the tile's read from that: under air held two levels coarser it shows its
+    // top, and its side to air held coarser across.
+    const VoxelTree full = VoxelTree::build(Volume::tile_side, [](int, int, int) {
+        return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+    });
+    const auto coarse_air = [&](hog::globe::TileKey at) -> const VoxelTree* {
+        const hog::globe::TileKey over = key.parent().parent();
+        return at.level == 2 && at.face == key.face && (at.k == over.k + 1 || at.i == over.i + 1)
+                   ? &air
+                   : nullptr;
+    };
+    const hog::globe::TileKey corner{.level = 0, .face = 2, .i = 10, .j = 10, .k = 3};
+    CHECK(hog::globe::mesh_tile(layers, corner, full).indices.empty());
+    CHECK(quads(hog::globe::mesh_tile(layers, corner, full, coarse_air)) ==
+          std::size_t{tile} * tile);
+    const hog::globe::TileKey edge{.level = 0, .face = 2, .i = 11, .j = 10, .k = 0};
+    CHECK(quads(hog::globe::mesh_tile(layers, edge, full, coarse_air)) == std::size_t{tile} * tile);
+
     // Coarser, each voxel stands for a cube of them as wide.
     const hog::globe::TileKey coarse{.level = 2, .face = 2, .i = 2, .j = 2, .k = 0};
     const VoxelMesh wide = hog::globe::mesh_tile(layers, coarse, rock);

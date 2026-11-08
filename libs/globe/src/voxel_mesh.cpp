@@ -425,41 +425,90 @@ void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, in
     }
 }
 
-// The cube at (x, y, z) from the tile's corner, a voxel past it at most: from the tile beside
-// where `beside` has it, else from the tile's own nearest edge.
-Cube cube_near(TileKey key, const VoxelTree& tile, const TileAt& beside, int x, int y, int z) {
-    const int across = Volume::tile_side;
-    const auto step = [&](int at) {
-        if (at < 0) {
-            return -1;
+// Levels a tile beside is looked for over its own, coarser, before it's taken as missing.
+constexpr int coarsest_beside = 24;
+
+// The cubes about a tile, a voxel past it at most: from the tile beside where `beside` has it, or
+// the coarsest over that, each voxel there standing for those it covers; else from the tile's own
+// nearest edge. Each tile beside is looked for once.
+class Near {
+public:
+    Near(TileKey key, const VoxelTree& tile, const TileAt& beside)
+        : key_{key}, tile_{&tile}, beside_{&beside} {}
+
+    Cube operator()(int x, int y, int z) {
+        constexpr int across = Volume::tile_side;
+        const auto step = [&](int at) {
+            if (at < 0) {
+                return -1;
+            }
+            return at >= across ? 1 : 0;
+        };
+        const int dx = step(x);
+        const int dy = step(y);
+        const int dz = step(z);
+        if (dx == 0 && dy == 0 && dz == 0) {
+            return tile_->at(x, y, z);
         }
-        return at >= across ? 1 : 0;
-    };
-    const int dx = step(x);
-    const int dy = step(y);
-    const int dz = step(z);
-    if (dx == 0 && dy == 0 && dz == 0) {
-        return tile.at(x, y, z);
+        const Found& found = find(dx, dy, dz);
+        if (found.tree == nullptr) {
+            return tile_->at(std::clamp(x, 0, across - 1), std::clamp(y, 0, across - 1),
+                             std::clamp(z, 0, across - 1));
+        }
+        // From the voxels of the key's level along its face to those of the tile found.
+        const auto place = [&](std::uint32_t tile, int at, std::uint32_t found_tile) {
+            const auto whole = (std::int64_t{tile} * across) + at;
+            return static_cast<int>((whole >> found.up) - (std::int64_t{found_tile} * across));
+        };
+        return found.tree->at(place(key_.i, x, found.key.i), place(key_.j, y, found.key.j),
+                              place(key_.k, z, found.key.k));
     }
-    const auto moved = [](std::uint32_t at, int by) -> std::optional<std::uint32_t> {
-        if (by < 0 && at == 0) {
-            return std::nullopt;
-        }
-        return by < 0 ? at - 1 : at + static_cast<std::uint32_t>(by);
+
+private:
+    struct Found {
+        bool looked = false;
+        const VoxelTree* tree = nullptr;
+        TileKey key;
+        int up = 0; // levels coarser than the key's
     };
-    const auto i = moved(key.i, dx);
-    const auto j = moved(key.j, dy);
-    const auto k = moved(key.k, dz);
-    if (beside && i && j && k) {
-        if (const VoxelTree* next =
-                beside({.level = key.level, .face = key.face, .i = *i, .j = *j, .k = *k});
-            next != nullptr) {
-            return next->at(x - (dx * across), y - (dy * across), z - (dz * across));
+
+    const Found& find(int dx, int dy, int dz) {
+        const int index = (dx + 1) + (3 * (dy + 1)) + (9 * (dz + 1));
+        Found& found = found_.at(static_cast<std::size_t>(index));
+        if (found.looked) {
+            return found;
         }
+        found.looked = true;
+        const auto moved = [](std::uint32_t at, int by) -> std::optional<std::uint32_t> {
+            if (by < 0 && at == 0) {
+                return std::nullopt;
+            }
+            return by < 0 ? at - 1 : at + static_cast<std::uint32_t>(by);
+        };
+        const auto i = moved(key_.i, dx);
+        const auto j = moved(key_.j, dy);
+        const auto k = moved(key_.k, dz);
+        if (!*beside_ || !i || !j || !k) {
+            return found;
+        }
+        TileKey next{.level = key_.level, .face = key_.face, .i = *i, .j = *j, .k = *k};
+        for (int up = 0; up <= coarsest_beside && next.level < UINT8_MAX; ++up) {
+            if (const VoxelTree* tree = (*beside_)(next); tree != nullptr) {
+                found.tree = tree;
+                found.key = next;
+                found.up = up;
+                return found;
+            }
+            next = next.parent();
+        }
+        return found;
     }
-    return tile.at(std::clamp(x, 0, across - 1), std::clamp(y, 0, across - 1),
-                   std::clamp(z, 0, across - 1));
-}
+
+    TileKey key_;
+    const VoxelTree* tile_;
+    const TileAt* beside_;
+    std::array<Found, 27> found_{};
+};
 
 } // namespace
 
@@ -472,7 +521,8 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
     }
     const int size = 1 << key.level;
     const int base = static_cast<int>(key.k) * across;
-    const int top = std::min(base + across, (layers.count + size - 1) / size);
+    const int shell = (layers.count + size - 1) / size;
+    const int top = std::min(base + across, shell);
     if (top <= base) {
         return mesh;
     }
@@ -489,6 +539,7 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
 
     Block block{across, base - 1, across + 2};
     std::vector<Held> column(static_cast<std::size_t>(across + 2));
+    Near near{key, tile, beside};
     for (int y = -1; y <= across; ++y) {
         for (int x = -1; x <= across; ++x) {
             // Those past its corners are never looked at.
@@ -497,8 +548,7 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
             }
             for (std::size_t n = 0; n < column.size(); ++n) {
                 const int z = static_cast<int>(n) - 1;
-                column[n] =
-                    base + z < top ? held_of(cube_near(key, tile, beside, x, y, z)) : Held{};
+                column[n] = base + z < shell ? held_of(near(x, y, z)) : Held{};
             }
             block.stand(x, y, column);
         }

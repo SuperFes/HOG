@@ -34,6 +34,20 @@ std::vector<globe::TileKey> beside(globe::TileKey key) {
     return next;
 }
 
+// Whether two tiles, neither inside the other, meet at a side, an edge or a corner.
+bool touching(globe::TileKey a, globe::TileKey b) {
+    if (a.face != b.face) {
+        return false;
+    }
+    const auto meets = [&](std::uint32_t from_a, std::uint32_t from_b) {
+        const std::uint64_t low_a = std::uint64_t{from_a} << a.level;
+        const std::uint64_t low_b = std::uint64_t{from_b} << b.level;
+        return low_a <= low_b + (std::uint64_t{1} << b.level) &&
+               low_b <= low_a + (std::uint64_t{1} << a.level);
+    };
+    return meets(a.i, b.i) && meets(a.j, b.j) && meets(a.k, b.k);
+}
+
 // The bits of `value`, 21 of them, spread to every third bit.
 std::uint64_t spread(std::uint32_t value) noexcept {
     std::uint64_t bits = value & 0x1F'FFFFU;
@@ -111,10 +125,15 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
     }
     touched_.insert(key);
     waiting_.insert(key);
-    // Those beside it read it at their edges.
+    // Those beside it read it at their edges, and so do the finer ones held against it.
     for (const globe::TileKey next : beside(key)) {
         if (held_.contains(next)) {
             waiting_.insert(next);
+        }
+        for (const globe::TileKey finer : under(next)) {
+            if (touching(finer, key)) {
+                waiting_.insert(finer);
+            }
         }
     }
     return {};
@@ -123,9 +142,13 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
 void TileMeshes::mesh(globe::TileKey key) {
     const Held& held = held_.at(key);
     std::vector<std::pair<globe::TileKey, std::shared_ptr<const globe::VoxelTree>>> near;
+    // Beside it where held at its level, else as the finest coarser tile held there has it.
     for (const globe::TileKey next : beside(key)) {
-        if (const auto found = held_.find(next); found != held_.end()) {
-            near.emplace_back(next, found->second.tree);
+        for (globe::TileKey over = next; over.level < by_level_.size(); over = over.parent()) {
+            if (const auto found = held_.find(over); found != held_.end()) {
+                near.emplace_back(over, found->second.tree);
+                break;
+            }
         }
     }
     for (Work& work : working_) {
