@@ -112,6 +112,11 @@ TEST_CASE("a player is sent every tile column in reach once, nearest and finest 
     sending.follow(player, glm::normalize(here() + (east * 400.0)) * glm::length(here()));
     CHECK(sending.due(player) > 0);
     CHECK(sending.due(player) < wanted / 2);
+
+    // Gone far off and back, every one is due again, as the player let them go.
+    sending.follow(player, -here());
+    sending.follow(player, here());
+    CHECK(sending.due(player) == wanted);
 }
 
 TEST_CASE("a tile column changed is sent again first to those holding it at its own level",

@@ -42,7 +42,12 @@ void ColumnSending::follow(net::ConnectionId player, DVec3 at) {
     };
     std::vector<Near> near;
     const double radius = glm::length(at);
-    for (const globe::Site corner : globe::tile_columns_near(layers_, at, reach)) {
+    const std::vector<globe::Site> in_reach = globe::tile_columns_near(layers_, at, reach);
+    // Out of reach the player lets them go, to be sent again on coming back.
+    std::erase_if(one.held, [&](const auto& held) {
+        return !std::ranges::binary_search(in_reach, held.first);
+    });
+    for (const globe::Site corner : in_reach) {
         const globe::Cell cell{.level = static_cast<std::uint8_t>(layers_.level - coarser),
                                .face = corner.face,
                                .i = corner.i / side,
