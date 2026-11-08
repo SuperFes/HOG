@@ -56,6 +56,10 @@ private:
     std::vector<double> lava_;
     std::vector<double> rock_cover_;
     std::vector<double> light_;
+    std::vector<double> lake_depth_; // metres of a lake's water over the top; 0 where none
+    std::vector<double>
+        lake_level_; // the level its water stands at, over the sea, at a lake's points
+    std::vector<double> lake_share_; // 1 at a lake's points, else 0
     // The nearest point to each cell of a cube's faces, for searches to start near.
     static constexpr std::size_t starts_across = 64;
     std::vector<std::uint32_t> starts_;

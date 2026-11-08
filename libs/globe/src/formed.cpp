@@ -42,12 +42,13 @@ OnCube on_cube(DVec3 direction) noexcept {
 } // namespace
 
 Formed::Formed(const Planet& planet, const Derived& derived)
-    : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)}, smooth_{world_.sphere, 2.0},
-      radius_{planet.radius}, vertical_{derived.vertical} {
+    : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)},
+      smooth_{world_.sphere, 2.0}, radius_{planet.radius}, vertical_{derived.vertical} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
-    for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &alluvium_, &lake_beds_, &till_,
-                        &ice_, &lava_, &rock_cover_, &light_}) {
+    for (auto* field :
+         {&top_, &organic_, &topsoil_, &subsoil_, &alluvium_, &lake_beds_, &till_, &ice_, &lava_,
+          &rock_cover_, &light_, &lake_depth_, &lake_level_, &lake_share_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -68,6 +69,12 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         lava_[point] = vertical_ * world.outcrop.lava[point];
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
+        const std::uint32_t lake = world.lakes.lake[point];
+        if (land && lake != formation::Lakes::none && world.sediment.lake_depth[point] > 0.0) {
+            lake_level_[point] = vertical_ * world.lakes.lakes[lake].level;
+            lake_depth_[point] = std::max(0.0, lake_level_[point] - top_[point]);
+            lake_share_[point] = 1.0;
+        }
     }
     const auto [lowest, highest] = std::ranges::minmax(top_);
     lowest_ = lowest;
@@ -113,9 +120,15 @@ Formed::Here Formed::at(DVec3 direction) const {
     Here here;
     here.top = {.value = top.value, .gradient = top.gradient / radius_};
     const formation::World& world = world_;
-    const std::uint32_t lake = world.lakes.lake[weights.nearest];
-    if (lake != formation::Lakes::none && world.sediment.lake_depth[weights.nearest] > 0.0) {
-        here.lake = vertical_ * world.lakes.lakes[lake].level;
+    // A lake's water stands at its level, ending where the ground rises over it; where the ground
+    // falls away instead, out of its outlet, it thins as its depth read like the ground's does,
+    // rather than standing up as a wall where the lake's points end.
+    if (const double share = value(lake_share_); share > 0.0) {
+        const double level = value(lake_level_) / share;
+        const double surface = std::min(level, top.value + value(lake_depth_));
+        if (surface > top.value + 0.01) {
+            here.lake = surface;
+        }
     }
     here.light = value(light_);
     here.folding = value(world.bedrock.folding);
