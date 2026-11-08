@@ -292,3 +292,4 @@ TEST_CASE("generator term cost", "[.bench][globe][land]") {
         WARN(sink);
     }
 }
+
