@@ -1,4 +1,5 @@
 #include <hog/core/image.hpp>
+#include <hog/formation/bedrock.hpp>
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
 #include <hog/formation/ice.hpp>
@@ -297,6 +298,61 @@ bool draw_ice(const Canvas& canvas, const hog::formation::Crust& crust,
     });
 }
 
+// The rock at the surface once worn: lava near black, flat layered rock tan (paler grey where much
+// of it dissolves), folded layers purple, the light crust's basement pink.
+bool draw_bedrock(const Canvas& canvas, const hog::formation::Rivers& rivers,
+                  const hog::formation::Bedrock& bedrock, const hog::formation::Outcrop& outcrop) {
+    using hog::formation::Rock;
+    const Sphere& sphere = *canvas.sphere;
+    std::uint32_t lit = 0;
+    return canvas.draw("bedrock.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        const double light = canvas.light(rivers.height, direction, lit);
+        Rgb colour = hog::formation_lab::rgb(190, 110, 100);
+        switch (outcrop.rock[near]) {
+        case Rock::Lava:
+            colour = hog::formation_lab::rgb(60, 55, 60);
+            break;
+        case Rock::Layered:
+            colour = mixed(hog::formation_lab::rgb(205, 170, 115),
+                           hog::formation_lab::rgb(185, 195, 200), bedrock.soluble[near]);
+            break;
+        case Rock::Folded:
+            colour = hog::formation_lab::rgb(140, 100, 150);
+            break;
+        case Rock::Basement:
+        case Rock::SeaFloor:
+            break;
+        }
+        return hog::formation_lab::scaled(colour, light);
+    });
+}
+
+void report_bedrock(const Sphere& sphere, const hog::formation::Rivers& rivers,
+                    const hog::formation::Bedrock& bedrock,
+                    const hog::formation::Outcrop& outcrop) {
+    std::array<double, 5> area{};
+    double land = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (rivers.receiver[point] != point) {
+            land += sphere.area(point);
+            area.at(static_cast<std::size_t>(outcrop.rock[point])) += sphere.area(point);
+        }
+    }
+    const auto share = [&](hog::formation::Rock rock) {
+        return 100.0 * area.at(static_cast<std::size_t>(rock)) / std::max(land, 1e-12);
+    };
+    using hog::formation::Rock;
+    std::cout << std::format("land's rock: lava {:.0f}%, layered {:.0f}%, folded {:.0f}%, "
+                             "basement {:.0f}%; layered rock up to {:.0f} m, lava up to {:.0f} m\n",
+                             share(Rock::Lava), share(Rock::Layered), share(Rock::Folded),
+                             share(Rock::Basement), *std::ranges::max_element(bedrock.cover),
+                             *std::ranges::max_element(bedrock.lava));
+}
+
 // Laid-down sediment: on land from none (rock and soil only) through tan to dark, thicker darker;
 // on the sea floor, deltas pale over the deep blue.
 // Where ice laid more than rivers did, its till is drawn grey-blue instead.
@@ -533,6 +589,12 @@ int run(const Options& options) {
     const hog::formation::Rivers rivers = hog::formation::ice_shaped(sphere, worn, ice);
     report_ice(sphere, crust, rivers, ice, seconds_since(at));
     ok = draw_ice(canvas, crust, rivers, ice) && ok;
+
+    const hog::formation::Bedrock bedrock = hog::formation::bedrock_on(sphere, crust, body);
+    const hog::formation::Outcrop outcrop =
+        hog::formation::outcrop_on(sphere, crust, bedrock, rivers, body);
+    report_bedrock(sphere, rivers, bedrock, outcrop);
+    ok = draw_bedrock(canvas, rivers, bedrock, outcrop) && ok;
 
     const hog::formation::Lakes lakes = hog::formation::lakes_on(sphere, rivers, climate, body);
     const auto open =
