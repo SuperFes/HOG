@@ -155,8 +155,8 @@ TEST_CASE("water still finds its way down the land ice shaped", "[formation][ice
             CHECK(shaped.receiver[point] == point);
             continue;
         }
-        const double ground =
-            made.rivers.ground[point] - made.ice.carved[point] + made.ice.thickness[point];
+        const double ground = made.rivers.ground[point] - made.ice.carved[point] +
+                              made.ice.till[point] + made.ice.thickness[point];
         CHECK_THAT(shaped.ground[point], WithinAbs(ground, 1e-9));
         if (shaped.receiver[point] == point) {
             // The sea only comes into troughs below its level that open onto it.
@@ -168,6 +168,53 @@ TEST_CASE("water still finds its way down the land ice shaped", "[formation][ice
         CHECK(shaped.height[point] > below);
         CHECK(shaped.height[point] >= shaped.ground[point]);
     }
+}
+
+TEST_CASE("all the rock ice carved is laid down as till or washed off", "[formation][ice]") {
+    const Made made;
+    constexpr double earth_radius = 6'371'000.0;
+    double carved = 0.0;
+    double laid = 0.0;
+    double washed = 0.0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        CHECK(made.ice.till[point] >= 0.0);
+        CHECK(made.ice.outwash[point] >= 0.0);
+        carved += made.ice.carved[point] * made.sphere.area(point);
+        laid += made.ice.till[point] * made.sphere.area(point);
+        washed += made.ice.outwash[point] / (earth_radius * earth_radius);
+    }
+    CHECK(carved > 0.0);
+    CHECK(washed > 0.0);
+    CHECK_THAT(laid + washed, WithinRel(carved, 1e-9));
+}
+
+TEST_CASE("till lies where the coldest ice lay, thickest where it ended", "[formation][ice]") {
+    const Made made;
+    const auto iced = [&](std::uint32_t point) {
+        return made.rivers.receiver[point] != point && made.ice.coldest[point] > 0.0;
+    };
+    double edge = 0.0;
+    double inner = 0.0;
+    int edges = 0;
+    int inners = 0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const bool land = made.rivers.receiver[point] != point;
+        const auto neighbors = made.sphere.neighbors(point);
+        if (land && made.ice.till[point] > 0.0) {
+            CHECK((iced(point) || std::ranges::any_of(neighbors, iced)));
+        }
+        if (!iced(point)) {
+            continue;
+        }
+        const bool ends = std::ranges::any_of(neighbors, [&](std::uint32_t next) {
+            return made.rivers.receiver[next] != next && !iced(next);
+        });
+        (ends ? edge : inner) += made.ice.till[point];
+        ++(ends ? edges : inners);
+    }
+    REQUIRE(edges > 0);
+    REQUIRE(inners > 0);
+    CHECK(edge / edges > inner / inners);
 }
 
 TEST_CASE("a bed dips under the bed down-ice only as far as the ice's fall allows",

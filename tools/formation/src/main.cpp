@@ -299,13 +299,17 @@ bool draw_ice(const Canvas& canvas, const hog::formation::Crust& crust,
 
 // Laid-down sediment: on land from none (rock and soil only) through tan to dark, thicker darker;
 // on the sea floor, deltas pale over the deep blue.
+// Where ice laid more than rivers did, its till is drawn grey-blue instead.
 bool draw_sediment(const Canvas& canvas, const hog::formation::Rivers& rivers,
-                   const hog::formation::Sediment& sediment) {
+                   const hog::formation::Ice& ice, const hog::formation::Sediment& sediment) {
     const Sphere& sphere = *canvas.sphere;
     static constexpr std::array<Rgb, 5> thin_to_thick{
         hog::formation_lab::rgb(120, 120, 110), hog::formation_lab::rgb(200, 180, 120),
         hog::formation_lab::rgb(160, 120, 60), hog::formation_lab::rgb(110, 75, 40),
         hog::formation_lab::rgb(60, 40, 25)};
+    static constexpr std::array<Rgb, 4> till{
+        hog::formation_lab::rgb(120, 120, 110), hog::formation_lab::rgb(160, 175, 185),
+        hog::formation_lab::rgb(100, 120, 150), hog::formation_lab::rgb(50, 65, 100)};
     static constexpr std::array<Rgb, 3> delta{hog::formation_lab::rgb(15, 25, 55),
                                               hog::formation_lab::rgb(60, 90, 120),
                                               hog::formation_lab::rgb(190, 180, 140)};
@@ -315,11 +319,16 @@ bool draw_sediment(const Canvas& canvas, const hog::formation::Rivers& rivers,
         // Thicknesses run from centimetres to kilometres, so they're shown by tens.
         const auto tens = [](double metres) { return std::log10(1.0 + std::max(metres, 0.0)); };
         if (rivers.receiver[near] == near) {
-            return hog::formation_lab::ramp(tens(sediment.delta[near]) / 3.0, delta);
+            return hog::formation_lab::ramp(tens(sediment.delta[near] + ice.till[near]) / 3.0,
+                                            delta);
+        }
+        const double light = canvas.light(rivers.height, direction, lit);
+        if (ice.till[near] > sediment.alluvium[near]) {
+            return hog::formation_lab::scaled(
+                hog::formation_lab::ramp(tens(ice.till[near]) / 3.0, till), light);
         }
         return hog::formation_lab::scaled(
-            hog::formation_lab::ramp(tens(sediment.alluvium[near]) / 3.0, thin_to_thick),
-            canvas.light(rivers.height, direction, lit));
+            hog::formation_lab::ramp(tens(sediment.alluvium[near]) / 3.0, thin_to_thick), light);
     });
 }
 
@@ -378,6 +387,18 @@ void report_ice(const Sphere& sphere, const hog::formation::Crust& crust,
         seconds, 100.0 * now / land, 100.0 * coldest / land,
         *std::ranges::max_element(ice.thickness), *std::ranges::max_element(ice.carved), fjords,
         ice.calving / 1e9);
+    double tilled = 0.0;
+    double laid = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.sea[point] == 0 && ice.till[point] > 0.0) {
+            tilled += sphere.area(point);
+            laid += ice.till[point] * sphere.area(point);
+        }
+    }
+    std::cout << std::format("till on {:.0f}% of the land, {:.0f} m deep on average there, "
+                             "thickest {:.0f} m\n",
+                             100.0 * tilled / land, laid / std::max(tilled, 1e-12),
+                             *std::ranges::max_element(ice.till));
 }
 
 int run(const Options& options) {
@@ -421,7 +442,7 @@ int run(const Options& options) {
                              open, static_cast<std::ptrdiff_t>(lakes.lakes.size()) - open,
                              std::ranges::count(lakes.salt_flat, std::uint8_t{1}));
     const hog::formation::Sediment sediment =
-        hog::formation::sediment_on(sphere, rivers, lakes, body);
+        hog::formation::sediment_on(sphere, rivers, lakes, ice.outwash, body);
     std::vector<std::uint8_t> still_wet(lakes.lakes.size(), 0);
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
         if (lakes.lake[point] != hog::formation::Lakes::none && sediment.lake_depth[point] > 0.0) {
@@ -434,7 +455,7 @@ int run(const Options& options) {
                              *std::ranges::max_element(sediment.alluvium),
                              *std::ranges::max_element(sediment.delta), filled);
     ok = draw_rivers(canvas, rivers, ice, lakes, sediment) && ok;
-    ok = draw_sediment(canvas, rivers, sediment) && ok;
+    ok = draw_sediment(canvas, rivers, ice, sediment) && ok;
 
     const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
     std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",

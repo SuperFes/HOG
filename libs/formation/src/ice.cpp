@@ -1,5 +1,6 @@
 #include <hog/core/portable_maths.hpp>
 #include <hog/formation/ice.hpp>
+#include <hog/formation/sediment.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -96,17 +97,45 @@ double top(const Land& land, const Cover& cover, std::uint32_t point) {
     return in_sea(*land.rivers, point) ? 0.0 : cover.surface[point];
 }
 
-// Ice gathered down its own surface from the highest: each point passes on what reaches it and
-// what its snow adds, less what melts, shared among the points below it by how steeply each lies;
-// so a sheet spreads its ice and valleys gather it. What reaches the sea breaks off.
-void gather(const Land& land, Cover& cover) {
-    const Sphere& sphere = *land.sphere;
-    const Rivers& rivers = *land.rivers;
-    const double cell_area = earth_radius * earth_radius;
+// Land points from the ice's top down.
+std::vector<std::uint32_t> downhill(const Land& land, const Cover& cover) {
     std::vector<std::uint32_t> downward = land.upward;
     std::ranges::sort(downward, [&](std::uint32_t a, std::uint32_t b) {
         return cover.surface[a] > cover.surface[b];
     });
+    return downward;
+}
+
+// Shares `amount` leaving a point among the points below it on the ice's top, by how steeply
+// each lies, so a sheet spreads what it carries and valleys gather it. A hollow in the surface
+// the ice hasn't filled yet empties the way the water would.
+template <typename Pass>
+void share_down(const Land& land, const Cover& cover, std::uint32_t point, double amount,
+                const Pass& pass) {
+    const Sphere& sphere = *land.sphere;
+    const double here = cover.surface[point];
+    const auto steepness = [&](std::uint32_t next) {
+        const double drop = here - top(land, cover, next);
+        return drop > 0.0 ? drop / angle(sphere.point(point), sphere.point(next)) : 0.0;
+    };
+    double steepest = 0.0;
+    for (const std::uint32_t next : sphere.neighbors(point)) {
+        steepest += steepness(next);
+    }
+    if (steepest <= 0.0) {
+        pass(land.rivers->receiver[point], amount);
+        return;
+    }
+    for (const std::uint32_t next : sphere.neighbors(point)) {
+        pass(next, amount * steepness(next) / steepest);
+    }
+}
+
+// Ice gathered down its own surface from the highest: each point passes on what reaches it and
+// what its snow adds, less what melts. What reaches the sea breaks off.
+void gather(const Land& land, Cover& cover) {
+    const Rivers& rivers = *land.rivers;
+    const double cell_area = earth_radius * earth_radius;
     std::ranges::fill(cover.reaching, 0.0);
     cover.calving = 0.0;
     const auto pass = [&](std::uint32_t to, double amount) {
@@ -116,29 +145,12 @@ void gather(const Land& land, Cover& cover) {
             cover.reaching[to] += amount;
         }
     };
-    for (const std::uint32_t point : downward) {
-        const double gained = cover.balance[point] * sphere.area(point) * cell_area;
+    for (const std::uint32_t point : downhill(land, cover)) {
+        const double gained = cover.balance[point] * land.sphere->area(point) * cell_area;
         cover.iced[point] = cover.reaching[point] > 0.0 || gained > 0.0 ? 1 : 0;
         cover.flux[point] = std::max(0.0, cover.reaching[point] + gained);
-        if (cover.flux[point] <= 0.0) {
-            continue;
-        }
-        const double here = cover.surface[point];
-        const auto steepness = [&](std::uint32_t next) {
-            const double drop = here - top(land, cover, next);
-            return drop > 0.0 ? drop / angle(sphere.point(point), sphere.point(next)) : 0.0;
-        };
-        double steepest = 0.0;
-        for (const std::uint32_t next : sphere.neighbors(point)) {
-            steepest += steepness(next);
-        }
-        // A hollow in the surface the ice hasn't filled yet empties the way the water would.
-        if (steepest <= 0.0) {
-            pass(rivers.receiver[point], cover.flux[point]);
-            continue;
-        }
-        for (const std::uint32_t next : sphere.neighbors(point)) {
-            pass(next, cover.flux[point] * steepness(next) / steepest);
+        if (cover.flux[point] > 0.0) {
+            share_down(land, cover, point, cover.flux[point], pass);
         }
     }
 }
@@ -270,6 +282,79 @@ std::vector<double> carve(const Land& land, const Cover& cold) {
     return carved;
 }
 
+// Rock the ice carved, carried in it down its surface and let go as it melts away: each point
+// lets go of the share of its load that it loses of its ice. Meltwater, gathered down the ice as
+// it melts, washes off what it can carry as outwash for the rivers; the rest lies as a sheet of
+// till through the melting reaches, and a moraine where the ice ends. Whatever reaches the sea
+// settles on its floor.
+void lay(const Land& land, const Cover& cold, Ice& ice) {
+    const Sphere& sphere = *land.sphere;
+    const Rivers& rivers = *land.rivers;
+    const double cell_area = earth_radius * earth_radius;
+    const double years = std::max(land.body->glaciated_years, 1.0);
+    const std::uint32_t size = sphere.size();
+    std::vector<double> carrying(size, 0.0); // cubic metres of rock a year arriving in the ice
+    std::vector<double> water(size, 0.0);    // cubic metres of meltwater a year arriving
+    std::vector<double> laid(size, 0.0);
+    std::vector<double> washed(size, 0.0);
+    std::vector<std::uint8_t> done(size, 0);
+    for (const std::uint32_t point : downhill(land, cold)) {
+        done[point] = 1;
+        const double area = sphere.area(point) * cell_area;
+        const double load = carrying[point] + (ice.carved[point] * area / years);
+        const double gained = cold.balance[point] * area;
+        const double arriving = cold.reaching[point] + std::max(gained, 0.0);
+        const double kept =
+            arriving > 0.0 ? std::clamp(cold.flux[point] / arriving, 0.0, 1.0) : 0.0;
+        water[point] += std::max(0.0, arriving - cold.flux[point]);
+        const double dropped = load * (1.0 - kept);
+        const std::uint32_t down = rivers.receiver[point];
+        const double below = in_sea(rivers, down) ? 0.0 : rivers.height[down];
+        const double slope = std::max(0.0, rivers.height[point] - below) /
+                             (angle(sphere.point(point), sphere.point(down)) * earth_radius);
+        // Meltwater runs under the ice in a few channels and sweeps up what melts out only where it
+        // comes out from under the ice, at its edge.
+        const bool edge = cold.flux[point] <= 0.0;
+        washed[point] =
+            edge ? std::min(dropped, carrying_capacity(water[point], slope, *land.body)) : 0.0;
+        // Till heaps no higher than the ice's top: past that the ice rides over it and takes the
+        // rest on, or at its edge leaves it to the meltwater.
+        const double rock = rivers.ground[point] - ice.carved[point];
+        const double room =
+            std::max(0.0, (std::max(0.0, cold.surface[point] - rock) * area / years) - laid[point]);
+        const double lying = std::min(dropped - washed[point], room);
+        laid[point] += lying;
+        double going = load * kept;
+        if (edge) {
+            washed[point] += dropped - washed[point] - lying;
+        } else {
+            going += dropped - washed[point] - lying;
+        }
+        const double flowing = water[point];
+        if (going <= 0.0 && flowing <= 0.0) {
+            continue;
+        }
+        const double total = going + flowing;
+        share_down(land, cold, point, total, [&](std::uint32_t to, double amount) {
+            const double rock = amount * going / total;
+            if (in_sea(rivers, to)) {
+                laid[to] += rock;
+            } else if (done[to] != 0) {
+                laid[point] += rock;
+            } else {
+                carrying[to] += rock;
+                water[to] += amount * flowing / total;
+            }
+        });
+    }
+    ice.till.assign(size, 0.0);
+    ice.outwash.assign(size, 0.0);
+    for (std::uint32_t point = 0; point < size; ++point) {
+        ice.till[point] = laid[point] * years / (sphere.area(point) * cell_area);
+        ice.outwash[point] = washed[point] * years;
+    }
+}
+
 } // namespace
 
 double degree_days(double mean, double swing) {
@@ -341,9 +426,10 @@ Ice ice_on(const Sphere& sphere, const Crust& crust, const Climate& climate, con
     Ice ice;
     ice.carved = carve(land, cold);
     ice.coldest = cold.thickness;
+    lay(land, cold, ice);
     std::vector<double> rock = rivers.ground;
     for (std::size_t point = 0; point < rock.size(); ++point) {
-        rock[point] -= ice.carved[point];
+        rock[point] += ice.till[point] - ice.carved[point];
     }
     Cover now = cover_on(land, rock, 0.0);
     ice.thickness = std::move(now.thickness);
@@ -367,7 +453,8 @@ Ice ice_on(const Sphere& sphere, const Crust& crust, const Climate& climate, con
 Rivers ice_shaped(const Sphere& sphere, const Rivers& rivers, const Ice& ice) {
     Rivers shaped = rivers;
     for (const std::uint32_t point : lowest_first(rivers)) {
-        const double ground = rivers.ground[point] - ice.carved[point] + ice.thickness[point];
+        const double ground =
+            rivers.ground[point] - ice.carved[point] + ice.till[point] + ice.thickness[point];
         const std::uint32_t down = shaped.receiver[point];
         if (in_sea(shaped, down) && ground < 0.0) {
             shaped.receiver[point] = point;
