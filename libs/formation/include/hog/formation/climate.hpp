@@ -3,6 +3,7 @@
 #include <hog/formation/body.hpp>
 #include <hog/formation/sphere.hpp>
 
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -20,7 +21,11 @@ struct Climate {
 // carries towards its poles (a Budyko–Sellers balance), at the liquid's level.
 [[nodiscard]] double sea_level_temperature(const Body& body, double latitude);
 
-// `heights` are metres from the liquid's level, under 0 being under it.
+// `heights` are metres from the liquid's level; `sea` is 1 where open liquid lies, which moisture
+// comes off.
+[[nodiscard]] Climate climate_on(const Sphere& sphere, std::span<const double> heights,
+                                 std::span<const std::uint8_t> sea, const Body& body);
+// As above, with open liquid wherever the height is under 0.
 [[nodiscard]] Climate climate_on(const Sphere& sphere, std::span<const double> heights,
                                  const Body& body);
 

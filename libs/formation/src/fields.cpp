@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <limits>
+#include <numbers>
 #include <queue>
 #include <utility>
 
@@ -67,6 +68,37 @@ Nearest nearest_sources(const Sphere& sphere, std::span<const Source> sources) {
         }
     }
     return nearest;
+}
+
+std::vector<std::uint8_t> open_sea(const Sphere& sphere, std::span<const double> heights,
+                                   double smallest_share) {
+    std::vector<std::uint8_t> sea(sphere.size(), 0);
+    std::vector<std::uint8_t> seen(sphere.size(), 0);
+    std::vector<std::uint32_t> body;
+    const double smallest = smallest_share * 4.0 * std::numbers::pi;
+    for (std::uint32_t first = 0; first < sphere.size(); ++first) {
+        if (seen[first] != 0 || heights[first] >= 0.0) {
+            continue;
+        }
+        body.assign(1, first);
+        seen[first] = 1;
+        double area = 0.0;
+        for (std::size_t next = 0; next < body.size(); ++next) {
+            area += sphere.area(body[next]);
+            for (const std::uint32_t other : sphere.neighbors(body[next])) {
+                if (seen[other] == 0 && heights[other] < 0.0) {
+                    seen[other] = 1;
+                    body.push_back(other);
+                }
+            }
+        }
+        if (area >= smallest) {
+            for (const std::uint32_t point : body) {
+                sea[point] = 1;
+            }
+        }
+    }
+    return sea;
 }
 
 } // namespace hog::formation

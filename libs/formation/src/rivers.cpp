@@ -137,8 +137,8 @@ void raise(const Ground& ground, std::span<const std::uint32_t> order,
         // Where the crust's cap falls under the ground downstream, the hollow is filled all but
         // flat, so water still finds its way out; lakes are left to a stage of their own.
         const double worn = below + (length * std::min(slope, body.steepest));
-        rivers.height[point] =
-            std::max(std::min(worn, ground.crust->base[point]), below + (1e-6 * length));
+        rivers.ground[point] = std::min(worn, ground.crust->base[point]);
+        rivers.height[point] = std::max(rivers.ground[point], below + (1e-6 * length));
     }
 }
 
@@ -172,6 +172,7 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
     const std::uint32_t size = sphere.size();
     Rivers rivers;
     rivers.height = crust.base;
+    rivers.ground = crust.base;
     rivers.receiver.resize(size);
     rivers.discharge.assign(size, 0.0);
     rivers.wear.assign(size, 0.0);
@@ -184,7 +185,7 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
                   .land = std::vector<std::uint8_t>(size),
                   .erodibility = std::vector<double>(size)};
     for (std::uint32_t point = 0; point < size; ++point) {
-        ground.land[point] = crust.base[point] >= 0.0 ? 1 : 0;
+        ground.land[point] = crust.sea[point] != 0 ? 0 : 1;
         rivers.receiver[point] = point;
         // Plants take hold where it's wet and warm enough, and hold the ground against wear.
         rivers.cover[point] = smoothstep(0.15, 1.0, climate.rain[point]) *

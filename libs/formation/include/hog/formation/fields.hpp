@@ -28,4 +28,10 @@ struct Nearest {
 };
 [[nodiscard]] Nearest nearest_sources(const Sphere& sphere, std::span<const Source> sources);
 
+// 1 where ground under the liquid's level (height under 0) joins up into a body covering at least
+// `smallest_share` of the surface: open sea. Smaller hollows under the level are basins on land.
+[[nodiscard]] std::vector<std::uint8_t> open_sea(const Sphere& sphere,
+                                                 std::span<const double> heights,
+                                                 double smallest_share);
+
 } // namespace hog::formation

@@ -47,7 +47,7 @@ TEST_CASE("fast-rising mountains are bare and still lowlands soiled", "[formatio
     const Sphere sphere{6, body.seed + 1};
     const Plates plates{body, layout};
     const auto crust = crust_on(sphere, plates, body);
-    const Climate climate = climate_on(sphere, crust.base, body);
+    const Climate climate = climate_on(sphere, crust.base, crust.sea, body);
     const Rivers rivers = rivers_on(sphere, crust, climate, body);
     const Soil soil = soil_on(sphere, rivers, climate, body);
     int soiled = 0;

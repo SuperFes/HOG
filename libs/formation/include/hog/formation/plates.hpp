@@ -78,6 +78,7 @@ struct Crust {
     std::vector<Meeting> meeting; // the nearest boundary's kind
     std::vector<double> boundary; // radians to the nearest boundary
     std::vector<double> floor_age; // millions of years since the sea floor was made
+    std::vector<std::uint8_t> sea; // 1 under open sea; basins under the level elsewhere are land
 };
 
 [[nodiscard]] Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body);

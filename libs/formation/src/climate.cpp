@@ -158,18 +158,18 @@ Arriving arriving_at(const Sphere& sphere, std::span<const double> heights, cons
 
 // Moisture comes off the liquid and rides the wind inland, falling as it goes and as the air is
 // pushed up slopes; air that cools holds less, so the rest falls there too.
-void carry_moisture(const Sphere& sphere, std::span<const double> heights, const Body& body,
-                    const Climate& climate, std::vector<double>& moisture,
-                    std::vector<double>& lost) {
+void carry_moisture(const Sphere& sphere, std::span<const double> heights,
+                    std::span<const std::uint8_t> sea, const Body& body, const Climate& climate,
+                    std::vector<double>& moisture, std::vector<double>& lost) {
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        moisture[point] = heights[point] < 0.0 ? capacity(climate.temperature[point]) : 0.0;
+        moisture[point] = sea[point] != 0 ? capacity(climate.temperature[point]) : 0.0;
     }
     std::vector<double> next = moisture;
     const int rounds =
         std::clamp(static_cast<int>(5.0 * body.rain_reach / sphere.spacing()), 20, 800);
     for (int round = 0; round < rounds; ++round) {
         for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-            if (heights[point] < 0.0) {
+            if (sea[point] != 0) {
                 continue;
             }
             const Arriving arriving =
@@ -190,6 +190,15 @@ double sea_level_temperature(const Body& body, double latitude) {
 }
 
 Climate climate_on(const Sphere& sphere, std::span<const double> heights, const Body& body) {
+    std::vector<std::uint8_t> sea(heights.size());
+    for (std::size_t point = 0; point < heights.size(); ++point) {
+        sea[point] = heights[point] < 0.0 ? 1 : 0;
+    }
+    return climate_on(sphere, heights, sea, body);
+}
+
+Climate climate_on(const Sphere& sphere, std::span<const double> heights,
+                   std::span<const std::uint8_t> sea, const Body& body) {
     const std::uint32_t size = sphere.size();
     Climate climate;
     climate.temperature.resize(size);
@@ -200,12 +209,12 @@ Climate climate_on(const Sphere& sphere, std::span<const double> heights, const 
 
     std::vector<double> moisture(size);
     std::vector<double> lost(size, 0.0);
-    carry_moisture(sphere, heights, body, climate, moisture, lost);
+    carry_moisture(sphere, heights, sea, body, climate, moisture, lost);
 
     double total = 0.0;
     double area = 0.0;
     for (std::uint32_t point = 0; point < size; ++point) {
-        const double falling = heights[point] < 0.0
+        const double falling = sea[point] != 0
                                    ? moisture[point] * sphere.spacing() / body.rain_reach
                                    : lost[point];
         climate.rain[point] = (0.3 + rising[point]) * falling;
