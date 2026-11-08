@@ -15,6 +15,7 @@
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/client/sonar.hpp>
+#include <hog/client/tile_meshes.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
@@ -640,6 +641,10 @@ public:
     [[nodiscard]] std::vector<protocol::SentColumn> take_columns() {
         return session_ ? session_->take_columns() : std::vector<protocol::SentColumn>{};
     }
+    // The tiles the server sent since last asked.
+    [[nodiscard]] std::vector<protocol::SentTile> take_tiles() {
+        return session_ ? session_->take_tiles() : std::vector<protocol::SentTile>{};
+    }
 
     // Answers the server and the login service, with nothing yet to say of where the player is.
     void pump(MonotonicClock::time_point now) {
@@ -1183,7 +1188,8 @@ constexpr double kept_ground = 9'000.0;
 // The ground the server sends, held as it comes: voxels alone, over the planet and its layers.
 struct StreamedGround {
     StreamedGround(const globe::Planet& planet, const globe::Layers& layers, jobs::JobSystem& jobs)
-        : planet{planet}, world{this->planet, layers, volume}, meshes{world, jobs} {
+        : planet{planet}, world{this->planet, layers, volume}, meshes{world, jobs},
+          tiles{this->planet, layers, jobs} {
         world.read_coarse(&held);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -1197,13 +1203,25 @@ struct StreamedGround {
     globe::World world;
     globe::ColumnCache held{volume};
     client::ColumnMeshes meshes;
+    client::TileMeshes tiles;
     std::optional<globe::Site> over; // the tile column last kept about
 };
 
-// Takes in the tile columns the server sent, once the columns being meshed from the world are
-// done, and has those they changed meshed again. Lets go those far off as the eye moves on.
+// Takes in the tiles the server sent, meshing them, and the tile columns, once the columns being
+// meshed from the world are done, and has those they changed meshed again. Lets go columns far
+// off as the eye moves on.
 void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye) {
     HOG_ZONE("ground");
+    for (const protocol::SentTile& tile : connection.take_tiles()) {
+        if (auto taken = ground.tiles.take(tile); !taken) {
+            log::warn(connection_log, "can't hold a tile sent: {}", taken.error());
+        }
+    }
+    if (client::GroundChanges changes = ground.tiles.collect(); !changes.empty()) {
+        scene.show_ground(std::move(changes));
+    }
+    scene.set_ground_state(ground.tiles.covered(eye, streamed_ground),
+                           ground.tiles.in_flight() > 0);
     const std::vector<protocol::SentColumn> sent = connection.take_columns();
     globe::ColumnCache& held = ground.held;
     std::optional<globe::Site>& over = ground.over;
@@ -1230,8 +1248,6 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
     if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
-    scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
-                           ground.meshes.in_flight() > 0);
 }
 
 // Flies over the ground the server streams until the window closes or it's time to quit, drawing

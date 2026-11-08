@@ -144,6 +144,9 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
     } else if (auto* columns = std::get_if<protocol::Columns>(&*message)) {
         columns_.insert(columns_.end(), std::make_move_iterator(columns->columns.begin()),
                         std::make_move_iterator(columns->columns.end()));
+    } else if (auto* tiles = std::get_if<protocol::Tiles>(&*message)) {
+        tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
+                      std::make_move_iterator(tiles->tiles.end()));
     } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
         grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
