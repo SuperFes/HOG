@@ -356,12 +356,12 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
             crust.boundary[point] = distance;
             crust.meeting[point] = x < 3.0 ? kind.meeting : Meeting::None;
             switch (kind.meeting) {
-            case Meeting::Collision: {
-                const double profile = bell(distance / kind.width);
-                base += light * body.crust_rise * kind.thickened * profile;
-                uplift += body.uplift_share * closing * profile;
+            case Meeting::Collision:
+                // Thickened crust spreads over the whole widened belt; rock is pushed up hardest
+                // at the active front.
+                base += light * body.crust_rise * kind.thickened * bell(distance / kind.width);
+                uplift += body.uplift_share * closing * bell(x);
                 break;
-            }
             case Meeting::Subduction:
                 if (riding) {
                     base += light * ((body.arc_height * bell((x - 0.6) / 0.3)) +

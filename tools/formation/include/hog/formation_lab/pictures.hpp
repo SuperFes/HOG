@@ -25,6 +25,10 @@ struct Rgb {
 // direction. Pixels are coloured in reading order, so `colour` can walk on from the last one.
 [[nodiscard]] Image map_picture(int width, const std::function<Rgb(const DVec3&)>& colour);
 
+// Draws the great-circle stretch from `from` to `to` onto a whole-planet map, `width` pixels wide,
+// wrapping round its sides.
+void draw_line(Image& image, const DVec3& from, const DVec3& to, Rgb colour, int width);
+
 // Along `stops`, evenly spaced over 0 to 1.
 [[nodiscard]] Rgb ramp(double t, std::span<const Rgb> stops);
 // Sea blues by depth, land from lowland green through brown to snowy white by height.

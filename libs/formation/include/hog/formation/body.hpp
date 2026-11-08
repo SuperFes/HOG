@@ -48,6 +48,14 @@ struct Body {
     double rain_mean = 1.0;         // metres a year over the whole planet
     double rain_reach = 0.3;        // radians moist air carries inland before most has fallen
     double vapour_height = 2'500.0; // metres of rise that wring out most of the air's water
+
+    // Running water wearing the land (stream power, at Earth's scale).
+    double erodibility = 2.0e-6;   // how readily bare rock wears, per year
+    double discharge_power = 0.5;  // how much more a bigger river cuts
+    double cover_holding = 0.5;    // share of wear plants hold back where they cover the ground
+    double driest_wear = 0.05;     // metres a year of rain wear acts as if on at least: flash floods
+    double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
+    double steepest = 0.05;        // steepest mean slope land holds across tens of kilometres
 };
 
 } // namespace hog::formation
