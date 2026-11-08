@@ -1,11 +1,14 @@
 #include <hog/client/column_meshes.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/column_cache.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <iterator>
+#include <optional>
 #include <utility>
+#include <vector>
 
 namespace hog::client {
 namespace {
@@ -73,7 +76,29 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     const std::optional<double> sea =
         world->planet().sea_fraction > 0.0 ? std::optional{world->planet().radius} : std::nullopt;
     const double voxel = world->layers().thickness;
+    // Those beside each, meshed, show their sides against it as it was.
+    std::vector<globe::Site> all{corners.begin(), corners.end()};
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    constexpr int coarser = std::countr_zero(side);
+    const auto columns = static_cast<std::uint8_t>(world->layers().level - coarser);
     for (const globe::Site corner : corners) {
+        const globe::Cell cell{
+            .level = columns, .face = corner.face, .i = corner.i / side, .j = corner.j / side};
+        for (const auto [di, dj] :
+             {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
+            if (const std::optional<globe::Cell> next = globe::next_to(cell, di, dj)) {
+                const globe::Site beside{
+                    .face = next->face, .i = next->i * side, .j = next->j * side};
+                if (meshed_.contains(beside)) {
+                    all.push_back(beside);
+                }
+            }
+        }
+    }
+    std::ranges::sort(all);
+    const auto [repeated, end] = std::ranges::unique(all);
+    all.erase(repeated, end);
+    for (const globe::Site corner : all) {
         // Meshed as it was, it's out of date.
         std::erase_if(working_, [&](const Work& work) { return work.corner == corner; });
         const std::optional<int> level = level_held(*world, corner);

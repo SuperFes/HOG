@@ -87,6 +87,38 @@ TEST_CASE("tile columns are meshed as they're held, and gone once they're let go
     CHECK(changes.gone == std::vector{hog::client::column_key(corner)});
 }
 
+TEST_CASE("a tile column changed has those beside it meshed again, for their sides against it",
+          "[client][columns]") {
+    const hog::client::GlobeWorld& made = hog::client::testing::globe();
+    Volume volume;
+    const hog::globe::World world{made.generator.planet(), made.generator.layers(), volume};
+    const Site corner{.face = 3, .i = 64 * 20, .j = 64 * 30};
+    const Site beside{.face = 3, .i = 64 * 21, .j = 64 * 30};
+    const Site apart{.face = 3, .i = 64 * 23, .j = 64 * 30};
+    for (const Site each : {corner, beside, apart}) {
+        volume.set_floor(each, 10);
+    }
+    hog::jobs::JobSystem jobs{2};
+    ColumnMeshes meshes{world, jobs};
+    const std::vector<Site> all{corner, beside, apart};
+    meshes.changed(all);
+    meshes.finish();
+    CHECK(meshes.collect().shown.size() == 3);
+
+    const std::vector<Site> one{corner};
+    meshes.changed(one);
+    meshes.finish();
+    std::vector<std::uint64_t> shown;
+    for (const auto& each : meshes.collect().shown) {
+        shown.push_back(each.key);
+    }
+    std::ranges::sort(shown);
+    std::vector<std::uint64_t> expected{hog::client::column_key(corner),
+                                        hog::client::column_key(beside)};
+    std::ranges::sort(expected);
+    CHECK(shown == expected);
+}
+
 TEST_CASE(
     "following the eye meshes the tile columns held near it, and lets go of those left behind",
     "[client][columns]") {
