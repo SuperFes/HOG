@@ -6,7 +6,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
-#include <limits>
+#include <numbers>
 #include <utility>
 
 namespace hog::client {
@@ -15,14 +15,6 @@ namespace {
 constexpr int side = globe::Volume::tile_side;
 // A tile is a cell this many levels coarser than its voxels'.
 constexpr int coarser = std::countr_zero(static_cast<unsigned>(side));
-
-// The tile `levels` over `key`.
-globe::TileKey over(globe::TileKey key, int levels) noexcept {
-    for (int n = 0; n < levels; ++n) {
-        key = key.parent();
-    }
-    return key;
-}
 
 // The six tiles beside `key` on its face at its level, as many as there are.
 std::vector<globe::TileKey> beside(globe::TileKey key) {
@@ -42,6 +34,17 @@ std::vector<globe::TileKey> beside(globe::TileKey key) {
     return next;
 }
 
+// The bits of `value`, 21 of them, spread to every third bit.
+std::uint64_t spread(std::uint32_t value) noexcept {
+    std::uint64_t bits = value & 0x1F'FFFFU;
+    bits = (bits | (bits << 32U)) & 0x1F'0000'0000'FFFFULL;
+    bits = (bits | (bits << 16U)) & 0x1F'0000'FF00'00FFULL;
+    bits = (bits | (bits << 8U)) & 0x100F'00F0'0F00'F00FULL;
+    bits = (bits | (bits << 4U)) & 0x10C3'0C30'C30C'30C3ULL;
+    bits = (bits | (bits << 2U)) & 0x1249'2492'4924'9249ULL;
+    return bits;
+}
+
 } // namespace
 
 std::uint64_t tile_key(globe::TileKey key) noexcept {
@@ -52,10 +55,25 @@ std::uint64_t tile_key(globe::TileKey key) noexcept {
            ((std::uint64_t{key.j} & 0x3'FFFFU) << 20U) | (std::uint64_t{key.k} & 0xF'FFFFU);
 }
 
+std::uint64_t TileMeshes::code(globe::TileKey key) noexcept {
+    return (std::uint64_t{key.face} << 61U) | spread(key.i) | (spread(key.j) << 1U) |
+           (spread(key.k) << 2U);
+}
+
 TileMeshes::TileMeshes(const globe::Planet& planet, const globe::Layers& layers,
                        jobs::JobSystem& jobs)
     : layers_{layers},
-      sea_{planet.sea_fraction > 0.0 ? std::optional{planet.radius} : std::nullopt}, jobs_{&jobs} {}
+      sea_{planet.sea_fraction > 0.0 ? std::optional{planet.radius} : std::nullopt}, jobs_{&jobs},
+      by_level_(static_cast<std::size_t>(std::max(layers.level - coarser, 0) + 1)) {
+    const auto top = static_cast<std::uint8_t>(by_level_.size() - 1);
+    for (std::uint8_t face = 0; face < 6; ++face) {
+        for (globe::TileKey root{.level = top, .face = face}; in_shell(root); ++root.k) {
+            roots_.push_back(root);
+        }
+    }
+}
+
+TileMeshes::~TileMeshes() = default;
 
 bool TileMeshes::in_shell(globe::TileKey key) const noexcept {
     return static_cast<std::int64_t>(key.k) * (std::int64_t{side} << key.level) < layers_.count;
@@ -71,13 +89,27 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
     }
     const globe::TileKey key{
         .level = sent.level, .face = sent.face, .i = sent.i, .j = sent.j, .k = sent.k};
-    if (key.face >= 6 || key.level + coarser > layers_.level || !in_shell(key)) {
+    if (key.face >= 6 || key.level >= by_level_.size() || !in_shell(key)) {
         return make_error(ErrorCode::OutOfRange, "a tile sent off the planet");
     }
-    Held& held = held_[key];
+    const auto [found, added] = held_.try_emplace(key);
+    Held& held = found->second;
+    if (added) {
+        by_level_[key.level].emplace(code(key), key);
+    }
+    // Sent again, it's drawn as it was till meshed anew.
     held.tree = std::make_shared<const globe::VoxelTree>(std::move(*tree));
     held.arrived = ++taken_;
-    held.meshed = false;
+    held.stale = false;
+    for (const globe::TileKey finer : under(key)) {
+        Held& replaced = held_.at(finer);
+        if (!replaced.stale) {
+            replaced.stale = true;
+            unfill(finer);
+        }
+        touched_.insert(finer);
+    }
+    touched_.insert(key);
     waiting_.insert(key);
     // Those beside it read it at their edges.
     for (const globe::TileKey next : beside(key)) {
@@ -96,6 +128,11 @@ void TileMeshes::mesh(globe::TileKey key) {
             near.emplace_back(next, found->second.tree);
         }
     }
+    for (Work& work : working_) {
+        if (work.key == key) {
+            abandoned_.push_back(std::move(work.job));
+        }
+    }
     std::erase_if(working_, [&](const Work& work) { return work.key == key; });
     const double thickness = std::ldexp(layers_.thickness, key.level);
     working_.push_back(
@@ -105,9 +142,9 @@ void TileMeshes::mesh(globe::TileKey key) {
              *jobs_, [layers = layers_, sea = sea_, key, tree = held.tree, near = std::move(near),
                       thickness] {
                  const globe::TileAt at = [&](globe::TileKey wanted) -> const globe::VoxelTree* {
-                     for (const auto& [next, beside] : near) {
+                     for (const auto& [next, tile] : near) {
                          if (next == wanted) {
-                             return beside.get();
+                             return tile.get();
                          }
                      }
                      return nullptr;
@@ -117,6 +154,7 @@ void TileMeshes::mesh(globe::TileKey key) {
 }
 
 void TileMeshes::gather(bool wait) {
+    std::erase_if(abandoned_, [&](const auto& job) { return wait || job->done(); });
     std::vector<Work> still;
     for (Work& work : working_) {
         if (!wait && !work.job->done()) {
@@ -131,10 +169,26 @@ void TileMeshes::gather(bool wait) {
         Held& held = found->second;
         held.ground = std::make_shared<const terrain::BlockMesh>(std::move(drawn.ground));
         held.water = std::make_shared<const terrain::BlockMesh>(std::move(drawn.water));
-        held.meshed = true;
         if (held.shown) {
-            changes_.shown.push_back(
-                {.key = tile_key(work.key), .ground = held.ground, .water = held.water});
+            changes_[tile_key(work.key)] = GroundChanges::Shown{
+                .key = tile_key(work.key), .ground = held.ground, .water = held.water};
+        }
+        if (std::exchange(held.meshed, true)) {
+            continue;
+        }
+        // Meshed for the first time since it came: what it's drawn for, and in place of, changes.
+        if (!held.stale) {
+            fill(work.key);
+        }
+        touched_.insert(work.key);
+        for (const globe::TileKey finer : under(work.key)) {
+            touched_.insert(finer);
+        }
+        for (globe::TileKey over = work.key.parent(); over.level < by_level_.size();
+             over = over.parent()) {
+            if (held_.contains(over)) {
+                touched_.insert(over);
+            }
         }
     }
     working_ = std::move(still);
@@ -144,72 +198,120 @@ void TileMeshes::finish() {
     gather(true);
 }
 
-std::uint64_t TileMeshes::finer_cover(globe::TileKey key,
-                                      const std::map<globe::TileKey, std::uint64_t>& cover) const {
-    if (key.level == 0) {
-        return 0;
-    }
-    std::uint64_t oldest = std::numeric_limits<std::uint64_t>::max();
-    for (std::size_t octant = 0; octant < 8; ++octant) {
-        if (const globe::TileKey child = key.child(octant); in_shell(child)) {
-            const auto found = cover.find(child);
-            oldest = std::min(oldest, found == cover.end() ? 0 : found->second);
+std::vector<globe::TileKey> TileMeshes::under(globe::TileKey key) const {
+    std::vector<globe::TileKey> found;
+    const std::uint64_t place = code(key) & ((std::uint64_t{1} << 61U) - 1U);
+    const std::uint64_t face = std::uint64_t{key.face} << 61U;
+    for (std::uint8_t level = 0; level < key.level; ++level) {
+        const auto finer = static_cast<unsigned>(3 * (key.level - level));
+        const std::uint64_t from = face | (place << finer);
+        const std::uint64_t to = from + (std::uint64_t{1} << finer);
+        const auto& held = by_level_[level];
+        for (auto at = held.lower_bound(from); at != held.end() && at->first < to; ++at) {
+            found.push_back(at->second);
         }
     }
-    return oldest;
+    return found;
 }
 
-std::map<globe::TileKey, std::uint64_t> TileMeshes::covers() const {
-    // Each cube's cover, bottom up: its own arrival where it's held meshed, or its children's
-    // oldest where all are covered, whichever came after.
-    std::map<globe::TileKey, std::uint64_t> cover;
-    std::uint8_t top = 0;
-    for (const auto& [key, held] : held_) {
-        top = std::max(top, key.level);
+bool TileMeshes::children_filled(globe::TileKey key) const {
+    if (key.level == 0) {
+        return false;
     }
-    std::set<globe::TileKey> level;
-    for (std::uint8_t at = 0; at <= top; ++at) {
-        for (const auto& [key, held] : held_) {
-            if (key.level == at && held.meshed) {
-                level.insert(key);
+    for (std::size_t octant = 0; octant < 8; ++octant) {
+        if (const globe::TileKey child = key.child(octant);
+            in_shell(child) && !filled_.contains(child)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void TileMeshes::fill(globe::TileKey key) {
+    filled_.insert(key);
+    for (globe::TileKey over = key.parent(); over.level < by_level_.size(); over = over.parent()) {
+        if (filled_.contains(over) || !children_filled(over)) {
+            return;
+        }
+        filled_.insert(over);
+        if (held_.contains(over)) {
+            touched_.insert(over);
+        }
+    }
+}
+
+void TileMeshes::unfill(globe::TileKey key) {
+    if (filled_.erase(key) == 0) {
+        return;
+    }
+    for (globe::TileKey over = key.parent(); over.level < by_level_.size(); over = over.parent()) {
+        if (!filled_.contains(over)) {
+            return;
+        }
+        // Filled by its own meshes, it's still filled.
+        if (const auto found = held_.find(over);
+            found != held_.end() && found->second.meshed && !found->second.stale) {
+            return;
+        }
+        filled_.erase(over);
+    }
+}
+
+bool TileMeshes::under_drawn(globe::TileKey key) const {
+    for (globe::TileKey over = key.parent(); over.level < by_level_.size(); over = over.parent()) {
+        if (const auto found = held_.find(over); found != held_.end()) {
+            const Held& held = found->second;
+            if (held.shown || (held.meshed && !held.stale)) {
+                return true;
             }
         }
-        std::set<globe::TileKey> parents;
-        for (const globe::TileKey key : level) {
-            const auto found = held_.find(key);
-            const std::uint64_t own =
-                found != held_.end() && found->second.meshed ? found->second.arrived : 0;
-            cover[key] = std::max(own, finer_cover(key, cover));
-            parents.insert(key.parent());
-        }
-        level = std::move(parents);
     }
-    // What each held tile is covered by finer.
-    std::map<globe::TileKey, std::uint64_t> finer;
-    for (const auto& [key, held] : held_) {
-        finer[key] = finer_cover(key, cover);
-    }
-    return finer;
+    return false;
 }
 
 bool TileMeshes::replaced(globe::TileKey key, const Held& held) const {
-    for (int up = 1; key.level + up + coarser <= layers_.level; ++up) {
-        const auto found = held_.find(over(key, up));
-        if (found != held_.end() && found->second.meshed && found->second.arrived > held.arrived) {
-            return true;
+    for (globe::TileKey over = key.parent(); over.level < by_level_.size(); over = over.parent()) {
+        if (const auto found = held_.find(over); found != held_.end()) {
+            const Held& by = found->second;
+            if (by.meshed && !by.stale && by.arrived > held.arrived) {
+                return true;
+            }
         }
     }
     return false;
 }
 
-bool TileMeshes::under_meshed(globe::TileKey key) const {
-    for (int up = 1; key.level + up + coarser <= layers_.level; ++up) {
-        const auto found = held_.find(over(key, up));
-        if (found != held_.end() && found->second.meshed) {
-            return true;
+void TileMeshes::decide(globe::TileKey key) {
+    const auto found = held_.find(key);
+    if (found == held_.end()) {
+        return;
+    }
+    Held& held = found->second;
+    if (replaced(key, held) || children_filled(key)) {
+        drop(key);
+        return;
+    }
+    const bool draw = held.meshed && !under_drawn(key);
+    if (draw != held.shown) {
+        held.shown = draw;
+        changes_[tile_key(key)] =
+            draw ? std::optional{GroundChanges::Shown{
+                       .key = tile_key(key), .ground = held.ground, .water = held.water}}
+                 : std::nullopt;
+        // Those under it are drawn for it now, or no longer.
+        for (const globe::TileKey finer : under(key)) {
+            touched_.insert(finer);
         }
     }
-    return false;
+    const auto drawn_under = [&] {
+        return std::ranges::any_of(under(key),
+                                   [&](globe::TileKey finer) { return held_.at(finer).shown; });
+    };
+    if (!held.meshed && !under_drawn(key) && !drawn_under()) {
+        bare_.insert(key);
+    } else {
+        bare_.erase(key);
+    }
 }
 
 void TileMeshes::drop(globe::TileKey key) {
@@ -218,10 +320,23 @@ void TileMeshes::drop(globe::TileKey key) {
         return;
     }
     if (found->second.shown) {
-        changes_.gone.push_back(tile_key(key));
+        changes_[tile_key(key)] = std::nullopt;
     }
+    for (Work& work : working_) {
+        if (work.key == key) {
+            abandoned_.push_back(std::move(work.job));
+        }
+    }
+    std::erase_if(working_, [&](const Work& work) { return work.key == key; });
     waiting_.erase(key);
+    bare_.erase(key);
     held_.erase(found);
+    by_level_[key.level].erase(code(key));
+    unfill(key);
+    // Those under it may be drawn now in its place.
+    for (const globe::TileKey finer : under(key)) {
+        touched_.insert(finer);
+    }
 }
 
 GroundChanges TileMeshes::collect() {
@@ -230,28 +345,21 @@ GroundChanges TileMeshes::collect() {
         mesh(key);
     }
     waiting_.clear();
-
-    const std::map<globe::TileKey, std::uint64_t> finer = covers();
-    std::vector<globe::TileKey> gone;
-    for (const auto& [key, held] : held_) {
-        if (replaced(key, held) || finer.at(key) > held.arrived) {
-            gone.push_back(key);
+    while (!touched_.empty()) {
+        const globe::TileKey key = *touched_.begin();
+        touched_.erase(touched_.begin());
+        decide(key);
+    }
+    GroundChanges out;
+    for (auto& [key, shown] : changes_) {
+        if (shown) {
+            out.shown.push_back(std::move(*shown));
+        } else {
+            out.gone.push_back(key);
         }
     }
-    for (const globe::TileKey key : gone) {
-        drop(key);
-    }
-    for (auto& [key, held] : held_) {
-        const bool draw = held.meshed && !under_meshed(key);
-        if (draw && !held.shown) {
-            changes_.shown.push_back(
-                {.key = tile_key(key), .ground = held.ground, .water = held.water});
-        } else if (!draw && held.shown) {
-            changes_.gone.push_back(tile_key(key));
-        }
-        held.shown = draw;
-    }
-    return std::exchange(changes_, {});
+    changes_.clear();
+    return out;
 }
 
 bool TileMeshes::drawn(globe::TileKey key) const {
@@ -260,11 +368,14 @@ bool TileMeshes::drawn(globe::TileKey key) const {
 }
 
 double TileMeshes::covered(DVec3 eye, double metres) const {
+    const bool whole = std::ranges::all_of(
+        roots_, [&](globe::TileKey root) { return filled_.contains(root) || drawn(root); });
+    if (bare_.empty() && whole) {
+        // Round the whole planet.
+        return std::numbers::pi * layers_.ceiling();
+    }
     double nearest = metres;
-    for (const auto& [key, held] : held_) {
-        if (held.shown) {
-            continue;
-        }
+    for (const globe::TileKey key : bare_) {
         const globe::Cell cell{.level =
                                    static_cast<std::uint8_t>(layers_.level - coarser - key.level),
                                .face = key.face,

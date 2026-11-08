@@ -38,6 +38,7 @@ hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/column_meshes_tests.cpp
     tests/tile_meshes_tests.cpp
+    tests/tile_look_tests.cpp
     tests/daylight_tests.cpp
     tests/cutaway_tests.cpp
     tests/flight_tests.cpp
