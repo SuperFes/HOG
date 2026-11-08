@@ -30,7 +30,8 @@ public:
     void join(net::ConnectionId player);
     void leave(net::ConnectionId player);
     // Where the player is, from the planet's centre: what it's to be sent is worked out afresh
-    // when it's over another tile column than before.
+    // when it's over another tile column than before, and what's out of reach no longer counts
+    // as held.
     void follow(net::ConnectionId player, DVec3 at);
     // The world changed the tile columns at these corners: sent again first to whoever holds
     // them at their own level.
