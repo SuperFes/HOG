@@ -109,10 +109,12 @@ VoxelTree::Id VoxelTree::joined(const std::array<Id, 8>& children) {
         return children[0];
     }
     std::array<Cube, 8> eight;
+    std::uint8_t open = 0;
     for (std::size_t k = 0; k < eight.size(); ++k) {
         eight.at(k) = nodes_[children.at(k)].voxel;
+        open = std::max(open, nodes_[children.at(k)].open);
     }
-    return intern({.leaf = false, .voxel = summed(eight), .child = children});
+    return intern({.leaf = false, .voxel = summed(eight), .child = children, .open = open});
 }
 
 Cube VoxelTree::at(int x, int y, int z) const {
@@ -245,7 +247,7 @@ VoxelTree VoxelTree::window(int x, int y, int z, int across, int voxel, std::uin
             return out.leaf_of(here.voxel, here.open);
         }
         if (size <= voxel) {
-            return out.leaf_of(here.voxel, cut);
+            return out.leaf_of(here.voxel, std::max(cut, here.open));
         }
         if (const auto found = made.find(key(node, size)); found != made.end()) {
             return found->second;
@@ -281,26 +283,8 @@ VoxelTree VoxelTree::window(int x, int y, int z, int across, int voxel, std::uin
     }
 }
 
-std::uint8_t VoxelTree::coarsest(int x, int y, int z, int across, int voxel) const {
-    std::uint8_t most = 0;
-    std::unordered_set<std::uint64_t> seen;
-    const auto [top, top_size] = node_at(x, y, z, across);
-    std::vector<std::pair<Id, int>> pending{{top, top_size}};
-    while (!pending.empty()) {
-        const auto [node, size] = pending.back();
-        pending.pop_back();
-        const Node& here = nodes_[node];
-        if (here.leaf) {
-            most = std::max(most, here.open);
-        } else if (size > voxel &&
-                   seen.insert((std::uint64_t{node} << 32U) | static_cast<std::uint32_t>(size))
-                       .second) {
-            for (const Id child : here.child) {
-                pending.emplace_back(child, size / 2);
-            }
-        }
-    }
-    return most;
+std::uint8_t VoxelTree::coarsest(int x, int y, int z, int across) const {
+    return nodes_[node_at(x, y, z, across).first].open;
 }
 
 VoxelTree::Id VoxelTree::imported(const VoxelTree& part, Id node, std::uint8_t open) {
@@ -376,10 +360,13 @@ VoxelTree::Id VoxelTree::merged(Id node, const VoxelTree& part, std::uint8_t ope
     };
     const auto done = [&](Id here, Id there) -> std::optional<Id> {
         const Node& mine = nodes_[here];
+        if (mine.open <= open) {
+            return here;
+        }
         if (!mine.leaf) {
             return std::nullopt;
         }
-        return mine.open > open ? imported(part, there, open) : here;
+        return imported(part, there, open);
     };
     if (const auto id = done(node, part.root_)) {
         return *id;
