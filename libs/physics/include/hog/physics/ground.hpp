@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 
 namespace hog::physics {
@@ -20,8 +21,8 @@ struct GroundSettings {
 };
 
 // The voxel world's ground in a space, its voxels' own boxes, kept only near the points asked for,
-// a tile column at a time as the world holds it at its own level. A brick changed lets go of the
-// tile columns drawn from it, to be meshed again as they're kept.
+// a tile at a time: the finest the world holds over each place, at its own level. A change lets go
+// of the tiles it touches, to be meshed again as they're kept.
 class Ground {
 public:
     Ground(Space& space, globe::World world, const GroundSettings& settings = {});
@@ -31,27 +32,31 @@ public:
     Ground(const Ground&) = delete;
     Ground& operator=(const Ground&) = delete;
 
-    // Adds the ground within reach of each point, and lets go of tile columns over twice as far
-    // from every one of them.
+    // Adds the ground within reach of each point, and lets go of tiles over twice as far from
+    // every one of them.
     Result<> keep(std::span<const WorldPosition> around);
-    // Lets go of the tile columns drawn from `brick`: its own, and the one beside it where it
-    // lies on its edge.
+    // Lets go of the tiles drawn from `brick`, or reading it at their edges.
     void changed(globe::BrickSite brick);
+    // Lets go of the tiles that share space with the tile at `key`, or meet it.
+    void changed(globe::TileKey key);
 
-    // Whether the tile column at `corner` is kept, with ground in it or none.
-    [[nodiscard]] bool holds(globe::Site corner) const { return columns_.contains(corner); }
-    // The tile columns kept with ground in the space.
+    // Whether the tile at `key`, or one kept over it, is kept, with ground in it or none.
+    [[nodiscard]] bool holds(globe::TileKey key) const;
+    // The tiles kept with ground in the space.
     [[nodiscard]] std::size_t size() const noexcept;
 
 private:
-    void let_go(globe::Site corner) noexcept;
+    void let_go(globe::TileKey key) noexcept;
     void clear() noexcept;
+    // The tiles kept for the finest ones within `reach` of each point.
+    [[nodiscard]] std::set<globe::TileKey> near(std::span<const WorldPosition> around,
+                                                double reach) const;
 
     Space* space_;
     globe::World world_;
     GroundSettings settings_;
-    // Each tile column kept, by its corner: its body, none where it has no ground.
-    std::map<globe::Site, std::optional<BodyId>> columns_;
+    // Each tile kept: its body, none where it has no ground.
+    std::map<globe::TileKey, std::optional<BodyId>> tiles_;
 };
 
 } // namespace hog::physics
