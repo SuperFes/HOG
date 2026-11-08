@@ -4,6 +4,7 @@ add_library(hog_formation
     src/lakes.cpp
     src/plates.cpp
     src/rivers.cpp
+    src/sediment.cpp
     src/soil.cpp
     src/sphere.cpp)
 add_library(hog::formation ALIAS hog_formation)
@@ -18,5 +19,6 @@ hog_add_tests(hog_formation
     tests/lakes_tests.cpp
     tests/plates_tests.cpp
     tests/rivers_tests.cpp
+    tests/sediment_tests.cpp
     tests/soil_tests.cpp
     tests/sphere_tests.cpp)

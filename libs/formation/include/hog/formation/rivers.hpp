@@ -18,7 +18,10 @@ struct Rivers {
     std::vector<double> ground;          // the same with hollows left unfilled: where lakes may lie
     std::vector<std::uint32_t> receiver; // where each point's water goes next; itself in the sea
     std::vector<double> discharge;       // cubic metres of water a year passing through
-    std::vector<double> wear;            // metres a year the ground is worn down
+    std::vector<double> flood;           // the same as wear and carrying feel it, deserts' flash
+                                         // floods counted in
+    std::vector<double> wear;            // metres a year the ground is worn down: the uplift where
+                                         // balanced, less on flats held down by the crust
     std::vector<double> cover;           // share of the ground plants first hold, 0 to 1
     int rounds = 0;                      // times the flow was routed before it settled
 };

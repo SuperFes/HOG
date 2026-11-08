@@ -3,6 +3,7 @@
 #include <hog/formation/lakes.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
+#include <hog/formation/sediment.hpp>
 #include <hog/formation/soil.hpp>
 #include <hog/formation/sphere.hpp>
 #include <hog/formation_lab/pictures.hpp>
@@ -204,11 +205,13 @@ bool draw_climate(const Canvas& canvas, const hog::formation::Crust& crust,
 }
 
 // Standing water over the land, if any: open lakes blue, closed ones greener, salt flats white.
-std::optional<Rgb> water_colour(const hog::formation::Lakes& lakes, std::uint32_t near) {
+// A lake filled in by what settles in it is a plain now.
+std::optional<Rgb> water_colour(const hog::formation::Lakes& lakes,
+                                const hog::formation::Sediment& sediment, std::uint32_t near) {
     if (lakes.salt_flat[near] != 0) {
         return hog::formation_lab::rgb(235, 230, 215);
     }
-    if (lakes.lake[near] == hog::formation::Lakes::none) {
+    if (lakes.lake[near] == hog::formation::Lakes::none || sediment.lake_depth[near] <= 0.0) {
         return std::nullopt;
     }
     return lakes.lakes[lakes.lake[near]].open ? hog::formation_lab::rgb(50, 110, 200)
@@ -216,7 +219,8 @@ std::optional<Rgb> water_colour(const hog::formation::Lakes& lakes, std::uint32_
 }
 
 bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
-                 const hog::formation::Rivers& rivers, const hog::formation::Lakes& lakes) {
+                 const hog::formation::Rivers& rivers, const hog::formation::Lakes& lakes,
+                 const hog::formation::Sediment& sediment) {
     const Sphere& sphere = *canvas.sphere;
     std::uint32_t start = 0;
     std::uint32_t lit = 0;
@@ -228,7 +232,7 @@ bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
             if (height < 0.0 && crust.sea[sphere.nearest(direction, start)] != 0) {
                 return hog::formation_lab::height_colour(height);
             }
-            if (const auto water = water_colour(lakes, sphere.nearest(direction, start))) {
+            if (const auto water = water_colour(lakes, sediment, sphere.nearest(direction, start))) {
                 return *water;
             }
             return hog::formation_lab::scaled(hog::formation_lab::height_colour(height),
@@ -251,6 +255,32 @@ bool draw_rivers(const Canvas& canvas, const hog::formation::Crust& crust,
         }
     }
     return write(canvas.options->out / "height.png", map);
+}
+
+// Laid-down sediment: on land from none (rock and soil only) through tan to dark, thicker darker;
+// on the sea floor, deltas pale over the deep blue.
+bool draw_sediment(const Canvas& canvas, const hog::formation::Rivers& rivers,
+                   const hog::formation::Sediment& sediment) {
+    const Sphere& sphere = *canvas.sphere;
+    static constexpr std::array<Rgb, 5> thin_to_thick{
+        hog::formation_lab::rgb(120, 120, 110), hog::formation_lab::rgb(200, 180, 120),
+        hog::formation_lab::rgb(160, 120, 60), hog::formation_lab::rgb(110, 75, 40),
+        hog::formation_lab::rgb(60, 40, 25)};
+    static constexpr std::array<Rgb, 3> delta{hog::formation_lab::rgb(15, 25, 55),
+                                              hog::formation_lab::rgb(60, 90, 120),
+                                              hog::formation_lab::rgb(190, 180, 140)};
+    std::uint32_t lit = 0;
+    return canvas.draw("sediment.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        // Thicknesses run from centimetres to kilometres, so they're shown by tens.
+        const auto tens = [](double metres) { return std::log10(1.0 + std::max(metres, 0.0)); };
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::ramp(tens(sediment.delta[near]) / 3.0, delta);
+        }
+        return hog::formation_lab::scaled(
+            hog::formation_lab::ramp(tens(sediment.alluvium[near]) / 3.0, thin_to_thick),
+            canvas.light(rivers.height, direction, lit));
+    });
 }
 
 bool draw_soil(const Canvas& canvas, const hog::formation::Rivers& rivers,
@@ -317,7 +347,21 @@ int run(const Options& options) {
                              lakes.lakes.size(), open,
                              static_cast<std::ptrdiff_t>(lakes.lakes.size()) - open,
                              std::ranges::count(lakes.salt_flat, std::uint8_t{1}));
-    ok = draw_rivers(canvas, crust, rivers, lakes) && ok;
+    const hog::formation::Sediment sediment =
+        hog::formation::sediment_on(sphere, rivers, lakes, body);
+    std::vector<std::uint8_t> still_wet(lakes.lakes.size(), 0);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (lakes.lake[point] != hog::formation::Lakes::none && sediment.lake_depth[point] > 0.0) {
+            still_wet[lakes.lake[point]] = 1;
+        }
+    }
+    const auto filled = std::ranges::count(still_wet, std::uint8_t{0});
+    std::cout << std::format("sediment: deepest {:.0f} m on land, {:.0f} m at river mouths; "
+                             "{} lakes filled in\n",
+                             *std::ranges::max_element(sediment.alluvium),
+                             *std::ranges::max_element(sediment.delta), filled);
+    ok = draw_rivers(canvas, crust, rivers, lakes, sediment) && ok;
+    ok = draw_sediment(canvas, rivers, sediment) && ok;
 
     const hog::formation::Soil soil = hog::formation::soil_on(sphere, rivers, climate, body);
     std::cout << std::format("soil on {:.0f}% of the land, deepest {:.2f} m\n",

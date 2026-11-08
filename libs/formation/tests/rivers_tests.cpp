@@ -78,15 +78,33 @@ TEST_CASE("all the rain on land comes out at the coasts", "[formation][rivers]")
     CHECK_THAT(out, WithinRel(fallen, 1e-9));
 }
 
-TEST_CASE("the flow settles, and wear balances uplift on land", "[formation][rivers]") {
+TEST_CASE("the flow settles, and wear balances uplift where the crust doesn't hold the land down",
+          "[formation][rivers]") {
     const Made made;
     // Settled before routing gives up at 200 rounds.
     CHECK(made.rivers.rounds < 200);
+    int balanced = 0;
+    int held = 0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
-        CHECK(made.rivers.wear[point] == (on_land(made, point) ? made.crust.uplift[point] : 0.0));
         CHECK(made.rivers.cover[point] >= 0.0);
         CHECK(made.rivers.cover[point] <= 1.0);
+        const double wear = made.rivers.wear[point];
+        const double uplift = made.crust.uplift[point];
+        if (!on_land(made, point)) {
+            CHECK(wear == 0.0);
+            continue;
+        }
+        CHECK(wear >= 0.0);
+        CHECK(wear <= uplift * (1.0 + 1e-12));
+        if (made.rivers.height[point] < made.crust.base[point] - 1.0) {
+            CHECK_THAT(wear, WithinRel(uplift, 1e-6));
+            ++balanced;
+        } else {
+            ++held;
+        }
     }
+    CHECK(balanced > 0);
+    CHECK(held > 0);
 }
 
 TEST_CASE("softer rock wears to lower land, and none stands over its crust", "[formation][rivers]") {

@@ -165,6 +165,32 @@ int reroute(const Ground& ground, std::span<const std::uint32_t> order, Rivers& 
     return changed;
 }
 
+// How fast the land as it now stands wears: what its river cuts on its slope past the threshold.
+// Where wear balances uplift that's the uplift; flats held down by the crust's float or filled
+// hollows barely wear. Slopes at the steepest they stand slide away as fast as rock rises.
+void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& rivers) {
+    const Body& body = *ground.body;
+    for (std::uint32_t point = 0; point < ground.sphere->size(); ++point) {
+        if (ground.land[point] == 0) {
+            continue;
+        }
+        const double uplift = ground.crust->uplift[point];
+        const std::uint32_t down = rivers.receiver[point];
+        const double below = ground.land[down] != 0 ? rivers.height[down] : 0.0;
+        const double length =
+            angle(ground.sphere->point(point), ground.sphere->point(down)) * earth_radius;
+        const double slope = (rivers.height[point] - below) / length;
+        if (slope >= body.steepest * (1.0 - 1e-9)) {
+            rivers.wear[point] = uplift;
+            continue;
+        }
+        const double cutting = ground.erodibility[point] *
+                               maths::pow(std::max(wearing[point], 1.0), body.discharge_power) *
+                               slope;
+        rivers.wear[point] = std::clamp(cutting - body.wear_threshold, 0.0, uplift);
+    }
+}
+
 } // namespace
 
 Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
@@ -206,9 +232,8 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
         order = downstream_first(sphere, rivers.receiver, ground.land);
     }
     rivers.rounds = std::min(rivers.rounds, most_rounds);
-    for (std::uint32_t point = 0; point < size; ++point) {
-        rivers.wear[point] = ground.land[point] != 0 ? crust.uplift[point] : 0.0;
-    }
+    wear_down(ground, wearing, rivers);
+    rivers.flood = std::move(wearing);
     return rivers;
 }
 
