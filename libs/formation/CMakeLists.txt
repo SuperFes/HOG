@@ -9,8 +9,10 @@ add_library(hog_formation
     src/plates.cpp
     src/rivers.cpp
     src/sediment.cpp
+    src/smooth.cpp
     src/soil.cpp
-    src/sphere.cpp)
+    src/sphere.cpp
+    src/world.cpp)
 add_library(hog::formation ALIAS hog_formation)
 
 target_include_directories(hog_formation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -28,5 +30,6 @@ hog_add_tests(hog_formation
     tests/plates_tests.cpp
     tests/rivers_tests.cpp
     tests/sediment_tests.cpp
+    tests/smooth_tests.cpp
     tests/soil_tests.cpp
     tests/sphere_tests.cpp)
