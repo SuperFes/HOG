@@ -4,6 +4,7 @@
 #include <hog/formation/climate.hpp>
 #include <hog/formation/ice.hpp>
 #include <hog/formation/lakes.hpp>
+#include <hog/formation/landforms.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
 #include <hog/formation/sediment.hpp>
@@ -331,6 +332,92 @@ bool draw_bedrock(const Canvas& canvas, const hog::formation::Rivers& rivers,
     });
 }
 
+// The landforms in the order drawn and reported, with their colours.
+struct Form {
+    std::string_view name;
+    std::vector<double> hog::formation::Landforms::* field;
+    Rgb colour;
+};
+
+constexpr std::array<Form, 10> forms{{
+    {.name = "canyons",
+     .field = &hog::formation::Landforms::canyons,
+     .colour = hog::formation_lab::rgb(225, 95, 40)},
+    {.name = "mesas",
+     .field = &hog::formation::Landforms::mesas,
+     .colour = hog::formation_lab::rgb(140, 55, 35)},
+    {.name = "escarpments",
+     .field = &hog::formation::Landforms::escarpments,
+     .colour = hog::formation_lab::rgb(230, 200, 80)},
+    {.name = "badlands",
+     .field = &hog::formation::Landforms::badlands,
+     .colour = hog::formation_lab::rgb(205, 160, 195)},
+    {.name = "karst",
+     .field = &hog::formation::Landforms::karst,
+     .colour = hog::formation_lab::rgb(70, 175, 200)},
+    {.name = "sea cliffs",
+     .field = &hog::formation::Landforms::sea_cliffs,
+     .colour = hog::formation_lab::rgb(245, 245, 245)},
+    {.name = "glacial",
+     .field = &hog::formation::Landforms::glacial,
+     .colour = hog::formation_lab::rgb(110, 130, 235)},
+    {.name = "fault scarps",
+     .field = &hog::formation::Landforms::fault_scarps,
+     .colour = hog::formation_lab::rgb(230, 40, 160)},
+    {.name = "volcanoes",
+     .field = &hog::formation::Landforms::volcanoes,
+     .colour = hog::formation_lab::rgb(170, 15, 15)},
+    {.name = "scree",
+     .field = &hog::formation::Landforms::scree,
+     .colour = hog::formation_lab::rgb(150, 150, 150)},
+}};
+
+// Each point in the colour of its likeliest landform, where one is likely at all.
+bool draw_landforms(const Canvas& canvas, const hog::formation::Rivers& rivers,
+                    const hog::formation::Landforms& landforms) {
+    const Sphere& sphere = *canvas.sphere;
+    std::uint32_t lit = 0;
+    return canvas.draw("landforms.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        Rgb colour = hog::formation_lab::rgb(110, 120, 100);
+        double likeliest = 0.25;
+        for (const Form& form : forms) {
+            const double likely = (landforms.*form.field)[near];
+            if (likely > likeliest) {
+                likeliest = likely;
+                colour = form.colour;
+            }
+        }
+        return hog::formation_lab::scaled(colour, canvas.light(rivers.height, direction, lit));
+    });
+}
+
+void report_landforms(const Sphere& sphere, const hog::formation::Rivers& rivers,
+                      const hog::formation::Landforms& landforms) {
+    double land = 0.0;
+    std::array<double, forms.size()> area{};
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (rivers.receiver[point] == point) {
+            continue;
+        }
+        land += sphere.area(point);
+        for (std::size_t form = 0; form < forms.size(); ++form) {
+            area.at(form) +=
+                (landforms.*forms.at(form).field)[point] > 0.3 ? sphere.area(point) : 0.0;
+        }
+    }
+    std::string line = "landforms likely on the land:";
+    for (std::size_t form = 0; form < forms.size(); ++form) {
+        line += std::format(" {} {:.1f}%{}", forms.at(form).name,
+                            100.0 * area.at(form) / std::max(land, 1e-12),
+                            form + 1 < forms.size() ? "," : "");
+    }
+    std::cout << line << '\n';
+}
+
 void report_bedrock(const Sphere& sphere, const hog::formation::Rivers& rivers,
                     const hog::formation::Bedrock& bedrock,
                     const hog::formation::Outcrop& outcrop) {
@@ -595,6 +682,10 @@ int run(const Options& options) {
         hog::formation::outcrop_on(sphere, crust, bedrock, rivers, body);
     report_bedrock(sphere, rivers, bedrock, outcrop);
     ok = draw_bedrock(canvas, rivers, bedrock, outcrop) && ok;
+    const hog::formation::Landforms landforms =
+        hog::formation::landforms_on(sphere, crust, bedrock, outcrop, climate, rivers, ice, body);
+    report_landforms(sphere, rivers, landforms);
+    ok = draw_landforms(canvas, rivers, landforms) && ok;
 
     const hog::formation::Lakes lakes = hog::formation::lakes_on(sphere, rivers, climate, body);
     const auto open =
