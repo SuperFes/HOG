@@ -1,6 +1,7 @@
 add_library(hog_formation
     src/climate.cpp
     src/fields.cpp
+    src/ice.cpp
     src/lakes.cpp
     src/plates.cpp
     src/rivers.cpp
@@ -16,6 +17,7 @@ hog_target_defaults(hog_formation)
 hog_add_tests(hog_formation
     tests/climate_tests.cpp
     tests/fields_tests.cpp
+    tests/ice_tests.cpp
     tests/lakes_tests.cpp
     tests/plates_tests.cpp
     tests/rivers_tests.cpp
