@@ -141,6 +141,24 @@ struct TileSource {
     }
 };
 
+VoxelTree tile_of(const TileSource& source) {
+    return VoxelTree::build_down(
+        TileSource::side,
+        [&](int x, int y, int z, int across) { return source.whole(x, y, z, across); },
+        [&](int x, int y, int z) { return source.voxel(x, y, z); });
+}
+
+// Each column's runs from `bottom` to `top`, of `layers`.
+std::vector<std::vector<Run>> runs_up(const std::vector<Generator::Column>& columns,
+                                      const Layers& layers, int bottom, int top) {
+    std::vector<std::vector<Run>> runs;
+    runs.reserve(columns.size());
+    for (const Generator::Column& each : columns) {
+        runs.push_back(runs_of(each, layers, bottom, top));
+    }
+    return runs;
+}
+
 // The tiles up the tile column at (`face`, `i`, `j`), counted in tiles, holding layers `bottom`
 // to `top`, from the columns over it. Under `bottom` they hold nothing; from `keep` up they keep
 // what the volume holds.
@@ -148,26 +166,19 @@ void build(Volume& volume, const Generator& generator,
            const std::vector<Generator::Column>& columns, std::uint8_t face, std::uint32_t i,
            std::uint32_t j, int bottom, int top, int keep) {
     constexpr int side = Volume::tile_side;
-    std::vector<std::vector<Run>> runs;
-    runs.reserve(columns.size());
-    for (const Generator::Column& each : columns) {
-        runs.push_back(runs_of(each, generator.layers(), bottom, std::min(top, keep - 1)));
-    }
+    const std::vector<std::vector<Run>> runs =
+        runs_up(columns, generator.layers(), bottom, std::min(top, keep - 1));
     for (int k = bottom / side; k <= top / side; ++k) {
         const Site place{.face = face,
                          .i = i * side,
                          .j = j * side,
                          .layer = static_cast<std::uint32_t>(k * side)};
-        const TileSource source{.runs = &runs,
-                                .kept = volume.tile_at(place),
-                                .base = k * side,
-                                .bottom = bottom,
-                                .top = top,
-                                .keep = keep};
-        VoxelTree tile = VoxelTree::build_down(
-            side, [&](int x, int y, int z, int across) { return source.whole(x, y, z, across); },
-            [&](int x, int y, int z) { return source.voxel(x, y, z); });
-        volume.put_tile(place, std::move(tile));
+        volume.put_tile(place, tile_of({.runs = &runs,
+                                        .kept = volume.tile_at(place),
+                                        .base = k * side,
+                                        .bottom = bottom,
+                                        .top = top,
+                                        .keep = keep}));
     }
 }
 
@@ -182,6 +193,37 @@ std::vector<Generator::Column> columns_of(const Generator& generator, std::uint8
 }
 
 } // namespace
+
+Layers coarser_layers(const Layers& layers, int level) noexcept {
+    const int size = 1 << level;
+    return {.level = layers.level - level,
+            .floor = layers.floor,
+            .thickness = layers.thickness * size,
+            .count = (layers.count + size - 1) / size};
+}
+
+VoxelTree generate_tile(const Generator& generator, TileKey key) {
+    constexpr int side = Volume::tile_side;
+    const Layers layers = coarser_layers(generator.layers(), key.level);
+    const int bottom = static_cast<int>(key.k) * side;
+    if (bottom >= layers.count) {
+        return VoxelTree{side};
+    }
+    const int top = std::min(bottom + side - 1, layers.count - 1);
+    const std::vector<Generator::Column> columns =
+        generator.columns({.level = static_cast<std::uint8_t>(layers.level),
+                           .face = key.face,
+                           .i = key.i * static_cast<std::uint32_t>(side),
+                           .j = key.j * static_cast<std::uint32_t>(side)},
+                          side, voxel_lod(generator) * (1 << key.level));
+    const std::vector<std::vector<Run>> runs = runs_up(columns, layers, bottom, top);
+    return tile_of({.runs = &runs,
+                    .kept = nullptr,
+                    .base = bottom,
+                    .bottom = bottom,
+                    .top = top,
+                    .keep = top + 1});
+}
 
 std::uint32_t tiles_across(const Generator& generator) {
     return std::max((std::uint32_t{1} << generator.layers().level) / Volume::tile_side, 1U);
