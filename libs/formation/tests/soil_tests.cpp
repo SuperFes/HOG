@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstdint>
 
+using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
+using hog::DVec3;
 using hog::formation::balanced_depth;
 using hog::formation::Body;
 using hog::formation::Climate;
@@ -20,8 +22,12 @@ using hog::formation::ice_on;
 using hog::formation::ice_shaped;
 using hog::formation::Lakes;
 using hog::formation::lakes_on;
+using hog::formation::Layer;
+using hog::formation::layer_at;
 using hog::formation::Parent;
 using hog::formation::Plates;
+using hog::formation::Profile;
+using hog::formation::profile_at;
 using hog::formation::Rivers;
 using hog::formation::rivers_on;
 using hog::formation::Sediment;
@@ -134,30 +140,86 @@ TEST_CASE("no soil forms under ice, standing water or salt", "[formation][soil]"
     }
 }
 
-TEST_CASE("loose deposits turn to soil faster than rock, and are soil or loose all through",
-          "[formation][soil]") {
+TEST_CASE("soil grows down through what was laid, faster than into rock", "[formation][soil]") {
     const Made made;
     int on_till = 0;
     int on_alluvium = 0;
+    int on_lake_beds = 0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         const Parent parent = made.soil.parent[point];
-        const double laid = made.ice.till[point] + made.sediment.alluvium[point];
-        CHECK(made.soil.loose[point] >= 0.0);
-        CHECK(made.soil.loose[point] <= laid + 1e-9);
-        if (parent == Parent::None) {
+        const double water = made.soil.alluvium[point] + made.soil.lake_beds[point];
+        const double till = made.soil.till[point];
+        CHECK(made.soil.alluvium[point] >= 0.0);
+        CHECK(made.soil.lake_beds[point] >= 0.0);
+        CHECK(till >= 0.0);
+        // Lake beds lie only in hollows, the rivers' alluvium only outside them.
+        if (made.lakes.basin[point] == Lakes::none) {
+            CHECK(made.soil.lake_beds[point] == 0.0);
+        } else {
+            CHECK(made.soil.alluvium[point] == 0.0);
+        }
+        CHECK(water <= made.sediment.alluvium[point] + 1e-9);
+        CHECK(till <= made.ice.till[point] + 1e-9);
+        if (made.rivers.receiver[point] == point || parent == Parent::None) {
             continue;
         }
-        if (made.soil.loose[point] > 0.0) {
-            CHECK_THAT(made.soil.depth[point] + made.soil.loose[point], WithinRel(laid, 1e-9));
+        // Soil takes the top first: till is only eaten into once what water laid is gone.
+        if (till < made.ice.till[point]) {
+            CHECK(water == 0.0);
+        }
+        const double laid = made.ice.till[point] + made.sediment.alluvium[point];
+        if (water + till > 0.0) {
+            CHECK_THAT(made.soil.depth[point] + water + till, WithinRel(laid, 1e-9));
         }
         if (made.soil.years[point] == made.body.soil_years) {
             CHECK(made.soil.depth[point] >= made.on_rock.depth[point]);
         }
         on_till += parent == Parent::Till ? 1 : 0;
         on_alluvium += parent == Parent::Alluvium ? 1 : 0;
+        on_lake_beds += parent == Parent::LakeBed ? 1 : 0;
     }
     CHECK(on_till > 0);
     CHECK(on_alluvium > 0);
+    CHECK(on_lake_beds > 0);
+}
+
+TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
+          "[formation][soil]") {
+    const Made made;
+    // At a point the profile is the point's own; going down, layers only ever give way to the
+    // ones under them, ending in rock.
+    std::uint32_t layered = 0;
+    std::uint32_t chosen = 0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const auto spot = made.sphere.locate(made.sphere.point(point), point);
+        const Profile profile = profile_at(made.sphere, made.soil, spot);
+        CHECK_THAT(profile.soil, WithinAbs(made.soil.depth[point], 1e-9));
+        CHECK_THAT(profile.till, WithinAbs(made.soil.till[point], 1e-9));
+        if (made.soil.depth[point] > 0.0 && made.soil.till[point] > 0.0) {
+            ++layered;
+            chosen = point;
+            CHECK(layer_at(profile, 0.0) == Layer::Soil);
+            CHECK(layer_at(profile, profile.soil + profile.alluvium + profile.lake_beds +
+                                        (profile.till / 2.0)) == Layer::Till);
+        }
+    }
+    REQUIRE(layered > 0);
+    // Between points too, read straight from the blended thicknesses.
+    const auto around = made.sphere.neighbors(chosen);
+    const DVec3 between = glm::normalize(made.sphere.point(chosen) + made.sphere.point(around[0]) +
+                                         made.sphere.point(around[1]));
+    const Profile profile = profile_at(made.sphere, made.soil, made.sphere.locate(between, chosen));
+    CHECK(profile.soil > 0.0);
+    CHECK(profile.till > 0.0);
+    const double laid = profile.soil + profile.alluvium + profile.lake_beds + profile.till;
+    auto previous = Layer::Soil;
+    constexpr int steps = 10'000;
+    for (int step = 0; step <= steps; ++step) {
+        const Layer layer = layer_at(profile, (laid + 10.0) * step / steps);
+        CHECK(static_cast<int>(layer) >= static_cast<int>(previous));
+        previous = layer;
+    }
+    CHECK(previous == Layer::Rock);
 }
 
 TEST_CASE("where the coldest times' ice lay, soil is young and thin on rock", "[formation][soil]") {

@@ -367,8 +367,8 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
     using hog::formation::Parent;
     double land = 0.0;
     double soiled = 0.0;
-    std::array<double, 4> area{};
-    std::array<double, 4> depth{};
+    std::array<double, 5> area{};
+    std::array<double, 5> depth{};
     double young = 0.0;
     double young_depth = 0.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
@@ -390,14 +390,23 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
         const auto kind = static_cast<std::size_t>(parent);
         return depth.at(kind) / std::max(area.at(kind), 1e-12);
     };
-    const auto share = [&](double part) { return 100.0 * part / std::max(land, 1e-12); };
+    const auto share = [&](Parent parent) {
+        return 100.0 * area.at(static_cast<std::size_t>(parent)) / std::max(land, 1e-12);
+    };
     std::cout << std::format(
         "soil on {:.0f}% of the land, deepest {:.2f} m; on rock {:.0f}% ({:.2f} m), till {:.1f}% "
-        "({:.2f} m), alluvium {:.0f}% ({:.2f} m); where ice left {:.0f}% ({:.2f} m); deepest "
-        "loose earth under it {:.0f} m\n",
-        share(soiled), *std::ranges::max_element(soil.depth), share(area.at(1)), mean(Parent::Rock),
-        share(area.at(2)), mean(Parent::Till), share(area.at(3)), mean(Parent::Alluvium),
-        share(young), young_depth / std::max(young, 1e-12), *std::ranges::max_element(soil.loose));
+        "({:.2f} m), alluvium {:.0f}% ({:.2f} m), lake beds {:.1f}% ({:.2f} m); where ice left "
+        "{:.0f}% ({:.2f} m)\n",
+        100.0 * soiled / std::max(land, 1e-12), *std::ranges::max_element(soil.depth),
+        share(Parent::Rock), mean(Parent::Rock), share(Parent::Till), mean(Parent::Till),
+        share(Parent::Alluvium), mean(Parent::Alluvium), share(Parent::LakeBed),
+        mean(Parent::LakeBed), 100.0 * young / std::max(land, 1e-12),
+        young_depth / std::max(young, 1e-12));
+    std::cout << std::format("under the soil, deepest alluvium {:.0f} m, lake beds {:.0f} m, "
+                             "till {:.0f} m\n",
+                             *std::ranges::max_element(soil.alluvium),
+                             *std::ranges::max_element(soil.lake_beds),
+                             *std::ranges::max_element(soil.till));
 }
 
 void report_ice(const Sphere& sphere, const hog::formation::Crust& crust,
