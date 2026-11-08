@@ -15,3 +15,6 @@ floor_depth = 500.0
 sky_height = 3000.0
 wear = 0.03
 voxel = 2.5
+# The land formed stage by stage, plates to soil, on a sphere split this many times; 0 leaves it
+# to the generator's own terms (and `wear`).
+formed_detail = 7.0
