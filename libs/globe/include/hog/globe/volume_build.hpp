@@ -33,6 +33,13 @@ inline constexpr int made_depth = 16;
 [[nodiscard]] Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32_t i,
                                     std::uint32_t j);
 
+// The layers a level coarser `level` times: each voxel 2^level of the finest a side.
+[[nodiscard]] Layers coarser_layers(const Layers& layers, int level) noexcept;
+
+// The tile at `key` as the generator makes it at the tile's own level, each voxel sampled at its
+// size: the same maths at any level, nothing finer made for it. Reads nothing else.
+[[nodiscard]] VoxelTree generate_tile(const Generator& generator, TileKey key);
+
 // Every tile column of the area, as `generate_tiles` makes them, one after another.
 [[nodiscard]] Volume generate_area(const Generator& generator, const Area& area);
 

@@ -9,7 +9,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <iostream>
@@ -340,6 +342,81 @@ TEST_CASE("a tile column saved writes its tiles too, a row each", "[globe][volum
     CHECK(archive.tiles_at(1)->empty());
     CHECK(archive.tiles_up({.face = 2, .i = 1}) == std::vector<std::uint32_t>{0, 1});
     CHECK(archive.tile(tiles[1]) == made.tile(tiles[1])->encode());
+}
+
+TEST_CASE("a tile is made at any level straight from the generator, at its own voxels' size",
+          "[globe][volume]") {
+    using hog::globe::TileKey;
+    const Generator& generator = earth();
+    const hog::globe::Layers& layers = generator.layers();
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    const hog::DVec3 up = hog::globe::bed::ground_between(generator, 10.0, 300.0);
+    const Cell cell = hog::globe::cell_under(up, layers.level);
+    const std::uint32_t i = cell.i / side;
+    const std::uint32_t j = cell.j / side;
+
+    // At the finest level, as a tile column's tiles are made.
+    const Volume made = hog::globe::generate_tiles(generator, cell.face, i, j);
+    const Site corner{.face = cell.face, .i = i * side, .j = j * side};
+    for (std::uint32_t k = made.floor(corner).value_or(0) / side; k < made.held_top(corner) / side;
+         ++k) {
+        CAPTURE(k);
+        const VoxelTree* tile = made.tile({.face = cell.face, .i = i, .j = j, .k = k});
+        REQUIRE(tile != nullptr);
+        CHECK(hog::globe::generate_tile(generator, {.face = cell.face, .i = i, .j = j, .k = k})
+                  .same_as(*tile));
+    }
+
+    // A level coarser, each voxel's ground stands as high as its four finer columns' does on
+    // average, to within one of its own voxels.
+    const auto share = [](std::uint16_t solid, std::uint16_t grain) {
+        return std::min(1.0, static_cast<double>(solid + grain) / Voxel::full);
+    };
+    const int ground = layers.layer_at(hog::globe::ground_below(generator, up, 0.5).value_or(0.0));
+    const auto coarse_k = static_cast<std::uint32_t>(std::max((ground / 2) - 64, 0)) / side;
+    const std::array<VoxelTree, 2> coarse{
+        hog::globe::generate_tile(
+            generator, {.level = 1, .face = cell.face, .i = i / 2, .j = j / 2, .k = coarse_k}),
+        hog::globe::generate_tile(
+            generator, {.level = 1, .face = cell.face, .i = i / 2, .j = j / 2, .k = coarse_k + 1})};
+    const int lowest = static_cast<int>(coarse_k * side * 2);
+    for (const auto [x, y] :
+         {std::pair{5, 9}, std::pair{30, 30}, std::pair{50, 12}, std::pair{17, 44}}) {
+        CAPTURE(x, y);
+        double coarse_height = 0.0;
+        for (const VoxelTree& tile : coarse) {
+            for (int z = 0; z < Volume::tile_side; ++z) {
+                const Cube voxel = tile.at(x, y, z);
+                coarse_height += 2.0 * share(voxel.solid_amount, voxel.grain_amount);
+            }
+        }
+        const std::vector<Generator::Column> fine =
+            generator.columns({.level = static_cast<std::uint8_t>(layers.level),
+                               .face = cell.face,
+                               .i = ((i / 2 * side) + static_cast<std::uint32_t>(x)) * 2,
+                               .j = ((j / 2 * side) + static_cast<std::uint32_t>(y)) * 2},
+                              2, hog::globe::voxel_lod(generator));
+        double fine_height = 0.0;
+        for (const Generator::Column& column : fine) {
+            for (int layer = lowest; layer < lowest + (4 * Volume::tile_side); ++layer) {
+                const Voxel voxel =
+                    hog::globe::generated_at(column, layers, static_cast<std::uint32_t>(layer));
+                fine_height += share(voxel.solid_amount, voxel.grain_amount) / 4.0;
+            }
+        }
+        CHECK(std::abs(coarse_height - fine_height) <= 2.0);
+    }
+
+    // High in the sky, a tile is all one voxel; at the top level one tile spans a face.
+    const VoxelTree sky = hog::globe::generate_tile(
+        generator, {.level = 1, .face = cell.face, .i = i / 2, .j = j / 2, .k = coarse_k + 4});
+    CHECK(sky.leaf_side(0, 0, 0) == Volume::tile_side);
+    const std::uint8_t top = hog::globe::top_level(layers);
+    const auto top_k = static_cast<std::uint32_t>(ground >> top) / side;
+    const VoxelTree whole = hog::globe::generate_tile(
+        generator, {.level = top, .face = cell.face, .i = 0, .j = 0, .k = top_k});
+    CHECK(whole.side() == Volume::tile_side);
+    CHECK(whole.leaves() > 1);
 }
 
 TEST_CASE("the generator's voxels are made into the volume once, its air left out",
