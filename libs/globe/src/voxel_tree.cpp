@@ -22,8 +22,8 @@ std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
                            v.grain_amount, static_cast<int>(v.liquid), v.liquid_amount, v.condition,
                            v.heat);
     }
-    return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3],
-                       node.child[4], node.child[5], node.child[6], node.child[7]);
+    return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3], node.child[4],
+                       node.child[5], node.child[6], node.child[7]);
 }
 
 bool VoxelTree::Equal::operator()(const Node& a, const Node& b) const noexcept {
@@ -115,8 +115,7 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
             break;
         }
         const int half = side / 2;
-        const std::size_t k =
-            (x >= half ? 1U : 0U) | (y >= half ? 2U : 0U) | (z >= half ? 4U : 0U);
+        const std::size_t k = (x >= half ? 1U : 0U) | (y >= half ? 2U : 0U) | (z >= half ? 4U : 0U);
         path.push_back({.node = node, .child = k});
         // A leaf is eight leaves alike, so a cube split from one goes on into itself.
         node = here.leaf ? node : here.child[k];
@@ -127,11 +126,10 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
     }
     for (auto step = path.rbegin(); step != path.rend(); ++step) {
         const Node above = nodes_[step->node];
-        std::array<Id, 8> children = above.leaf ? std::array<Id, 8>{step->node, step->node,
-                                                                    step->node, step->node,
-                                                                    step->node, step->node,
-                                                                    step->node, step->node}
-                                                : above.child;
+        std::array<Id, 8> children =
+            above.leaf ? std::array<Id, 8>{step->node, step->node, step->node, step->node,
+                                           step->node, step->node, step->node, step->node}
+                       : above.child;
         children.at(step->child) = replacement;
         replacement = joined(children);
     }
@@ -322,7 +320,8 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
                 child = ids[static_cast<std::size_t>(k - *back)];
             }
             // Bytes made by encode never hold eight leaves alike; refusing them keeps one form.
-            if (tree.joined(children) != tree.intern({.leaf = false, .voxel = {}, .child = children})) {
+            if (tree.joined(children) !=
+                tree.intern({.leaf = false, .voxel = {}, .child = children})) {
                 return fail("a cube of eight alike leaves is not in its joined form");
             }
             ids.push_back(tree.intern({.leaf = false, .voxel = {}, .child = children}));
@@ -410,6 +409,17 @@ Cube summed(const std::array<Cube, 8>& eight) {
     return out;
 }
 
+// The eight voxels of `tree` from (2x, 2y, 2z), as one.
+Cube summed_at(const VoxelTree& tree, int x, int y, int z) {
+    std::array<Cube, 8> eight;
+    for (std::size_t k = 0; k < eight.size(); ++k) {
+        eight.at(k) =
+            tree.at((2 * x) + static_cast<int>(k & 1U), (2 * y) + static_cast<int>((k >> 1U) & 1U),
+                    (2 * z) + static_cast<int>((k >> 2U) & 1U));
+    }
+    return summed(eight);
+}
+
 } // namespace
 
 VoxelTree halved(const VoxelTree& tree) {
@@ -423,16 +433,46 @@ VoxelTree halved(const VoxelTree& tree) {
         }
         return std::nullopt;
     };
-    const auto voxel_at = [&](int x, int y, int z) {
-        std::array<Cube, 8> eight;
-        for (std::size_t k = 0; k < eight.size(); ++k) {
-            eight.at(k) = tree.at((2 * x) + static_cast<int>(k & 1U),
-                                  (2 * y) + static_cast<int>((k >> 1U) & 1U),
-                                  (2 * z) + static_cast<int>((k >> 2U) & 1U));
-        }
-        return summed(eight);
-    };
+    const auto voxel_at = [&](int x, int y, int z) { return summed_at(tree, x, y, z); };
     return VoxelTree::build_down(tree.side() / 2, whole, voxel_at);
+}
+
+VoxelTree parent_of(const std::array<Octant, 8>& children, int side, const VoxelTree* kept) {
+    HOG_ASSERT(side > 1, "a tree wider than one voxel");
+    const int half = side / 2;
+    const auto octant = [&](int x, int y, int z) -> const Octant& {
+        const std::size_t index =
+            (x >= half ? 1U : 0U) + (y >= half ? 2U : 0U) + (z >= half ? 4U : 0U);
+        return children.at(index);
+    };
+    // A cube within one child, where that's all one voxel or within one leaf of it.
+    const auto whole = [&](int x, int y, int z, int across) -> std::optional<Cube> {
+        if (across > half) {
+            return std::nullopt;
+        }
+        const Octant& child = octant(x, y, z);
+        if (child.tree != nullptr) {
+            const int at_x = x % half;
+            const int at_y = y % half;
+            const int at_z = z % half;
+            return child.tree->leaf_side(2 * at_x, 2 * at_y, 2 * at_z) >= 2 * across
+                       ? std::optional{summed_at(*child.tree, at_x, at_y, at_z)}
+                       : std::nullopt;
+        }
+        if (kept != nullptr) {
+            return kept->leaf_side(x, y, z) >= across ? std::optional{kept->at(x, y, z)}
+                                                      : std::nullopt;
+        }
+        return child.fill;
+    };
+    const auto voxel_at = [&](int x, int y, int z) {
+        const Octant& child = octant(x, y, z);
+        if (child.tree != nullptr) {
+            return summed_at(*child.tree, x % half, y % half, z % half);
+        }
+        return kept != nullptr ? kept->at(x, y, z) : child.fill;
+    };
+    return VoxelTree::build_down(side, whole, voxel_at);
 }
 
 } // namespace hog::globe

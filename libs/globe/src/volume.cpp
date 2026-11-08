@@ -1,6 +1,9 @@
+#include <hog/core/assert.hpp>
 #include <hog/core/bytes.hpp>
 #include <hog/globe/volume.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -154,6 +157,52 @@ void Volume::put_tile(Site site, VoxelTree tile) {
     tiles_.insert_or_assign(key_of(site), std::move(tile));
 }
 
+const VoxelTree* Volume::tile(TileKey key) const {
+    const auto found = tiles_.find(key);
+    return found == tiles_.end() ? nullptr : &found->second;
+}
+
+void Volume::put_coarse(TileKey key, VoxelTree tile) {
+    HOG_ASSERT(key.level > 0, "a tile coarser than the finest");
+    coarsest_ = std::max(coarsest_, key.level);
+    tiles_.insert_or_assign(key, std::move(tile));
+}
+
+std::optional<std::pair<std::uint8_t, const VoxelTree*>>
+Volume::finest_over(Site site, std::uint8_t level) const {
+    // Tiles are as many voxels across at every level, so a level coarser is a tile twice as wide.
+    TileKey key = key_of(site);
+    for (std::uint8_t at = 0; at < level; ++at) {
+        key = key.parent();
+    }
+    for (std::uint8_t at = level; at <= coarsest_; ++at, key = key.parent()) {
+        if (const VoxelTree* found = tile(key)) {
+            return std::pair{at, found};
+        }
+    }
+    return std::nullopt;
+}
+
+Cube Volume::finest_at(Site site) const {
+    const auto over = finest_over(site);
+    if (!over) {
+        return {};
+    }
+    const auto [level, found] = *over;
+    const auto place = [&](std::uint32_t at) { return within(at >> level); };
+    return found->at(place(site.i), place(site.j), place(site.layer));
+}
+
+void Volume::refresh_over(TileKey key, std::uint8_t top) {
+    for (TileKey parent = key.parent(); parent.level <= top; parent = parent.parent()) {
+        std::array<Octant, 8> children{};
+        for (std::size_t octant = 0; octant < children.size(); ++octant) {
+            children.at(octant).tree = tile(parent.child(octant));
+        }
+        put_coarse(parent, parent_of(children, tile_side, tile(parent)));
+    }
+}
+
 void Volume::merge(Volume other) {
     for (const auto& [column, layer] : other.floors_) {
         floors_.insert_or_assign(column, layer);
@@ -161,6 +210,7 @@ void Volume::merge(Volume other) {
     for (auto& [key, tile] : other.tiles_) {
         tiles_.insert_or_assign(key, std::move(tile));
     }
+    coarsest_ = std::max(coarsest_, other.coarsest_);
 }
 
 std::vector<std::byte> Volume::encode() const {
@@ -174,6 +224,7 @@ std::vector<std::byte> Volume::encode() const {
     }
     out.write_varint(tiles_.size());
     for (const auto& [key, tile] : tiles_) {
+        out.write(key.level);
         out.write(key.face);
         out.write_varint(key.i);
         out.write_varint(key.j);
@@ -213,12 +264,13 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
         return fail("a volume's tile count is cut short or out of range");
     }
     for (std::uint64_t n = 0; n < *count; ++n) {
+        const auto level = in.read<std::uint8_t>();
         const auto face = in.read<std::uint8_t>();
         const auto i = in.read_varint();
         const auto j = in.read_varint();
         const auto k = in.read_varint();
         const auto size = in.read_varint();
-        if (!face || !i || !j || !k || !size) {
+        if (!level || !face || !i || !j || !k || !size) {
             return fail("a volume's bytes are cut short");
         }
         const auto tree_bytes = in.read_bytes(*size);
@@ -232,7 +284,9 @@ Result<Volume> Volume::decode(std::span<const std::byte> bytes) {
         if (tree->side() != tile_side) {
             return fail("a volume's tile is the wrong size");
         }
-        volume.tiles_.emplace(Key{.face = *face,
+        volume.coarsest_ = std::max(volume.coarsest_, *level);
+        volume.tiles_.emplace(Key{.level = *level,
+                                  .face = *face,
                                   .i = static_cast<std::uint32_t>(*i),
                                   .j = static_cast<std::uint32_t>(*j),
                                   .k = static_cast<std::uint32_t>(*k)},
@@ -310,8 +364,8 @@ std::optional<TileColumn> Volume::column(Site site) const {
     const Column at = column_of(site);
     TileColumn column{.floor = *lowest, .tiles = {}};
     for (auto tile = tiles_.lower_bound({.face = at.face, .i = at.i, .j = at.j});
-         tile != tiles_.end() && tile->first.face == at.face && tile->first.i == at.i &&
-         tile->first.j == at.j;
+         tile != tiles_.end() && tile->first.level == 0 && tile->first.face == at.face &&
+         tile->first.i == at.i && tile->first.j == at.j;
          ++tile) {
         column.tiles.emplace_back(tile->first.k, tile->second);
     }

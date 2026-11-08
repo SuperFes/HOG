@@ -391,3 +391,40 @@ TEST_CASE("a tree halved from its big leaves is the tree halved voxel by voxel",
     });
     CHECK(half.same_as(by_voxel));
 }
+
+TEST_CASE("a parent tree stands for its eight children, as the tree twice as wide halved",
+          "[globe][voxel_tree]") {
+    const VoxelTree whole = VoxelTree::build(16, [](int x, int y, int z) {
+        if (z < 5) {
+            return rock();
+        }
+        return z < 11 ? scattered(x, y, z) : Cube{};
+    });
+    std::array<VoxelTree, 8> trees{VoxelTree{8}, VoxelTree{8}, VoxelTree{8}, VoxelTree{8},
+                                   VoxelTree{8}, VoxelTree{8}, VoxelTree{8}, VoxelTree{8}};
+    std::array<hog::globe::Octant, 8> children{};
+    for (std::size_t k = 0; k < 8; ++k) {
+        const int x = 8 * static_cast<int>(k & 1U);
+        const int y = 8 * static_cast<int>((k >> 1U) & 1U);
+        const int z = 8 * static_cast<int>((k >> 2U) & 1U);
+        trees.at(k) =
+            VoxelTree::build(8, [&](int a, int b, int c) { return whole.at(x + a, y + b, z + c); });
+        children.at(k).tree = &trees.at(k);
+    }
+    CHECK(hog::globe::parent_of(children, 8).same_as(hog::globe::halved(whole)));
+
+    // A child that's all one voxel needs no tree: its eighth of the parent is that voxel.
+    std::array<hog::globe::Octant, 8> filled = children;
+    for (std::size_t k = 0; k < 4; ++k) {
+        filled.at(k) = {.tree = nullptr, .fill = rock()};
+    }
+    for (std::size_t k = 4; k < 8; ++k) {
+        filled.at(k) = {.tree = nullptr, .fill = Cube{}};
+    }
+    const VoxelTree layered = hog::globe::parent_of(filled, 8);
+    CHECK(layered.at(7, 7, 3) == rock());
+    CHECK(layered.at(0, 0, 4) == Cube{});
+    CHECK(layered.leaf_side(0, 0, 0) == 4);
+    filled.fill({.tree = nullptr, .fill = rock()});
+    CHECK(hog::globe::parent_of(filled, 8).leaf_side(0, 0, 0) == 8);
+}

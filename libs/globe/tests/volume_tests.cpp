@@ -234,9 +234,11 @@ TEST_CASE("a voxel's heat is told over the open air's warmth where it is", "[glo
     const hog::globe::Layers& layers = earth().layers();
     const auto at = [&](hog::DVec3 direction, int layer) {
         const Cell cell = hog::globe::cell_under(glm::normalize(direction), layers.level);
-        return hog::globe::place_temperature(
-            planet, layers,
-            {.face = cell.face, .i = cell.i, .j = cell.j, .layer = static_cast<std::uint32_t>(layer)});
+        return hog::globe::place_temperature(planet, layers,
+                                             {.face = cell.face,
+                                              .i = cell.i,
+                                              .j = cell.j,
+                                              .layer = static_cast<std::uint32_t>(layer)});
     };
     const hog::DVec3 equator{1.0, 0.0, 0.0};
     const hog::DVec3 north{0.1, 0.0, 1.0};
@@ -525,4 +527,47 @@ TEST_CASE("the working world's tile columns, timed and sized", "[.time]") {
                                      sum.tiles / sum.count, sum.bytes / sum.count);
         }
     }
+}
+
+TEST_CASE("coarser tiles stand for the eight under them, and the finest held over a voxel is read",
+          "[globe][volume]") {
+    using hog::globe::TileKey;
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    Volume volume;
+    const Cube granite = full_of(Material::Granite);
+    const Cube basalt = full_of(Material::Basalt);
+    // Rock 20 voxels deep in four tiles side by side, under air.
+    for (std::uint32_t j = 0; j < 2; ++j) {
+        for (std::uint32_t i = 0; i < 2; ++i) {
+            volume.put_tile({.face = 2, .i = i * side, .j = j * side, .layer = 0},
+                            VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+                                return z < 20 ? granite : Cube{};
+                            }));
+        }
+    }
+    // A coarser tile already held over them keeps what nothing under it says otherwise.
+    volume.put_coarse({.level = 2, .face = 2}, VoxelTree{Volume::tile_side, basalt});
+    volume.refresh_over({.face = 2}, 2);
+
+    const VoxelTree* half = volume.tile({.level = 1, .face = 2});
+    REQUIRE(half != nullptr);
+    CHECK(half->at(40, 40, 9) == granite);
+    CHECK(half->at(40, 40, 10) == Cube{});
+    const VoxelTree* quarter = volume.tile({.level = 2, .face = 2});
+    REQUIRE(quarter != nullptr);
+    CHECK(quarter->at(5, 5, 4) == granite);
+    CHECK(quarter->at(5, 5, 6) == Cube{});
+    CHECK(quarter->at(40, 5, 5) == basalt);
+
+    // Read where a tile is held, and coarser where it isn't.
+    CHECK(volume.finest_at({.face = 2, .i = 5, .j = 70, .layer = 19}) == granite);
+    CHECK(volume.finest_at({.face = 2, .i = 5, .j = 70, .layer = 20}) == Cube{});
+    const Site past{.face = 2, .i = (2 * side) + 5, .j = 5, .layer = 5};
+    CHECK(volume.finest_over(past).transform([](const auto& over) { return over.first; }) ==
+          std::optional<std::uint8_t>{2});
+    CHECK(volume.finest_at(past) == basalt);
+    CHECK(volume.finest_over(past, 3) == std::nullopt);
+    CHECK(volume.finest_at({.face = 3, .i = 5, .j = 5, .layer = 5}) == Cube{});
+    CHECK(TileKey{.level = 1, .face = 2, .i = 3, .j = 4, .k = 5}.child(5).parent() ==
+          TileKey{.level = 1, .face = 2, .i = 3, .j = 4, .k = 5});
 }
