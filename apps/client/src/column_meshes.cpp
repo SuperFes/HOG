@@ -45,13 +45,7 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
         const auto tile = static_cast<std::uint8_t>(first.material);
         const auto base = static_cast<std::uint32_t>(into.vertices.size());
         for (std::size_t k = 0; k < 4; ++k) {
-            Vec3 position = mesh.vertices[face + k].position;
-            // The voxel holding the sea's surface is drawn full, but the sea stands at its level.
-            if (corner == sea_corner && sea) {
-                const DVec3 at = mesh.origin + DVec3{position};
-                position = Vec3{(glm::normalize(at) * *sea) - mesh.origin};
-            }
-            into.vertices.push_back({.position = position,
+            into.vertices.push_back({.position = mesh.vertices[face + k].position,
                                      .normal = mesh.vertices[face + k].normal,
                                      .tiles = {tile, tile, tile},
                                      .corner = corner});

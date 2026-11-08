@@ -291,7 +291,7 @@ TEST_CASE("columns far apart tell distance at their coarser detail as truly as s
     CHECK(shared_error / counted < 0.08);
 }
 
-TEST_CASE("voxels filled far apart are the world's, as thick as they're far apart",
+TEST_CASE("voxels filled far apart are the world's, averaged through the layers they stand for",
           "[globe][world]") {
     MadeWorld made{earth()};
     World& world = made.world();
@@ -320,11 +320,17 @@ TEST_CASE("voxels filled far apart are the world's, as thick as they're far apar
                             .layer = static_cast<std::uint32_t>(bottom + (step * apart))};
             const Voxel voxel =
                 voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
-            Voxel thick = world.at(site);
-            thick.solid_amount =
-                hog::globe::amount_at(hog::globe::distance_of(thick.solid_amount, layers.thickness),
-                                      layers.thickness * apart);
-            CHECK(voxel == thick);
+            std::uint32_t solid = 0;
+            std::uint32_t liquid = 0;
+            for (std::uint32_t up = 0; up < apart; ++up) {
+                Site layer = site;
+                layer.layer += up;
+                solid += world.at(layer).solid_amount;
+                liquid += world.at(layer).liquid_amount;
+            }
+            CHECK(voxel.solid_amount == (solid + (apart / 2)) / apart);
+            CHECK(voxel.liquid_amount == (liquid + (apart / 2)) / apart);
+            CHECK(voxel.temperature == world.at(site).temperature);
             inside += voxel.solid != Material::Air ? 1 : 0;
         }
     }

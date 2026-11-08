@@ -14,40 +14,175 @@ namespace {
 
 constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
 
-// What a voxel is as drawn: its shaped matter, else grain that fills it, else a liquid that does;
-// open space where none does.
-struct Kind {
-    Material material = Material::Air;
-    bool liquid = false;
+// The least share of a voxel a liquid shows in: less wets what's there without standing on it.
+constexpr double least_liquid = 1.0 / 16.0;
+// The share of a voxel its ground must fill for the voxel to be ground right through.
+constexpr double half = 0.5;
+
+// What a voxel holds, as shares of it: its ground, shaped matter and grain together, and liquid.
+struct Held {
+    Material ground = Material::Air; // the most of its ground
+    Material liquid = Material::Air;
+    double ground_share = 0.0;
+    double liquid_share = 0.0;
 };
 
-Kind kind_of(const Voxel& voxel) {
-    const auto half = static_cast<std::uint16_t>(Voxel::full / 2);
-    if (voxel.solid != Material::Air && voxel.solid_amount >= half) {
-        return {.material = voxel.solid};
-    }
-    if (voxel.grain != Material::Air && voxel.grain_amount >= half) {
-        return {.material = voxel.grain};
-    }
-    if (voxel.liquid != Material::Air && voxel.liquid_amount >= half) {
-        return {.material = voxel.liquid, .liquid = true};
-    }
-    return {};
+Held held_of(const Voxel& voxel) {
+    constexpr double full = Voxel::full;
+    const double solid = voxel.solid == Material::Air ? 0.0 : voxel.solid_amount / full;
+    const double grain = voxel.grain == Material::Air ? 0.0 : voxel.grain_amount / full;
+    const double liquid = voxel.liquid == Material::Air ? 0.0 : voxel.liquid_amount / full;
+    return {.ground = solid >= grain ? voxel.solid : voxel.grain,
+            .liquid = voxel.liquid,
+            .ground_share = std::min(1.0, solid + grain),
+            .liquid_share = std::min(1.0, liquid)};
 }
 
-// The voxels of a column and the columns about it, a voxel past it all round.
+// Part of a voxel's height drawn as one matter, as shares of it from its bottom.
+struct Piece {
+    double from = 0.0;
+    double to = 0.0;
+    Material material = Material::Air;
+
+    [[nodiscard]] bool empty() const noexcept { return to <= from; }
+};
+
+// What's drawn in a voxel's place: the ground in it, and the liquid standing over that.
+struct Slot {
+    Piece ground;
+    Piece liquid;
+};
+
+// A column voxel by voxel from the bottom, as held and as drawn, and which voxels' ground is drawn
+// in another's place.
+struct Standing {
+    std::span<const Held> column;
+    std::vector<Slot> slots;
+    std::vector<std::uint8_t> claimed;
+
+    explicit Standing(std::span<const Held> held)
+        : column{held}, slots(held.size()), claimed(held.size(), 0) {}
+
+    [[nodiscard]] int count() const noexcept { return static_cast<int>(column.size()); }
+    [[nodiscard]] const Held& held(int z) const { return column[static_cast<std::size_t>(z)]; }
+    [[nodiscard]] Slot& slot(int z) { return slots[static_cast<std::size_t>(z)]; }
+    [[nodiscard]] bool taken(int z) const { return claimed[static_cast<std::size_t>(z)] != 0; }
+    void take(int z) { claimed[static_cast<std::size_t>(z)] = 1; }
+    [[nodiscard]] bool partial(int z) const {
+        const double share = held(z).ground_share;
+        return share > 0.0 && share < half;
+    }
+};
+
+// The ground hanging under the ground from `first` up, as low as the matter no ground under it
+// stands up into makes.
+void hang(Standing& standing, int first) {
+    double under = 0.0;
+    for (int k = first - 1; k >= 0 && !standing.taken(k) && standing.partial(k); --k) {
+        under += standing.held(k).ground_share;
+        standing.take(k);
+    }
+    for (int k = first - 1; k >= 0 && under > 0.0; --k) {
+        standing.slot(k).ground = {
+            .from = 1.0 - std::min(1.0, under), .to = 1.0, .material = standing.held(first).ground};
+        under -= 1.0;
+    }
+}
+
+// Ground is wherever a voxel is at least half of it, and the ground beside that stands as high, or
+// hangs as low, as all of it in the voxels over, or under, it makes.
+void stand_ground(Standing& standing) {
+    const int count = standing.count();
+    for (int z = 0; z < count;) {
+        if (standing.held(z).ground_share < half) {
+            ++z;
+            continue;
+        }
+        const int first = z;
+        for (; z < count && standing.held(z).ground_share >= half; ++z) {
+            standing.slot(z).ground = {.from = 0.0, .to = 1.0, .material = standing.held(z).ground};
+            standing.take(z);
+        }
+        const int last = z - 1;
+        double over = standing.held(last).ground_share;
+        for (; z < count && standing.partial(z); ++z) {
+            over += standing.held(z).ground_share;
+            standing.take(z);
+        }
+        const Material top = standing.held(last).ground;
+        for (int k = last; k < count && over > 0.0; ++k) {
+            const Material own = standing.held(k).ground;
+            standing.slot(k).ground = {.from = 0.0,
+                                       .to = std::min(1.0, over),
+                                       .material = own != Material::Air ? own : top};
+            over -= 1.0;
+        }
+        hang(standing, first);
+    }
+}
+
+// Liquid stands over the ground as high as all of it makes, with the ground no ground stands on
+// lying in it.
+void stand_liquid(Standing& standing) {
+    const int count = standing.count();
+    for (int z = 0; z < count;) {
+        if (standing.held(z).liquid_share <= 0.0) {
+            ++z;
+            continue;
+        }
+        const int first = z;
+        const Material material = standing.held(z).liquid;
+        double total = 0.0;
+        for (; z < count && standing.held(z).liquid_share > 0.0; ++z) {
+            total += standing.held(z).liquid_share +
+                     (standing.taken(z) ? 0.0 : standing.held(z).ground_share);
+        }
+        if (total < least_liquid) {
+            continue;
+        }
+        for (int k = first; k < count && total > 0.0; ++k) {
+            const Piece& ground = standing.slot(k).ground;
+            const double bottom = ground.empty() ? 0.0 : ground.to;
+            if (bottom >= 1.0 && k != first) {
+                break;
+            }
+            const double part = std::min(1.0 - bottom, total);
+            standing.slot(k).liquid = {.from = bottom, .to = bottom + part, .material = material};
+            total -= part;
+        }
+    }
+}
+
+// Where a column's matter stands, voxel by voxel from the bottom.
+std::vector<Slot> stood(std::span<const Held> column) {
+    Standing standing{column};
+    stand_ground(standing);
+    stand_liquid(standing);
+    return std::move(standing.slots);
+}
+
+// The voxels of a column and the columns about it, a voxel past it all round, as drawn.
 class Block {
 public:
     Block(int across, int lowest, int height)
         : across_{across}, lowest_{lowest}, height_{height},
-          kinds_(static_cast<std::size_t>((across + 2) * (across + 2) * height)) {}
+          slots_(static_cast<std::size_t>((across + 2) * (across + 2) * height)) {}
 
     [[nodiscard]] int across() const noexcept { return across_; }
     [[nodiscard]] int lowest() const noexcept { return lowest_; }
     [[nodiscard]] int height() const noexcept { return height_; }
-    // `x` and `y` from -1 to across, `z` from lowest up height of them.
-    [[nodiscard]] Kind& at(int x, int y, int z) { return kinds_[index(x, y, z)]; }
-    [[nodiscard]] const Kind& at(int x, int y, int z) const { return kinds_[index(x, y, z)]; }
+    // `x` and `y` from -1 to across, `z` from lowest up height of them; open space past those.
+    [[nodiscard]] const Slot& at(int x, int y, int z) const {
+        static const Slot open;
+        return z < lowest_ || z >= lowest_ + height_ ? open : slots_[index(x, y, z)];
+    }
+    // Draws the column at `x`, `y` as it holds what's in it, from the lowest up.
+    void stand(int x, int y, std::span<const Held> column) {
+        const std::vector<Slot> drawn = stood(column);
+        for (int z = 0; z < height_; ++z) {
+            slots_[index(x, y, lowest_ + z)] = drawn[static_cast<std::size_t>(z)];
+        }
+    }
 
 private:
     [[nodiscard]] std::size_t index(int x, int y, int z) const {
@@ -59,7 +194,7 @@ private:
     int across_;
     int lowest_;
     int height_;
-    std::vector<Kind> kinds_;
+    std::vector<Slot> slots_;
 };
 
 // The layers the tile column holds, as voxels of the level: from under its floor to over its
@@ -140,19 +275,23 @@ void fill(const World& world, Block& block, Cell first, int size) {
             if (!column) {
                 continue;
             }
-            const auto half = static_cast<std::uint32_t>(size / 2);
+            const auto middle = static_cast<std::uint32_t>(size / 2);
             const Cell fine{.level = static_cast<std::uint8_t>(layers.level),
                             .face = column->face,
-                            .i = (column->i * static_cast<std::uint32_t>(size)) + half,
-                            .j = (column->j * static_cast<std::uint32_t>(size)) + half};
+                            .i = (column->i * static_cast<std::uint32_t>(size)) + middle,
+                            .j = (column->j * static_cast<std::uint32_t>(size)) + middle};
             const std::vector<Voxel> voxels =
                 world.fill(std::span{&fine, 1}, bottom * size, top - bottom, size);
-            for (int z = block.lowest(); z < bottom; ++z) {
-                block.at(x, y, z) = {.material = world.planet().high.rock};
+            std::vector<Held> held(static_cast<std::size_t>(block.height()));
+            for (int z = block.lowest(); z < block.lowest() + block.height(); ++z) {
+                Held& here = held[static_cast<std::size_t>(z - block.lowest())];
+                if (z < bottom) {
+                    here = {.ground = world.planet().high.rock, .ground_share = 1.0};
+                } else if (z < top) {
+                    here = held_of(voxels[static_cast<std::size_t>(z - bottom)]);
+                }
             }
-            for (int z = bottom; z < top; ++z) {
-                block.at(x, y, z) = kind_of(voxels[static_cast<std::size_t>(z - bottom)]);
-            }
+            block.stand(x, y, held);
         }
     }
 }
@@ -187,28 +326,88 @@ constexpr std::array<Side, 6> box_sides{{{.axis = 0, .by = -1, .corners = {0, 2,
                                          {.axis = 2, .by = -1, .corners = {0, 1, 3, 2}},
                                          {.axis = 2, .by = 1, .corners = {4, 6, 7, 5}}}};
 
-// The faces of the voxel at `x`, `y`, `z` of the block that show.
-void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, int z, double low,
-               double high) {
-    const Kind here = block.at(x, y, z);
-    if (here.material == Material::Air) {
-        return;
-    }
-    std::optional<std::array<DVec3, 8>> box;
-    for (const Side& face : box_sides) {
-        const Kind beside =
-            block.at(x + (face.axis == 0 ? face.by : 0), y + (face.axis == 1 ? face.by : 0),
-                     z + (face.axis == 2 ? face.by : 0));
-        // Solid shows against anything not solid; a liquid only against open space.
-        const bool open = here.liquid ? beside.material == Material::Air
-                                      : beside.material == Material::Air || beside.liquid;
-        if (!open) {
+// What of `piece` isn't behind `hiding`, at most two parts of it.
+std::array<Piece, 2> uncovered(Piece piece, std::span<const Piece> hiding) {
+    std::array<Piece, 2> left{piece, Piece{}};
+    for (const Piece& cover : hiding) {
+        if (cover.empty()) {
             continue;
         }
-        if (!box) {
-            box = box_of(first, x, y, low, high);
+        std::array<Piece, 2> cut{};
+        std::size_t kept = 0;
+        for (const Piece& part : left) {
+            if (part.empty()) {
+                continue;
+            }
+            if (cover.to <= part.from || cover.from >= part.to) {
+                cut.at(kept++) = part;
+                continue;
+            }
+            if (part.from < cover.from && kept < cut.size()) {
+                cut.at(kept++) = {.from = part.from, .to = cover.from, .material = part.material};
+            }
+            if (cover.to < part.to && kept < cut.size()) {
+                cut.at(kept++) = {.from = cover.to, .to = part.to, .material = part.material};
+            }
         }
-        quad(mesh, *box, face.corners, here.material);
+        left = cut;
+    }
+    return left;
+}
+
+// Whether a piece reaches the bottom of its voxel, or the top.
+bool from_bottom(const Piece& piece) {
+    return !piece.empty() && piece.from <= 0.0;
+}
+bool to_top(const Piece& piece) {
+    return !piece.empty() && piece.to >= 1.0;
+}
+
+// Whether the top of `piece`, `by` up, or its bottom is hidden by `next` over or under it. Ground
+// shows against all but ground; a liquid against open space.
+bool end_hidden(const Piece& piece, bool liquid, const Slot& here, const Slot& next, int by) {
+    if (by > 0) {
+        return to_top(piece) && (from_bottom(next.ground) || (liquid && from_bottom(next.liquid)));
+    }
+    const bool resting = liquid && !here.ground.empty() && here.ground.to >= piece.from;
+    return resting ||
+           (from_bottom(piece) && (to_top(next.ground) || (liquid && to_top(next.liquid))));
+}
+
+// What of `piece` in the voxel at `x`, `y`, `z` of the block shows on its side `face`.
+std::array<Piece, 2> shown(const Block& block, int x, int y, int z, const Piece& piece, bool liquid,
+                           const Side& face) {
+    const Slot& here = block.at(x, y, z);
+    if (face.axis == 2) {
+        const Slot& next = block.at(x, y, z + face.by);
+        return end_hidden(piece, liquid, here, next, face.by) ? std::array<Piece, 2>{}
+                                                              : std::array{piece, Piece{}};
+    }
+    const Slot& beside =
+        block.at(x + (face.axis == 0 ? face.by : 0), y + (face.axis == 1 ? face.by : 0), z);
+    const std::array<Piece, 2> hiding{beside.ground, liquid ? beside.liquid : Piece{}};
+    return uncovered(piece, hiding);
+}
+
+// The faces that show of what's drawn in the voxel at `x`, `y`, `z` of the block, `low` to `high`
+// metres from the planet's centre.
+void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, int z, double low,
+               double high) {
+    const Slot& here = block.at(x, y, z);
+    const auto metres = [&](double share) { return low + (share * (high - low)); };
+    for (const bool liquid : {false, true}) {
+        const Piece& piece = liquid ? here.liquid : here.ground;
+        if (piece.empty()) {
+            continue;
+        }
+        for (const Side& face : box_sides) {
+            for (const Piece& part : shown(block, x, y, z, piece, liquid, face)) {
+                if (!part.empty()) {
+                    quad(mesh, box_of(first, x, y, metres(part.from), metres(part.to)),
+                         face.corners, part.material);
+                }
+            }
+        }
     }
 }
 
