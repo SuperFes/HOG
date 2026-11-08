@@ -29,6 +29,7 @@ add_library(hog_globe
     src/voxel_tree.cpp
     src/volume.cpp
     src/land.cpp
+    src/held_tiles.cpp
     src/volume_build.cpp
     src/volume_archive.cpp
     src/voxel_mesh.cpp
@@ -49,6 +50,7 @@ hog_add_tests(hog_globe
     tests/formed_tests.cpp
     tests/generator_tests.cpp
     tests/grip_tests.cpp
+    tests/held_tiles_tests.cpp
     tests/land_tests.cpp
     tests/landform_survey_tests.cpp
     tests/lake_bed_tests.cpp
