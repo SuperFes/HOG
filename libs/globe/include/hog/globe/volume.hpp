@@ -68,15 +68,18 @@ struct TileColumn {
 [[nodiscard]] std::vector<BrickSite> brick_footprint(Site corner);
 
 // The world's voxels, held where they are: tiles `tile_side` voxels across along a face and up
-// through the layers, each a VoxelTree. Air is never held; a tile of nothing else is no tile.
+// through the layers, each a VoxelTree, held from the lowest made in each tile column up to its
+// highest holding anything; under that nothing is made yet, not even air, and over it is air.
 // Coarser tiles over them each stand for the eight a level finer.
-// Each tile column is made down to its floor only; below that nothing is made yet, not even air.
 class Volume {
 public:
     static constexpr int tile_side = 64;
 
-    // The lowest layer made in the tile column holding `site`; none where nothing is.
+    // The lowest layer made in the tile column holding `site`, the foot of its lowest tile; none
+    // where nothing is.
     [[nodiscard]] std::optional<std::uint32_t> floor(Site site) const;
+    // Makes the tile column holding `site` from the tile holding `layer` up, with air where it held
+    // nothing.
     void set_floor(Site site, std::uint32_t layer);
     [[nodiscard]] bool made(Site site) const;
     // The layer over the highest tile held up the tile column through `site`; its floor where it
@@ -97,9 +100,9 @@ public:
     bool remove(Site site) { return set(site, {}); }
 
     [[nodiscard]] std::size_t tiles() const noexcept { return tiles_.size(); }
-    // The tile holding `site`; none where it's all air.
+    // The tile holding `site`; none where none is held.
     [[nodiscard]] const VoxelTree* tile_at(Site site) const;
-    // Puts the tile holding `site`, none where it's all air.
+    // Puts the tile holding `site`, making it.
     void put_tile(Site site, VoxelTree tile);
 
     // The tile at `key`, at any level; none where none is held.
@@ -115,10 +118,10 @@ public:
     // Makes the tiles over `key` again from theirs under them, up to `top`: each a level coarser
     // than what it's made from, an eighth from each it holds, and the rest kept as it was.
     void refresh_over(TileKey key, std::uint8_t top);
-    // Takes in the other's tiles and floors, over any of its own in the same places.
+    // Takes in the other's tiles, over any of its own in the same places.
     void merge(Volume other);
 
-    // Each floor, then each tile, in order: tiles as their place and their tree's bytes.
+    // Each tile, in order: its place and its tree's bytes.
     [[nodiscard]] std::vector<std::byte> encode() const;
     // Fails, saying why, on bytes that aren't a volume.
     [[nodiscard]] static Result<Volume> decode(std::span<const std::byte> bytes);
@@ -130,7 +133,7 @@ public:
     // Puts back the tile column holding `site` from its bytes, in place of what was there; fails,
     // changing nothing, on bytes that aren't one.
     [[nodiscard]] Result<void> decode_column(Site site, std::span<const std::byte> bytes);
-    // Lets the tile column holding `site` go, its floor and tiles, as if never made; what of it
+    // Lets the tile column holding `site` go, its tiles, as if never made; what of it
     // is unsaved is lost.
     void drop_column(Site site);
     // The corners of the tile columns made, in order.
@@ -144,7 +147,7 @@ public:
     [[nodiscard]] std::vector<BrickSite> changed_since(std::uint64_t revision) const;
 
     // The tile columns changed since they were last saved, as their corners, in order: set, given
-    // a floor or a tile. Those decoded or merged in are as saved.
+    // made or given a tile. Those decoded or merged in are as saved.
     [[nodiscard]] std::vector<Site> unsaved() const;
     void saved(Site site) { unsaved_.erase(column_of(site)); }
 
@@ -159,7 +162,6 @@ private:
     [[nodiscard]] static Key key_of(Site site) noexcept;
     [[nodiscard]] static Column column_of(Site site) noexcept;
 
-    std::map<Column, std::uint32_t> floors_;
     std::map<Key, VoxelTree> tiles_;
     std::uint8_t coarsest_ = 0; // the coarsest level any tile is held at
     std::uint64_t revision_ = 0;
