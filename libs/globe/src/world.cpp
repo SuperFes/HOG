@@ -13,6 +13,30 @@
 #include <vector>
 
 namespace hog::globe {
+namespace {
+
+// One voxel standing for those of `layers` together: each matter as much of it as they hold on
+// average, of the kind most of it is; the rest as the lowest has it.
+Voxel averaged(std::span<const Voxel> layers) {
+    Voxel out = layers.front();
+    const auto share = [&](Material Voxel::* kind, std::uint16_t Voxel::* amount) {
+        std::uint32_t total = 0;
+        const Voxel* most = &layers.front();
+        for (const Voxel& voxel : layers) {
+            total += voxel.*amount;
+            most = voxel.*amount > most->*amount ? &voxel : most;
+        }
+        const auto count = static_cast<std::uint32_t>(layers.size());
+        out.*amount = static_cast<std::uint16_t>((total + (count / 2)) / count);
+        out.*kind = out.*amount == 0 ? Material::Air : most->*kind;
+    };
+    share(&Voxel::solid, &Voxel::solid_amount);
+    share(&Voxel::grain, &Voxel::grain_amount);
+    share(&Voxel::liquid, &Voxel::liquid_amount);
+    return out;
+}
+
+} // namespace
 
 Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer,
                    int apart) {
@@ -144,14 +168,19 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells, int bottom, int coun
         }
         const std::span<Voxel> out = std::span{voxels}.subspan(k * static_cast<std::size_t>(count),
                                                                static_cast<std::size_t>(count));
-        column({.face = cells[k].face, .i = cells[k].i, .j = cells[k].j}, bottom, count, apart, out,
-               1);
-        if (apart > 1) {
-            for (int step = 0; step < count; ++step) {
-                Voxel& voxel = out[static_cast<std::size_t>(step)];
-                voxel.solid_amount = amount_at(distance_of(voxel.solid_amount, layers.thickness),
-                                               layers.thickness * apart);
-            }
+        const Site base{.face = cells[k].face, .i = cells[k].i, .j = cells[k].j};
+        if (apart == 1) {
+            column(base, bottom, count, 1, out, 1);
+            continue;
+        }
+        const int every = std::min(count * apart, layers.count - bottom);
+        std::vector<Voxel> each(static_cast<std::size_t>(every));
+        column(base, bottom, every, 1, each, 1);
+        for (int step = 0; step < count; ++step) {
+            const int from = step * apart;
+            out[static_cast<std::size_t>(step)] = averaged(
+                std::span{each}.subspan(static_cast<std::size_t>(from),
+                                        static_cast<std::size_t>(std::min(apart, every - from))));
         }
     }
     return voxels;

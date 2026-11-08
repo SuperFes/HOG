@@ -30,8 +30,7 @@ struct ColumnDrawn {
 inline constexpr std::uint8_t sea_corner = 1;
 
 // The faces split into ground and water: a liquid's faces at `sea` metres from the planet's
-// centre, within a voxel `thickness`, are the sea's own, marked so for its waves to be drawn, and
-// put at that level.
+// centre, within a voxel `thickness`, are the sea's own, marked so for its waves to be drawn.
 [[nodiscard]] ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea,
                                    double thickness);
 

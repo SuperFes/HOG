@@ -62,8 +62,8 @@ public:
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
 
     // The voxels `count` layers up from `bottom` through each of `cells`, every `apart` layers,
-    // as they now are, a column after another. Their solid amounts are as voxels `apart` layers
-    // thick, as coarser detail is drawn from voxels further apart.
+    // as they now are, a column after another: each the `apart` layers from it averaged, as a
+    // voxel that many layers thick holds them.
     [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells, int bottom, int count,
                                           int apart = 1) const;
 
