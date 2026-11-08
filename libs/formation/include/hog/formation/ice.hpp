@@ -22,6 +22,10 @@ struct Ice {
     std::vector<double> flux;      // cubic metres of water a year passing on as ice
     std::vector<double> coldest;   // metres of ice that lay in the coldest times
     std::vector<double> carved;    // metres of rock that ice carved away
+    std::vector<double> till;      // metres of that rock the ice laid down as it melted, on land
+                                   // or the sea floor: moraines where it ended
+    std::vector<double> outwash;   // cubic metres of it meltwater washed into the rivers from each
+                                   // point, over the time the ice lay
     std::vector<double> sea_ice;   // share of the year the open sea lies frozen
     double calving = 0.0;          // cubic metres of water a year ice breaks off into the sea
 };
@@ -45,8 +49,8 @@ struct Ice {
 [[nodiscard]] Ice ice_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
                          const Rivers& rivers, const Body& body);
 
-// The land as water finds it after ice: rock lowered where ice carved it, ice lying on top where it
-// lies now, and the sea let into troughs carved below its level.
+// The land as water finds it after ice: rock lowered where ice carved it and raised where it laid
+// till, ice lying on top where it lies now, and the sea let into troughs carved below its level.
 [[nodiscard]] Rivers ice_shaped(const Sphere& sphere, const Rivers& rivers, const Ice& ice);
 
 } // namespace hog::formation

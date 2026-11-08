@@ -28,7 +28,7 @@ struct Lake {
 struct Basin {
     std::uint32_t outlet = 0;
     std::uint32_t lake = 0xFFFF'FFFFU; // the lake standing in it, if any
-    double room = 0.0;                 // cubic metres of water it holds
+    double room = 0.0;                 // cubic metres it holds up to its brim
 };
 
 struct Lakes {
