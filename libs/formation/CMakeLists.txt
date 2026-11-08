@@ -5,6 +5,7 @@ add_library(hog_formation
     src/ice.cpp
     src/lakes.cpp
     src/landforms.cpp
+    src/ores.cpp
     src/plates.cpp
     src/rivers.cpp
     src/sediment.cpp
@@ -23,6 +24,7 @@ hog_add_tests(hog_formation
     tests/ice_tests.cpp
     tests/lakes_tests.cpp
     tests/landforms_tests.cpp
+    tests/ores_tests.cpp
     tests/plates_tests.cpp
     tests/rivers_tests.cpp
     tests/sediment_tests.cpp

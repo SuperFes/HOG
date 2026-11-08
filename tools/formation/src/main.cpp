@@ -5,6 +5,7 @@
 #include <hog/formation/ice.hpp>
 #include <hog/formation/lakes.hpp>
 #include <hog/formation/landforms.hpp>
+#include <hog/formation/ores.hpp>
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
 #include <hog/formation/sediment.hpp>
@@ -418,6 +419,95 @@ void report_landforms(const Sphere& sphere, const hog::formation::Rivers& rivers
     std::cout << line << '\n';
 }
 
+// The ores in the order drawn and reported, with their colours.
+struct Ore {
+    std::string_view name;
+    std::vector<double> hog::formation::Ores::* field;
+    Rgb colour;
+};
+
+constexpr std::array<Ore, 11> ores{{
+    {.name = "copper",
+     .field = &hog::formation::Ores::copper,
+     .colour = hog::formation_lab::rgb(40, 190, 150)},
+    {.name = "gold",
+     .field = &hog::formation::Ores::gold,
+     .colour = hog::formation_lab::rgb(240, 200, 40)},
+    {.name = "placers",
+     .field = &hog::formation::Ores::placers,
+     .colour = hog::formation_lab::rgb(250, 240, 150)},
+    {.name = "banded iron",
+     .field = &hog::formation::Ores::banded_iron,
+     .colour = hog::formation_lab::rgb(170, 40, 30)},
+    {.name = "laterite",
+     .field = &hog::formation::Ores::laterite,
+     .colour = hog::formation_lab::rgb(220, 110, 50)},
+    {.name = "bog iron",
+     .field = &hog::formation::Ores::bog_iron,
+     .colour = hog::formation_lab::rgb(110, 70, 40)},
+    {.name = "lead and zinc",
+     .field = &hog::formation::Ores::lead_zinc,
+     .colour = hog::formation_lab::rgb(130, 140, 170)},
+    {.name = "salt",
+     .field = &hog::formation::Ores::salt,
+     .colour = hog::formation_lab::rgb(250, 250, 250)},
+    {.name = "coal",
+     .field = &hog::formation::Ores::coal,
+     .colour = hog::formation_lab::rgb(25, 25, 25)},
+    {.name = "oil",
+     .field = &hog::formation::Ores::oil,
+     .colour = hog::formation_lab::rgb(90, 30, 110)},
+    {.name = "diamonds",
+     .field = &hog::formation::Ores::diamonds,
+     .colour = hog::formation_lab::rgb(120, 220, 250)},
+}};
+
+// Each point in the colour of its likeliest ore, where one is likely at all.
+bool draw_ores(const Canvas& canvas, const hog::formation::Rivers& rivers,
+               const hog::formation::Ores& found) {
+    const Sphere& sphere = *canvas.sphere;
+    std::uint32_t lit = 0;
+    return canvas.draw("ores.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        Rgb colour = hog::formation_lab::rgb(110, 120, 100);
+        double likeliest = 0.25;
+        for (const Ore& ore : ores) {
+            const double likely = (found.*ore.field)[near];
+            if (likely > likeliest) {
+                likeliest = likely;
+                colour = ore.colour;
+            }
+        }
+        return hog::formation_lab::scaled(colour, canvas.light(rivers.height, direction, lit));
+    });
+}
+
+void report_ores(const Sphere& sphere, const hog::formation::Rivers& rivers,
+                 const hog::formation::Ores& found) {
+    double land = 0.0;
+    std::array<double, ores.size()> area{};
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (rivers.receiver[point] == point) {
+            continue;
+        }
+        land += sphere.area(point);
+        for (std::size_t ore = 0; ore < ores.size(); ++ore) {
+            area.at(ore) += (found.*ores.at(ore).field)[point] > 0.3 ? sphere.area(point) : 0.0;
+        }
+    }
+    std::string line = "ores likely on the land:";
+    for (std::size_t ore = 0; ore < ores.size(); ++ore) {
+        line += std::format(" {} {:.1f}% (best {:.2f}){}", ores.at(ore).name,
+                            100.0 * area.at(ore) / std::max(land, 1e-12),
+                            std::ranges::max(found.*ores.at(ore).field),
+                            ore + 1 < ores.size() ? "," : "");
+    }
+    std::cout << line << '\n';
+}
+
 void report_bedrock(const Sphere& sphere, const hog::formation::Rivers& rivers,
                     const hog::formation::Bedrock& bedrock,
                     const hog::formation::Outcrop& outcrop) {
@@ -714,6 +804,11 @@ int run(const Options& options) {
     report_soil(sphere, crust, soil);
     ok = draw_soil(canvas, rivers, ice, lakes, sediment, soil) && ok;
     ok = draw_topsoil(canvas, rivers, ice, lakes, sediment, soil) && ok;
+
+    const hog::formation::Ores found = hog::formation::ores_on(
+        sphere, crust, bedrock, outcrop, climate, rivers, lakes, sediment, soil, body);
+    report_ores(sphere, rivers, found);
+    ok = draw_ores(canvas, rivers, found) && ok;
     return ok ? 0 : 1;
 }
 

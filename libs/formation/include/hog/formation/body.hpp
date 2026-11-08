@@ -50,6 +50,22 @@ struct Body {
     double lava_flood_depth = 1'500.0; // metres of lava at a flood's heart
     double exhumed_years = 10.0e6;     // years the land has worn down at today's pace
 
+    // How much richer or poorer than Earth each kind of ore is, against the processes making it.
+    struct OreAbundance {
+        double copper = 1.0;
+        double gold = 1.0;
+        double placers = 1.0;
+        double banded_iron = 1.0;
+        double laterite = 1.0;
+        double bog_iron = 1.0;
+        double lead_zinc = 1.0;
+        double salt = 1.0;
+        double coal = 1.0;
+        double oil = 1.0;
+        double diamonds = 1.0;
+    };
+    OreAbundance ore_abundance;
+
     // Sunlight and the air's hold on heat (Budyko's 1969 balance and numbers).
     double star_flux = 1'361.0;   // watts a square metre where the planet orbits
     double tilt = 23.44;          // degrees
