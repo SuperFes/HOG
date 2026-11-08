@@ -465,3 +465,93 @@ TEST_CASE("a parent tree stands for its eight children, as the tree twice as wid
     filled.fill({.tree = nullptr, .fill = rock()});
     CHECK(hog::globe::parent_of(filled, 8).leaf_side(0, 0, 0) == 8);
 }
+
+TEST_CASE("an open leaf keeps its mark, apart from a fine leaf alike, through its bytes",
+          "[globe][voxel_tree]") {
+    const VoxelTree open{8, rock(), 3};
+    CHECK_FALSE(open.same_as(VoxelTree{8, rock()}));
+    CHECK(open.coarsest(0, 0, 0, 8, 1) == 3);
+    const auto decoded = VoxelTree::decode(open.encode());
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->same_as(open));
+
+    // An open leaf marked 0 is not one.
+    std::vector<std::byte> bytes = open.encode();
+    const auto mark = std::ranges::find(bytes, std::byte{3});
+    REQUIRE(mark != bytes.end());
+    *mark = std::byte{0};
+    CHECK_FALSE(VoxelTree::decode(bytes).has_value());
+}
+
+TEST_CASE("a window stands each of its voxels for a cube of the tree", "[globe][voxel_tree]") {
+    const VoxelTree tree = VoxelTree::build(16, [](int x, int y, int z) {
+        if (z < 5) {
+            return rock();
+        }
+        return z < 11 ? scattered(x, y, z) : Cube{};
+    });
+    CHECK(tree.window(0, 0, 0, 16, 1, 0).same_as(tree));
+    const VoxelTree window = tree.window(8, 0, 0, 8, 2, 5);
+    REQUIRE(window.side() == 4);
+    for (int z = 0; z < 4; ++z) {
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                CAPTURE(x, y, z);
+                CHECK(window.at(x, y, z) == tree.average(8 + (2 * x), 2 * y, 2 * z, 2));
+            }
+        }
+    }
+    // Rock down low was a leaf as wide, so is as fine as it goes; cut cubes are marked.
+    CHECK(window.coarsest(0, 0, 0, 2, 1) == 0);
+    CHECK(window.coarsest(0, 0, 2, 4, 1) == 5);
+}
+
+TEST_CASE("a part grafted in is kept only where the tree knew its voxels more coarsely",
+          "[globe][voxel_tree]") {
+    VoxelTree tree{16, rock(), 5};
+    const VoxelTree part = VoxelTree::build(4, scattered);
+    tree.graft(4, 8, 4, part, 1, 2);
+    for (int z = 0; z < 4; ++z) {
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                CHECK(tree.at(4 + x, 8 + y, 4 + z) == part.at(x, y, z));
+            }
+        }
+    }
+    CHECK(tree.coarsest(4, 8, 4, 4, 1) == 2);
+    // The rest of what it stood in is still open as it was.
+    CHECK(tree.at(0, 0, 0) == rock());
+    CHECK(tree.coarsest(0, 0, 0, 4, 1) == 5);
+    CHECK(tree.coarsest(0, 0, 0, 16, 1) == 5);
+    // Its cubes stand for the part's voxels.
+    CHECK(tree.average(4, 8, 4, 4) == part.average(0, 0, 0, 4));
+
+    // Known no more finely, it changes nothing; known finely, it takes the place.
+    const VoxelTree water_part{4, water()};
+    tree.graft(4, 8, 4, water_part, 1, 3);
+    CHECK(tree.at(5, 9, 6) == part.at(1, 1, 2));
+    tree.graft(4, 8, 4, water_part, 1, 0);
+    CHECK(tree.at(5, 9, 6) == water());
+    CHECK(tree.coarsest(4, 8, 4, 4, 1) == 0);
+    // And a fine tree takes nothing in.
+    VoxelTree fine{8, rock()};
+    fine.graft(0, 0, 0, water_part, 1, 0);
+    CHECK(fine.same_as(VoxelTree{8, rock()}));
+}
+
+TEST_CASE("a coarse part grafted in stands each voxel for a wider cube", "[globe][voxel_tree]") {
+    VoxelTree tree{16, Cube{}, 9};
+    const VoxelTree part = VoxelTree::build(4, scattered);
+    tree.graft(8, 0, 8, part, 2, 2);
+    for (int z = 0; z < 8; ++z) {
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                CHECK(tree.at(8 + x, y, 8 + z) == part.at(x / 2, y / 2, z / 2));
+            }
+        }
+    }
+    CHECK(tree.window(8, 0, 8, 8, 2, 2)
+              .same_as(tree.window(8, 0, 8, 8, 1, 2).window(0, 0, 0, 8, 2, 2)));
+    CHECK(tree.coarsest(8, 0, 8, 8, 2) == 2);
+    CHECK(tree.coarsest(0, 0, 0, 8, 2) == 9);
+}

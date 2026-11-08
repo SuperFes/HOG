@@ -69,7 +69,7 @@ std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
         const Cube& v = node.voxel;
         return hash_values(1, static_cast<int>(v.solid), v.solid_amount, static_cast<int>(v.grain),
                            v.grain_amount, static_cast<int>(v.liquid), v.liquid_amount, v.condition,
-                           v.heat);
+                           v.heat, node.open);
     }
     return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3], node.child[4],
                        node.child[5], node.child[6], node.child[7]);
@@ -79,12 +79,12 @@ bool VoxelTree::Equal::operator()(const Node& a, const Node& b) const noexcept {
     if (a.leaf != b.leaf) {
         return false;
     }
-    return a.leaf ? a.voxel == b.voxel : a.child == b.child;
+    return a.leaf ? a.voxel == b.voxel && a.open == b.open : a.child == b.child;
 }
 
-VoxelTree::VoxelTree(int side, const Cube& fill) : side_{side} {
+VoxelTree::VoxelTree(int side, const Cube& fill, std::uint8_t open) : side_{side} {
     HOG_ASSERT(side > 0 && (side & (side - 1)) == 0, "a tree's side is a power of two");
-    root_ = leaf_of(fill);
+    root_ = leaf_of(fill, open);
 }
 
 VoxelTree::Id VoxelTree::intern(const Node& node) {
@@ -95,8 +95,8 @@ VoxelTree::Id VoxelTree::intern(const Node& node) {
     return found->second;
 }
 
-VoxelTree::Id VoxelTree::leaf_of(const Cube& voxel) {
-    return intern({.leaf = true, .voxel = voxel, .child = {}});
+VoxelTree::Id VoxelTree::leaf_of(const Cube& voxel, std::uint8_t open) {
+    return intern({.leaf = true, .voxel = voxel, .child = {}, .open = open});
 }
 
 VoxelTree::Id VoxelTree::joined(const std::array<Id, 8>& children) {
@@ -137,6 +137,10 @@ Cube VoxelTree::average(int x, int y, int z, int across) const {
                "a point in the tree");
     HOG_ASSERT(across > 0 && across <= side_ && (across & (across - 1)) == 0,
                "a cube a power of two across, no wider than the tree");
+    return nodes_[node_at(x, y, z, across).first].voxel;
+}
+
+std::pair<VoxelTree::Id, int> VoxelTree::node_at(int x, int y, int z, int across) const {
     Id node = root_;
     int size = side_;
     while (!nodes_[node].leaf && size > across) {
@@ -148,7 +152,7 @@ Cube VoxelTree::average(int x, int y, int z, int across) const {
         z %= half;
         size = half;
     }
-    return nodes_[node].voxel;
+    return {node, size};
 }
 
 int VoxelTree::leaf_side(int x, int y, int z) const {
@@ -170,14 +174,11 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
     // Down to the voxel's own place or the first leaf already holding it, noting each cube passed
     // and which of its eight we went into; then back up, making a node of each with its one new
     // child, and joining where they come alike.
-    struct Step {
-        Id node;
-        std::size_t child;
-    };
     std::vector<Step> path;
     Id replacement = node;
     while (true) {
         const Node here = nodes_[node];
+        HOG_ASSERT(!here.leaf || here.open == 0, "a voxel set where the ground is made finely");
         if (here.leaf && here.voxel == voxel) {
             replacement = node;
             break;
@@ -196,6 +197,10 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
         z %= half;
         side = half;
     }
+    return rejoined(path, replacement);
+}
+
+VoxelTree::Id VoxelTree::rejoined(const std::vector<Step>& path, Id replacement) {
     for (auto step = path.rbegin(); step != path.rend(); ++step) {
         const Node above = nodes_[step->node];
         std::array<Id, 8> children =
@@ -212,6 +217,194 @@ void VoxelTree::set(int x, int y, int z, const Cube& voxel) {
     HOG_ASSERT(x >= 0 && y >= 0 && z >= 0 && x < side_ && y < side_ && z < side_,
                "a point in the tree");
     root_ = with(root_, side_, x, y, z, voxel);
+}
+
+VoxelTree VoxelTree::window(int x, int y, int z, int across, int voxel, std::uint8_t cut) const {
+    HOG_ASSERT(voxel > 0 && voxel <= across && across <= side_ && (voxel & (voxel - 1)) == 0 &&
+                   (across & (across - 1)) == 0,
+               "a window and its voxels powers of two, no wider than the tree");
+    HOG_ASSERT(x >= 0 && y >= 0 && z >= 0 && x % across == 0 && y % across == 0 &&
+                   z % across == 0 && x < side_ && y < side_ && z < side_,
+               "a window within the tree, on its grid");
+    VoxelTree out{across / voxel};
+    // Each node with its size, as nodes alike may stand at different sizes and be cut differently.
+    std::unordered_map<std::uint64_t, Id> made;
+    const auto key = [](Id node, int size) {
+        return (std::uint64_t{node} << 32U) | static_cast<std::uint32_t>(size);
+    };
+    struct Open {
+        Id node;
+        int size;
+        std::size_t next = 0;
+        std::array<Id, 8> children{};
+    };
+    std::vector<Open> open;
+    const auto done = [&](Id node, int size) -> std::optional<Id> {
+        const Node& here = nodes_[node];
+        if (here.leaf) {
+            return out.leaf_of(here.voxel, here.open);
+        }
+        if (size <= voxel) {
+            return out.leaf_of(here.voxel, cut);
+        }
+        if (const auto found = made.find(key(node, size)); found != made.end()) {
+            return found->second;
+        }
+        return std::nullopt;
+    };
+    const auto [top, top_size] = node_at(x, y, z, across);
+    if (const auto id = done(top, top_size)) {
+        out.root_ = *id;
+        return out;
+    }
+    open.push_back({.node = top, .size = top_size});
+    while (true) {
+        Open& last = open.back();
+        if (last.next == 8) {
+            const Id id = out.joined(last.children);
+            made.emplace(key(last.node, last.size), id);
+            open.pop_back();
+            if (open.empty()) {
+                out.root_ = id;
+                return out;
+            }
+            open.back().children.at(open.back().next++) = id;
+            continue;
+        }
+        const Id child = nodes_[last.node].child.at(last.next);
+        const int half = last.size / 2;
+        if (const auto id = done(child, half)) {
+            last.children.at(last.next++) = *id;
+        } else {
+            open.push_back({.node = child, .size = half});
+        }
+    }
+}
+
+std::uint8_t VoxelTree::coarsest(int x, int y, int z, int across, int voxel) const {
+    std::uint8_t most = 0;
+    std::unordered_set<std::uint64_t> seen;
+    const auto [top, top_size] = node_at(x, y, z, across);
+    std::vector<std::pair<Id, int>> pending{{top, top_size}};
+    while (!pending.empty()) {
+        const auto [node, size] = pending.back();
+        pending.pop_back();
+        const Node& here = nodes_[node];
+        if (here.leaf) {
+            most = std::max(most, here.open);
+        } else if (size > voxel &&
+                   seen.insert((std::uint64_t{node} << 32U) | static_cast<std::uint32_t>(size))
+                       .second) {
+            for (const Id child : here.child) {
+                pending.emplace_back(child, size / 2);
+            }
+        }
+    }
+    return most;
+}
+
+VoxelTree::Id VoxelTree::imported(const VoxelTree& part, Id node, std::uint8_t open) {
+    std::unordered_map<Id, Id> made;
+    struct Open {
+        Id node;
+        std::size_t next = 0;
+        std::array<Id, 8> children{};
+    };
+    const auto done = [&](Id at) -> std::optional<Id> {
+        const Node& here = part.nodes_[at];
+        if (here.leaf) {
+            return leaf_of(here.voxel, std::max(here.open, open));
+        }
+        if (const auto found = made.find(at); found != made.end()) {
+            return found->second;
+        }
+        return std::nullopt;
+    };
+    if (const auto id = done(node)) {
+        return *id;
+    }
+    std::vector<Open> pending{{.node = node}};
+    while (true) {
+        Open& last = pending.back();
+        if (last.next == 8) {
+            const Id id = joined(last.children);
+            made.emplace(last.node, id);
+            pending.pop_back();
+            if (pending.empty()) {
+                return id;
+            }
+            pending.back().children.at(pending.back().next++) = id;
+            continue;
+        }
+        const Id child = part.nodes_[last.node].child.at(last.next);
+        if (const auto id = done(child)) {
+            last.children.at(last.next++) = *id;
+        } else {
+            pending.push_back({.node = child});
+        }
+    }
+}
+
+void VoxelTree::graft(int x, int y, int z, const VoxelTree& part, int voxel, std::uint8_t open) {
+    const int across = part.side() * voxel;
+    HOG_ASSERT(across <= side_ && x >= 0 && y >= 0 && z >= 0 && x % across == 0 &&
+                   y % across == 0 && z % across == 0 && x < side_ && y < side_ && z < side_,
+               "a part within the tree, on its grid");
+    // Down to the part's cube, as `with` goes.
+    std::vector<Step> path;
+    Id node = root_;
+    for (int side = side_; side > across; side /= 2) {
+        const int half = side / 2;
+        const std::size_t k = (x >= half ? 1U : 0U) | (y >= half ? 2U : 0U) | (z >= half ? 4U : 0U);
+        path.push_back({.node = node, .child = k});
+        node = nodes_[node].leaf ? node : nodes_[node].child[k];
+        x %= half;
+        y %= half;
+        z %= half;
+    }
+    root_ = rejoined(path, merged(node, part, open));
+}
+
+VoxelTree::Id VoxelTree::merged(Id node, const VoxelTree& part, std::uint8_t open) {
+    // This tree's nodes and the part's side by side: a leaf here marked coarser than the part is
+    // the part's from there down, and anything else here is kept, its children gone through.
+    struct Open {
+        Id here;
+        Id there;
+        std::size_t next = 0;
+        std::array<Id, 8> children{};
+    };
+    const auto done = [&](Id here, Id there) -> std::optional<Id> {
+        const Node& mine = nodes_[here];
+        if (!mine.leaf) {
+            return std::nullopt;
+        }
+        return mine.open > open ? imported(part, there, open) : here;
+    };
+    if (const auto id = done(node, part.root_)) {
+        return *id;
+    }
+    std::vector<Open> pending{{.here = node, .there = part.root_}};
+    while (true) {
+        Open& last = pending.back();
+        if (last.next == 8) {
+            const Id id = joined(last.children);
+            pending.pop_back();
+            if (pending.empty()) {
+                return id;
+            }
+            pending.back().children.at(pending.back().next++) = id;
+            continue;
+        }
+        const Id here = nodes_[last.here].child.at(last.next);
+        const Node& theirs = part.nodes_[last.there];
+        const Id there = theirs.leaf ? last.there : theirs.child.at(last.next);
+        if (const auto id = done(here, there)) {
+            last.children.at(last.next++) = *id;
+        } else {
+            pending.push_back({.here = here, .there = there});
+        }
+    }
 }
 
 std::size_t VoxelTree::nodes() const {
@@ -267,11 +460,42 @@ std::size_t VoxelTree::leaves() const {
 
 namespace {
 
-// Bytes that mark a node as a leaf or a cube of eight.
+// Bytes that mark a node as a leaf, a cube of eight, or a leaf made coarsely, its mark next.
 constexpr std::uint8_t leaf_tag = 0;
 constexpr std::uint8_t cube_tag = 1;
+constexpr std::uint8_t open_tag = 2;
 // The most nodes a tree of bytes may claim, so damaged bytes can't ask for the memory of a planet.
 constexpr std::uint64_t most_nodes = std::uint64_t{1} << 28U;
+
+// A leaf's voxel from its bytes; none where they're cut short or out of range.
+std::optional<Cube> read_cube(ByteReader& in) {
+    const auto material = [](Result<std::uint8_t> value) -> std::optional<Material> {
+        if (!value || *value >= material_count) {
+            return std::nullopt;
+        }
+        return static_cast<Material>(*value);
+    };
+    const auto solid = material(in.read<std::uint8_t>());
+    const auto solid_amount = in.read<std::uint16_t>();
+    const auto grain = material(in.read<std::uint8_t>());
+    const auto grain_amount = in.read<std::uint16_t>();
+    const auto liquid = material(in.read<std::uint8_t>());
+    const auto liquid_amount = in.read<std::uint16_t>();
+    const auto condition = in.read<std::uint8_t>();
+    const auto heat = in.read<std::uint8_t>();
+    if (!solid || !solid_amount || !grain || !grain_amount || !liquid || !liquid_amount ||
+        !condition || !heat) {
+        return std::nullopt;
+    }
+    return Cube{.solid = *solid,
+                .solid_amount = *solid_amount,
+                .grain = *grain,
+                .grain_amount = *grain_amount,
+                .liquid = *liquid,
+                .liquid_amount = *liquid_amount,
+                .condition = *condition,
+                .heat = *heat};
+}
 
 } // namespace
 
@@ -309,7 +533,12 @@ std::vector<std::byte> VoxelTree::encode() const {
         const Node& node = nodes_[order[k]];
         if (node.leaf) {
             const Cube& v = node.voxel;
-            out.write(leaf_tag);
+            if (node.open == 0) {
+                out.write(leaf_tag);
+            } else {
+                out.write(open_tag);
+                out.write(node.open);
+            }
             out.write(static_cast<std::uint8_t>(v.solid));
             out.write(v.solid_amount);
             out.write(static_cast<std::uint8_t>(v.grain));
@@ -348,40 +577,19 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
     VoxelTree tree{static_cast<int>(*side)};
     std::vector<Id> ids;
     ids.reserve(static_cast<std::size_t>(*count));
-    const auto material = [&](Result<std::uint8_t> value) -> std::optional<Material> {
-        if (!value || *value >= material_count) {
-            return std::nullopt;
-        }
-        return static_cast<Material>(*value);
-    };
     for (std::uint64_t k = 0; k < *count; ++k) {
         const auto tag = in.read<std::uint8_t>();
         if (!tag) {
             return fail("a tree's bytes are cut short");
         }
-        if (*tag == leaf_tag) {
-            Cube v;
-            const auto solid = material(in.read<std::uint8_t>());
-            const auto solid_amount = in.read<std::uint16_t>();
-            const auto grain = material(in.read<std::uint8_t>());
-            const auto grain_amount = in.read<std::uint16_t>();
-            const auto liquid = material(in.read<std::uint8_t>());
-            const auto liquid_amount = in.read<std::uint16_t>();
-            const auto condition = in.read<std::uint8_t>();
-            const auto heat = in.read<std::uint8_t>();
-            if (!solid || !solid_amount || !grain || !grain_amount || !liquid || !liquid_amount ||
-                !condition || !heat) {
+        if (*tag == leaf_tag || *tag == open_tag) {
+            const auto open =
+                *tag == open_tag ? in.read<std::uint8_t>() : Result<std::uint8_t>{std::uint8_t{0}};
+            const std::optional<Cube> voxel = read_cube(in);
+            if (!open || (*tag == open_tag && *open == 0) || !voxel) {
                 return fail("a leaf is cut short or has a value out of range");
             }
-            v.solid = *solid;
-            v.solid_amount = *solid_amount;
-            v.grain = *grain;
-            v.grain_amount = *grain_amount;
-            v.liquid = *liquid;
-            v.liquid_amount = *liquid_amount;
-            v.condition = *condition;
-            v.heat = *heat;
-            ids.push_back(tree.leaf_of(v));
+            ids.push_back(tree.leaf_of(*voxel, *open));
         } else if (*tag == cube_tag) {
             std::array<Id, 8> children{};
             for (Id& child : children) {
@@ -422,7 +630,7 @@ bool VoxelTree::same_as(const VoxelTree& other) const {
             return false;
         }
         if (left.leaf) {
-            if (!(left.voxel == right.voxel)) {
+            if (!(left.voxel == right.voxel) || left.open != right.open) {
                 return false;
             }
             continue;
