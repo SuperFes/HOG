@@ -89,6 +89,10 @@ public:
     [[nodiscard]] std::vector<protocol::SentColumn> take_columns() noexcept {
         return std::exchange(columns_, {});
     }
+    // Tiles of the voxel world the server sent since last asked, oldest first.
+    [[nodiscard]] std::vector<protocol::SentTile> take_tiles() noexcept {
+        return std::exchange(tiles_, {});
+    }
 
     // The grain the server has in flight near the player.
     [[nodiscard]] const GrainField& grains() const noexcept { return grains_; }
@@ -147,6 +151,7 @@ private:
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentColumn> columns_;
+    std::vector<protocol::SentTile> tiles_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;
