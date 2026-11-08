@@ -14,8 +14,8 @@ namespace hog::formation {
 // the coasts upwards along where water flows, not stepped through time. Each point's slope is
 // the one at which its river wears rock away as fast as the rock rises (stream power, n = 1).
 struct Rivers {
-    std::vector<double> height;          // metres from the liquid's level; sea floor as the crust left it
-    std::vector<double> ground;          // the same with hollows left unfilled: where lakes may lie
+    std::vector<double> height; // metres from the liquid's level; sea floor as the crust left it
+    std::vector<double> ground; // the same with hollows left unfilled: where lakes may lie
     std::vector<std::uint32_t> receiver; // where each point's water goes next; itself in the sea
     std::vector<double> discharge;       // cubic metres of water a year passing through
     std::vector<double> flood;           // the same as wear and carrying feel it, deserts' flash

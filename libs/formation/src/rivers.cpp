@@ -1,6 +1,5 @@
-#include <hog/formation/rivers.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/rivers.hpp>
 
 #include <algorithm>
 #include <cmath>

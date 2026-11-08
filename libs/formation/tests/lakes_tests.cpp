@@ -1,5 +1,4 @@
 #include <hog/formation/lakes.hpp>
-
 #include <hog/formation/plates.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -32,7 +31,8 @@ TEST_CASE("open water loses more to the air warm than cold", "[formation][lakes]
     CHECK(open_water_loss(-20.0, body) == 0.0);
 }
 
-TEST_CASE("a hollow fills until the air takes what flows in, or to its brim", "[formation][lakes]") {
+TEST_CASE("a hollow fills until the air takes what flows in, or to its brim",
+          "[formation][lakes]") {
     const std::array<double, 4> ground{10.0, 12.0, 15.0, 20.0};
     const std::array<double, 4> loss{1.0, 1.0, 1.0, 1.0};
     const Filling brim = fill_hollow(ground, loss, 10.0, 25.0);

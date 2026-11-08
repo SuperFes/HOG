@@ -1,9 +1,7 @@
-#include <hog/formation/plates.hpp>
-
-#include <hog/formation/fields.hpp>
-
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/fields.hpp>
+#include <hog/formation/plates.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -193,8 +191,8 @@ Boundary classify(const Plates& plates, const Body& body, const Step& step, cons
         boundary.meeting = Meeting::Subduction;
         boundary.over = lit_a ? a : b;
         const double piled = 0.5 * body.thickening * shortening / std::sqrt(std::numbers::pi);
-        boundary.thickened = std::min(piled * body.crust_thickness / body.belt_width,
-                                      0.6 * body.crust_thickness);
+        boundary.thickened =
+            std::min(piled * body.crust_thickness / body.belt_width, 0.6 * body.crust_thickness);
     } else {
         boundary.meeting = Meeting::IslandArc;
         boundary.over = plates.rides_over(a, b) ? a : b;

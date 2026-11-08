@@ -1,6 +1,5 @@
-#include <hog/formation/climate.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/climate.hpp>
 
 #include <algorithm>
 #include <array>
@@ -214,9 +213,8 @@ Climate climate_on(const Sphere& sphere, std::span<const double> heights,
     double total = 0.0;
     double area = 0.0;
     for (std::uint32_t point = 0; point < size; ++point) {
-        const double falling = sea[point] != 0
-                                   ? moisture[point] * sphere.spacing() / body.rain_reach
-                                   : lost[point];
+        const double falling =
+            sea[point] != 0 ? moisture[point] * sphere.spacing() / body.rain_reach : lost[point];
         climate.rain[point] = (0.3 + rising[point]) * falling;
         total += climate.rain[point] * sphere.area(point);
         area += sphere.area(point);

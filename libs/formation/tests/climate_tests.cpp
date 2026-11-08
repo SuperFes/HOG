@@ -54,7 +54,8 @@ TEST_CASE("a planet on its side warms its poles past its equator", "[formation][
 TEST_CASE("a brighter star warms everywhere", "[formation][climate]") {
     Body bright;
     bright.star_flux = 1'600.0;
-    CHECK(sea_level_temperature(bright, 30.0 * degree) > sea_level_temperature(Body{}, 30.0 * degree));
+    CHECK(sea_level_temperature(bright, 30.0 * degree) >
+          sea_level_temperature(Body{}, 30.0 * degree));
 }
 
 TEST_CASE("ground cools with height and rain totals what's asked", "[formation][climate]") {

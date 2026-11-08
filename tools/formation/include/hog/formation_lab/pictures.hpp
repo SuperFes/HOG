@@ -47,7 +47,7 @@ void draw_line(Image& image, const DVec3& from, const DVec3& to, Rgb colour, int
 // Light falling from the north-west on a height field read smoothly over the sphere: 1 on flat
 // ground, more on slopes facing the light, less facing away. `step` is radians between samples.
 [[nodiscard]] double shade(const formation::Sphere& sphere, std::span<const double> heights,
-                           const DVec3& direction, double radius, double step,
-                           double exaggeration, std::uint32_t& start);
+                           const DVec3& direction, double radius, double step, double exaggeration,
+                           std::uint32_t& start);
 
 } // namespace hog::formation_lab

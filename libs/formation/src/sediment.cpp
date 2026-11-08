@@ -1,6 +1,5 @@
-#include <hog/formation/sediment.hpp>
-
 #include <hog/core/portable_maths.hpp>
+#include <hog/formation/sediment.hpp>
 
 #include <algorithm>
 #include <numeric>

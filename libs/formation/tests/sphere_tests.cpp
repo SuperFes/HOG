@@ -16,7 +16,8 @@ using hog::DVec3;
 using hog::formation::Sphere;
 using hog::formation::sphere_size;
 
-TEST_CASE("a sphere has the points its splits make, all on the unit sphere", "[formation][sphere]") {
+TEST_CASE("a sphere has the points its splits make, all on the unit sphere",
+          "[formation][sphere]") {
     const int subdivisions = GENERATE(0, 1, 4);
     const Sphere sphere{subdivisions, 7};
     REQUIRE(sphere.size() == sphere_size(subdivisions));
@@ -73,7 +74,8 @@ TEST_CASE("the nearest point walked to is the nearest of all", "[formation][sphe
         const DVec3 direction{across * std::cos(turn), across * std::sin(turn), z};
         std::uint32_t best = 0;
         for (std::uint32_t index = 1; index < sphere.size(); ++index) {
-            if (glm::dot(sphere.point(index), direction) > glm::dot(sphere.point(best), direction)) {
+            if (glm::dot(sphere.point(index), direction) >
+                glm::dot(sphere.point(best), direction)) {
                 best = index;
             }
         }

@@ -1,6 +1,5 @@
-#include <hog/formation_lab/pictures.hpp>
-
 #include <hog/core/hash.hpp>
+#include <hog/formation_lab/pictures.hpp>
 
 #include <algorithm>
 #include <array>
@@ -141,8 +140,8 @@ double shade(const formation::Sphere& sphere, std::span<const double> heights,
     const double rise_north =
         (height_at(direction + (step * north)) - height_at(direction - (step * north))) / across;
     // Lit from the north-west, high in the sky.
-    const DVec3 normal = glm::normalize(
-        DVec3{-rise_east * exaggeration, -rise_north * exaggeration, 1.0});
+    const DVec3 normal =
+        glm::normalize(DVec3{-rise_east * exaggeration, -rise_north * exaggeration, 1.0});
     const DVec3 light = glm::normalize(DVec3{-1.0, 1.0, 1.4});
     const double flat = light.z;
     return std::clamp(glm::dot(normal, light) / flat, 0.25, 1.6);

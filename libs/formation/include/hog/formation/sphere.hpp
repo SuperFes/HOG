@@ -25,7 +25,8 @@ public:
     }
     [[nodiscard]] const DVec3& point(std::uint32_t index) const { return points_[index]; }
     [[nodiscard]] std::span<const std::uint32_t> neighbors(std::uint32_t index) const {
-        return std::span{neighbors_}.subspan(offsets_[index], offsets_[index + 1] - offsets_[index]);
+        return std::span{neighbors_}.subspan(offsets_[index],
+                                             offsets_[index + 1] - offsets_[index]);
     }
     // Steradians, summing to 4π.
     [[nodiscard]] double area(std::uint32_t index) const { return areas_[index]; }
@@ -49,7 +50,8 @@ public:
 
     template <typename Field>
     [[nodiscard]] double sample(const Field& field, const Spot& spot) const {
-        return (spot.weights.x * field[spot.corners[0]]) + (spot.weights.y * field[spot.corners[1]]) +
+        return (spot.weights.x * field[spot.corners[0]]) +
+               (spot.weights.y * field[spot.corners[1]]) +
                (spot.weights.z * field[spot.corners[2]]);
     }
 
