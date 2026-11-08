@@ -109,6 +109,14 @@ std::vector<Message> examples() {
         Columns{.columns =
                     {{.face = 5, .i = 0xFFFF'FFF0, .j = 3, .level = 6, .bytes = bytes({1, 2, 3})},
                      {.face = 0, .i = 1, .j = 2, .level = 0, .bytes = {}}}},
+        Tiles{},
+        Tiles{.tiles = {{.level = 9,
+                         .face = 5,
+                         .i = 0xFFFF'FFF0,
+                         .j = 3,
+                         .k = 0x8000'0001,
+                         .bytes = bytes({1, 2, 3})},
+                        {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
         Grains{},
         Grains{.tick = 7,
@@ -386,7 +394,8 @@ TEST_CASE("chat with control characters is refused", "[protocol]") {
     }
 }
 
-TEST_CASE("an edit of no width or too wide, and tile columns too many or too big, are refused",
+TEST_CASE("an edit of no width or too wide, and tile columns or tiles too many or too big, are "
+          "refused",
           "[protocol]") {
     auto none = encode(Dug{.centre = far_out, .radius = 1});
     none[none.size() - 4] = std::byte{0};
@@ -407,6 +416,21 @@ TEST_CASE("an edit of no width or too wide, and tile columns too many or too big
     }
     big.resize(big.size() + length);
     CHECK(decode(big).error().code == ErrorCode::OutOfRange);
+    // Tiles likewise.
+    CHECK(decode(bytes({18, 0, static_cast<int>((most_tiles + 1) & 0xFFU),
+                        static_cast<int>((most_tiles + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto big_tile = bytes({18, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0});
+    const auto tile_length = static_cast<std::uint32_t>(most_tile + 1);
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        big_tile.push_back(static_cast<std::byte>((tile_length >> shift) & 0xFFU));
+    }
+    big_tile.resize(big_tile.size() + tile_length);
+    CHECK(decode(big_tile).error().code == ErrorCode::OutOfRange);
+    auto short_tile = encode(Tiles{.tiles = {{.level = 1, .bytes = bytes({1, 2})}}});
+    short_tile.pop_back();
+    CHECK(decode(short_tile).error().code == ErrorCode::Parse);
     // Grains: a count over the most, ids not going up, and one cut short.
     CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
           ErrorCode::OutOfRange);

@@ -36,6 +36,7 @@ enum class Kind : std::uint16_t {
     Built = 15,
     Columns = 16,
     Grains = 17,
+    Tiles = 18,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -586,6 +587,46 @@ struct Ball {
     return finished(in, std::move(columns));
 }
 
+[[nodiscard]] Result<Message> read_tiles(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "tiles");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_tiles) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} tiles in a message; {} allowed", *count, most_tiles));
+    }
+    Tiles tiles;
+    tiles.tiles.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto level = read<std::uint8_t>(in, "a tile");
+        const auto face = read<std::uint8_t>(in, "a tile");
+        const auto i = read<std::uint32_t>(in, "a tile");
+        const auto j = read<std::uint32_t>(in, "a tile");
+        const auto k = read<std::uint32_t>(in, "a tile");
+        const auto length = read<std::uint32_t>(in, "a tile");
+        if (!level || !face || !i || !j || !k || !length) {
+            return make_error(ErrorCode::Parse, "a tile cut short");
+        }
+        if (*length > most_tile) {
+            return make_error(
+                ErrorCode::OutOfRange,
+                std::format("a tile of {} bytes is over the {} allowed", *length, most_tile));
+        }
+        const auto bytes = in.read_bytes(*length);
+        if (!bytes) {
+            return make_error(ErrorCode::Parse, "a tile cut short");
+        }
+        tiles.tiles.push_back({.level = *level,
+                               .face = *face,
+                               .i = *i,
+                               .j = *j,
+                               .k = *k,
+                               .bytes = {bytes->begin(), bytes->end()}});
+    }
+    return finished(in, std::move(tiles));
+}
+
 [[nodiscard]] Result<Message> read_grains(ByteReader& in) {
     const auto tick = read<std::uint32_t>(in, "grains");
     const auto count = read<std::uint16_t>(in, "grains");
@@ -769,6 +810,20 @@ std::vector<std::byte> encode(const Message& message) {
                     out.write(static_cast<std::uint32_t>(column.bytes.size()));
                     out.write_bytes(column.bytes);
                 }
+            } else if constexpr (std::is_same_v<Body, Tiles>) {
+                HOG_ASSERT(body.tiles.size() <= most_tiles, "too many tiles to send at once");
+                out.write(static_cast<std::uint16_t>(Kind::Tiles));
+                out.write(static_cast<std::uint16_t>(body.tiles.size()));
+                for (const SentTile& tile : body.tiles) {
+                    HOG_ASSERT(tile.bytes.size() <= most_tile, "a tile too big to send");
+                    out.write(tile.level);
+                    out.write(tile.face);
+                    out.write(tile.i);
+                    out.write(tile.j);
+                    out.write(tile.k);
+                    out.write(static_cast<std::uint32_t>(tile.bytes.size()));
+                    out.write_bytes(tile.bytes);
+                }
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 HOG_ASSERT(body.flying.size() <= most_grains, "too much grain to send at once");
                 out.write(static_cast<std::uint16_t>(Kind::Grains));
@@ -910,6 +965,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_columns(in);
     case Kind::Grains:
         return read_grains(in);
+    case Kind::Tiles:
+        return read_tiles(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {

@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 33;
+inline constexpr std::uint32_t version = 34;
 // The longest planet a welcome carries.
 inline constexpr std::size_t most_planet = 1'024;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -247,6 +247,9 @@ inline constexpr std::uint32_t most_edit = 8'000;
 // most fills a message.
 inline constexpr std::size_t most_column = std::size_t{500} * 1024;
 inline constexpr std::size_t most_columns = 256;
+// Bytes a tile's coding may take, and the tiles a message may carry.
+inline constexpr std::size_t most_tile = std::size_t{500} * 1024;
+inline constexpr std::size_t most_tiles = 1024;
 
 // Client to server: take shaped matter out of a ball at `centre`, millimetres from the planet's
 // centre, `radius` millimetres across, over most_edit refused. The server obliges where the
@@ -287,6 +290,27 @@ struct Columns {
     friend bool operator==(const Columns&, const Columns&) = default;
 };
 
+// A tile of the voxel world, as globe::VoxelTree codes it: 64 voxels across, each standing for a
+// cube 2^level of the finest voxels wide, at (i, j, k) counted in tiles of its level on `face`.
+struct SentTile {
+    std::uint8_t level = 0;
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint32_t k = 0;
+    std::vector<std::byte> bytes; // at most most_tile
+
+    friend bool operator==(const SentTile&, const SentTile&) = default;
+};
+
+// Server to client: tiles about the player, each to hold in place of any finer the client held
+// within it; sent bulk, so they never hold up moves.
+struct Tiles {
+    std::vector<SentTile> tiles; // at most most_tiles
+
+    friend bool operator==(const Tiles&, const Tiles&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -320,13 +344,13 @@ struct Grains {
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Columns, Grains>;
+                             Said, Hurry, Clock, Placed, Dug, Built, Columns, Grains, Tiles>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
-// characters, a stance it doesn't know, an edit of no width or too wide, or columns too many or
-// too big.
+// characters, a stance it doesn't know, an edit of no width or too wide, or columns or tiles too
+// many or too big.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.
