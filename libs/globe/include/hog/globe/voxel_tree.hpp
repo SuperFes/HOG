@@ -85,6 +85,9 @@ public:
     }
     [[nodiscard]] int side() const noexcept { return side_; }
     [[nodiscard]] Cube at(int x, int y, int z) const;
+    // The voxel standing for the cube `across` wide holding the point, as `halved` would have it
+    // that many times over. Precondition: `across` is a power of two no wider than the tree.
+    [[nodiscard]] Cube average(int x, int y, int z, int across) const;
     // Sets one voxel, splitting any larger cube it's in, and joining cubes back that come alike.
     void set(int x, int y, int z, const Cube& voxel);
 
@@ -110,7 +113,8 @@ public:
 private:
     struct Node {
         bool leaf = true;
-        Cube voxel;
+        Cube voxel; // a cube of eight's as `halved` has them, which its children decide
+
         std::array<Id, 8> child{};
     };
     struct Hash {
