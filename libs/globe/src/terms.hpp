@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <vector>
 
 // The generator's terms, one file each. Heights are metres over the planet's raw radius, as
 // functions of direction, their gradients taken against the point on the sphere at that radius.
@@ -88,6 +90,10 @@ struct CraterProfile {
 
 // Every crater's shape over the ground, worn by its age.
 [[nodiscard]] Noise craters(const Context& context, DVec3 direction, double lod) noexcept;
+// The same at the middle of each of `cells`, all of one level, into each of `into`: added to what's
+// there, the same bits as one at a time.
+void craters(const Context& context, std::span<const Cell> cells, double lod,
+             std::span<Noise> into);
 
 // The cones and craters of the planet's volcanoes, outlines warped.
 [[nodiscard]] Noise volcanoes(const Context& context, DVec3 direction, double lod) noexcept;
@@ -100,6 +106,9 @@ struct Column {
 };
 
 [[nodiscard]] Column column(const Context& context, DVec3 direction, double lod) noexcept;
+// The same, the craters' share given.
+[[nodiscard]] Column column(const Context& context, DVec3 direction, double lod,
+                            const Noise& struck) noexcept;
 
 using Layering = Strata;
 
@@ -116,6 +125,9 @@ struct Ground {
 };
 
 [[nodiscard]] Ground ground(const Context& context, DVec3 direction, double lod) noexcept;
+// The same at the middle of each of `cells`, all of one level: the same bits as one at a time.
+[[nodiscard]] std::vector<Ground> ground(const Context& context, std::span<const Cell> cells,
+                                         double lod);
 
 // Caves never reach a point more than this many metres from open rock.
 inline constexpr double cave_reach = 50.0;
@@ -161,6 +173,9 @@ inline constexpr double sheds_from = 0.3;
 [[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexcept;
 [[nodiscard]] std::optional<Rock> rockfall(const Context& context, DVec3 direction,
                                            double lod) noexcept;
+// The same at the middle of each of `cells`, all of one level, each rock made once.
+[[nodiscard]] std::vector<std::optional<Rock>> rockfall(const Context& context,
+                                                        std::span<const Cell> cells, double lod);
 
 // What's `depth` metres under the ground at `radius`.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,

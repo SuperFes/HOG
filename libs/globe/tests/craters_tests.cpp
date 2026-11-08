@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 using hog::DVec3;
 using hog::globe::Planet;
@@ -110,4 +111,41 @@ TEST_CASE("old airless surfaces keep the most craters", "[globe][craters]") {
     CHECK(mars > 0.1);
     CHECK(mars < moon);
     CHECK(earth < 0.02);
+}
+
+TEST_CASE("craters made over a tile's cells at once are the same bits as one at a time",
+          "[globe][craters]") {
+    for (const std::string_view name : {"moon", "earth"}) {
+        const Planet planet = named(name);
+        const hog::globe::Derived derived = hog::globe::derive(planet);
+        const hog::globe::Generator::Shape shape;
+        const hog::globe::terms::Context context{
+            .planet = &planet, .derived = &derived, .shape = &shape};
+        for (const std::uint8_t level : {std::uint8_t{17}, std::uint8_t{12}}) {
+            const double lod = 1.25 * std::ldexp(1.0, 17 - level);
+            std::vector<hog::globe::Cell> cells;
+            for (std::uint32_t j = 0; j < 64; ++j) {
+                for (std::uint32_t i = 0; i < 64; ++i) {
+                    cells.push_back({.level = level,
+                                     .face = 4,
+                                     .i = (std::uint32_t{1} << (level - 1)) + i,
+                                     .j = (std::uint32_t{3} << (level - 2)) + j});
+                }
+            }
+            std::vector<hog::globe::Noise> made(cells.size());
+            hog::globe::terms::craters(context, cells, lod, made);
+            int marked = 0;
+            for (std::size_t n = 0; n < cells.size(); ++n) {
+                const hog::globe::Noise one =
+                    hog::globe::terms::craters(context, hog::globe::center(cells[n]), lod);
+                CAPTURE(name, level, n);
+                CHECK(made[n].value == one.value);
+                CHECK(made[n].gradient == one.gradient);
+                marked += one.value != 0.0 ? 1 : 0;
+            }
+            // The young Earth may have none in a tile; the Moon is covered in them.
+            CAPTURE(name, level);
+            CHECK((name != "moon" || marked > 0));
+        }
+    }
 }

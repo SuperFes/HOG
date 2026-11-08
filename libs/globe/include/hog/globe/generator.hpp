@@ -119,8 +119,13 @@ public:
         // differ from one layer to the next but for their temperature: about the ground, open
         // water, the water table, the beds' edges and caves, each `margin` wider either way.
         // Outside them, voxels are alike all the way to the next, and no cave reaches them.
-        [[nodiscard]] std::vector<Boundary> boundaries(double lowest, double highest,
-                                                       double margin) const;
+        // Without `beds`, the beds' edges are left out, as inside() tells them; without `caves`,
+        // the caves.
+        [[nodiscard]] std::vector<Boundary> boundaries(double lowest, double highest, double margin,
+                                                       bool beds = true, bool caves = true) const;
+        // The matter a voxel `radius` from the centre shows, deep in the ground clear of its
+        // surface, caves and fallen rock: as sample() has it there.
+        [[nodiscard]] Material inside(double radius) const noexcept;
 
     private:
         friend class Generator;
@@ -205,8 +210,8 @@ public:
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 
 private:
-    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made,
-                                double slope) const noexcept;
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made, double slope,
+                                const std::optional<Rock>& rock) const noexcept;
 
     Planet planet_;
     Derived derived_;

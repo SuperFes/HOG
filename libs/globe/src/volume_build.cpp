@@ -1,3 +1,4 @@
+#include <hog/core/assert.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
@@ -5,7 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -25,10 +28,30 @@ Cube made(const Generator::Column& column, const Layers& layers, int layer, bool
     return cube_of(voxel, voxel.temperature / 8.0);
 }
 
+// Voxels wider than a tunnel show no cave: caves are seen from inside them, where the voxels are
+// finest.
+constexpr double widest_cave = 7.0;
+
+// A voxel deep in the ground, clear of its surface, caves and fallen rock: the bed it shows, and
+// the water in its pores under open water, as made() has it.
+Cube deep(const Generator::Column& column, const Planet& planet, const Layers& layers, int layer) {
+    const double radius = layers.middle(layer);
+    Sample sample;
+    sample.distance = radius - column.ground();
+    sample.material = column.inside(radius);
+    if (column.water() > 0.0 && radius < column.water()) {
+        sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
+        sample.water = properties(sample.material).porosity;
+    }
+    const Voxel voxel = voxel_from(sample, layers.thickness);
+    return cube_of(voxel, voxel.temperature / 8.0);
+}
+
 // The column's voxels from `bottom` to `top` as runs: one sample for each stretch between the
-// generator's boundaries, and one for each voxel within them.
-std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, int bottom,
-                         int top) {
+// generator's boundaries, and one for each voxel within them; in the ground between them, each
+// voxel's bed.
+std::vector<Run> runs_of(const Generator::Column& column, const Planet& planet,
+                         const Layers& layers, int bottom, int top, bool caves) {
     // Layers a boundary passes through, with whether a cave may be in them.
     struct Changing {
         int low = 0;
@@ -37,7 +60,7 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
     };
     std::vector<Changing> changing;
     for (const Generator::Column::Boundary& change :
-         column.boundaries(layers.bottom(bottom), layers.top(top), 0.0)) {
+         column.boundaries(layers.bottom(bottom), layers.top(top), 0.0, false, caves)) {
         const int low = std::max(layers.layer_at(change.bottom), bottom);
         const int high = std::min(layers.layer_at(change.top), top);
         if (low > high) {
@@ -62,10 +85,20 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
             runs.push_back({.low = low, .high = high, .voxel = voxel});
         }
     };
+    // Between boundaries all is alike but the beds, which lie only in the ground.
+    const auto between = [&](int low, int high) {
+        if (layers.middle(high) >= column.ground()) {
+            add(low, high, made(column, layers, (low + high) / 2, false));
+            return;
+        }
+        for (int layer = low; layer <= high; ++layer) {
+            add(layer, layer, deep(column, planet, layers, layer));
+        }
+    };
     int next = bottom;
     for (const Changing& stretch : changing) {
         if (next < stretch.low) {
-            add(next, stretch.low - 1, made(column, layers, (next + stretch.low - 1) / 2, false));
+            between(next, stretch.low - 1);
         }
         for (int layer = std::max(stretch.low, next); layer <= stretch.high; ++layer) {
             add(layer, layer, made(column, layers, layer, stretch.cave));
@@ -73,7 +106,7 @@ std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, 
         next = std::max(next, stretch.high + 1);
     }
     if (next <= top) {
-        add(next, top, made(column, layers, (next + top) / 2, false));
+        between(next, top);
     }
     return runs;
 }
@@ -150,11 +183,12 @@ VoxelTree tile_of(const TileSource& source) {
 
 // Each column's runs from `bottom` to `top`, of `layers`.
 std::vector<std::vector<Run>> runs_up(const std::vector<Generator::Column>& columns,
-                                      const Layers& layers, int bottom, int top) {
+                                      const Planet& planet, const Layers& layers, int bottom,
+                                      int top, bool caves = true) {
     std::vector<std::vector<Run>> runs;
     runs.reserve(columns.size());
     for (const Generator::Column& each : columns) {
-        runs.push_back(runs_of(each, layers, bottom, top));
+        runs.push_back(runs_of(each, planet, layers, bottom, top, caves));
     }
     return runs;
 }
@@ -167,7 +201,7 @@ void build(Volume& volume, const Generator& generator,
            std::uint32_t j, int bottom, int top, int keep) {
     constexpr int side = Volume::tile_side;
     const std::vector<std::vector<Run>> runs =
-        runs_up(columns, generator.layers(), bottom, std::min(top, keep - 1));
+        runs_up(columns, generator.planet(), generator.layers(), bottom, std::min(top, keep - 1));
     for (int k = bottom / side; k <= top / side; ++k) {
         const Site place{.face = face,
                          .i = i * side,
@@ -203,26 +237,76 @@ Layers coarser_layers(const Layers& layers, int level) noexcept {
 }
 
 VoxelTree generate_tile(const Generator& generator, TileKey key) {
+    return std::move(generate_stack(generator, std::span{&key, 1}).front().tree);
+}
+
+std::vector<MadeTile> generate_stack(const Generator& generator, std::span<const TileKey> keys) {
     constexpr int side = Volume::tile_side;
-    const Layers layers = coarser_layers(generator.layers(), key.level);
-    const int bottom = static_cast<int>(key.k) * side;
-    if (bottom >= layers.count) {
-        return VoxelTree{side};
+    std::vector<MadeTile> made;
+    made.reserve(keys.size());
+    if (keys.empty()) {
+        return made;
     }
-    const int top = std::min(bottom + side - 1, layers.count - 1);
+    const TileKey first = keys.front();
+    HOG_ASSERT(std::ranges::all_of(keys,
+                                   [&](TileKey key) {
+                                       return key.level == first.level && key.face == first.face &&
+                                              key.i == first.i && key.j == first.j;
+                                   }),
+               "tiles over one footprint");
+    const Layers layers = coarser_layers(generator.layers(), first.level);
+    int lowest = layers.count;
+    int highest = 0;
+    for (const TileKey key : keys) {
+        const int bottom = static_cast<int>(key.k) * side;
+        if (bottom < layers.count) {
+            lowest = std::min(lowest, bottom);
+            highest = std::max(highest, std::min(bottom + side - 1, layers.count - 1));
+        }
+    }
+    if (lowest > highest) {
+        for (const TileKey key : keys) {
+            made.push_back({.key = key});
+        }
+        return made;
+    }
     const std::vector<Generator::Column> columns =
         generator.columns({.level = static_cast<std::uint8_t>(layers.level),
-                           .face = key.face,
-                           .i = key.i * static_cast<std::uint32_t>(side),
-                           .j = key.j * static_cast<std::uint32_t>(side)},
-                          side, voxel_lod(generator) * (1 << key.level));
-    const std::vector<std::vector<Run>> runs = runs_up(columns, layers, bottom, top);
-    return tile_of({.runs = &runs,
-                    .kept = nullptr,
-                    .base = bottom,
-                    .bottom = bottom,
-                    .top = top,
-                    .keep = top + 1});
+                           .face = first.face,
+                           .i = first.i * static_cast<std::uint32_t>(side),
+                           .j = first.j * static_cast<std::uint32_t>(side)},
+                          side, voxel_lod(generator) * (1 << first.level));
+    const std::vector<std::vector<Run>> runs = runs_up(columns, generator.planet(), layers, lowest,
+                                                       highest, layers.thickness <= widest_cave);
+    // The lowest the ground over the footprint comes, and beside it as steep as it slopes.
+    double ground = std::numeric_limits<double>::max();
+    for (const Generator::Column& column : columns) {
+        ground = std::min(ground, column.ground() - (column.slope() * layers.thickness));
+    }
+    for (const TileKey key : keys) {
+        const int bottom = static_cast<int>(key.k) * side;
+        if (bottom >= layers.count) {
+            made.push_back({.key = key});
+            continue;
+        }
+        const int top = std::min(bottom + side - 1, layers.count - 1);
+        bool solid = ground - layers.thickness >= layers.top(top);
+        for (const std::vector<Run>& up : runs) {
+            for (const Run& run : up) {
+                solid = solid && (run.high < bottom || run.low > top ||
+                                  run.voxel.solid_amount >= Voxel::full);
+            }
+        }
+        made.push_back({.key = key,
+                        .tree = tile_of({.runs = &runs,
+                                         .kept = nullptr,
+                                         .base = bottom,
+                                         .bottom = bottom,
+                                         .top = top,
+                                         .keep = top + 1}),
+                        .buried = solid});
+    }
+    return made;
 }
 
 std::uint32_t tiles_across(const Generator& generator) {

@@ -1,3 +1,4 @@
+#include <hog/core/assert.hpp>
 #include <hog/globe/land.hpp>
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/volume_build.hpp>
@@ -64,17 +65,35 @@ void Land::make(std::span<const TileKey> keys, const EachOf& each) {
     std::ranges::sort(wanted);
     const auto [last, end] = std::ranges::unique(wanted);
     wanted.erase(last, end);
-    std::vector<VoxelTree> made(wanted.size(), VoxelTree{Volume::tile_side});
-    const auto body = [&](std::size_t k) { made[k] = generate_tile(*generator_, wanted[k]); };
+    // Those over one footprint are made together, sharing the ground under them; sorted, they're
+    // next to each other.
+    std::vector<std::span<const TileKey>> stacks;
+    for (std::size_t from = 0; from < wanted.size();) {
+        std::size_t to = from + 1;
+        while (to < wanted.size() && wanted[to].level == wanted[from].level &&
+               wanted[to].face == wanted[from].face && wanted[to].i == wanted[from].i &&
+               wanted[to].j == wanted[from].j) {
+            ++to;
+        }
+        stacks.emplace_back(std::span{wanted}.subspan(from, to - from));
+        from = to;
+    }
+    std::vector<std::vector<MadeTile>> stacked(stacks.size());
+    const auto body = [&](std::size_t n) { stacked[n] = generate_stack(*generator_, stacks[n]); };
     if (each) {
-        each(wanted.size(), body);
+        each(stacks.size(), body);
     } else {
-        for (std::size_t k = 0; k < wanted.size(); ++k) {
-            body(k);
+        for (std::size_t n = 0; n < stacks.size(); ++n) {
+            body(n);
         }
     }
-    for (std::size_t k = 0; k < wanted.size(); ++k) {
-        put(wanted[k], made[k]);
+    for (const std::vector<MadeTile>& stack : stacked) {
+        for (const MadeTile& tile : stack) {
+            put(tile.key, tile.tree);
+            if (tile.buried) {
+                buried_.insert(tile.key);
+            }
+        }
     }
 }
 
@@ -85,6 +104,25 @@ VoxelTree Land::tile(TileKey key) {
     const Place place = place_of(key);
     return root_for(place.root)
         .window(place.x, place.y, place.z, place.across, place.voxel, made_at(key.level));
+}
+
+VoxelTree Land::made(TileKey key) const {
+    const Place place = place_of(key);
+    const VoxelTree* tree = root(place.root);
+    HOG_ASSERT(tree != nullptr && known(key), "a tile known");
+    return tree->window(place.x, place.y, place.z, place.across, place.voxel, made_at(key.level));
+}
+
+bool Land::hidden(TileKey key) {
+    return all_one(key) || buried_.contains(key);
+}
+
+bool Land::all_one(TileKey key) {
+    if (!known(key)) {
+        make(std::span{&key, 1});
+    }
+    const Place place = place_of(key);
+    return root_for(place.root).leaf_side(place.x, place.y, place.z) >= place.across;
 }
 
 namespace {
@@ -117,6 +155,10 @@ void Land::set(Site site, const Cube& voxel) {
     root_for(place.root)
         .set(place.x + static_cast<int>(site.i % side), place.y + static_cast<int>(site.j % side),
              place.z + static_cast<int>(site.layer % side), voxel);
+    // What's changed may show now.
+    for (TileKey over = key; over.level <= top_; over = over.parent()) {
+        buried_.erase(over);
+    }
 }
 
 } // namespace hog::globe

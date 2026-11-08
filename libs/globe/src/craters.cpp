@@ -1,5 +1,6 @@
 #include "terms.hpp"
 
+#include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/maths.hpp>
@@ -8,6 +9,10 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace hog::globe::terms {
 namespace {
@@ -148,25 +153,34 @@ int fallen(double expected, double draw) {
     return count;
 }
 
-struct Sampled {
-    const Context* context;
-    DVec3 direction;
-    double lod;
-    double least; // the smallest crater shown, metres across
+// A crater of a bin as it falls in its cell: where, how wide, and how much of it shows at the
+// detail asked for and how rounded its crest.
+struct Crater {
+    DVec3 centre{0.0};
+    double radius = 0.0; // metres
+    double size = 0.0;   // across
+    double shown = 0.0;
+    double rounding = 0.0; // metres
 };
 
-// The craters of one bin drawn in `cell`, as they shape the ground at the sampled point.
-void add_cell(Noise& sum, const Sampled& at, const Bin& bin, Cell cell) {
-    const Planet& planet = *at.context->planet;
+// Each crater of the bin in `cell` that shows at `lod`, none smaller than `least` across, in the
+// order they fell.
+template <typename Visit>
+void craters_in(const Context& context, const Bin& bin, Cell cell, double lod, double least,
+                const Visit& visit) {
+    const Planet& planet = *context.planet;
     const double radius = planet.radius;
     const std::uint64_t seed =
-        hash_values(at.context->seed(Term::Craters), bin.index, cell.face, cell.i, cell.j);
+        hash_values(context.seed(Term::Craters), bin.index, cell.face, cell.i, cell.j);
     const int count = fallen(bin.expected, unit(hash_values(seed, 0)));
+    if (count == 0) {
+        return;
+    }
     const DVec3 middle = center(cell);
     const DVec3 side_axis = std::abs(middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side_axis, middle));
     const DVec3 north = glm::cross(middle, east);
-    const double kappa = diffusivity(*at.context->derived);
+    const double kappa = diffusivity(*context.derived);
     for (int crater = 1; crater <= count; ++crater) {
         const std::uint64_t own = hash_values(seed, crater);
         const DVec3 centre =
@@ -178,55 +192,64 @@ void add_cell(Noise& sum, const Sampled& at, const Bin& bin, Cell cell) {
             bin.diameter *
             maths::pow(1.0 - (unit(hash_values(own, 3)) * (1.0 - maths::pow(2.0, -bin.slope))),
                        -1.0 / bin.slope);
-        const double crater_radius = 0.5 * size;
-        const double apart = radius * maths::atan2(glm::length(glm::cross(at.direction, centre)),
-                                                   glm::dot(at.direction, centre));
-        if (apart >= reach * crater_radius || size < at.least) {
+        if (size < least) {
             continue;
         }
+        const double crater_radius = 0.5 * size;
         // Worn by creep over its age: features narrower than the creep's reach fade.
         const double age = unit(hash_values(own, 4)) * planet.surface_age * 1'000.0;
         const double crept = std::sqrt(kappa * age);
         const double creep = crept / (0.3 * crater_radius);
         // And faded in as the detail asked for reaches them.
-        const double shown = smoothstep((size / (2.0 * at.lod)) - 1.0) / (1.0 + (creep * creep));
+        const double shown = smoothstep((size / (2.0 * lod)) - 1.0) / (1.0 + (creep * creep));
         if (shown < 0.01) {
             continue;
         }
         // The crest is rounded as far as creep has worn it, and no sharper than the detail.
-        const CraterProfile shape =
-            crater_profile(apart / crater_radius, size, at.context->derived->crater_transition,
-                           std::max(crept, at.lod) / crater_radius);
-        sum.value += shown * shape.height;
-        const DVec3 outward = tangential(at.direction - centre, at.direction);
-        const double out_length = glm::length(outward);
-        if (out_length > 1e-15) {
-            sum.gradient += (shown * shape.slope / crater_radius / out_length) * outward;
-        }
+        visit(Crater{.centre = centre,
+                     .radius = crater_radius,
+                     .size = size,
+                     .shown = shown,
+                     .rounding = std::max(crept, lod)});
     }
 }
 
-} // namespace
+// The crater as it shapes the ground at `direction`.
+void add_crater(Noise& sum, const Context& context, DVec3 direction, const Crater& crater) {
+    const double radius = context.planet->radius;
+    const double apart = radius * maths::atan2(glm::length(glm::cross(direction, crater.centre)),
+                                               glm::dot(direction, crater.centre));
+    if (apart >= reach * crater.radius) {
+        return;
+    }
+    const CraterProfile shape =
+        crater_profile(apart / crater.radius, crater.size, context.derived->crater_transition,
+                       crater.rounding / crater.radius);
+    sum.value += crater.shown * shape.height;
+    const DVec3 outward = tangential(direction - crater.centre, direction);
+    const double out_length = glm::length(outward);
+    if (out_length > 1e-15) {
+        sum.gradient += (crater.shown * shape.slope / crater.radius / out_length) * outward;
+    }
+}
 
-Noise craters(const Context& context, DVec3 direction, double lod) noexcept {
+// Each bin drawn at `lod` and the level of the cells its craters are drawn in, smallest first;
+// none on a world without craters.
+template <typename Visit>
+void bins_at(const Context& context, double least, const Visit& visit) {
     const Planet& planet = *context.planet;
     const double over_1km = planet.impact_flux * per_km2_over_1km(planet.surface_age);
     if (over_1km <= 0.0) {
-        return {};
+        return;
     }
     // A cell's mean side at level 0, in metres.
     const double side_at_root = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.radius;
-    const Sampled at{.context = &context,
-                     .direction = direction,
-                     .lod = lod,
-                     .least = std::max({smallest, atmosphere_cut(planet.pressure), 2.0 * lod})};
-    Noise sum;
     for (int index = 0; index < bin_count; ++index) {
         const double diameter = std::ldexp(smallest, index);
         if (diameter > 0.5 * planet.radius) {
             break;
         }
-        if (2.0 * diameter < at.least) {
+        if (2.0 * diameter < least) {
             continue;
         }
         // Cells wide enough that a crater's reach never runs past the cells around its own.
@@ -240,14 +263,69 @@ Noise craters(const Context& context, DVec3 direction, double lod) noexcept {
                 .side = side_at_root / std::ldexp(1.0, level)};
         bin.expected = (per_km2_over(diameter, over_1km) - per_km2_over(2.0 * diameter, over_1km)) *
                        bin.side * bin.side * 1e-6;
-        const Cell home = cell_under(direction, level);
-        add_cell(sum, at, bin, home);
-        const CellNeighbors near = around(home);
-        for (const Cell cell : near.all()) {
-            add_cell(sum, at, bin, cell);
-        }
+        visit(bin, level);
     }
+}
+
+double least_shown(const Planet& planet, double lod) {
+    return std::max({smallest, atmosphere_cut(planet.pressure), 2.0 * lod});
+}
+
+// Each crater of a bin about `home`, its own cell's then those around it, in that order.
+template <typename Visit>
+void craters_about(const Context& context, const Bin& bin, Cell home, double lod, double least,
+                   const Visit& visit) {
+    craters_in(context, bin, home, lod, least, visit);
+    const CellNeighbors near = around(home);
+    for (const Cell cell : near.all()) {
+        craters_in(context, bin, cell, lod, least, visit);
+    }
+}
+
+} // namespace
+
+Noise craters(const Context& context, DVec3 direction, double lod) noexcept {
+    const double least = least_shown(*context.planet, lod);
+    Noise sum;
+    bins_at(context, least, [&](const Bin& bin, int level) {
+        craters_about(context, bin, cell_under(direction, level), lod, least,
+                      [&](const Crater& crater) { add_crater(sum, context, direction, crater); });
+    });
     return sum;
+}
+
+void craters(const Context& context, std::span<const Cell> cells, double lod,
+             std::span<Noise> into) {
+    HOG_ASSERT(cells.size() == into.size(), "a sum for each cell");
+    const double least = least_shown(*context.planet, lod);
+    std::vector<DVec3> directions;
+    directions.reserve(cells.size());
+    for (const Cell cell : cells) {
+        directions.push_back(center(cell));
+    }
+    std::unordered_map<std::uint64_t, std::vector<Crater>> about;
+    bins_at(context, least, [&](const Bin& bin, int level) {
+        about.clear();
+        for (std::size_t n = 0; n < cells.size(); ++n) {
+            const Cell cell = cells[n];
+            // A cell's middle lies well inside the coarser cell holding it.
+            const auto shift = static_cast<unsigned>(cell.level - level);
+            const Cell home = std::cmp_less_equal(level, cell.level)
+                                  ? Cell{.level = static_cast<std::uint8_t>(level),
+                                         .face = cell.face,
+                                         .i = cell.i >> shift,
+                                         .j = cell.j >> shift}
+                                  : cell_under(directions[n], level);
+            auto [found, added] = about.try_emplace(index_of(home));
+            if (added) {
+                craters_about(context, bin, home, lod, least,
+                              [&](const Crater& crater) { found->second.push_back(crater); });
+            }
+            for (const Crater& crater : found->second) {
+                add_crater(into[n], context, directions[n], crater);
+            }
+        }
+    });
 }
 
 } // namespace hog::globe::terms
