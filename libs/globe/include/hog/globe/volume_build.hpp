@@ -40,6 +40,18 @@ inline constexpr int made_depth = 16;
 // size: the same maths at any level, nothing finer made for it. Reads nothing else.
 [[nodiscard]] VoxelTree generate_tile(const Generator& generator, TileKey key);
 
+// A tile as the generator makes it, and whether it's buried: solid all through and a voxel under
+// the ground at least everywhere over it and beside it, so nothing of it shows from outside.
+struct MadeTile {
+    TileKey key;
+    VoxelTree tree{Volume::tile_side};
+    bool buried = false;
+};
+// The tiles at `keys`, as generate_tile makes each, all over one footprint: of one level, face,
+// i and j. The ground under them is worked out once for them all.
+[[nodiscard]] std::vector<MadeTile> generate_stack(const Generator& generator,
+                                                   std::span<const TileKey> keys);
+
 // Every tile column of the area, as `generate_tiles` makes them, one after another.
 [[nodiscard]] Volume generate_area(const Generator& generator, const Area& area);
 

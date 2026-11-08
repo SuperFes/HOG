@@ -5,10 +5,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace hog::globe {
 
@@ -69,8 +73,8 @@ double steepness(const Context& context, DVec3 direction) noexcept {
 }
 
 int rock_level(const Planet& planet) noexcept {
-    return std::max(
-        0, static_cast<int>(std::ceil(std::log2(std::numbers::pi / 2.0 * planet.radius / rock_cell))));
+    return std::max(0, static_cast<int>(std::ceil(
+                           std::log2(std::numbers::pi / 2.0 * planet.radius / rock_cell))));
 }
 
 std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexcept {
@@ -86,7 +90,8 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     const std::array<DVec3, 4> corner = corners(cell);
     double width = rock_cell;
     for (std::size_t k = 0; k < corner.size(); ++k) {
-        width = std::min(width, glm::length(corner[(k + 1) % corner.size()] - corner[k]) * planet.radius);
+        width = std::min(width,
+                         glm::length(corner[(k + 1) % corner.size()] - corner[k]) * planet.radius);
     }
     const double length =
         std::min(smallest * std::pow(largest / smallest, draw * draw), 0.2 * width);
@@ -94,7 +99,8 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
         return std::nullopt;
     }
     const DVec3 middle_direction = center(cell);
-    const DVec3 axis = std::abs(middle_direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 axis =
+        std::abs(middle_direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(axis, middle_direction));
     const DVec3 north = glm::cross(middle_direction, east);
     // Inside the middle of the cell, so the block never crosses into the next.
@@ -127,6 +133,19 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     return rock;
 }
 
+namespace {
+
+// The rock in `cell`, if it reaches the column under `direction`.
+std::optional<Rock> reaching(const Context& context, const std::optional<Rock>& rock,
+                             DVec3 direction) noexcept {
+    if (rock && glm::length(rock->up - direction) * context.planet->radius > rock->axes.x) {
+        return std::nullopt;
+    }
+    return rock;
+}
+
+} // namespace
+
 std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod) noexcept {
     const Cell cell = cell_under(direction, rock_level(*context.planet));
     // Only a column the block reaches is worth the ground under it.
@@ -134,11 +153,32 @@ std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod
     if (unit(seed, 0) >= full_density) {
         return std::nullopt;
     }
-    std::optional<Rock> rock = rock_in(context, cell, lod);
-    if (rock && glm::length(rock->up - direction) * context.planet->radius > rock->axes.x) {
-        return std::nullopt;
+    return reaching(context, rock_in(context, cell, lod), direction);
+}
+
+std::vector<std::optional<Rock>> rockfall(const Context& context, std::span<const Cell> cells,
+                                          double lod) {
+    const int level = rock_level(*context.planet);
+    std::unordered_map<std::uint64_t, std::optional<Rock>> made;
+    std::vector<std::optional<Rock>> found;
+    found.reserve(cells.size());
+    for (const Cell cell : cells) {
+        const DVec3 direction = center(cell);
+        // A cell's middle lies well inside the coarser cell holding it.
+        const auto shift = static_cast<unsigned>(cell.level - level);
+        const Cell home = std::cmp_less_equal(level, cell.level)
+                              ? Cell{.level = static_cast<std::uint8_t>(level),
+                                     .face = cell.face,
+                                     .i = cell.i >> shift,
+                                     .j = cell.j >> shift}
+                              : cell_under(direction, level);
+        const auto [rock, added] = made.try_emplace(index_of(home));
+        if (added) {
+            rock->second = rock_in(context, home, lod);
+        }
+        found.push_back(reaching(context, rock->second, direction));
     }
-    return rock;
+    return found;
 }
 
 } // namespace terms

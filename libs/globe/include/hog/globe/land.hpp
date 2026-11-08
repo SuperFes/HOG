@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <span>
 
 namespace hog::globe {
@@ -36,6 +37,14 @@ public:
     void make(std::span<const TileKey> keys, const EachOf& each = {});
     // The tile at `key`, made first where not known: each voxel standing for its cube of the tree.
     [[nodiscard]] VoxelTree tile(TileKey key);
+    // The tile at `key` as known, without making anything: safe beside other readers.
+    // Precondition: known(key).
+    [[nodiscard]] VoxelTree made(TileKey key) const;
+    // Whether the tile at `key` is all one voxel, made first where not known.
+    [[nodiscard]] bool all_one(TileKey key);
+    // Whether nothing of the tile at `key` shows from outside it, made first where not known: it's
+    // all one voxel, or buried as the generator made it and unchanged since.
+    [[nodiscard]] bool hidden(TileKey key);
 
     // The voxel at `site` as finely as it's known; air where nothing is.
     [[nodiscard]] Cube at(Site site) const;
@@ -60,6 +69,7 @@ private:
     const Generator* generator_;
     std::uint8_t top_ = 0;
     std::map<TileKey, VoxelTree> roots_;
+    std::set<TileKey> buried_;
 };
 
 // A tile's open leaves' mark as the generator makes it at `level`: 0 at the finest, as fine as it
