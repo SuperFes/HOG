@@ -356,7 +356,10 @@ void TileMeshes::drop(globe::TileKey key) {
     bare_.erase(key);
     held_.erase(found);
     by_level_[key.level].erase(code(key));
-    unfill(key);
+    // Filled right through by those under it, its cube still is.
+    if (!children_filled(key)) {
+        unfill(key);
+    }
     // Those under it may be drawn now in its place.
     for (const globe::TileKey finer : under(key)) {
         touched_.insert(finer);
