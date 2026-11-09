@@ -36,7 +36,7 @@ struct Planet {
     // The voxel shell: impassable below the floor, open sky above the ceiling.
     double voxel = 0.333'333'333; // metres
     double floor_depth = 2'500.0; // metres of rock kept under the lowest ground
-    double sky_height = 12'000.0; // metres above the reference level
+    double sky_height = 12'000.0; // metres of air kept over the highest ground
 
     double heat_flow = 0.087; // W/m² out through the surface
     // Splits of the sphere the land is formed on, stage by stage from plates to soil

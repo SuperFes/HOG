@@ -9,6 +9,7 @@
 using hog::globe::Layers;
 
 TEST_CASE("layers stand evenly from the floor to the ceiling", "[globe][layers]") {
+    // A shell the layers fill exactly.
     const Layers layers = hog::globe::layers_about(115'000.0, 3'000.0, 2'000.0, 0.5);
     CHECK(layers.count == 10'000);
     CHECK(layers.floor == 112'000.0);
@@ -20,6 +21,16 @@ TEST_CASE("layers stand evenly from the floor to the ceiling", "[globe][layers]"
     for (int layer = 0; layer < layers.count; layer += 97) {
         CHECK(layers.layer_at((layers.bottom(layer) + layers.top(layer)) / 2.0) == layer);
     }
+}
+
+TEST_CASE("layers keep their thickness and the reference level on a layer's floor",
+          "[globe][layers]") {
+    const Layers layers = hog::globe::layers_about(115'000.0, 2'500.1, 1'999.95, 1.0 / 3.0);
+    CHECK(layers.thickness == 1.0 / 3.0);
+    CHECK(layers.floor <= 115'000.0 - 2'500.1);
+    CHECK(layers.ceiling() >= 115'000.0 + 1'999.95);
+    const int level = layers.layer_at(115'000.0 + 1e-6);
+    CHECK(std::abs(layers.bottom(level) - 115'000.0) < 1e-6);
 }
 
 TEST_CASE("a layer's voxels fill its spherical shell exactly", "[globe][layers]") {

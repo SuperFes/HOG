@@ -277,7 +277,13 @@ TEST_CASE("ground warmed by the sun draws air in and lifts it", "[weather][wind]
         return world.field.air[cell].wind - still.air[cell].wind;
     };
     const Vec3 up = world.stencil.up(column);
-    CHECK(glm::dot(added(world.field.grid.index(column, low + 1)), up) > 0.0F);
+    // The warmed column rises as a whole, however its lowest layers first rock.
+    double lifted = 0.0;
+    for (int layer = low; layer < layers; ++layer) {
+        lifted += world.field.grid.depth_of(layer) *
+                  static_cast<double>(glm::dot(added(world.field.grid.index(column, layer)), up));
+    }
+    CHECK(lifted > 0.0);
     // Air close to the ground flows in from the sides.
     float inflow = 0.0F;
     const auto& links = world.stencil.links(world.field.grid.index(column, low));

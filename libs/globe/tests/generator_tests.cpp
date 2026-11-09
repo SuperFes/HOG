@@ -73,12 +73,15 @@ TEST_CASE("a wet world's sea stands at its radius and its ground inside its shel
     CHECK(earth.sea_level().value_or(0.0) == earth.planet().body.radius);
     CHECK(found.sea > 0.3);
     CHECK(found.sea < 0.95);
-    // A shell from the floor under the deepest sea to the sky.
-    CHECK(earth.layers().ceiling() - earth.planet().body.radius == earth.planet().sky_height);
+    // A shell from the floor under the deepest sea to the sky over the highest ground.
+    const double sky = earth.planet().sky_height + std::max(0.0, earth.shape().highest);
+    CHECK(earth.layers().ceiling() - earth.planet().body.radius >= sky);
+    CHECK(earth.layers().ceiling() - earth.planet().body.radius < sky + earth.layers().thickness);
     UNSCOPED_INFO("ground " << found.lowest << " to " << found.highest);
     CHECK(found.lowest - earth.layers().floor + earth.planet().body.radius >
           0.75 * earth.planet().floor_depth);
-    CHECK(found.highest < earth.planet().sky_height);
+    CHECK(found.highest + earth.planet().sky_height <
+          earth.layers().ceiling() - earth.planet().body.radius + earth.layers().thickness);
 }
 
 TEST_CASE("a world where nothing lies liquid has no sea", "[globe][generator]") {
@@ -89,7 +92,8 @@ TEST_CASE("a world where nothing lies liquid has no sea", "[globe][generator]") 
         CHECK(found.sea == 0.0);
         CHECK(found.lowest - world.layers().floor + world.planet().body.radius >
               0.75 * world.planet().floor_depth);
-        CHECK(found.highest < world.planet().sky_height);
+        CHECK(found.highest + world.planet().sky_height <
+              world.layers().ceiling() - world.planet().body.radius + world.layers().thickness);
     }
 }
 

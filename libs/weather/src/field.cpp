@@ -128,8 +128,7 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
     const double bottom = sea.value_or(planet.body.radius + generator.shape().lowest);
 
     Field field;
-    field.grid =
-        stretched_grid(level, layers, bottom, planet.body.radius + planet.sky_height - bottom);
+    field.grid = stretched_grid(level, layers, bottom, generator.layers().ceiling() - bottom);
     const Grid& grid = field.grid;
     field.air.resize(grid.size());
     field.ground.resize(grid.columns());

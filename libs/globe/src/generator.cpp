@@ -66,7 +66,7 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     shape_.formed = formed;
     say("laying out the voxel layers");
     layers_ = layers_about(planet_.body.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
-                           planet_.sky_height, planet_.voxel);
+                           planet_.sky_height + std::max(0.0, shape_.highest), planet_.voxel);
 }
 
 std::optional<double> Generator::sea_level() const noexcept {
