@@ -122,8 +122,13 @@ private:
     std::vector<double> volcanic_;
     std::vector<double> carbonate_;
     std::vector<double> shingle_;
-    // How deep the sea gets about each point.
-    std::vector<double> floor_;
+    // Each point's beach about where the ground comes out of the water, built once along the
+    // ground across the shore there; points beside them share theirs.
+    void lay_shores();
+    [[nodiscard]] std::optional<Laid> lay_shore(std::uint32_t point,
+                                                formation::Smooth::Weights& weights) const;
+    std::vector<std::uint32_t> laid_at_; // each point's in `laid_`, none without
+    std::vector<Laid> laid_;
     // Beaches' grains: sand, volcanic sand, shell sand, shingle, and mud.
     std::array<Grains, 5> grains_{};
     std::uint64_t bars_seed_ = 0;

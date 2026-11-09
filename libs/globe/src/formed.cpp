@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <thread>
 
@@ -21,15 +22,8 @@ namespace {
 constexpr double rock_steepest = 1.73; // 60 degrees
 constexpr double loose_steepest = 0.7; // 35 degrees
 constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
-double smoothstep(double from, double to, double x) noexcept {
-    const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
-    return t * t * (3.0 - (2.0 * t));
-}
-
 // Rip currents cut crescent bars about this many times the surf zone's width apart.
 constexpr double rip_spacing = 4.0;
-// The gentlest ground a beach is reckoned across, rise over run.
-constexpr double shallowest = 1e-4;
 
 formation::Body body_for(const Planet& planet) {
     formation::Body body;
@@ -261,6 +255,42 @@ void spread_round(const formation::Sphere& sphere, std::span<std::vector<double>
     held = std::move(next);
 }
 
+// Points about where `top` comes out of the water, and a point either side of them.
+std::vector<std::uint8_t> about_waterline(const formation::Sphere& sphere,
+                                          const std::vector<double>& top) {
+    std::vector<std::uint8_t> about(sphere.size(), 0);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const bool crossing = std::ranges::any_of(sphere.neighbors(point), [&](std::uint32_t near) {
+            return (top[near] > 0.0) != (top[point] > 0.0);
+        });
+        if (crossing) {
+            about[point] = 1;
+            for (const std::uint32_t near : sphere.neighbors(point)) {
+                about[near] = 1;
+            }
+        }
+    }
+    return about;
+}
+
+// Points with none in `at` take a neighbour's.
+void share_round(const formation::Sphere& sphere, std::vector<std::uint32_t>& at) {
+    constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
+    std::vector<std::uint32_t> shared = at;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (at[point] != none) {
+            continue;
+        }
+        const auto neighbors = sphere.neighbors(point);
+        const auto near =
+            std::ranges::find_if(neighbors, [&](std::uint32_t next) { return at[next] != none; });
+        if (near != neighbors.end()) {
+            shared[point] = at[*near];
+        }
+    }
+    at = std::move(shared);
+}
+
 // The sand there's most of.
 Material most_sand(double quartz, double volcanic, double carbonate) {
     if (quartz >= volcanic && quartz >= carbonate) {
@@ -298,17 +328,116 @@ void Formed::fill_shores() {
     for (int round = 0; round < rounds; ++round) {
         spread_round(world.sphere, fields, held);
     }
+    lay_shores();
+}
 
-    const formation::Sphere& sphere = world.sphere;
+void Formed::lay_shores() {
+    const formation::Sphere& sphere = world_.sphere;
     const std::uint32_t size = sphere.size();
-    floor_.assign(size, 0.0);
-    for (std::uint32_t point = 0; point < size; ++point) {
-        double lowest = top_[point];
-        for (const std::uint32_t near : sphere.neighbors(point)) {
-            lowest = std::min(lowest, top_[near]);
+    const std::vector<std::uint8_t> building = about_waterline(sphere, top_);
+    std::vector<std::optional<Laid>> built(size);
+    std::atomic<std::uint32_t> next = 0;
+    const auto build = [&] {
+        formation::Smooth::Weights weights;
+        for (std::uint32_t point = next++; point < size; point = next++) {
+            if (building[point] != 0) {
+                built[point] = lay_shore(point, weights);
+            }
         }
-        floor_[point] = std::max(0.0, -lowest);
+    };
+    {
+        std::vector<std::jthread> workers;
+        const unsigned count = std::max(1U, std::thread::hardware_concurrency());
+        workers.reserve(count);
+        for (unsigned worker = 0; worker < count; ++worker) {
+            workers.emplace_back(build);
+        }
     }
+    constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
+    laid_at_.assign(size, none);
+    laid_.clear();
+    for (std::uint32_t point = 0; point < size; ++point) {
+        if (const std::optional<Laid>& here = built[point]; here.has_value()) {
+            laid_at_[point] = static_cast<std::uint32_t>(laid_.size());
+            laid_.push_back(here.value());
+        }
+    }
+    // Reads weigh points a couple of spacings about, so those beside share a neighbour's.
+    for (int round = 0; round < 2; ++round) {
+        share_round(sphere, laid_at_);
+    }
+}
+
+std::optional<Laid> Formed::lay_shore(std::uint32_t point,
+                                      formation::Smooth::Weights& weights) const {
+    const std::optional<Beach> beach =
+        beach_from([&](const std::vector<double>& field) { return field[point]; });
+    if (!beach) {
+        return std::nullopt;
+    }
+    const formation::Sphere& sphere = world_.sphere;
+    const DVec3 middle = sphere.point(point);
+    smooth_.weigh(middle, weights, point);
+    const formation::Smooth::Read here = formation::Smooth::read(top_, weights);
+    const DVec3 rise = here.gradient - (glm::dot(here.gradient, middle) * middle);
+    if (glm::length(rise) <= 0.0) {
+        return std::nullopt;
+    }
+    // The ground across the shore, down its fall from a couple of spacings inland to as far out.
+    const DVec3 seaward = -glm::normalize(rise);
+    const double spacing = sphere.spacing() * radius_;
+    constexpr int steps = static_cast<int>(Section::samples) - 1;
+    std::array<double, steps + 1> along{};
+    std::array<double, steps + 1> height{};
+    std::uint32_t near = point;
+    for (int at = 0; at <= steps; ++at) {
+        const auto index = static_cast<std::size_t>(at);
+        along[index] = spacing * ((4.0 * at / steps) - 2.0);
+        smooth_.weigh(glm::normalize(middle + (seaward * (along[index] / radius_))), weights, near);
+        near = weights.nearest;
+        height[index] = formation::Smooth::read(top_, weights).value;
+    }
+    // Where it comes out of the water nearest the point.
+    std::optional<double> water;
+    std::size_t from = 0;
+    for (std::size_t at = 0; at < steps; ++at) {
+        if (height[at] > 0.0 && height[at + 1] <= 0.0) {
+            const double there = along[at] + ((along[at + 1] - along[at]) * height[at] /
+                                              (height[at] - height[at + 1]));
+            if (!water || std::abs(there) < std::abs(*water)) {
+                water = there;
+                from = at;
+            }
+        }
+    }
+    if (!water) {
+        return std::nullopt;
+    }
+    // Out from the waterline, never rising seaward: out from it the lowest yet, in from it the
+    // highest. Where it's level its height can't tell how far out it is, so it's read as falling
+    // at least as the beach's own shoreface does on the whole.
+    Section section;
+    for (std::size_t at = 0; at <= steps; ++at) {
+        section.out[at] = along[at] - *water;
+        section.height[at] = height[at];
+    }
+    const Profile& profile = beach->profile;
+    const double least_fall =
+        (along[1] - along[0]) * profile.closure / std::max(out_to(profile, profile.closure), 1.0);
+    for (std::size_t at = from + 1; at <= steps; ++at) {
+        section.height[at] = std::min(section.height[at], section.height[at - 1] - least_fall);
+    }
+    for (std::size_t at = from + 1; at-- > 0;) {
+        section.height[at] = std::max(section.height[at], section.height[at + 1] + least_fall);
+    }
+    const std::optional<Built> laid = built_along(profile, section, beach->volume);
+    if (!laid) {
+        return std::nullopt;
+    }
+    return Laid{.profile = profile,
+                .built = *laid,
+                .bars = bars_on(profile, beach->sea, beach->grains, world_.body.gravity),
+                .section = section};
 }
 
 template <typename Value>
@@ -347,68 +476,74 @@ std::optional<Formed::Beach> Formed::beach_from(const Value& value) const {
         beach.volume = sand;
     }
     beach.profile = profile_for(beach.sea, beach.grains, body.gravity);
+    // The swash throws up sand and stones, not mud: mud flats have no berm.
+    if (beach.mud) {
+        beach.profile.berm = 0.0;
+    }
     return beach;
 }
 
 void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, Noise& top,
                        Strata& layers) const {
-    const auto value = [&](const std::vector<double>& field) {
-        return formation::Smooth::read(field, weights).value;
-    };
-    const std::optional<Beach> beach = beach_from(value);
-    if (!beach) {
-        return;
-    }
-    const double floor = value(floor_);
-    if (floor <= 0.0) {
-        return;
-    }
-    // Built on the ground as the points have it, out from its waterline across its slope here.
+    // As thick over the ground as the points' beaches lie over ground as high, blended.
     const formation::Smooth::Read plane = formation::Smooth::read(top_, weights);
     const DVec3 rise =
         (plane.gradient - (glm::dot(plane.gradient, direction) * direction)) / radius_;
-    const Ground ground{.slope = std::max(glm::length(rise), shallowest), .floor = floor};
-    const Built built = built_on(beach->profile, ground, beach->volume);
-    const double out = -plane.value / ground.slope;
-    const std::optional<Across> on = beach_top(beach->profile, ground, built, out);
-    if (!on) {
-        return;
-    }
-    Across surface = *on;
-    const Profile profile = as_built(beach->profile, built);
-    const double offshore = out - built.ahead;
-    if (offshore > 0.0 && offshore < out_to(profile, profile.closure)) {
-        const Bars bars = bars_on(beach->profile, beach->sea, beach->grains, world_.body.gravity);
-        if (bars.count > 0) {
-            const double spacing =
-                rip_spacing * bars.crest[static_cast<std::size_t>(bars.count - 1)];
-            const double shift =
-                bars.rhythm * gradient_noise(direction * (radius_ / spacing), bars_seed_).value;
-            const Across bar = bars_at(bars, offshore, shift);
-            surface.height += bar.height;
-            surface.slope += bar.slope;
+    double thick = 0.0;
+    double rate = 0.0;
+    DVec3 weighed{0.0};
+    for (std::size_t at = 0; at < weights.points.size(); ++at) {
+        const std::uint32_t index = laid_at_[weights.points[at]];
+        if (index == std::numeric_limits<std::uint32_t>::max()) {
+            continue;
         }
+        const Laid& laid = laid_[index];
+        double shift = 0.0;
+        if (laid.bars.count > 0) {
+            const double spacing =
+                rip_spacing * laid.bars.crest[static_cast<std::size_t>(laid.bars.count - 1)];
+            shift = laid.bars.rhythm *
+                    gradient_noise(direction * (radius_ / spacing), bars_seed_).value;
+        }
+        const Across lying = lying_over(laid, plane.value, shift);
+        const double weight = weights.weights[at];
+        thick += weight * lying.height;
+        rate += weight * lying.slope;
+        weighed += weights.gradients[at] * lying.height;
     }
-    // Hollows deeper under the ground's plane than the storms rework funnel the sand on down.
-    const double sunk = (plane.value - top.value) / std::max(profile.closure, 1.0);
-    const double kept = built.share * (1.0 - smoothstep(1.0, 2.0, sunk));
-    const double fill = kept * (surface.height - top.value);
-    if (fill <= 0.0) {
+    if (thick <= 0.0) {
         return;
     }
-    const DVec3 seaward = glm::length(rise) > 0.0 ? -rise / glm::length(rise) : DVec3{0.0};
-    top.gradient = ((1.0 - kept) * top.gradient) + (kept * surface.slope * seaward);
+    const DVec3 thickening = (weighed / radius_) + (rate * rise);
+    // Hollows cut below the points' ground it fills up to its top, as deep again as it lies thick
+    // and no deeper, there being no more of it; over deeper ones it lies that thick, following them
+    // down. Ground standing over theirs it fills only up to its top, and none stands higher.
+    const double over = plane.value + thick - top.value;
+    if (over <= 0.0) {
+        return;
+    }
+    const bool draping = over >= 2.0 * thick;
+    const double fill = draping ? 2.0 * thick : over;
+    top.gradient = (draping ? top.gradient : rise) + ((draping ? 2.0 : 1.0) * thickening);
     top.value += fill;
     layers.beach = fill;
     layers.organic = 0.0;
     layers.topsoil = 0.0;
     layers.subsoil = 0.0;
     // The swash throws stones to the top of the beach, sand lies under them.
+    const auto value = [&](const std::vector<double>& field) {
+        return formation::Smooth::read(field, weights).value;
+    };
+    const std::optional<Beach> beach = beach_from(value);
+    if (!beach) {
+        layers.beach_of = Material::Sand;
+        return;
+    }
     const double shingle = std::clamp(value(shingle_), 0.0, 1.0);
-    const double band = profile.berm + profile.closure;
+    const Profile& profile = beach->profile;
     if (beach->mud) {
         layers.beach_of = Material::Sediment;
-    } else if (top.value >= profile.berm - (shingle * band)) {
+    } else if (top.value >= profile.berm - (shingle * (profile.berm + profile.closure))) {
         layers.beach_of = Material::Shingle;
     } else {
         layers.beach_of = most_sand(value(quartz_), value(volcanic_), value(carbonate_));

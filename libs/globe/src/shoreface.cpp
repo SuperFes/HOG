@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 
 namespace hog::globe {
@@ -124,11 +125,13 @@ Grains grains_of(Material material, double gravity) {
         (sinking(middle, submerged, gravity) < of.settling ? small : large) = middle;
     }
     const double soaked = of.saturated_repose > 0.0 ? of.saturated_repose : of.repose;
+    const double dry = of.repose > 0.0 ? of.repose : soaked;
     return {.size = std::sqrt(small * large),
             .settling = of.settling,
             // Dean (1987), from the settling in centimetres a second.
             .scale = 0.067 * maths::pow(100.0 * of.settling, 0.44),
-            .steepest = maths::tan(soaked)};
+            .steepest = maths::tan(soaked),
+            .dry = maths::tan(dry)};
 }
 
 Grains mixed(std::span<const Grains> grains, std::span<const double> shares) {
@@ -138,6 +141,7 @@ Grains mixed(std::span<const Grains> grains, std::span<const double> shares) {
         mix.settling += grains[kind].settling * shares[kind];
         mix.scale += grains[kind].scale * shares[kind];
         mix.steepest += grains[kind].steepest * shares[kind];
+        mix.dry += grains[kind].dry * shares[kind];
     }
     return mix;
 }
@@ -152,7 +156,7 @@ double face_slope(const Sea& sea, const Grains& grains, double gravity) {
 
 double runup(const Sea& sea, double face, double gravity) {
     const double length = gravity * sea.period * sea.period / (2.0 * std::numbers::pi);
-    const double reach = sea.storm * length;
+    const double reach = sea.usual * length;
     return 1.1 * ((0.35 * face * std::sqrt(reach)) +
                   (0.5 * std::sqrt(reach * ((0.563 * face * face) + 0.004))));
 }
@@ -171,7 +175,8 @@ Profile profile_for(const Sea& sea, const Grains& grains, double gravity) {
             .face = face,
             .berm = runup(sea, face, gravity),
             .closure = closure_depth(sea, gravity),
-            .toe = grains.steepest};
+            .toe = grains.steepest,
+            .back = grains.dry};
 }
 
 double out_to(const Profile& profile, double depth) {
@@ -206,15 +211,21 @@ Across across(const Profile& profile, double out) {
     return {.height = -depth, .slope = -1.0 / rate};
 }
 
-double held(const Profile& profile, const Ground& ground, double ahead) {
-    // Summed by height: at each, from the ground out to the beach's top.
+double held(const Profile& profile, const Ground& ground, double ahead, double top) {
+    // Summed by height: at each, from the ground out to the beach's top, up to `top`.
     const double inland = 1.0 / ground.slope;
-    const double over = above_line(ahead, inland - (1.0 / profile.face), 0.0, profile.berm);
-    const double shoreface = above_shoreface(ahead, (1.0 / profile.face) - inland, profile.scale,
-                                             std::min(profile.closure, ground.floor));
+    const double over =
+        above_line(ahead, inland - (1.0 / profile.face), 0.0, std::min(profile.berm, top));
+    const double from = std::max(0.0, -top);
+    const double rate = (1.0 / profile.face) - inland;
+    const double deepest = std::min(profile.closure, ground.floor);
+    const double shoreface = from < deepest ? above_shoreface(ahead, rate, profile.scale, deepest) -
+                                                  above_shoreface(ahead, rate, profile.scale, from)
+                                            : 0.0;
     const double reach = out_to(profile, profile.closure);
-    const double toe = above_line(ahead + reach - (profile.closure / profile.toe),
-                                  (1.0 / profile.toe) - inland, profile.closure, ground.floor);
+    const double toe =
+        above_line(ahead + reach - (profile.closure / profile.toe), (1.0 / profile.toe) - inland,
+                   std::max(profile.closure, from), ground.floor);
     return over + shoreface + toe;
 }
 
@@ -224,63 +235,162 @@ Profile as_built(const Profile& profile, const Built& built) {
     return cut;
 }
 
-Built built_on(const Profile& profile, const Ground& ground, double volume) {
-    // Sand can't lie on ground steeper than it holds soaked: what reaches it slides off.
-    if (volume <= 0.0 || ground.slope >= profile.toe) {
-        return {};
+namespace {
+
+// Where a beach of `volume` lies, `holds` telling how much it holds built so: gathering at the
+// ground's foot `lowest` metres up and filling up from there until it comes up to the beach's berm;
+// then its face built out from the waterline, at least `least_ahead` for it to stand whole; then
+// its shoreface reaching down as far as there's sand for; then the whole of it built out.
+template <typename Holds>
+Built build(const Profile& profile, const Holds& holds, double volume, double least_ahead,
+            double lowest) {
+    if (volume < holds(Built{})) {
+        double low = lowest;
+        double high = profile.berm;
+        for (int step = 0; step < halvings; ++step) {
+            const double middle = 0.5 * (low + high);
+            (holds(Built{.top = middle}) < volume ? low : high) = middle;
+        }
+        return {.top = 0.5 * (low + high)};
     }
-    const auto with = [&](double ahead, double down) {
-        return held(as_built(profile, {.ahead = ahead, .down = down}), ground, ahead);
-    };
-    // A trace of sand only thinly covers where the least of a beach would lie.
-    const double trace = with(0.0, 0.0);
-    if (volume <= trace) {
-        return {.ahead = 0.0, .down = 0.0, .share = volume / trace};
-    }
-    // Then its face builds out from the waterline until it stands clear of ground steeper than
-    // it, from its berm down to the water.
-    const double least_ahead =
-        std::max(0.0, profile.berm * ((1.0 / profile.face) - (1.0 / ground.slope)));
-    if (volume < with(least_ahead, 0.0)) {
+    if (volume < holds(Built{.ahead = least_ahead})) {
         double near = 0.0;
         double far = least_ahead;
         for (int step = 0; step < halvings; ++step) {
             const double middle = 0.5 * (near + far);
-            (with(middle, 0.0) < volume ? near : far) = middle;
+            (holds(Built{.ahead = middle}) < volume ? near : far) = middle;
         }
-        return {.ahead = 0.5 * (near + far), .down = 0.0, .share = 1.0};
+        return {.ahead = 0.5 * (near + far)};
     }
-    // Then its shoreface reaches down as far as there's sand for, then the whole of it builds out.
-    if (volume < with(least_ahead, profile.closure)) {
+    if (volume < holds(Built{.ahead = least_ahead, .down = profile.closure})) {
         double shallow = 0.0;
         double deep = profile.closure;
         for (int step = 0; step < halvings; ++step) {
             const double middle = 0.5 * (shallow + deep);
-            (with(least_ahead, middle) < volume ? shallow : deep) = middle;
+            (holds(Built{.ahead = least_ahead, .down = middle}) < volume ? shallow : deep) = middle;
         }
-        return {.ahead = least_ahead, .down = 0.5 * (shallow + deep), .share = 1.0};
+        return {.ahead = least_ahead, .down = 0.5 * (shallow + deep)};
     }
+    const auto whole = [&](double ahead) {
+        return holds(Built{.ahead = ahead, .down = profile.closure});
+    };
     double near = least_ahead;
     double far = least_ahead + 1.0;
-    for (int step = 0; step < 64 && held(profile, ground, far) < volume; ++step) {
+    for (int step = 0; step < 64 && whole(far) < volume; ++step) {
         near = far;
         far = least_ahead + (2.0 * (far - least_ahead));
     }
     for (int step = 0; step < halvings; ++step) {
         const double middle = 0.5 * (near + far);
-        (held(profile, ground, middle) < volume ? near : far) = middle;
+        (whole(middle) < volume ? near : far) = middle;
     }
-    return {.ahead = 0.5 * (near + far), .down = profile.closure, .share = 1.0};
+    return {.ahead = 0.5 * (near + far), .down = profile.closure};
+}
+
+// A beach's top `out` metres out from the waterline of ground that rises over its berm `inland`
+// metres out, its shoreface's depth `depth` metres out from its own waterline.
+template <typename Depth>
+Across top_with(const Profile& profile, const Built& built, double inland, double out,
+                const Depth& depth) {
+    Across top;
+    const double from = out - built.ahead;
+    const double down = std::min(profile.closure, built.down);
+    if (out < inland) {
+        top = {.height = profile.berm - (profile.back * (inland - out)), .slope = profile.back};
+    } else if (from <= 0.0) {
+        const double height = -profile.face * from;
+        top = height >= profile.berm ? Across{.height = profile.berm, .slope = 0.0}
+                                     : Across{.height = height, .slope = -profile.face};
+    } else if (const double reach = out_to(profile, down); from < reach) {
+        top = depth(from);
+    } else {
+        top = {.height = -down - (profile.toe * (from - reach)), .slope = -profile.toe};
+    }
+    // None over what it's filled up to.
+    if (top.height > built.top) {
+        top = {.height = built.top, .slope = 0.0};
+    }
+    return top;
+}
+
+// The ground across a shore `out` metres out from its waterline.
+double ground_at(const Section& section, double out) {
+    const auto& outs = section.out;
+    const auto& heights = section.height;
+    constexpr std::size_t last = Section::samples - 1;
+    std::size_t at = 0;
+    while (at + 1 < last && outs[at + 1] < out) {
+        ++at;
+    }
+    const double across = outs[at + 1] - outs[at];
+    return heights[at] + ((heights[at + 1] - heights[at]) * (out - outs[at]) / across);
+}
+
+} // namespace
+
+std::optional<Built> built_on(const Profile& profile, const Ground& ground, double volume) {
+    if (volume <= 0.0 || ground.floor <= 0.0) {
+        return std::nullopt;
+    }
+    const auto holds = [&](const Built& built) {
+        return held(as_built(profile, built), ground, built.ahead, built.top);
+    };
+    const double least_ahead =
+        std::max(0.0, profile.berm * ((1.0 / profile.face) - (1.0 / ground.slope)));
+    return build(profile, holds, volume, least_ahead, -ground.floor);
+}
+
+std::optional<Built> built_along(const Profile& profile, const Section& section, double volume) {
+    if (volume <= 0.0 || section.height.back() >= 0.0) {
+        return std::nullopt;
+    }
+    // Summed across, slice by slice, its shoreface's depths read off a table of them.
+    constexpr int slices = 256;
+    const double from = section.out.front();
+    const double width = (section.out.back() - from) / slices;
+    std::array<double, slices> ground{};
+    for (std::size_t at = 0; at < slices; ++at) {
+        ground[at] = ground_at(section, from + ((static_cast<double>(at) + 0.5) * width));
+    }
+    constexpr int rows = 256;
+    const double reach = out_to(profile, profile.closure);
+    std::array<double, rows + 1> depths{};
+    for (std::size_t row = 0; row <= rows; ++row) {
+        depths[row] = across(profile, reach * static_cast<double>(row) / rows).height;
+    }
+    const auto depth = [&](double out) {
+        const double place = std::clamp(out / reach * rows, 0.0, static_cast<double>(rows));
+        const auto row = std::min(static_cast<std::size_t>(place), std::size_t{rows - 1});
+        const double part = place - static_cast<double>(row);
+        return Across{.height = depths[row] + ((depths[row + 1] - depths[row]) * part)};
+    };
+    const double inland = out_at(section, profile.berm).height;
+    const auto holds = [&](const Built& built) {
+        double sum = 0.0;
+        for (std::size_t at = 0; at < slices; ++at) {
+            const double out = from + ((static_cast<double>(at) + 0.5) * width);
+            sum += std::max(0.0, top_with(profile, built, inland, out, depth).height - ground[at]);
+        }
+        return sum * width;
+    };
+    const double least_ahead = std::max(0.0, (profile.berm / profile.face) + inland);
+    return build(profile, holds, volume, least_ahead, section.height.back());
+}
+
+Across top_along(const Profile& profile, const Section& section, const Built& built, double out) {
+    return top_with(profile, built, out_at(section, profile.berm).height, out,
+                    [&](double from) { return across(profile, from); });
 }
 
 std::optional<Across> beach_top(const Profile& profile, const Ground& ground, const Built& built,
                                 double out) {
-    if (built.share <= 0.0 || ground.slope >= profile.toe || out < -profile.berm / ground.slope) {
-        return std::nullopt;
-    }
-    const Across top = across(as_built(profile, built), out - built.ahead);
-    if (top.height < -ground.floor) {
-        return std::nullopt;
+    const double inland = -profile.berm / ground.slope;
+    Across top = out < inland ? Across{.height = profile.berm - (profile.back * (inland - out)),
+                                       .slope = profile.back}
+                              : across(as_built(profile, built), out - built.ahead);
+    // None over what it's filled up to.
+    if (top.height > built.top) {
+        top = {.height = built.top, .slope = 0.0};
     }
     return top;
 }
@@ -337,6 +447,39 @@ Across bars_at(const Bars& bars, double out, double shift) {
         sum.slope -= half * std::numbers::pi / width * maths::sin(std::numbers::pi * phase);
     }
     return sum;
+}
+
+Across out_at(const Section& section, double height) {
+    const auto& out = section.out;
+    const auto& heights = section.height;
+    constexpr std::size_t last = Section::samples - 1;
+    // The stretch it falls in, its ends' stretches running on past them.
+    std::size_t at = 0;
+    while (at + 1 < last && heights[at + 1] > height) {
+        ++at;
+    }
+    const double fall = heights[at] - heights[at + 1];
+    const double per_metre = fall > 0.0 ? (out[at + 1] - out[at]) / fall : 0.0;
+    return {.height = out[at] + ((heights[at] - height) * per_metre), .slope = per_metre};
+}
+
+Across lying_over(const Laid& laid, double height, double shift) {
+    const Across placed = out_at(laid.section, height);
+    const double out = placed.height;
+    Across surface = top_along(laid.profile, laid.section, laid.built, out);
+    const Profile profile = as_built(laid.profile, laid.built);
+    const double offshore = out - laid.built.ahead;
+    if (offshore > 0.0 && offshore < out_to(profile, profile.closure)) {
+        const Across bar = bars_at(laid.bars, offshore, shift);
+        surface.height += bar.height;
+        surface.slope += bar.slope;
+    }
+    const double thick = surface.height - height;
+    if (thick <= 0.0) {
+        return {};
+    }
+    // A metre higher is that much further in.
+    return {.height = thick, .slope = (-surface.slope * placed.slope) - 1.0};
 }
 
 } // namespace hog::globe
