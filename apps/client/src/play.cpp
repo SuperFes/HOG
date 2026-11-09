@@ -21,7 +21,6 @@
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
 #include <hog/globe/cell.hpp>
-#include <hog/globe/column_cache.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
@@ -637,10 +636,6 @@ public:
         return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
     }
 
-    // The tile columns the server sent since last asked.
-    [[nodiscard]] std::vector<protocol::SentColumn> take_columns() {
-        return session_ ? session_->take_columns() : std::vector<protocol::SentColumn>{};
-    }
     // The tiles the server sent since last asked.
     [[nodiscard]] std::vector<protocol::SentTile> take_tiles() {
         return session_ ? session_->take_tiles() : std::vector<protocol::SentTile>{};

@@ -1,6 +1,5 @@
 #include <hog/client/column_meshes.hpp>
 #include <hog/globe/cell.hpp>
-#include <hog/globe/column_cache.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -17,11 +16,6 @@ namespace {
 std::optional<int> level_held(const globe::World& world, globe::Site corner) {
     if (world.volume().floor(corner)) {
         return 0;
-    }
-    if (const globe::ColumnCache* cache = world.coarse(); cache != nullptr) {
-        if (const globe::ColumnCache::Coarse* coarse = cache->coarse(corner)) {
-            return coarse->level;
-        }
     }
     return std::nullopt;
 }

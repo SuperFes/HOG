@@ -712,10 +712,8 @@ namespace {
 struct Digger {
     hog::net::Client client;
     bool welcomed = false;
-    // Each tile column sent at its own level, how many times, and as last sent.
-    std::map<std::tuple<std::uint8_t, std::uint32_t, std::uint32_t>,
-             std::pair<int, std::vector<std::byte>>>
-        columns;
+    // Each finest tile sent, how many times, and as last sent.
+    std::map<hog::globe::TileKey, std::pair<int, std::vector<std::byte>>> tiles;
     std::vector<hog::net::Event> events;
 };
 
@@ -731,12 +729,13 @@ void hear(Digger& digger) {
             REQUIRE(decoded);
             if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
                 digger.welcomed = true;
-            } else if (auto* sent = std::get_if<hog::protocol::Columns>(&*decoded)) {
-                for (hog::protocol::SentColumn& column : sent->columns) {
-                    if (column.level == 0) {
-                        auto& [times, bytes] = digger.columns[{column.face, column.i, column.j}];
+            } else if (auto* sent = std::get_if<hog::protocol::Tiles>(&*decoded)) {
+                for (hog::protocol::SentTile& tile : sent->tiles) {
+                    if (tile.level == 0) {
+                        auto& [times, bytes] = digger.tiles[{
+                            .level = 0, .face = tile.face, .i = tile.i, .j = tile.j, .k = tile.k}];
                         ++times;
-                        bytes = std::move(column.bytes);
+                        bytes = std::move(tile.bytes);
                     }
                 }
             }
@@ -747,7 +746,7 @@ void hear(Digger& digger) {
 } // namespace
 
 // Hidden while digging changes the volume and players are sent the land.
-TEST_CASE("a player's digging has the tile columns it touches sent again to everyone",
+TEST_CASE("a player's digging has the tiles it touches sent again to everyone",
           "[.][app][server]") {
     const World world;
     build_ground(world, hog::planet::start_direction);
@@ -762,21 +761,17 @@ TEST_CASE("a player's digging has the tile columns it touches sent again to ever
     auto second = hog::net::Client::connect(address);
     REQUIRE(first);
     REQUIRE(second);
-    std::array<Digger, 2> diggers{Digger{.client = std::move(*first),
-                                         .welcomed = false,
-                                         .columns = {},
-                                         .events = {}},
-                                  Digger{.client = std::move(*second),
-                                         .welcomed = false,
-                                         .columns = {},
-                                         .events = {}}};
+    std::array<Digger, 2> diggers{
+        Digger{.client = std::move(*first), .welcomed = false, .tiles = {}, .events = {}},
+        Digger{.client = std::move(*second), .welcomed = false, .tiles = {}, .events = {}}};
     const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
-    const auto under =
-        std::tuple{static_cast<std::uint8_t>(cell.face), cell.i / hog::globe::Volume::tile_side,
-                   cell.j / hog::globe::Volume::tile_side};
+    constexpr auto side = static_cast<std::uint32_t>(hog::globe::Volume::tile_side);
+    const auto layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 1.0));
+    const hog::globe::TileKey under{
+        .level = 0, .face = cell.face, .i = cell.i / side, .j = cell.j / side, .k = layer / side};
     const auto sent_again = [&](const Digger& digger) {
-        const auto found = digger.columns.find(under);
-        return found != digger.columns.end() && found->second.first > 1;
+        const auto found = digger.tiles.find(under);
+        return found != digger.tiles.end() && found->second.first > 1;
     };
     bool placed = false;
     bool dug = false;
@@ -798,8 +793,8 @@ TEST_CASE("a player's digging has the tile columns it touches sent again to ever
                                                .stance = hog::protocol::Stance::Flying})));
             }
         }
-        // Dug once each holds the column it's over.
-        const auto holds = [&](const Digger& digger) { return digger.columns.contains(under); };
+        // Dug once each holds the tile it's over.
+        const auto holds = [&](const Digger& digger) { return digger.tiles.contains(under); };
         if (placed && !dug && holds(diggers[0]) && holds(diggers[1])) {
             dug = true;
             REQUIRE(diggers[0].client.send(
@@ -815,21 +810,18 @@ TEST_CASE("a player's digging has the tile columns it touches sent again to ever
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(server->globe().revision() > 0);
-    // Both are sent the column under the hole again once it was dug, as the server holds it.
+    // Both are sent the tile under the hole again once it was dug, as the server holds it.
     for (const Digger& digger : diggers) {
-        INFO("columns held " << digger.columns.size() << ", dug " << dug);
+        INFO("tiles held " << digger.tiles.size() << ", dug " << dug);
         CHECK(sent_again(digger));
-        const auto found = digger.columns.find(under);
-        REQUIRE(found != digger.columns.end());
+        const auto found = digger.tiles.find(under);
+        REQUIRE(found != digger.tiles.end());
         // The hole is in it: the flow carries on changing the ground after, so it may be sent
         // again later still.
-        hog::globe::Volume held;
-        const hog::globe::Site at{
-            .face = cell.face,
-            .i = cell.i,
-            .j = cell.j,
-            .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 1.0))};
-        REQUIRE(held.decode_column(at, found->second.second));
-        CHECK(held.at(at).solid == hog::globe::Material::Air);
+        const auto held = hog::globe::VoxelTree::decode(found->second.second);
+        REQUIRE(held);
+        CHECK(held->at(static_cast<int>(cell.i % side), static_cast<int>(cell.j % side),
+                       static_cast<int>(layer % side))
+                  .solid == hog::globe::Material::Air);
     }
 }

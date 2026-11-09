@@ -550,7 +550,7 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     CHECK(matt->stats());
 }
 
-TEST_CASE("a session takes the bricks sent, and asks to dig and build once welcomed",
+TEST_CASE("a session takes the tiles sent, and asks to dig and build once welcomed",
           "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);
@@ -559,23 +559,26 @@ TEST_CASE("a session takes the bricks sent, and asks to dig and build once welco
     session.dig(centre, 1.5);
     welcome(session, stand);
     CHECK(stand.count<protocol::Dug>() == 0);
-    stand.send(protocol::Columns{
-        .columns = {
-            {.face = 1, .i = 7, .j = 2, .level = 0, .bytes = {std::byte{1}, std::byte{2}}}}});
-    stand.send(
-        protocol::Columns{.columns = {{.face = 1, .i = 8, .j = 2, .level = 3, .bytes = {}}}});
-    std::vector<protocol::SentColumn> taken;
+    stand.send(protocol::Tiles{.tiles = {{.level = 0,
+                                          .face = 1,
+                                          .i = 7,
+                                          .j = 2,
+                                          .k = 4,
+                                          .bytes = {std::byte{1}, std::byte{2}}}}});
+    stand.send(protocol::Tiles{.tiles = {{.level = 3, .face = 1, .i = 8, .j = 2, .bytes = {}}}});
+    std::vector<protocol::SentTile> taken;
     look_until(session, stand, [&] {
-        for (protocol::SentColumn& column : session.take_columns()) {
-            taken.push_back(std::move(column));
+        for (protocol::SentTile& tile : session.take_tiles()) {
+            taken.push_back(std::move(tile));
         }
         return taken.size() == 2;
     });
     CHECK(taken[0].i == 7);
+    CHECK(taken[0].k == 4);
     CHECK(taken[0].bytes.size() == 2);
     CHECK(taken[1].i == 8);
     CHECK(taken[1].level == 3);
-    CHECK(session.take_columns().empty());
+    CHECK(session.take_tiles().empty());
     session.dig(centre, 1.5);
     session.dig(centre, 0.0);
     session.build(centre, 100.0, 9);
