@@ -3,18 +3,18 @@
 [planet]
 seed = 1 # 812080951
 ocean_fraction = 0.7
-radius_km = 30
+radius_km = 135
 # Locked to real time: four hours of day and night, through Earth's year and seasons.
 day_hours = 4
 axial_tilt = 23.44
 
 [globe]
 preset = "earth"
-radius = 30000.0
-floor_depth = 500.0
-sky_height = 3000.0
-wear = 0.03
-voxel = 2.5
+radius = 135000.0
+floor_depth = 2500.0
+sky_height = 12000.0
+wear = 0.08
+voxel = 0.333333333
 # The land formed stage by stage, plates to soil, on a sphere split this many times; 0 leaves it
 # to the generator's own terms (and `wear`).
 formed_detail = 7.0
