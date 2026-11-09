@@ -125,6 +125,8 @@ struct Body {
     double loose_weathering = 5.0; // how much faster loose till and alluvium turn to soil than rock
     double soil_years = 1'000'000.0;  // years soil has had where the coldest times' ice never lay
     double ice_left_years = 12'000.0; // years since the coldest times' ice melted back
+    double rotting_rock = 2.0e-5;     // metres a year the front of rock rotting in place goes down
+                                      // at 15 °C, well watered: saprolite under old soils
 
     // Dead plant matter in and on the soil (Lieth's Miami model of growth; Clymo's peat).
     double plant_growth = 1.0;     // how fast plants grow against Earth's, warmth and rain alike

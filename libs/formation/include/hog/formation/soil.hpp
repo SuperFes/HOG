@@ -31,6 +31,8 @@ enum class Parent : std::uint8_t {
 // then the rivers' alluvium or the lake beds, then the till ice laid before them, then the rock.
 // Plants darken its top with humus from their dying roots, and what dies above ground lies on it
 // as litter, or as peat where waterlogged ground keeps the air from rotting it.
+// Under it all, where the land is old, warm, wet and wears slowly, the rock itself has rotted in
+// place far down as saprolite.
 struct Soil {
     std::vector<double> depth;     // metres of soil, topsoil and subsoil
     std::vector<double> topsoil;   // metres of its top darkened with humus
@@ -40,6 +42,7 @@ struct Soil {
     std::vector<double> alluvium;  // metres of what rivers laid, left under the soil
     std::vector<double> lake_beds; // metres of what settled in hollows, left under the soil
     std::vector<double> till;      // metres of what ice laid, left under those
+    std::vector<double> saprolite; // metres of the rock under it all rotted in place
     std::vector<double> making;    // metres a year its bare parent turns to soil there
     std::vector<double> years;     // years it has had to grow
     std::vector<Parent> parent;
@@ -55,6 +58,7 @@ enum class Layer : std::uint8_t {
     Alluvium,
     LakeBed,
     Till,
+    Saprolite,
     Rock
 };
 
@@ -68,11 +72,16 @@ struct Profile {
     double alluvium = 0.0;
     double lake_beds = 0.0;
     double till = 0.0;
+    double saprolite = 0.0;
 };
 
 // Metres a year bare rock turns to soil: rotting faster where it's warm and wet, shattered by frost
 // a little under freezing, neither where it's frozen through.
 [[nodiscard]] double soil_making(double celsius, double rain, const Body& body);
+// Metres of rock rotted in place over `years` as its weathering front goes down faster than the
+// ground wears: warm, wet and slowly worn land rots deepest.
+[[nodiscard]] double rotted_rock(double celsius, double rain, double wear, double years,
+                                 const Body& body);
 // The depth at which soil made under it matches `wear`; none where wear outpaces making.
 [[nodiscard]] double balanced_depth(double making, double wear, const Body& body);
 // The depth soil grows to from bare ground over `years`, tending to the balanced depth.

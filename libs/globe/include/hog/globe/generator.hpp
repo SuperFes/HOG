@@ -54,6 +54,7 @@ struct Strata {
     double alluvium = 0.0;  // what rivers laid
     double lake_beds = 0.0; // what settled in hollows
     double till = 0.0;      // what ice laid
+    double saprolite = 0.0; // the rock under those rotted in place
     double lava = 0.0;
 };
 
