@@ -85,6 +85,15 @@ double rotting_rate(double celsius, double wetness, const Body& body) {
            ((1.0 - drowned) + (body.drowned_rotting * drowned));
 }
 
+double rotted_rock(double celsius, double rain, double wear, double years, const Body& body) {
+    // Rotting is chemical, so it needs the ground thawed and wet, and quickens as it warms.
+    const double thawed = smoothstep(-5.0, 10.0, celsius);
+    const double wet = std::max(rain, 0.0) / (std::max(rain, 0.0) + 1.0);
+    const double front =
+        body.rotting_rock * wet * thawed * maths::exp(body.weathering_warmth * (celsius - 15.0));
+    return std::max(front - std::max(wear, 0.0), 0.0) * std::max(years, 0.0);
+}
+
 double gathered(double gain, double rate, double years) {
     const double time = std::max(years, 0.0);
     if (rate * time < 1e-9) {
@@ -131,6 +140,7 @@ Soil bare(std::uint32_t size) {
     soil.alluvium.assign(size, 0.0);
     soil.lake_beds.assign(size, 0.0);
     soil.till.assign(size, 0.0);
+    soil.saprolite.assign(size, 0.0);
     soil.making.assign(size, 0.0);
     soil.years.assign(size, 0.0);
     soil.parent.assign(size, Parent::None);
@@ -267,6 +277,7 @@ Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
         const double wear = laid.total() > 0.0 ? 0.0 : rivers.wear[point];
         grow(soil, point, laid, soil_making(celsius, rain, body), rivers.wear[point], years, body);
         rot(soil, point, celsius, rain, wear, years, body);
+        soil.saprolite[point] = rotted_rock(celsius, rain, wear, years, body);
     }
     return soil;
 }
@@ -280,7 +291,8 @@ Profile profile_at(const Sphere& sphere, const Soil& soil, const Sphere::Spot& s
             .sand = sphere.sample(soil.sand, spot),
             .alluvium = sphere.sample(soil.alluvium, spot),
             .lake_beds = sphere.sample(soil.lake_beds, spot),
-            .till = sphere.sample(soil.till, spot)};
+            .till = sphere.sample(soil.till, spot),
+            .saprolite = sphere.sample(soil.saprolite, spot)};
 }
 
 Layer layer_at(const Profile& profile, double depth) {
@@ -313,7 +325,11 @@ Layer layer_at(const Profile& profile, double depth) {
         return Layer::LakeBed;
     }
     bottom += profile.till;
-    return depth < bottom ? Layer::Till : Layer::Rock;
+    if (depth < bottom) {
+        return Layer::Till;
+    }
+    bottom += profile.saprolite;
+    return depth < bottom ? Layer::Saprolite : Layer::Rock;
 }
 
 } // namespace hog::formation

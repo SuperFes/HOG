@@ -46,9 +46,9 @@ Formed::Formed(const Planet& planet, const Derived& derived)
       smooth_{world_.sphere, 2.0}, radius_{planet.radius}, vertical_{derived.vertical} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
-    for (auto* field :
-         {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_, &lake_beds_, &till_,
-          &ice_, &lava_, &rock_cover_, &light_, &lake_depth_, &lake_level_, &lake_share_}) {
+    for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
+                        &lake_beds_, &till_, &saprolite_, &ice_, &lava_, &rock_cover_, &light_,
+                        &lake_depth_, &lake_level_, &lake_share_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -73,6 +73,7 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         alluvium_[point] = vertical_ * world.soil.alluvium[point];
         lake_beds_[point] = vertical_ * world.soil.lake_beds[point];
         till_[point] = vertical_ * world.soil.till[point];
+        saprolite_[point] = vertical_ * world.soil.saprolite[point];
         ice_[point] = land ? vertical_ * world.ice.thickness[point] : 0.0;
         lava_[point] = vertical_ * world.outcrop.lava[point];
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
@@ -150,10 +151,12 @@ Formed::Here Formed::at(DVec3 direction) const {
     layers.alluvium = value(alluvium_);
     layers.lake_beds = value(lake_beds_);
     layers.till = value(till_);
+    layers.saprolite = value(saprolite_);
     layers.lava = value(lava_);
+    // Rotted rock is the top of the rock itself, so the beds under it lie no deeper for it.
     layers.cover = layers.ice + layers.organic + layers.topsoil + layers.subsoil + layers.loess +
                    layers.sand + layers.alluvium + layers.lake_beds + layers.till + layers.lava +
-                   value(rock_cover_);
+                   std::max(value(rock_cover_), layers.saprolite);
     layers.basement = here.light >= 0.5 ? Material::Granite : Material::Basalt;
     return here;
 }

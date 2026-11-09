@@ -673,11 +673,17 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
         mean(Parent::LakeBed), share(Parent::Loess), mean(Parent::Loess), share(Parent::Sand),
         mean(Parent::Sand), 100.0 * young / std::max(land, 1e-12),
         young_depth / std::max(young, 1e-12));
-    std::cout << std::format("under the soil, deepest alluvium {:.0f} m, lake beds {:.0f} m, "
-                             "till {:.0f} m\n",
-                             *std::ranges::max_element(soil.alluvium),
-                             *std::ranges::max_element(soil.lake_beds),
-                             *std::ranges::max_element(soil.till));
+    double rotted = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        rotted += crust.sea[point] == 0 && soil.saprolite[point] > 10.0 ? sphere.area(point) : 0.0;
+    }
+    std::cout << std::format(
+        "under the soil, deepest alluvium {:.0f} m, lake beds {:.0f} m, "
+        "till {:.0f} m; rock rotted over 10 m deep on {:.0f}% of the land, "
+        "deepest {:.0f} m\n",
+        *std::ranges::max_element(soil.alluvium), *std::ranges::max_element(soil.lake_beds),
+        *std::ranges::max_element(soil.till), 100.0 * rotted / std::max(land, 1e-12),
+        *std::ranges::max_element(soil.saprolite));
     double dark = 0.0;
     double topsoil = 0.0;
     double peat = 0.0;

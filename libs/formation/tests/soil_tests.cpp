@@ -345,3 +345,24 @@ TEST_CASE("soil grows down through what the wind laid first, loess over sand",
     }
     CHECK(on_wind > 0);
 }
+
+TEST_CASE("rock rots in place deepest where it's warm, wet and wears slowly", "[formation][soil]") {
+    const Body body;
+    const double years = 1.0e6;
+    using hog::formation::rotted_rock;
+    CHECK(rotted_rock(25.0, 2.0, 0.0, years, body) > rotted_rock(10.0, 2.0, 0.0, years, body));
+    CHECK(rotted_rock(25.0, 2.0, 0.0, years, body) > rotted_rock(25.0, 0.2, 0.0, years, body));
+    CHECK(rotted_rock(25.0, 2.0, 0.0, years, body) > 10.0);
+    CHECK(rotted_rock(-20.0, 2.0, 0.0, years, body) == 0.0);
+    CHECK(rotted_rock(25.0, 0.0, 0.0, years, body) == 0.0);
+    // Worn away as fast as it rots, none is left; it grows with the years it's had.
+    CHECK(rotted_rock(25.0, 2.0, 1.0e-3, years, body) == 0.0);
+    CHECK(rotted_rock(25.0, 2.0, 0.0, 2.0 * years, body) >
+          1.99 * rotted_rock(25.0, 2.0, 0.0, years, body));
+
+    // Down a profile it lies under all that was laid, over the rock.
+    const Profile profile{.topsoil = 0.5, .subsoil = 1.0, .till = 2.0, .saprolite = 20.0};
+    CHECK(layer_at(profile, 3.0) == Layer::Till);
+    CHECK(layer_at(profile, 10.0) == Layer::Saprolite);
+    CHECK(layer_at(profile, 24.0) == Layer::Rock);
+}

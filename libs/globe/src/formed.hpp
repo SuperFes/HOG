@@ -54,6 +54,7 @@ private:
     std::vector<double> alluvium_;
     std::vector<double> lake_beds_;
     std::vector<double> till_;
+    std::vector<double> saprolite_;
     std::vector<double> ice_;
     std::vector<double> lava_;
     std::vector<double> rock_cover_;
