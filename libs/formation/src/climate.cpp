@@ -194,8 +194,8 @@ LatitudeTemperatures sea_level_temperatures(const Body& body) {
     return temperature_rows(body);
 }
 
-double temperature_at(const LatitudeTemperatures& rows, double latitude) noexcept {
-    return read_rows(rows, latitude);
+double temperature_at(const LatitudeTemperatures& table, double latitude) noexcept {
+    return read_rows(table, latitude);
 }
 
 Climate climate_on(const Sphere& sphere, std::span<const double> heights, const Body& body) {
