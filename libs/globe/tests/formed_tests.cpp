@@ -282,12 +282,39 @@ TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][fo
         }
         const double cut = std::max(0.0, uncut.top.value - here.top.value);
         CHECK_THAT(laid(here), WithinAbs(std::max(0.0, laid(uncut) - cut), 1e-6));
-        CHECK(here.layers.cover <=
-              std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
-                  (here.layers.organic + here.layers.topsoil + here.layers.subsoil));
+        // Less soil and beach, which form again on what's left.
+        CHECK(here.layers.cover <= std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
+                                       (here.layers.organic + here.layers.topsoil +
+                                        here.layers.subsoil + here.layers.beach));
         cut_into += cut > 0.0 && laid(uncut) > 0.0 ? 1 : 0;
     }
     CHECK(cut_into > 100);
+}
+
+TEST_CASE("beaches lie along formed shores about the waterline, bare of soil", "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double voxel = generator.planet().voxel;
+    // Storms' waves stir the bottom no deeper than twice the tallest fully grown sea's, about
+    // 10 m, and throw their swash no higher than its height.
+    constexpr double tallest = 10.0;
+    int beaches = 0;
+    for (std::uint64_t n = 0; n < 200'000; ++n) {
+        const DVec3 direction = somewhere(n);
+        const Formed::Here here = formed.at(direction, voxel);
+        if (here.layers.beach <= 0.0) {
+            continue;
+        }
+        ++beaches;
+        CHECK(here.top.value > -2.0 * tallest);
+        CHECK(here.top.value < tallest);
+        CHECK(here.layers.organic + here.layers.topsoil + here.layers.subsoil == 0.0);
+        const Material made_of = here.layers.beach_of;
+        CHECK((made_of == Material::Sand || made_of == Material::VolcanicSand ||
+               made_of == Material::ShellSand || made_of == Material::Shingle ||
+               made_of == Material::Sediment));
+    }
+    CHECK(beaches > 20);
 }
 
 TEST_CASE("formed ground cost", "[.bench][globe][formed]") {

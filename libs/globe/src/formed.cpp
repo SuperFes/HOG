@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <thread>
 
 namespace hog::globe {
@@ -20,6 +21,15 @@ namespace {
 constexpr double rock_steepest = 1.73; // 60 degrees
 constexpr double loose_steepest = 0.7; // 35 degrees
 constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
+// Dean's equilibrium shoreface, depth rising as distance out to the two thirds: its scale, metres
+// to the third, for fine sand and for shingle.
+constexpr double sand_shoreface = 0.11;
+constexpr double shingle_shoreface = 0.9;
+
+double smoothstep(double from, double to, double x) noexcept {
+    const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
+    return t * t * (3.0 - (2.0 * t));
+}
 
 formation::Body body_for(const Planet& planet) {
     formation::Body body;
@@ -141,6 +151,7 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         }
     }
     fill_lakes();
+    fill_shores();
 }
 
 DVec3 Formed::Lake::toward(int x, int y) const noexcept {
@@ -202,6 +213,116 @@ void Formed::fill_lakes() {
         if (floor[lake] != none) {
             list_lake(lake, floor[lake], listed);
         }
+    }
+}
+
+namespace {
+
+// Points with the sea on one side and land on the other.
+std::vector<std::uint8_t> at_waterline(const formation::World& world) {
+    std::vector<std::uint8_t> held(world.sphere.size(), 0);
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        const bool sea = world.rivers.receiver[point] == point;
+        held[point] = std::ranges::any_of(world.sphere.neighbors(point),
+                                          [&](std::uint32_t near) {
+                                              return (world.rivers.receiver[near] == near) != sea;
+                                          })
+                          ? 1
+                          : 0;
+    }
+    return held;
+}
+
+// Points next to `held` ones take their mean in each field, and are held from then on.
+void spread_round(const formation::Sphere& sphere, std::span<std::vector<double>* const> fields,
+                  std::vector<std::uint8_t>& held) {
+    std::vector<std::uint8_t> next = held;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (held[point] != 0) {
+            continue;
+        }
+        int count = 0;
+        for (const std::uint32_t near : sphere.neighbors(point)) {
+            if (held[near] != 0) {
+                ++count;
+                for (std::vector<double>* field : fields) {
+                    (*field)[point] += (*field)[near];
+                }
+            }
+        }
+        if (count > 0) {
+            for (std::vector<double>* field : fields) {
+                (*field)[point] /= count;
+            }
+            next[point] = 1;
+        }
+    }
+    held = std::move(next);
+}
+
+// The sand there's most of.
+Material most_sand(double quartz, double volcanic, double carbonate) {
+    if (quartz >= volcanic && quartz >= carbonate) {
+        return Material::Sand;
+    }
+    return volcanic >= carbonate ? Material::VolcanicSand : Material::ShellSand;
+}
+
+} // namespace
+
+void Formed::fill_shores() {
+    const formation::Shores& shores = world_.shores;
+    waves_ = shores.waves;
+    beach_ = shores.beach;
+    mud_ = shores.mud;
+    quartz_ = shores.quartz;
+    volcanic_ = shores.volcanic;
+    carbonate_ = shores.carbonate;
+    shingle_ = shores.shingle;
+    const std::array fields{&waves_, &beach_, &mud_, &quartz_, &volcanic_, &carbonate_, &shingle_};
+    std::vector<std::uint8_t> held = at_waterline(world_);
+    constexpr int rounds = 2;
+    for (int round = 0; round < rounds; ++round) {
+        spread_round(world_.sphere, fields, held);
+    }
+}
+
+void Formed::lay_beach(double height, const formation::Smooth::Weights& weights,
+                       Strata& layers) const {
+    const auto value = [&](const std::vector<double>& field) {
+        return formation::Smooth::read(field, weights).value;
+    };
+    // From where storms' waves stop stirring the bottom, about twice their height down, to the
+    // top of their swash, about their height up.
+    const double waves = value(waves_);
+    const double stirred = 2.0 * waves;
+    const double swash = waves;
+    if (waves <= 0.0 || height <= -stirred || height >= swash) {
+        return;
+    }
+    const double beach = std::max(0.0, value(beach_));
+    const double shingle = std::clamp(value(shingle_), 0.0, 1.0);
+    // Spread over the shoreface out to where the waves stop stirring it, the narrower the coarser.
+    const double scale = sand_shoreface + ((shingle_shoreface - sand_shoreface) * shingle);
+    const double across = maths::pow(stirred / scale, 1.5);
+    const double ends = 0.2 * (stirred + swash);
+    const double inside = smoothstep(-stirred, ends - stirred, height) *
+                          (1.0 - smoothstep(swash - ends, swash, height));
+    layers.beach = std::min(beach / across, stirred + swash) * inside;
+    if (layers.beach <= 0.0) {
+        return;
+    }
+    layers.organic = 0.0;
+    layers.topsoil = 0.0;
+    layers.subsoil = 0.0;
+    // The swash throws stones to the top of the beach, sand lies under them; where more mud than
+    // sand comes, it's mud flats.
+    if (height >= swash - (shingle * (stirred + swash))) {
+        layers.beach_of = Material::Shingle;
+    } else if (value(mud_) > beach) {
+        layers.beach_of = Material::Sediment;
+    } else {
+        layers.beach_of = most_sand(value(quartz_), value(volcanic_), value(carbonate_));
     }
 }
 
@@ -418,6 +539,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     }
     layers.saprolite = std::max(0.0, layers.saprolite - cut);
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut);
+    lay_beach(top.top.value, weights, layers);
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.
     const DVec3 rise = top.top.gradient - (glm::dot(top.top.gradient, direction) * direction);
@@ -427,9 +549,9 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.topsoil *= lying;
     layers.subsoil *= lying;
     // Rotted rock is the top of the rock itself, so the beds under it lie no deeper for it.
-    layers.cover = layers.ice + layers.organic + layers.topsoil + layers.subsoil + layers.loess +
-                   layers.sand + layers.alluvium + layers.lake_beds + layers.till + layers.lava +
-                   std::max(rock_cover, layers.saprolite);
+    layers.cover = layers.ice + layers.beach + layers.organic + layers.topsoil + layers.subsoil +
+                   layers.loess + layers.sand + layers.alluvium + layers.lake_beds + layers.till +
+                   layers.lava + std::max(rock_cover, layers.saprolite);
     layers.basement = here.light >= 0.5 ? Material::Granite : Material::Basalt;
     return here;
 }

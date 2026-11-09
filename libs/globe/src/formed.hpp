@@ -57,6 +57,11 @@ private:
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
     // runs out over its rim or stands at the level formed for it.
     void fill_lakes();
+    // The shores' fields, carried a couple of points either way from the waterline so they read
+    // whole along it.
+    void fill_shores();
+    // What of the top of ground `height` metres over the sea the waves laid as beach.
+    void lay_beach(double height, const formation::Smooth::Weights& weights, Strata& layers) const;
     // The lake with its floor at the point `floor`, its points `reach` radians round it, standing
     // at `most` at the highest.
     [[nodiscard]] Lake fill_lake(std::uint32_t floor, double reach, double most,
@@ -93,6 +98,15 @@ private:
     std::vector<double> wall_;
     // The steepest soil lies on about each point, the wetter the less steep, likewise.
     std::vector<double> soil_holds_;
+    // What the sea's waves made of the shore, held at the points about the waterline: storms'
+    // wave height, the beach a metre of coast holds and the mud, and what the beach is made of.
+    std::vector<double> waves_;
+    std::vector<double> beach_;
+    std::vector<double> mud_;
+    std::vector<double> quartz_;
+    std::vector<double> volcanic_;
+    std::vector<double> carbonate_;
+    std::vector<double> shingle_;
     // At each point a lake was formed over, 1 and the level formed for it; elsewhere nothing.
     std::vector<double> lake_share_;
     std::vector<double> lake_cap_;
