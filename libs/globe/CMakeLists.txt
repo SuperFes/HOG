@@ -43,6 +43,7 @@ hog_target_defaults(hog_globe)
 hog_add_tests(hog_globe
     tests/brick_tests.cpp
     tests/caves_tests.cpp
+    tests/courses_tests.cpp
     tests/cell_tests.cpp
     tests/dissection_tests.cpp
     tests/joints_tests.cpp

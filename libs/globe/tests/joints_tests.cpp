@@ -108,6 +108,26 @@ TEST_CASE("each domain of rock has its joints turned its own way", "[globe][join
     CHECK(turned == 400);
 }
 
+TEST_CASE("faults break the rock along wandering traces, most of it whole", "[globe][joints]") {
+    int broken = 0;
+    int crushed = 0;
+    constexpr int count = 4'000;
+    for (int n = 0; n < count; ++n) {
+        const DVec3 point = DVec3{3.1e6, -2.2e6, 4.0e5} +
+                            DVec3{std::fmod(n * 37.1, 4'000.0), std::fmod(n * 91.7, 3'000.0), 0.0};
+        const double fault = hog::globe::faulted(point, 9);
+        CHECK(fault >= 0.0);
+        CHECK(fault <= 1.0);
+        broken += fault > 0.0 ? 1 : 0;
+        crushed += fault > 0.5 ? 1 : 0;
+    }
+    // Damage zones a fiftieth of the blocks wide either side of each trace, wider where the
+    // ground cuts a fault aslant.
+    CHECK(broken > count / 50);
+    CHECK(broken < count / 3);
+    CHECK(crushed > 0);
+}
+
 TEST_CASE("a block's inset is the way to its nearest joint", "[globe][joints]") {
     const Block block{.low = {0.0, 0.0, 0.0},
                       .high = {4.0, 2.0, 6.0},

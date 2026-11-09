@@ -13,6 +13,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -73,6 +75,9 @@ private:
         double above_floor = 1e30;
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights) const;
+    // The course the river from `point` cuts down to the point it runs to, worked out the first
+    // time it's read: directions from one to the other.
+    [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const;
     // The ground carved, then cut by gullies no narrower than twice `lod`.
     [[nodiscard]] Dissected surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                     double lod) const;
@@ -134,6 +139,11 @@ private:
     std::vector<double> years_;
     std::vector<double> strength_;
     std::uint64_t joints_seed_ = 0;
+    // Rivers' courses, each made once, and the seeds of the rock they cut through.
+    mutable std::vector<std::vector<DVec3>> courses_;
+    std::unique_ptr<std::once_flag[]> course_made_;
+    std::uint64_t rock_seed_ = 0;
+    std::uint64_t faults_seed_ = 0;
     // How steeply valley walls rise about each point, metres up per metre across.
     std::vector<double> wall_;
     // The steepest soil lies on about each point, the wetter the less steep, likewise.

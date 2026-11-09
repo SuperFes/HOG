@@ -1,5 +1,6 @@
 #include "formed.hpp"
 
+#include "courses.hpp"
 #include "joints.hpp"
 #include "valleys.hpp"
 
@@ -12,6 +13,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <thread>
 
@@ -65,6 +67,8 @@ Formed::Formed(const Planet& planet)
       // As far apart as the widest gullies cut deep, so they fade over their own width at least.
       fall_blend_{gullies_.longest * rock_steepest / 2.0},
       joints_seed_{hash_values(planet.body.seed, 0x6a6f'696e'7473ULL)},
+      rock_seed_{hash_values(planet.body.seed, 0x726f'636bULL)},
+      faults_seed_{hash_values(planet.body.seed, 0x6661'756c'7473ULL)},
       bars_seed_{hash_values(planet.body.seed, 0x6261'7273ULL)} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
@@ -146,6 +150,8 @@ Formed::Formed(const Planet& planet)
             }
         }
     }
+    courses_.resize(size);
+    course_made_ = std::make_unique<std::once_flag[]>(size);
     fill_lakes();
     fill_shores();
 }
@@ -627,6 +633,55 @@ std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
     return starts_[(((face * starts_across) + cell(on.u)) * starts_across) + cell(on.v)];
 }
 
+const std::vector<DVec3>& Formed::course_of(std::uint32_t point) const {
+    std::call_once(course_made_[point], [&] {
+        const formation::World& world = world_;
+        const formation::Sphere& sphere = world.sphere;
+        const std::uint32_t down = world.rivers.receiver[point];
+        const DVec3 from = sphere.point(point);
+        const DVec3 to = sphere.point(down);
+        const bool mouth = world.rivers.receiver[down] == down;
+        const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+        // The rock about it varies from place to place, finer than its points can tell, at every
+        // scale down to what its lanes tell apart; faults crush it.
+        const Octaves rocks{
+            .wavelength = sphere.spacing() * radius_ / 2.0, .gain = 0.55, .finest = 20.0};
+        formation::Smooth::Weights weights;
+        std::uint32_t near = point;
+        const auto effort = [&](DVec3 at) {
+            smooth_.weigh(at, weights, near);
+            near = weights.nearest;
+            const auto value = [&](const std::vector<double>& field) {
+                return formation::Smooth::read(field, weights).value;
+            };
+            // As much as it has to cut down to its floor where it runs, and its own depth, which
+            // it cuts wherever it runs.
+            constexpr double channel_depth = 1.0;
+            const DVec3 along = to - from;
+            const double t =
+                std::clamp(glm::dot(at - from, along) / glm::dot(along, along), 0.0, 1.0);
+            const double floor = top_[point] + ((floor_to - top_[point]) * t);
+            const double cut = std::max(0.0, value(top_) - floor) + channel_depth;
+            // Loose ground cuts as the weakest rock does, but for how it lies.
+            const double deposits =
+                value(alluvium_) + value(lake_beds_) + value(till_) + value(sand_) + value(loess_);
+            const DVec3 metres = at * radius_;
+            const double strength =
+                std::clamp((deposits > loose_deep ? 0.0 : value(strength_)) +
+                               (0.3 * fbm(metres, rocks, 0.0, rock_seed_).value) -
+                               (0.6 * faulted(metres, faults_seed_)),
+                           0.0, 1.0);
+            // As slowly as the rock wears (the rivers' own rule for rock strength).
+            return cut *
+                   maths::exp(std::numbers::ln10 * world.body.rock_hardness * (strength - 0.5));
+        };
+        const double apart = maths::atan2(glm::length(glm::cross(from, to)), glm::dot(from, to));
+        courses_[point] = course(
+            {.from = from, .to = to, .half_width = 0.3 * apart, .steps = 16, .lanes = 5}, effort);
+    });
+    return courses_[point];
+}
+
 Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights& weights) const {
     const formation::World& world = world_;
     const formation::Sphere& sphere = world.sphere;
@@ -651,12 +706,38 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         }
         // A river's bed meets the sea at its level, not down on the sea floor past its mouth.
         const bool mouth = world.rivers.receiver[down] == down;
-        const Wall wall = wall_at({.from = sphere.point(point),
-                                   .to = sphere.point(down),
-                                   .floor_from = top_[point],
-                                   .floor_to = mouth ? std::min(top_[point], 0.0) : top_[down],
+        const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+        // Along the stretch of its course nearest, its floor falling evenly along the course.
+        const std::vector<DVec3>& line = course_of(point);
+        std::size_t nearest = 0;
+        double best = 1e300;
+        double length = 0.0;
+        double before = 0.0;
+        for (std::size_t k = 0; k + 1 < line.size(); ++k) {
+            const DVec3 along = line[k + 1] - line[k];
+            const double t = std::clamp(glm::dot(direction - line[k], along) /
+                                            std::max(glm::dot(along, along), 1e-300),
+                                        0.0, 1.0);
+            const DVec3 off = direction - (line[k] + (along * t));
+            if (const double apart = glm::dot(off, off); apart < best) {
+                best = apart;
+                nearest = k;
+                before = length;
+            }
+            length += glm::length(along);
+        }
+        const double stretch = glm::length(line[nearest + 1] - line[nearest]);
+        const auto floor_at = [&](double run) {
+            return top_[point] + ((floor_to - top_[point]) * (length > 0.0 ? run / length : 0.0));
+        };
+        const Wall wall = wall_at({.from = line[nearest],
+                                   .to = line[nearest + 1],
+                                   .floor_from = floor_at(before),
+                                   .floor_to = floor_at(before + stretch),
                                    .wall = std::max(wall_[point], wall_[down]),
-                                   .reach = reach},
+                                   .reach = reach,
+                                   .head = length > 0.0 ? before / length : 0.0,
+                                   .foot = length > 0.0 ? (before + stretch) / length : 1.0},
                                   direction, radius_);
         // Read's gradient is per radian.
         if (wall.height < carved.top.value) {
