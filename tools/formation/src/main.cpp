@@ -2,6 +2,7 @@
 #include <hog/formation/bedrock.hpp>
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
+#include <hog/formation/drifts.hpp>
 #include <hog/formation/ice.hpp>
 #include <hog/formation/lakes.hpp>
 #include <hog/formation/landforms.hpp>
@@ -695,6 +696,74 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
         100.0 * peat / std::max(land, 1e-12));
 }
 
+// Wind-laid sand gold, deeper redder, with dune fields bright; loess pale olive by depth.
+bool draw_drifts(const Canvas& canvas, const hog::formation::Rivers& rivers,
+                 const hog::formation::Ice& ice, const hog::formation::Lakes& lakes,
+                 const hog::formation::Sediment& sediment, const hog::formation::Drifts& drifts) {
+    const Sphere& sphere = *canvas.sphere;
+    static constexpr std::array<Rgb, 3> sand{hog::formation_lab::rgb(205, 180, 120),
+                                             hog::formation_lab::rgb(220, 150, 70),
+                                             hog::formation_lab::rgb(190, 90, 40)};
+    static constexpr std::array<Rgb, 3> loess{hog::formation_lab::rgb(120, 120, 110),
+                                              hog::formation_lab::rgb(175, 165, 110),
+                                              hog::formation_lab::rgb(215, 200, 140)};
+    std::uint32_t lit = 0;
+    return canvas.draw("drifts.png", [&](const DVec3& direction, const Sphere::Spot& spot) {
+        const std::uint32_t near = sphere.nearest(direction, spot.corners[0]);
+        if (rivers.receiver[near] == near) {
+            return hog::formation_lab::rgb(20, 30, 60);
+        }
+        const double light = canvas.light(rivers.height, direction, lit);
+        if (ice.thickness[near] > 0.0) {
+            return hog::formation_lab::scaled(ice_white, light);
+        }
+        if (const auto water = water_colour(lakes, sediment, near)) {
+            return *water;
+        }
+        const double laid = sphere.sample(drifts.sand, spot);
+        if (laid > 1.0) {
+            const double dunes = sphere.sample(drifts.dunes, spot);
+            return hog::formation_lab::scaled(
+                hog::formation_lab::ramp(std::max(laid / 60.0, dunes), sand), light);
+        }
+        return hog::formation_lab::scaled(
+            hog::formation_lab::ramp(sphere.sample(drifts.loess, spot) / 30.0, loess), light);
+    });
+}
+
+// How much land the wind strips and covers, and how deep.
+void report_drifts(const Sphere& sphere, const hog::formation::Crust& crust,
+                   const hog::formation::Drifts& drifts) {
+    double land = 0.0;
+    double stripped = 0.0;
+    double sanded = 0.0;
+    double duned = 0.0;
+    double loessed = 0.0;
+    double loess_depth = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (crust.sea[point] != 0) {
+            continue;
+        }
+        const double here = sphere.area(point);
+        land += here;
+        stripped += drifts.deflated[point] > 1.0 ? here : 0.0;
+        sanded += drifts.sand[point] > 1.0 ? here : 0.0;
+        duned += drifts.dunes[point] > 0.5 ? here : 0.0;
+        if (drifts.loess[point] > 1.0) {
+            loessed += here;
+            loess_depth += drifts.loess[point] * here;
+        }
+    }
+    const auto share = [&](double area) { return 100.0 * area / std::max(land, 1e-12); };
+    std::cout << std::format(
+        "wind: stripped over 1 m on {:.1f}% of the land, deepest {:.0f} m; sand over 1 m on "
+        "{:.1f}%, deepest {:.0f} m, dune fields {:.1f}%; loess over 1 m on {:.1f}% ({:.1f} m), "
+        "deepest {:.0f} m\n",
+        share(stripped), *std::ranges::max_element(drifts.deflated), share(sanded),
+        *std::ranges::max_element(drifts.sand), share(duned), share(loessed),
+        loess_depth / std::max(loessed, 1e-12), *std::ranges::max_element(drifts.loess));
+}
+
 void report_ice(const Sphere& sphere, const hog::formation::Crust& crust,
                 const hog::formation::Rivers& rivers, const hog::formation::Ice& ice,
                 double seconds) {
@@ -800,6 +869,11 @@ int run(const Options& options) {
                              *std::ranges::max_element(sediment.delta), filled);
     ok = draw_rivers(canvas, rivers, ice, lakes, sediment) && ok;
     ok = draw_sediment(canvas, rivers, ice, sediment) && ok;
+
+    const hog::formation::Drifts drifts =
+        hog::formation::drifts_on(sphere, climate, rivers, ice, lakes, sediment, body);
+    report_drifts(sphere, crust, drifts);
+    ok = draw_drifts(canvas, rivers, ice, lakes, sediment, drifts) && ok;
 
     const hog::formation::Soil soil =
         hog::formation::soil_on(sphere, rivers, climate, ice, lakes, sediment, body);
