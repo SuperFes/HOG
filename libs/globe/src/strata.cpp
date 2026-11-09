@@ -67,8 +67,9 @@ Layering layering(const Context& context, DVec3 direction, const Column& column,
 Material material_at(const Context& context, const Layering& layers, double depth,
                      double radius) noexcept {
     // What a formed world laid over its beds, from the top down.
-    const std::array<std::pair<double, Material>, 11> laid{{
+    const std::array<std::pair<double, Material>, 12> laid{{
         {layers.ice, Material::Ice},
+        {layers.beach, layers.beach_of},
         {layers.organic, Material::Soil},
         {layers.topsoil, Material::Soil},
         {layers.subsoil, Material::Clay},

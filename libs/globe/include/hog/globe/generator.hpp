@@ -46,6 +46,8 @@ struct Strata {
     Material basement = Material::Basalt;
     // What a formed world laid over its beds, metres each, from the top down; within `cover`.
     double ice = 0.0;
+    double beach = 0.0; // what the sea's waves laid along the shore, of `beach_of`
+    Material beach_of = Material::Sand;
     double organic = 0.0; // dead plant matter: litter, or peat
     double topsoil = 0.0;
     double subsoil = 0.0;
