@@ -11,6 +11,7 @@
 #include <hog/formation/plates.hpp>
 #include <hog/formation/rivers.hpp>
 #include <hog/formation/sediment.hpp>
+#include <hog/formation/shores.hpp>
 #include <hog/formation/soil.hpp>
 #include <hog/formation/sphere.hpp>
 
@@ -39,6 +40,7 @@ struct World {
     Outcrop outcrop;
     Lakes lakes;
     Sediment sediment;
+    Shores shores;
     Drifts drifts;
     Soil soil;
     Landforms landforms;

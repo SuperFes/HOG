@@ -13,6 +13,7 @@ World::World(const Body& made_with, int layout_splits, int detail_splits)
       outcrop{outcrop_on(sphere, crust, bedrock, rivers, body)},
       lakes{lakes_on(sphere, rivers, climate, body)},
       sediment{sediment_on(sphere, rivers, lakes, ice.outwash, body)},
+      shores{shores_on(sphere, climate, rivers, bedrock, outcrop, ice, sediment, body)},
       drifts{drifts_on(sphere, climate, rivers, ice, lakes, sediment, body)},
       soil{soil_on(sphere, rivers, climate, ice, lakes, sediment, drifts, body)},
       landforms{landforms_on(sphere, crust, bedrock, outcrop, climate, rivers, ice, body)},
