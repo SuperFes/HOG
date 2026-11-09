@@ -204,18 +204,21 @@ TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
     }
 }
 
-TEST_CASE("a small world's ground stays inside its shell", "[globe][planet]") {
+TEST_CASE("a small world's ground stays inside its shell, under the sky kept over its heights",
+          "[globe][planet]") {
     Planet small;
     small.body.radius = 15'000.0;
     small.floor_depth = 500.0;
-    small.sky_height = 3'000.0;
+    // Lower than its mountains stand: the sky is kept over them, not cut through them.
+    small.sky_height = 300.0;
     const hog::globe::Generator generator{small};
+    const double ceiling = generator.layers().ceiling() - small.body.radius;
     for (std::uint64_t k = 0; k < 98'304; k += 997) {
         const auto ground = hog::globe::ground_below(
             generator, hog::globe::center(hog::globe::cell_at_index(7, k)), 20.0);
         REQUIRE(ground.has_value());
         const double height = ground.value_or(0.0) - small.body.radius;
-        CHECK(height < small.sky_height);
+        CHECK(height + small.sky_height < ceiling + generator.layers().thickness);
         CHECK(height > -small.floor_depth - 1'000.0);
     }
 }
