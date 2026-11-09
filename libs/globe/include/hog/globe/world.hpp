@@ -2,7 +2,6 @@
 
 #include <hog/core/math.hpp>
 #include <hog/globe/brick.hpp>
-#include <hog/globe/column_cache.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/held_tiles.hpp>
 #include <hog/globe/material.hpp>
@@ -52,11 +51,6 @@ public:
     [[nodiscard]] const Generator& generator() const noexcept;
     [[nodiscard]] const Volume& volume() const noexcept { return *volume_; }
 
-    // Where the volume holds no tile column, reads those `cache` holds coarser, each of their
-    // voxels all through the voxels it stands for; none to read nothing more. The cache must
-    // outlive the world and its copies.
-    void read_coarse(const ColumnCache* cache) noexcept { coarse_ = cache; }
-    [[nodiscard]] const ColumnCache* coarse() const noexcept { return coarse_; }
     // Where the volume holds no tile column, reads the tiles held, each voxel as the finest of them
     // over it has it; none to read nothing more. They must outlive the world and its copies.
     void read_tiles(const HeldTiles* tiles) noexcept { tiles_ = tiles; }
@@ -102,7 +96,6 @@ private:
     const Planet* planet_;
     Layers layers_;
     Volume* volume_;
-    const ColumnCache* coarse_ = nullptr;
     const HeldTiles* tiles_ = nullptr;
 };
 

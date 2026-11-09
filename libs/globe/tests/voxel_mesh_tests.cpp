@@ -1,6 +1,5 @@
 #include "bed.hpp"
 
-#include <hog/globe/column_cache.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
@@ -45,15 +44,12 @@ TileColumn flat(bool wet = false) {
                        })}}};
 }
 
-// The tile column at `middle` and the eight about it, held at `level`.
-void hold_about(hog::globe::ColumnCache& cache, const TileColumn& column, std::uint8_t level) {
-    TileColumn sent = column;
-    for (std::uint8_t k = 0; k < level; ++k) {
-        sent = sent.halved();
-    }
+// The tile column at `middle` and the eight about it, held.
+void hold_about(Volume& volume, const TileColumn& column) {
     for (std::uint32_t j = 9; j <= 11; ++j) {
         for (std::uint32_t i = 9; i <= 11; ++i) {
-            REQUIRE(cache.take(2, i, j, level, sent.encode()));
+            REQUIRE(
+                volume.decode_column({.face = 2, .i = i * tile, .j = j * tile}, column.encode()));
         }
     }
 }
@@ -68,8 +64,7 @@ TEST_CASE("flat ground meshes to its top faces alone, facing up, where its rock 
           "[globe][voxel_mesh]") {
     Volume volume;
     const hog::globe::World world{earth(), volume};
-    hog::globe::ColumnCache cache{volume};
-    hold_about(cache, flat(), 0);
+    hold_about(volume, flat());
     const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
     CHECK(quads(mesh) == std::size_t{tile} * tile);
     const double top = earth().layers().bottom(static_cast<int>(ground) + 1);
@@ -93,8 +88,7 @@ TEST_CASE("water shows its top to the open, and the ground under it shows throug
           "[globe][voxel_mesh]") {
     Volume volume;
     const hog::globe::World world{earth(), volume};
-    hog::globe::ColumnCache cache{volume};
-    hold_about(cache, flat(true), 0);
+    hold_about(volume, flat(true));
     const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
     CHECK(quads(mesh) == std::size_t{2} * tile * tile);
     CHECK(std::ranges::count(mesh.vertices, Material::Water, &hog::globe::VoxelVertex::material) ==
@@ -105,7 +99,6 @@ TEST_CASE("water stands as high as it fills its voxel, showing its side over sha
           "[globe][voxel_mesh]") {
     Volume volume;
     const hog::globe::World world{earth(), volume};
-    hog::globe::ColumnCache cache{volume};
     TileColumn shallow = flat();
     const auto quarter = static_cast<std::uint16_t>(Voxel::full / 4);
     shallow.tiles.front().second = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
@@ -117,7 +110,7 @@ TEST_CASE("water stands as high as it fills its voxel, showing its side over sha
         }
         return Cube{};
     });
-    hold_about(cache, shallow, 0);
+    hold_about(volume, shallow);
     const hog::globe::Layers& layers = earth().layers();
     const double bottom = layers.bottom(static_cast<int>(ground) + 1);
     const auto water_tops = [&](const VoxelMesh& mesh) {
@@ -159,7 +152,6 @@ TEST_CASE("ground stands as high as its matter, keeping out water lower than it,
           "[globe][voxel_mesh]") {
     Volume volume;
     const hog::globe::World world{earth(), volume};
-    hog::globe::ColumnCache cache{volume};
     const auto share = [](double of) {
         return static_cast<std::uint16_t>(of * static_cast<double>(Voxel::full));
     };
@@ -173,7 +165,7 @@ TEST_CASE("ground stands as high as its matter, keeping out water lower than it,
         }
         return Cube{};
     });
-    hold_about(cache, sea, 0);
+    hold_about(volume, sea);
     // Ground a third of a voxel high, over the water beside it.
     const Site dry{.face = 2, .i = middle.i + 5, .j = middle.j + 7, .layer = ground + 1};
     REQUIRE(volume.set(dry, {.solid = Material::Granite, .solid_amount = share(0.33)}));
@@ -216,26 +208,6 @@ TEST_CASE("ground stands as high as its matter, keeping out water lower than it,
     CHECK(basalt_bottoms.front() ==
           Catch::Approx(layers.bottom(static_cast<int>(ground) + 4) - (0.4 * layers.thickness))
               .margin(0.01));
-}
-
-TEST_CASE("a tile column held coarser meshes as its coarser voxels", "[globe][voxel_mesh]") {
-    Volume volume;
-    hog::globe::World world{earth(), volume};
-    hog::globe::ColumnCache cache{volume};
-    world.read_coarse(&cache);
-    hold_about(cache, flat(), 2);
-    const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 2);
-    CHECK(quads(mesh) == std::size_t{tile / 4} * (tile / 4));
-    // Rock to layer 40 fills ten coarse voxels and a quarter of the eleventh, which stands that
-    // much higher on them: to the top of layer 40, as finer.
-    const double top = earth().layers().bottom(static_cast<int>(ground) + 1);
-    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
-        CHECK(std::abs(glm::length(mesh.origin + hog::DVec3{vertex.position}) - top) < 0.01);
-    }
-    // Not held at that level, or at all, there's nothing to mesh.
-    CHECK(hog::globe::mesh_tile_column(world, middle, 1).vertices.empty());
-    CHECK(hog::globe::mesh_tile_column(world, {.face = 2, .i = 30 * tile, .j = 4 * tile}, 0)
-              .vertices.empty());
 }
 
 TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where there are any",

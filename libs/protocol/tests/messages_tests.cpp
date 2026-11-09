@@ -73,59 +73,54 @@ Weather weather(std::uint8_t level) {
 }
 
 std::vector<Message> examples() {
-    return {
-        Hello{},
-        Hello{.version = version, .token = bytes({1, 2, 3, 250})},
-        Welcome{},
-        Welcome{.world = 0x0123456789abcdefULL, .planet = {}, .ground = {}},
-        Welcome{.world = 1, .planet = bytes({4, 5}), .ground = bytes({6, 7, 8})},
-        Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
-        Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
-        Moved{.sequence = 0xFFFF'FFFF, .corrections = 3, .at = far_out},
-        Moved{.sequence = 2,
-              .corrections = 0,
-              .at = far_out,
-              .stance = Stance::Flying,
-              .facing = {.heading = 0xFFFF, .pitch = -16'384}},
-        Placed{.at = far_out, .stance = Stance::Walking, .facing = {.heading = 1, .pitch = 7}},
-        Placed{.at = far_out, .stance = Stance::Flying, .facing = {}},
-        Corrected{.count = 1, .at = far_out},
-        Ack{.tick = 0xFFFF'FFF0},
-        whole(),
-        delta(),
-        Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
-        weather(0),
-        weather(1),
-        Said{.from = "", .text = "hello?"},
-        Said{.from = std::string(most_name, 'n'), .text = std::string(most_said, 's')},
-        Hurry{.scale = 1},
-        Hurry{.scale = 16'384},
-        Clock{.scale = 1},
-        Clock{.scale = 86'400},
-        Dug{.centre = far_out, .radius = 1},
-        Dug{.centre = far_out, .radius = most_edit},
-        Built{.centre = far_out, .radius = 2'500, .material = 9},
-        Columns{},
-        Columns{.columns =
-                    {{.face = 5, .i = 0xFFFF'FFF0, .j = 3, .level = 6, .bytes = bytes({1, 2, 3})},
-                     {.face = 0, .i = 1, .j = 2, .level = 0, .bytes = {}}}},
-        Tiles{},
-        Tiles{.tiles = {{.level = 9,
-                         .face = 5,
-                         .i = 0xFFFF'FFF0,
-                         .j = 3,
-                         .k = 0x8000'0001,
-                         .bytes = bytes({1, 2, 3})},
-                        {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
-        Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
-        Grains{},
-        Grains{.tick = 7,
-               .flying = {{.id = NetId{1},
-                           .at = far_out,
-                           .velocity = {-32'768, 0, 32'767},
-                           .material = 4,
-                           .amount = 70'000},
-                          {.id = NetId{9}, .at = Millimetres{0, -5, 6}, .velocity = {}}}}};
+    return {Hello{},
+            Hello{.version = version, .token = bytes({1, 2, 3, 250})},
+            Welcome{},
+            Welcome{.world = 0x0123456789abcdefULL, .planet = {}, .ground = {}},
+            Welcome{.world = 1, .planet = bytes({4, 5}), .ground = bytes({6, 7, 8})},
+            Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
+            Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
+            Moved{.sequence = 0xFFFF'FFFF, .corrections = 3, .at = far_out},
+            Moved{.sequence = 2,
+                  .corrections = 0,
+                  .at = far_out,
+                  .stance = Stance::Flying,
+                  .facing = {.heading = 0xFFFF, .pitch = -16'384}},
+            Placed{.at = far_out, .stance = Stance::Walking, .facing = {.heading = 1, .pitch = 7}},
+            Placed{.at = far_out, .stance = Stance::Flying, .facing = {}},
+            Corrected{.count = 1, .at = far_out},
+            Ack{.tick = 0xFFFF'FFF0},
+            whole(),
+            delta(),
+            Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
+            weather(0),
+            weather(1),
+            Said{.from = "", .text = "hello?"},
+            Said{.from = std::string(most_name, 'n'), .text = std::string(most_said, 's')},
+            Hurry{.scale = 1},
+            Hurry{.scale = 16'384},
+            Clock{.scale = 1},
+            Clock{.scale = 86'400},
+            Dug{.centre = far_out, .radius = 1},
+            Dug{.centre = far_out, .radius = most_edit},
+            Built{.centre = far_out, .radius = 2'500, .material = 9},
+            Tiles{},
+            Tiles{.tiles = {{.level = 9,
+                             .face = 5,
+                             .i = 0xFFFF'FFF0,
+                             .j = 3,
+                             .k = 0x8000'0001,
+                             .bytes = bytes({1, 2, 3})},
+                            {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
+            Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
+            Grains{},
+            Grains{.tick = 7,
+                   .flying = {{.id = NetId{1},
+                               .at = far_out,
+                               .velocity = {-32'768, 0, 32'767},
+                               .material = 4,
+                               .amount = 70'000},
+                              {.id = NetId{9}, .at = Millimetres{0, -5, 6}, .velocity = {}}}}};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -394,8 +389,7 @@ TEST_CASE("chat with control characters is refused", "[protocol]") {
     }
 }
 
-TEST_CASE("an edit of no width or too wide, and tile columns or tiles too many or too big, are "
-          "refused",
+TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are refused",
           "[protocol]") {
     auto none = encode(Dug{.centre = far_out, .radius = 1});
     none[none.size() - 4] = std::byte{0};
@@ -404,19 +398,7 @@ TEST_CASE("an edit of no width or too wide, and tile columns or tiles too many o
     wide[wide.size() - 5] = std::byte{static_cast<std::uint8_t>((most_edit + 1) & 0xFFU)};
     wide[wide.size() - 4] = std::byte{static_cast<std::uint8_t>((most_edit + 1) >> 8U)};
     CHECK(decode(wide).error().code == ErrorCode::OutOfRange);
-    // Tile columns: a count over the most, then one claiming more bytes than allowed.
-    CHECK(decode(bytes({16, 0, static_cast<int>((most_columns + 1) & 0xFFU),
-                        static_cast<int>((most_columns + 1) >> 8U)}))
-              .error()
-              .code == ErrorCode::OutOfRange);
-    auto big = bytes({16, 0, 1, 0, 2, 1, 0, 0, 0, 1, 0, 0, 0, 3});
-    const auto length = static_cast<std::uint32_t>(most_column + 1);
-    for (unsigned shift = 0; shift < 32; shift += 8) {
-        big.push_back(static_cast<std::byte>((length >> shift) & 0xFFU));
-    }
-    big.resize(big.size() + length);
-    CHECK(decode(big).error().code == ErrorCode::OutOfRange);
-    // Tiles likewise.
+    // Tiles: a count over the most, then one claiming more bytes than allowed.
     CHECK(decode(bytes({18, 0, static_cast<int>((most_tiles + 1) & 0xFFU),
                         static_cast<int>((most_tiles + 1) >> 8U)}))
               .error()

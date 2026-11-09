@@ -225,13 +225,6 @@ std::optional<Span> span_of(const World& world, Site corner, int level) {
     if (level == 0) {
         floor = world.volume().floor(corner);
         top = world.volume().held_top(corner);
-    } else if (const ColumnCache* cache = world.coarse(); cache != nullptr) {
-        if (const ColumnCache::Coarse* coarse = cache->coarse(corner);
-            coarse != nullptr && std::cmp_equal(coarse->level, level)) {
-            floor = coarse->column.floor << static_cast<unsigned>(level);
-            top = coarse->column.tiles.empty() ? *floor
-                                               : (coarse->column.tiles.back().first + 1) * side;
-        }
     }
     if (!floor) {
         return std::nullopt;
