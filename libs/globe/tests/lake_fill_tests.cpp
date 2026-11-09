@@ -72,6 +72,41 @@ TEST_CASE("the slope past the rim water runs out over stays dry", "[globe][lake]
     CHECK(pool.at(30, 0) == Pool::Cell::Dry);
 }
 
+TEST_CASE("water rising past its own reach fills on out, never cut off at a grid's edge",
+          "[globe][lake]") {
+    // A bowl wider than the water's own reach of ten cells.
+    const Pool pool = fill_pool(10, [](int x, int y) { return bowl(x, y, 1e9); }, 30.0, 0.0, 40);
+    CHECK(pool.level == 30.0);
+    CHECK_FALSE(pool.outlet.has_value());
+    // Out to where the bowl stands at the level, past the ten cells.
+    CHECK(pool.at(16, 0) == Pool::Cell::Water);
+    CHECK(pool.at(0, -17) == Pool::Cell::Water);
+    CHECK(pool.at(18, 0) != Pool::Cell::Water);
+}
+
+TEST_CASE("water that brims and runs on out of its reach marks the rim it ran out over",
+          "[globe][lake]") {
+    // As above, the hollow's east side giving way to ground falling away ten cells east.
+    std::size_t read = 0;
+    const auto ground = [&](int x, int y) {
+        ++read;
+        const double near = static_cast<double>((x * x) + (y * y)) / 10.0;
+        return x > 0 ? std::min(near, 20.0 - x) : near;
+    };
+    const Pool pool = fill_pool(15, ground, 1e9, 0.0, 2'000);
+    CHECK(pool.level == 10.0);
+    REQUIRE(pool.outlet.has_value());
+    CHECK(pool.outlet->first == 10);
+    // On the rim, which stands at 10 all along ten cells east.
+    CHECK(ground(pool.outlet->first, pool.outlet->second) == 10.0);
+    CHECK(pool.at(9, 0) == Pool::Cell::Water);
+    CHECK(pool.at(12, 0) == Pool::Cell::Dry);
+    // Stopping there, not running on down to the grid's far edge.
+    CHECK(read < 2'000);
+    // Water held short of its rim runs out nowhere.
+    CHECK_FALSE(fill_pool(15, ground, 5.0, 0.0, 2'000).outlet.has_value());
+}
+
 TEST_CASE("water running over into a further closed hollow fills it too", "[globe][lake]") {
     // Two hollows side by side, the far one deeper, closed by ground rising to the grid's edge:
     // water poured in the near one runs over into it, and both fill as one.
