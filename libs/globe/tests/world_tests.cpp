@@ -383,8 +383,8 @@ TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[
 }
 
 TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
-    for (const char* name : {"earth", "mars", "venus", "moon"}) {
-        const Generator generator{hog::globe::preset(name).value_or(hog::globe::Planet{})};
+    {
+        const Generator generator{hog::globe::Planet{}};
         std::vector<BrickSite> bricks;
         bricks.reserve(40);
         for (std::uint64_t k = 0; k < 40; ++k) {
@@ -412,9 +412,10 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
             }
         }
         const std::chrono::duration<double> alone = std::chrono::steady_clock::now() - alone_start;
-        WARN(name << ": " << took.count() * 1e3 / static_cast<double>(bricks.size())
-                  << " ms a brick, " << alone.count() * 1e3 / static_cast<double>(bricks.size())
-                  << " ms with slopes of their own (" << inside << " inside)");
+        WARN("bricks: " << took.count() * 1e3 / static_cast<double>(bricks.size())
+                        << " ms a brick, "
+                        << alone.count() * 1e3 / static_cast<double>(bricks.size())
+                        << " ms with slopes of their own (" << inside << " inside)");
     }
 }
 

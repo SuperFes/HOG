@@ -129,8 +129,8 @@ seed = 7
 radius_km = 30
 
 [globe]
-preset = "earth"
-wear = 0.03
+voxel = 0.5
+formed_detail = 7
 )");
     REQUIRE(config);
     CHECK(config->seed == 7);

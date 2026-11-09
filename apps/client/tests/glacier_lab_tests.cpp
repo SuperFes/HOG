@@ -49,7 +49,8 @@ TEST_CASE("a mountain above the snowline grows a glacier that reaches below it",
     REQUIRE(total_ice(bed) == 0.0);
     const auto began = std::chrono::steady_clock::now();
     run(bed, climate, 300);
-    const auto took = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    const auto took =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
     std::printf("300 years on 48x48: %.3f s, ice %.0f, terminus %.0f m\n", took, total_ice(bed),
                 terminus(bed));
     CHECK(total_ice(bed) > 0.0);
@@ -90,7 +91,8 @@ TEST_CASE("feature builders shape the bed where asked", "[client][glacier_lab]")
     CHECK(ramp.rock[ramp.index(19, 5)] == 10.0);
 }
 
-TEST_CASE("a peak over the snowline sheds ice into a valley cut below it", "[client][glacier_lab]") {
+TEST_CASE("a peak over the snowline sheds ice into a valley cut below it",
+          "[client][glacier_lab]") {
     Bed bed = flat(64, 10.0, 100.0);
     add_peak(bed, 20.0, 32.0, 120.0, 600.0);
     add_valley(bed, 20.0, 32.0, 63.0, 32.0, 50.0, 60.0);
@@ -100,7 +102,8 @@ TEST_CASE("a peak over the snowline sheds ice into a valley cut below it", "[cli
     CHECK(bed.ice[bed.index(30, 32)] > bed.ice[bed.index(30, 40)]);
 }
 
-TEST_CASE("a warming climate shrinks a glacier and a cooling one regrows it", "[client][glacier_lab]") {
+TEST_CASE("a warming climate shrinks a glacier and a cooling one regrows it",
+          "[client][glacier_lab]") {
     Bed bed = mountain(48, 10.0, 700.0, 3);
     const Climate climate;
     run(bed, climate, 300);
@@ -172,7 +175,8 @@ TEST_CASE("flow carries debris with the ice and keeps all of it", "[client][glac
     CHECK_THAT(total_debris(bed), WithinRel(before, 1.0e-9));
 }
 
-TEST_CASE("a debris cover slows melt and bare rock walls shed debris onto ice", "[client][glacier_lab]") {
+TEST_CASE("a debris cover slows melt and bare rock walls shed debris onto ice",
+          "[client][glacier_lab]") {
     const Climate climate{.snowline = 500.0};
     Bed clean = flat(8, 10.0, 100.0);
     Bed covered = clean;
@@ -201,7 +205,8 @@ TEST_CASE("ice that melts away leaves its debris as moraine on the bed", "[clien
     CHECK_THAT(bed.rock[bed.index(2, 2)], WithinRel(100.4, 1.0e-5));
 }
 
-TEST_CASE("a glacier meeting the sea ends in a grounded face and calves the rest", "[client][glacier_lab]") {
+TEST_CASE("a glacier meeting the sea ends in a grounded face and calves the rest",
+          "[client][glacier_lab]") {
     Bed bed = flat(64, 25.0, 300.0);
     add_tilt(bed, 450.0);
     add_ridge(bed, 4.0, 32.0, 24.0, 32.0, 250.0, 900.0);
@@ -243,7 +248,8 @@ TEST_CASE("colder air freezes more sea and warm air leaves it open", "[client][g
     CHECK(cover(-40.0) == 1.0);
 }
 
-TEST_CASE("sea ice thickens more slowly the thicker it is and melts back", "[client][glacier_lab]") {
+TEST_CASE("sea ice thickens more slowly the thicker it is and melts back",
+          "[client][glacier_lab]") {
     Bed bed = flat(12, 100.0, -50.0);
     const Climate climate{.sea = 0.0};
     const Cold cold{.base = -30.0, .per_row = 0.0, .patchy = 0.0};
@@ -267,7 +273,9 @@ TEST_CASE("an ice age cuts the valley floor deeper than its sides and leaves it 
     const Bed before = bed;
     Climate cold{.snowline = 420.0, .gain = 0.004, .most_gain = 1.0, .wear = 1.0e-4};
     run(bed, cold, 300);
-    const auto worn = [&](int x, int y) { return before.rock[bed.index(x, y)] - bed.rock[bed.index(x, y)]; };
+    const auto worn = [&](int x, int y) {
+        return before.rock[bed.index(x, y)] - bed.rock[bed.index(x, y)];
+    };
     CHECK(worn(26, 32) > worn(26, 36));
     run_drifting(bed, cold, 400, 3.0);
     CHECK(total_ice(bed) < 1.0e4);
@@ -283,7 +291,8 @@ TEST_CASE("glacier beds, to look at", "[.look]") {
     const auto show = [&](const char* name, Bed bed, const Climate& climate, int years) {
         write_ppm(bed, dir + "/" + name + "_0.ppm");
         run(bed, climate, years);
-        std::printf("%s: ice %.0f, deepest %.0f m\n", name, total_ice(bed), *std::max_element(bed.ice.begin(), bed.ice.end()));
+        std::printf("%s: ice %.0f, deepest %.0f m\n", name, total_ice(bed),
+                    *std::max_element(bed.ice.begin(), bed.ice.end()));
         write_ppm(bed, dir + "/" + name + "_" + std::to_string(years) + ".ppm");
     };
     show("massif", mountain(64, 50.0, 900.0, 3), Climate{.snowline = 620.0}, 300);
@@ -343,7 +352,8 @@ struct WorldPatch {
     Climate climate;
 };
 
-WorldPatch patch_of(const hog::globe::Generator& generator, hog::DVec3 centre, int size, double cell) {
+WorldPatch patch_of(const hog::globe::Generator& generator, hog::DVec3 centre, int size,
+                    double cell) {
     const auto& planet = generator.planet();
     const double datum = generator.sea_level().value_or(planet.radius);
     const hog::DVec3 up = glm::normalize(centre);
@@ -373,15 +383,17 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
     const std::string dir{where};
-    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     planet.radius = 20'000.0;
     const auto began = std::chrono::steady_clock::now();
     const hog::globe::Generator generator{planet};
     const auto lod = hog::globe::voxel_lod(generator) * 8.0;
-    std::printf("generator: %.2f s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
+    std::printf("generator: %.2f s\n",
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
     const double datum = generator.sea_level().value_or(planet.radius);
     const auto snowline_at = [&](const hog::DVec3& d) {
-        return std::max((hog::globe::temperature_at(planet, std::asin(d.z)) - 273.15) / 0.0065, 0.0);
+        return std::max((hog::globe::temperature_at(planet, std::asin(d.z)) - 273.15) / 0.0065,
+                        0.0);
     };
     // Where the ground stands highest over its own snowline on a coarse sweep.
     const auto pick = [&](double min_lat, double max_lat, double colder) {
@@ -391,8 +403,10 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
             for (int lon = 0; lon < 360; lon += 4) {
                 const double a = lat * 0.0174533;
                 const double b = lon * 0.0174533;
-                const hog::DVec3 d{std::cos(a) * std::cos(b), std::cos(a) * std::sin(b), std::sin(a)};
-                const double over = generator.column(d, lod).ground() - datum - std::max(snowline_at(d) - colder, 0.0);
+                const hog::DVec3 d{std::cos(a) * std::cos(b), std::cos(a) * std::sin(b),
+                                   std::sin(a)};
+                const double over = generator.column(d, lod).ground() - datum -
+                                    std::max(snowline_at(d) - colder, 0.0);
                 if (over > most) {
                     most = over;
                     best = d;
@@ -404,9 +418,11 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     const auto glaciate = [&](const char* name, hog::DVec3 at, double colder) {
         WorldPatch world = patch_of(generator, at, 64, 100.0);
         world.climate.snowline = std::max(world.climate.snowline - colder, 0.0);
-        std::printf("%s: lat %.1f, ground %.0f..%.0f m, snowline %.0f m\n", name, std::asin(at.z) / 0.0174533,
+        std::printf("%s: lat %.1f, ground %.0f..%.0f m, snowline %.0f m\n", name,
+                    std::asin(at.z) / 0.0174533,
                     *std::min_element(world.bed.rock.begin(), world.bed.rock.end()),
-                    *std::max_element(world.bed.rock.begin(), world.bed.rock.end()), world.climate.snowline);
+                    *std::max_element(world.bed.rock.begin(), world.bed.rock.end()),
+                    world.climate.snowline);
         write_ppm(world.bed, dir + "/" + name + "_0.ppm", 8, world.climate.sea);
         run(world.bed, world.climate, 500);
         std::printf("%s: ice %.0f, deepest %.0f m\n", name, total_ice(world.bed),
@@ -427,15 +443,18 @@ TEST_CASE("the flow library moves ice as the lab does on the same bed", "[client
     }
     const Climate climate;
     const auto size = static_cast<std::size_t>(bed.size);
-    hog::flow::Glacier glacier{size * size, {.cell = bed.cell, .flow = climate.flow, .wear = climate.wear}};
+    hog::flow::Glacier glacier{size * size,
+                               {.cell = bed.cell, .flow = climate.flow, .wear = climate.wear}};
     const auto at = [&](int x, int y) {
         return x < 0 || y < 0 || x >= bed.size || y >= bed.size ? hog::flow::Glacier::none
-                                                                 : static_cast<int>(bed.index(x, y));
+                                                                : static_cast<int>(bed.index(x, y));
     };
     for (int y = 0; y < bed.size; ++y) {
         for (int x = 0; x < bed.size; ++x) {
             const std::size_t i = bed.index(x, y);
-            glacier[i] = {.rock = bed.rock[i], .ice = bed.ice[i], .debris = bed.debris[i],
+            glacier[i] = {.rock = bed.rock[i],
+                          .ice = bed.ice[i],
+                          .debris = bed.debris[i],
                           .next = {at(x + 1, y), at(x, y + 1), at(x - 1, y), at(x, y - 1)}};
         }
     }

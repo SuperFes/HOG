@@ -49,11 +49,11 @@ struct Found {
     Found() {
         const int level = 13;
         const std::uint64_t cells = hog::globe::cells_at(level);
-        for (std::uint64_t k = 0; k < 4'000 && !rock; ++k) {
+        for (std::uint64_t k = 0; k < 40'000 && !rock; ++k) {
             const auto cell = hog::globe::cell_at_index(level, (k * 2'654'435'761ULL) % cells);
-            const std::vector<Rock> near = generator.rocks_near(
-                hog::globe::center(cell) * generator.planet().radius,
-                hog::globe::voxel_lod(generator));
+            const std::vector<Rock> near =
+                generator.rocks_near(hog::globe::center(cell) * generator.planet().radius,
+                                     hog::globe::voxel_lod(generator));
             for (const Rock& candidate : near) {
                 if (!rock && candidate.axes.z > 2.5 && gentle(candidate)) {
                     rock = candidate;
@@ -109,9 +109,10 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
     hog::globe::MadeWorld made{found.generator};
     hog::globe::World& world = made.world();
     made.cover(glm::normalize(rock.middle));
-    // A ball taking the ground under the whole footprint, stopping short of the rock's middle.
+    // A ball taking the ground under the whole footprint, its top a voxel short of the rock's
+    // middle.
     const double hollow = (0.75 * std::max(rock.axes.x, rock.axes.y)) + 1.0;
-    hog::globe::dig(world, rock.middle - (rock.up * (rock.axes.z + 1.5)), hollow);
+    hog::globe::dig(world, rock.middle - (rock.up * (hollow + world.layers().thickness)), hollow);
     hog::flow::Region region{world, false};
     hold_about(region, world.layers(), rock.middle, 14.0);
 

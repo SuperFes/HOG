@@ -26,13 +26,13 @@
 
 namespace hog::client {
 
-// The planet drawn as the globe: a preset by name or a planet file, Earth's knobs if neither.
-// A preset, or Earth, takes the seed and radius of the world it's drawn in place of, so the sky
+// The planet drawn as the globe: a planet file by name, the default knobs if none.
+// The default takes the seed and radius of the world it's drawn in place of, so the sky
 // fits it.
 [[nodiscard]] Result<globe::Planet> globe_planet(std::optional<std::string_view> named,
                                                  std::uint64_t seed, double radius);
 
-// The voxel world a planet file describes: its [globe] table, with the world's seed, or Earth's
+// The voxel world a planet file describes: its [globe] table, with the world's seed, or the default
 // knobs at the seed and radius given if it has none.
 [[nodiscard]] Result<globe::Planet> globe_planet_in(const std::filesystem::path& file,
                                                     std::uint64_t seed, double radius);

@@ -27,17 +27,13 @@ using hog::DVec3;
 using hog::Vec3;
 using hog::globe::Material;
 
-TEST_CASE("the globe is a preset or Earth at the world's size, or a planet file",
+TEST_CASE("the globe is the default knobs at the world's size, or a planet file",
           "[client][globe]") {
     const auto earth = hog::client::globe_planet(std::nullopt, 7, 90'000.0);
     REQUIRE(earth);
     CHECK(earth->seed == 7);
     CHECK(earth->radius == 90'000.0);
     CHECK(earth->volatiles == hog::globe::Volatile::Water);
-    const auto moon = hog::client::globe_planet("moon", 7, 90'000.0);
-    REQUIRE(moon);
-    CHECK(moon->radius == 90'000.0);
-    CHECK(moon->volatiles == hog::globe::Volatile::None);
     CHECK_FALSE(hog::client::globe_planet("no such planet.toml", 7, 90'000.0));
 }
 
@@ -80,30 +76,33 @@ TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its co
 TEST_CASE("a planet file keeps its own size and takes the config's seed", "[globe_view]") {
     const auto path = std::filesystem::temp_directory_path() / "hog_globe_view_planet.toml";
     {
-        std::ofstream{path} << "[globe]\npreset = \"moon\"\nradius = 868500.0\n";
+        std::ofstream{path} << "[globe]\nradius = 868500.0\n";
     }
     const auto planet = hog::client::globe_planet(path.string(), 7, 115'000.0);
     std::filesystem::remove(path);
     REQUIRE(planet.has_value());
     CHECK(planet->radius == 868'500.0);
     CHECK(planet->seed == 7);
-    const auto preset = hog::client::globe_planet("moon", 7, 115'000.0);
-    REQUIRE(preset.has_value());
-    CHECK(preset->radius == 115'000.0);
+    // With no file, the default knobs at the world's own size.
+    const auto unnamed = hog::client::globe_planet(std::nullopt, 7, 115'000.0);
+    REQUIRE(unnamed.has_value());
+    CHECK(unnamed->radius == 115'000.0);
+    CHECK(unnamed->seed == 7);
 }
 
 TEST_CASE("a planet file's [globe] table is the voxel world drawn, at the world's seed",
           "[client][globe]") {
     const auto path = std::filesystem::temp_directory_path() / "hog_globe_view_in_planet.toml";
-    std::ofstream{path} << "[planet]\nseed = 1\n\n[globe]\npreset = \"earth\"\nradius = 12000.0\n"
-                           "floor_depth = 200.0\nsky_height = 800.0\nvoxel = 1.5\nwear = 0.02\n";
+    std::ofstream{path}
+        << "[planet]\nseed = 1\n\n[globe]\nradius = 12000.0\n"
+           "floor_depth = 200.0\nsky_height = 800.0\nvoxel = 1.5\nformed_detail = 6\n";
     const auto planet = hog::client::globe_planet_in(path, 9, 115'000.0);
     std::filesystem::remove(path);
     REQUIRE(planet);
     CHECK(planet->seed == 9);
     CHECK(planet->radius == 12'000.0);
     CHECK(planet->voxel == 1.5);
-    CHECK(planet->wear == 0.02);
+    CHECK(planet->formed_detail == 6.0);
     const auto none = hog::client::globe_planet_in(path, 9, 90'000.0);
     REQUIRE(none);
     CHECK(none->radius == 90'000.0);

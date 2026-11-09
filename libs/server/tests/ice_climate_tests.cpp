@@ -6,7 +6,7 @@ using namespace hog::server;
 
 TEST_CASE("the flow's ice balance follows the weather's climate at the ground's height",
           "[server][ice]") {
-    const hog::globe::Planet planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    const hog::globe::Planet planet;
     const auto balance = ice_balance(planet, [](const hog::globe::Cell& column) {
         // Cold and snowy on the odd columns, warm on the even.
         return column.i % 2 == 1

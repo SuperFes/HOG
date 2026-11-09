@@ -19,7 +19,7 @@ Everything lives in one sparse volume: rock, sediment, soil, ice, water, air and
 - **Pay for what happens, not for size.** Cost scales with activity near players, never with the planet.
 - **Solve, don't loop, where nature is at equilibrium.** Isostasy, climate, lakes and groundwater are solved directly; tectonics and landscape evolution take big implicit steps.
 - **Judged by looking.** Every stage has map stills and fly-over stills, and tests for its physical invariants (mass conserved, water runs downhill, crust area kept).
-- **Built alongside.** `generator = "v2"` in `config/planet.toml` picks it; the current world stays playable until v2 overtakes it. Today's generation is a test bed, so nothing of its look is preserved.
+- **Built alongside.** Today's generation is a test bed, so nothing of its look is preserved.
 
 ## The volume
 

@@ -21,7 +21,7 @@ constexpr int level = 3;
 constexpr int layers = 10;
 
 Planet earth() {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0; // small, for a quick generator
     return planet;
 }
@@ -148,7 +148,9 @@ TEST_CASE("the sea is a flat floor to the air and the land is where the ground i
 }
 
 TEST_CASE("a world without a volatile has no vapour in its air", "[weather][field]") {
-    Planet moon = hog::globe::preset("moon").value_or(Planet{});
+    Planet moon;
+    moon.pressure = 0.0;
+    moon.volatiles = hog::globe::Volatile::None;
     moon.radius = 20'000.0;
     const Generator generator{moon};
     const Field field = hog::weather::start_field(generator, 2, 6);

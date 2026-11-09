@@ -22,7 +22,7 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-build-world --world FILE [--preset earth|mars|venus|moon | --planet FILE]\n"
+    "usage: hog-build-world --world FILE [--planet FILE]\n"
     "                       [--seed N] [--threads N] (--at LAT,LON [--across N] | --all)\n"
     "Makes the world's voxels into FILE ahead of play, a tile column at a time: --across tile\n"
     "columns square about --at (8 by default), or every one with --all. Tile columns already\n"
@@ -49,11 +49,6 @@ std::optional<double> number(std::string_view text) {
 
 // Each option and its value; false on anything it doesn't know.
 bool apply(Options& options, std::string_view name, std::string_view value) {
-    if (name == "--preset") {
-        const auto planet = hog::globe::preset(value);
-        options.planet = planet.value_or(options.planet);
-        return planet.has_value();
-    }
     if (name == "--planet") {
         const auto loaded = hog::globe::load_planet(value);
         if (!loaded) {
@@ -102,7 +97,6 @@ hog::DVec3 direction_of(double latitude, double longitude) {
 
 int run(std::span<const std::string_view> arguments) {
     Options options;
-    options.planet = hog::globe::preset("earth").value_or(options.planet);
     for (std::size_t k = 0; k < arguments.size(); ++k) {
         if (arguments[k] == "--all") {
             options.all = true;

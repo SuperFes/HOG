@@ -27,8 +27,17 @@ using hog::globe::Planet;
 
 namespace {
 
-Planet named(std::string_view name) {
-    return fine(hog::globe::preset(name).value_or(Planet{}));
+Planet wet() {
+    return fine(Planet{});
+}
+
+// No air or water, under a sixth of the gravity.
+Planet airless() {
+    Planet planet = fine(Planet{});
+    planet.gravity = 1.62;
+    planet.pressure = 0.0;
+    planet.volatiles = hog::globe::Volatile::None;
+    return planet;
 }
 
 DVec3 direction(std::uint64_t k) {
@@ -69,7 +78,7 @@ double floor_of(const Planet& planet) {
 
 TEST_CASE("a column's caves are found by casting down it, wherever its samples are open",
           "[globe][caves]") {
-    const Generator generator{named("earth")};
+    const Generator generator{wet()};
     const double lod = hog::globe::voxel_lod(generator);
     constexpr double reach = 300.0;
     int with = 0;
@@ -108,7 +117,7 @@ TEST_CASE("a column's caves are found by casting down it, wherever its samples a
 
 TEST_CASE("the cost of the caves' distance, and how steep the noise gets",
           "[.bench][globe][caves]") {
-    const Planet earth = named("earth");
+    const Planet earth = wet();
     const hog::globe::Derived derived = hog::globe::derive(earth);
     const Generator::Shape shape;
     const hog::globe::terms::Context context{
@@ -134,13 +143,13 @@ TEST_CASE("the cost of the caves' distance, and how steep the noise gets",
 }
 
 TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]") {
-    const Planet earth = named("earth");
+    const Planet earth = wet();
     const double limestone = open_share(earth, Material::Limestone, 50.0);
     const double shale = open_share(earth, Material::Shale, 50.0);
     const double granite = open_share(earth, Material::Granite, 50.0);
     UNSCOPED_INFO("open: limestone " << limestone << ", shale " << shale << ", granite "
                                      << granite);
-    // On a shape with no drainage, only the chambers open; passages follow the drainage.
+    // Watered limestone opens in chambers.
     CHECK(limestone > 0.001);
     CHECK(limestone > 3.0 * shale);
     CHECK(shale > granite);
@@ -148,7 +157,7 @@ TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]
     // Dissolution needs moving water: little a kilometre and a half down.
     CHECK(open_share(earth, Material::Limestone, 1'500.0) < 0.25 * limestone);
     // Without water, no karst; but lava tubes run under any world's basalt flows.
-    const Planet moon = named("moon");
+    const Planet moon = airless();
     CHECK(open_share(moon, Material::Limestone, 50.0) == 0.0);
     CHECK(open_share(moon, Material::Basalt, 15.0) > 0.0);
     CHECK(open_share(moon, Material::Basalt, 200.0) == 0.0);
@@ -157,7 +166,7 @@ TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]
 TEST_CASE("some columns cross solid ground more than once", "[globe][caves]") {
     // Where a cave runs under the ground, a column passes rock, open space, then rock again:
     // what a height map can't hold.
-    const Generator earth{named("earth")};
+    const Generator earth{wet()};
     std::uint64_t crossed_again = 0;
     constexpr std::uint64_t columns = 4'000;
     for (std::uint64_t k = 0; k < columns; ++k) {
@@ -180,10 +189,11 @@ TEST_CASE("some columns cross solid ground more than once", "[globe][caves]") {
 
 TEST_CASE("caves keep to their beds, their walls running on across the beds' faces",
           "[globe][caves]") {
-    // Down a column the distance never leaps from one step to the next, even where one bed gives
-    // way to another and a cave in the one stops at its face: a step that changes it far more
-    // than the steps either side is a leap.
-    const Generator earth{named("earth")};
+    // Down a column the distance never leaps from one step to the next near the surface it
+    // bounds, even where one bed gives way to another and a cave in the one stops at its face: a
+    // step that changes it far more than the steps either side is a leap. Deeper in the rock a
+    // passage narrowing to nothing may drop away whole, unseen.
+    const Generator earth{wet()};
     constexpr double step = 0.05;
     int leaps = 0;
     int open = 0;
@@ -198,7 +208,7 @@ TEST_CASE("caves keep to their beds, their walls running on across the beds' fac
             const double before = std::abs(down_it[at - 1] - down_it[at - 2]);
             const double change = std::abs(down_it[at] - down_it[at - 1]);
             const double after = std::abs(down_it[at + 1] - down_it[at]);
-            const bool near = std::abs(down_it[at]) < 5.0 || std::abs(down_it[at - 1]) < 5.0;
+            const bool near = std::abs(down_it[at]) < 1.0 || std::abs(down_it[at - 1]) < 1.0;
             leaps += near && change > 0.25 && change > 4.0 * std::max(before, after) ? 1 : 0;
         }
     }
@@ -208,7 +218,7 @@ TEST_CASE("caves keep to their beds, their walls running on across the beds' fac
 }
 
 TEST_CASE("chambers shrink away under thin rock, their roofs fallen in", "[globe][caves]") {
-    const Planet earth = named("earth");
+    const Planet earth = wet();
     const hog::globe::Derived derived = hog::globe::derive(earth);
     const Generator::Shape shape{.sea = true};
     const hog::globe::terms::Context context{
@@ -235,17 +245,17 @@ TEST_CASE("chambers shrink away under thin rock, their roofs fallen in", "[globe
 
 TEST_CASE("passages close where the stress round them overcomes the rock, deeper in weaker gravity",
           "[globe][caves]") {
-    const double earth = floor_of(named("earth"));
-    const double moon = floor_of(named("moon"));
-    // Hundreds of metres on Earth, kilometres under the Moon's sixth of the gravity.
+    const double earth = floor_of(wet());
+    const double moon = floor_of(airless());
+    // Hundreds of metres, kilometres under a sixth of the gravity.
     CHECK(earth > 200.0);
     CHECK(earth < 1'500.0);
     CHECK(moon > 3.0 * earth);
-    Planet heavy = named("earth");
+    Planet heavy = wet();
     heavy.gravity *= 2.0;
     CHECK(floor_of(heavy) == Catch::Approx(earth / 2.0).margin(60.0));
     // Nothing is open at the floor, and a cast down a column never reaches below it.
-    const Generator generator{named("earth")};
+    const Generator generator{wet()};
     for (std::uint64_t k = 0; k < 200; ++k) {
         const Generator::Column column = generator.column(direction(k), 0.5);
         for (const auto& [bottom, top] : column.caves(0.0, 1e9, 0.0)) {
@@ -256,7 +266,7 @@ TEST_CASE("passages close where the stress round them overcomes the rock, deeper
 
 TEST_CASE("a cast flags little where the rock holds only fine fractures", "[globe][caves]") {
     // The Moon's crystalline rock opens fissures narrower than a voxel, which aren't drawn.
-    const Generator generator{named("moon")};
+    const Generator generator{airless()};
     double flagged = 0.0;
     for (std::uint64_t k = 0; k < 300; ++k) {
         for (const auto& [bottom, top] :

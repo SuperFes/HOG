@@ -294,7 +294,7 @@ void fill(const World& world, Block& block, Cell first, int size) {
             for (int z = block.lowest(); z < block.lowest() + block.height(); ++z) {
                 Held& here = held[static_cast<std::size_t>(z - block.lowest())];
                 if (z < bottom) {
-                    here = {.ground = world.planet().high.rock, .ground_share = 1.0};
+                    here = {.ground = Material::Granite, .ground_share = 1.0};
                 } else if (z < top) {
                     here = held_of(voxels[static_cast<std::size_t>(z - bottom)]);
                 }

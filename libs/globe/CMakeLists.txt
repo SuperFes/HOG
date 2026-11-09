@@ -2,11 +2,8 @@ add_library(hog_globe
     src/brick.cpp
     src/caves.cpp
     src/cell.cpp
-    src/craters.cpp
-    src/crust.cpp
     src/dissection.cpp
     src/drainage.cpp
-    src/erosion.cpp
     src/formed.cpp
     src/lake_fill.cpp
     src/valleys.cpp
@@ -20,13 +17,12 @@ add_library(hog_globe
     src/planet_file.cpp
     src/pockets.cpp
     src/qef.cpp
-    src/relief.cpp
     src/rockfall.cpp
     src/shoreface.cpp
     src/strata.cpp
     src/surface.cpp
+    src/terms.cpp
     src/vents.cpp
-    src/volcanoes.cpp
     src/cube.cpp
     src/voxel.cpp
     src/voxel_tree.cpp
@@ -46,9 +42,7 @@ hog_target_defaults(hog_globe)
 hog_add_tests(hog_globe
     tests/brick_tests.cpp
     tests/caves_tests.cpp
-    tests/cave_bed_tests.cpp
     tests/cell_tests.cpp
-    tests/craters_tests.cpp
     tests/dissection_tests.cpp
     tests/drainage_tests.cpp
     tests/formed_tests.cpp
@@ -58,8 +52,6 @@ hog_add_tests(hog_globe
     tests/grip_tests.cpp
     tests/held_tiles_tests.cpp
     tests/land_tests.cpp
-    tests/landform_survey_tests.cpp
-    tests/lake_bed_tests.cpp
     tests/layers_tests.cpp
     tests/material_tests.cpp
     tests/maths_tests.cpp
@@ -71,7 +63,6 @@ hog_add_tests(hog_globe
     tests/shoreface_tests.cpp
     tests/strata_tests.cpp
     tests/vents_tests.cpp
-    tests/volcanoes_tests.cpp
     tests/octree_estimate_tests.cpp
     tests/temperature_tests.cpp
     tests/cube_tests.cpp

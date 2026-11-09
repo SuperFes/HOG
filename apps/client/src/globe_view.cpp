@@ -23,16 +23,12 @@ Result<globe::Planet> globe_planet(std::optional<std::string_view> named, std::u
                                    double radius) {
     globe::Planet planet;
     if (named) {
-        if (const auto preset = globe::preset(*named)) {
-            planet = *preset;
-        } else {
-            // A planet file sets its own size.
-            auto loaded = globe::load_planet(std::string{*named});
-            if (loaded) {
-                loaded->seed = seed;
-            }
-            return loaded;
+        // A planet file sets its own size.
+        auto loaded = globe::load_planet(std::string{*named});
+        if (loaded) {
+            loaded->seed = seed;
         }
+        return loaded;
     }
     planet.seed = seed;
     planet.radius = radius;

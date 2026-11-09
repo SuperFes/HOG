@@ -326,25 +326,10 @@ TEST_CASE("generator term cost", "[.bench][globe][land]") {
                                static_cast<double>(downs.size()) * 1e6
                         << " us");
         };
-        time("province", [&](hog::DVec3 d) { return terms::province(context, d).high; });
-        time("built_up", [&](hog::DVec3 d) {
-            return terms::built_up(context, d, terms::province(context, d)).value;
-        });
-        time("relief", [&](hog::DVec3 d) {
-            const auto crust = terms::province(context, d);
-            return terms::relief(context, d, crust, terms::built_up(context, d, crust), lod).value;
-        });
-        time("craters", [&](hog::DVec3 d) { return terms::craters(context, d, lod).value; });
-        time("volcanoes", [&](hog::DVec3 d) { return terms::volcanoes(context, d, lod).value; });
         time("ground", [&](hog::DVec3 d) { return terms::ground(context, d, lod).height; });
         time("column", [&](hog::DVec3 d) { return generator.column(d, lod).ground(); });
         time("rockfall",
              [&](hog::DVec3 d) { return terms::rockfall(context, d, lod) ? 1.0 : 0.0; });
-        time("pond", [&](hog::DVec3 d) { return generator.pond_at(d).value_or(0.0); });
-        time("layering", [&](hog::DVec3 d) {
-            const auto rock = terms::column(context, d, lod);
-            return terms::layering(context, d, rock, rock.height.value).cover;
-        });
         WARN(sink);
     }
 }

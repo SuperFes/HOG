@@ -77,7 +77,7 @@ TEST_CASE("air that holds less than it can is left alone", "[weather][moisture]"
 
 TEST_CASE("a parcel lifted from the ground makes cloud above a base that rises with dry air",
           "[weather][moisture]") {
-    const Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    const Planet planet;
     const double surface = 295.0;
     const auto base = [&](double humidity) {
         const double held0 = saturation_ratio(Volatile::Water, surface, planet.pressure);
@@ -100,7 +100,9 @@ TEST_CASE("a parcel lifted from the ground makes cloud above a base that rises w
 }
 
 TEST_CASE("a world with no volatile makes no cloud", "[weather][moisture]") {
-    Planet moon = hog::globe::preset("moon").value_or(Planet{});
+    Planet moon;
+    moon.pressure = 0.0;
+    moon.volatiles = hog::globe::Volatile::None;
     moon.radius = 20'000.0;
     const hog::globe::Generator generator{moon};
     Field field = start_field(generator, 2, 4);
@@ -114,7 +116,7 @@ TEST_CASE("a world with no volatile makes no cloud", "[weather][moisture]") {
 }
 
 TEST_CASE("the sea feeds the air above it more than the land does", "[weather][moisture]") {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
@@ -155,7 +157,7 @@ TEST_CASE("the sea feeds the air above it more than the land does", "[weather][m
 
 TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
           "[weather][moisture]") {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     const Field start = start_field(generator, 3, 8);
@@ -196,7 +198,7 @@ namespace {
 
 struct Small {
     Planet planet = [] {
-        Planet p = hog::globe::preset("earth").value_or(Planet{});
+        Planet p;
         p.radius = 20'000.0;
         return p;
     }();
@@ -274,8 +276,8 @@ TEST_CASE("rain in dry air evaporates before it lands, cooling the air", "[weath
         precipitate(world.field, world.planet, 30.0);
         reached += static_cast<double>(world.field.precipitation[column]) * 30.0 / 3'600.0;
     }
-    // The cell holds about 0.0005 kg/kg of air a kilogram a cubic metre or less over its depth, and a
-    // fifth of it or less reaches the ground.
+    // The cell holds about 0.0005 kg/kg of air a kilogram a cubic metre or less over its depth, and
+    // a fifth of it or less reaches the ground.
     CHECK(reached < 0.25 * 0.0005 * world.field.grid.depth_of(6));
     CHECK(world.field.at(column, 3).temperature < before);
 }
@@ -323,7 +325,7 @@ TEST_CASE("a heated, moist column makes a storm that rains where a dry one barel
 }
 
 TEST_CASE("the sea gives up the heat of the water it evaporates", "[weather][moisture]") {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
@@ -341,7 +343,7 @@ TEST_CASE("the sea gives up the heat of the water it evaporates", "[weather][moi
 }
 
 TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moisture]") {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
@@ -390,10 +392,10 @@ TEST_CASE("rain keeps its water falling through cells that grow with height", "[
     };
     for (int layer = 0; layer < field.grid.layers; ++layer) {
         Air& air = world.field.at(column, layer);
-        air.vapour = static_cast<float>(saturation_ratio(
-            world.planet.volatiles, static_cast<double>(air.temperature),
-            pressure_at(world.planet, static_cast<double>(field.surface[column]),
-                        field.grid.radius_of(layer) - world.planet.radius)));
+        air.vapour = static_cast<float>(
+            saturation_ratio(world.planet.volatiles, static_cast<double>(air.temperature),
+                             pressure_at(world.planet, static_cast<double>(field.surface[column]),
+                                         field.grid.radius_of(layer) - world.planet.radius)));
     }
     world.field.at(column, 6).rain = 0.002F;
     const double start = 0.002 * mass(6);
@@ -401,7 +403,8 @@ TEST_CASE("rain keeps its water falling through cells that grow with height", "[
     double reached = 0.0;
     for (int i = 0; i < 40; ++i) {
         precipitate(world.field, world.planet, 30.0);
-        reached += static_cast<double>(field.precipitation[column]) * 30.0 / 3'600.0 * ground * ground;
+        reached +=
+            static_cast<double>(field.precipitation[column]) * 30.0 / 3'600.0 * ground * ground;
     }
     double held = 0.0;
     for (int layer = 0; layer < field.grid.layers; ++layer) {

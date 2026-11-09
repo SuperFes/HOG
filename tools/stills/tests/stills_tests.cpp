@@ -10,8 +10,22 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace {
+
+// No air, and nothing to lie liquid: no sea or sky over the ground; voxels as fine as a
+// section's half-metre pixels.
+hog::globe::Planet airless() {
+    hog::globe::Planet planet;
+    planet.pressure = 0.0;
+    planet.volatiles = hog::globe::Volatile::None;
+    planet.voxel = 0.5;
+    return planet;
+}
+
+} // namespace
+
 TEST_CASE("the map shows the sea blue and the land not", "[stills]") {
-    const hog::globe::Generator earth{hog::globe::preset("earth").value_or(hog::globe::Planet{})};
+    const hog::globe::Generator earth{hog::globe::Planet{}};
     const hog::stills::Image map = hog::stills::map(earth, 64, 2);
     REQUIRE(map.width == 64);
     REQUIRE(map.height == 32);
@@ -29,7 +43,7 @@ TEST_CASE("the map shows the sea blue and the land not", "[stills]") {
 }
 
 TEST_CASE("a section shows air over the ground and rock under it", "[stills]") {
-    const hog::globe::Generator moon{hog::globe::preset("moon").value_or(hog::globe::Planet{})};
+    const hog::globe::Generator moon{airless()};
     const hog::stills::Place place{.latitude = 10.0, .longitude = 20.0};
     const hog::stills::Image cut =
         hog::stills::section(moon, place, 8'000.0, -8'000.0, 8'000.0, 40, 2);
@@ -43,7 +57,7 @@ TEST_CASE("a section shows air over the ground and rock under it", "[stills]") {
 }
 
 TEST_CASE("a voxel section shows a dug ball open where the ground was", "[stills]") {
-    const hog::globe::Generator moon{hog::globe::preset("moon").value_or(hog::globe::Planet{})};
+    const hog::globe::Generator moon{airless()};
     const hog::stills::Place place{.latitude = -30.0, .longitude = 70.0};
     const double radius = moon.planet().radius;
     const double ground = hog::globe::ground_below(moon, place.direction(), 0.5).value_or(radius);

@@ -395,12 +395,11 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
     REQUIRE(where != nullptr);
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
-    // A small worn planet, made in seconds.
-    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    // A small planet, made in seconds.
+    hog::globe::Planet planet;
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
-    planet.wear = 0.03;
     planet.voxel = 2.5;
     const hog::client::GlobeWorld globe{planet};
     auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),

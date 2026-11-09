@@ -18,10 +18,11 @@ using hog::globe::Rock;
 namespace {
 
 struct Setup {
-    hog::globe::Planet planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     hog::globe::Generator generator{planet};
-    hog::globe::terms::Context context{
-        .planet = &generator.planet(), .derived = &generator.derived(), .shape = &generator.shape()};
+    hog::globe::terms::Context context{.planet = &generator.planet(),
+                                       .derived = &generator.derived(),
+                                       .shape = &generator.shape()};
 };
 
 // The rocks in cells spread over the planet, with their cells.
@@ -69,8 +70,7 @@ TEST_CASE("rock lies only where the ground is steep, sized and placed inside its
         CHECK(rock.axes.x <= 4.5);
         CHECK(rock.axes.z <= rock.axes.x);
         CHECK(hog::globe::properties(rock.material).strength >= 1.0e6);
-        CHECK(hog::globe::terms::steepness(setup.context, rock.up) >
-              hog::globe::terms::sheds_from);
+        CHECK(hog::globe::terms::steepness(setup.context, rock.up) > hog::globe::terms::sheds_from);
     }
 }
 

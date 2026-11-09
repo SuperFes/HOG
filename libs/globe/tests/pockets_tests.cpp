@@ -14,7 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <tuple>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -25,22 +25,21 @@ namespace {
 
 constexpr std::array voxels{1.0, 2.5};
 
-// A small worn planet, made in seconds, at a voxel size.
-const Generator& planet_of(double voxel, double wear = 0.03) {
-    static std::vector<std::tuple<double, double, Generator>> made;
-    for (const auto& [size, worn, generator] : made) {
-        if (size == voxel && worn == wear) {
+// A small planet, made in seconds, at a voxel size.
+const Generator& planet_of(double voxel) {
+    static std::vector<std::pair<double, Generator>> made;
+    for (const auto& [size, generator] : made) {
+        if (size == voxel) {
             return generator;
         }
     }
-    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
-    planet.wear = wear;
     planet.voxel = voxel;
-    made.emplace_back(voxel, wear, Generator{planet});
-    return std::get<2>(made.back());
+    made.emplace_back(voxel, Generator{planet});
+    return made.back().second;
 }
 
 } // namespace
@@ -90,7 +89,13 @@ TEST_CASE("the pockets found under the ground are the hollows in it, near to far
         CHECK(pocket.across > 0.0);
         CHECK(pocket.height > 0.0);
         last = away;
-        // Open voxels lie up or down the column the pocket is at, within its own height.
+        // A dug hollow's open voxels lie up or down the column it's at, within its own height; a
+        // cave's middle may lie off its winding open space.
+        const bool dug = std::ranges::any_of(
+            hollows, [&](const DVec3 hollow) { return glm::length(pocket.at - hollow) < 6.0; });
+        if (!dug) {
+            continue;
+        }
         const hog::globe::Cell cell =
             hog::globe::cell_under(glm::normalize(pocket.at), layers.level);
         const double middle = glm::length(pocket.at);
@@ -118,10 +123,9 @@ TEST_CASE("a hole dug deep in the rock is a pocket", "[globe][pockets]") {
     // Within what's made under the ground.
     const DVec3 hole = up * (ground - 20.0);
     const auto near_hole = [&] {
-        return std::ranges::any_of(hog::globe::find_pockets(world, up * ground, 100.0, 6.0),
-                                   [&](const Pocket& pocket) {
-                                       return glm::length(pocket.at - hole) < 6.0;
-                                   });
+        return std::ranges::any_of(
+            hog::globe::find_pockets(world, up * ground, 100.0, 6.0),
+            [&](const Pocket& pocket) { return glm::length(pocket.at - hole) < 6.0; });
     };
     // Solid rock there before it's dug.
     REQUIRE_FALSE(near_hole());

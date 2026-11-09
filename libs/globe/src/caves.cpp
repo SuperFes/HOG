@@ -30,36 +30,12 @@ constexpr Octaves pooling{
 // Caves gather in districts a couple of kilometres across, where water found its way in.
 constexpr double district_wavelength = 2'000.0;
 
-// Water makes a passage where enough of it drains through a cell, widening as its flow does.
-constexpr double karst_catchment = 1.0e5; // square metres draining through below which none forms
-constexpr double karst_radius = 1.5;      // metres across at that catchment
-constexpr double karst_widest = 15.0;
-constexpr double karst_growth = 0.3; // the radius' power of the catchment
-// How steeply the meanders' offset may change over a metre.
-constexpr double karst_meander = 0.4;
-// The share of the water's cutting down that had been done when the passage was dissolved.
-constexpr double karst_stage = 0.5;
-constexpr Octaves meandering{.wavelength = 120.0, .gain = 0.4, .finest = 20.0};
-
 // Lava tubes lie within tens of metres of the flows' tops.
 constexpr double tube_depth = 30.0;
 // What a tunnel's wall bears against the rock's strength: about two and a half times the weight
 // of the rock over it, and the rock mass holds a fifth of what intact rock does, being jointed.
 constexpr double wall_stress = 2.5;
 constexpr double mass_strength = 0.2;
-
-double karst_width(double catchment) {
-    return std::min(karst_widest,
-                    karst_radius * std::pow(catchment / karst_catchment, karst_growth));
-}
-
-// Height over the radius the passage under a cell lies at: the water table as it stood part way
-// down, and its roof clear of it by a passage's width.
-double karst_level(const Generator::Shape& shape, std::size_t cell) {
-    return static_cast<double>(shape.table[cell]) +
-           (karst_stage * static_cast<double>(shape.cut[cell])) -
-           (2.0 * karst_width(static_cast<double>(shape.catchment[cell])));
-}
 
 // The depth passages in `rock` are held open to, and none are by twice it: where the stress
 // round them overcomes the rock.
@@ -173,16 +149,16 @@ double widest_span(const Planet& planet, Material rock) {
 }
 
 // Metres to the open space of the caves in `rock` as `open` as it is there, were it all that rock.
-double cave_in(const Context& context, Fields& fields, Material rock, double open, bool watered,
-               double cover, double lod, const Planet& planet, bool bound) {
+double cave_in(Fields& fields, Material rock, double open, bool watered, double cover, double lod,
+               const Planet& planet, bool bound) {
     const double presence = open * fields.district();
     const double size = tunnel_radius * presence;
     // Passages too narrow for the detail asked for close up smoothly.
     const double shown = size * smoothstep((size / lod) - 1.0);
     double distance = shown > 0.0 ? fields.across(bound) - shown : cave_reach;
     if (rock == Material::Limestone && watered) {
-        // Dissolved by the water that ran through it, not opened by chance.
-        distance = karst_distance(context, fields.direction(), fields.radius(), lod, bound);
+        // Limestone the water ran through opens in chambers, not chance passages.
+        distance = cave_reach;
         // Fewer where passages are fewer: none where there are none.
         const double threshold = chamber_threshold + ((1.0 - presence) * 0.6);
         // A roof arches over a span only under about as much rock again; under less it falls
@@ -202,59 +178,6 @@ double cave_in(const Context& context, Fields& fields, Material rock, double ope
 }
 
 } // namespace
-
-double karst_distance(const Context& context, DVec3 direction, double radius, double lod,
-                      bool bound) noexcept {
-    const Generator::Shape& shape = *context.shape;
-    if (shape.receiver.empty()) {
-        return cave_reach;
-    }
-    const double planet_radius = context.planet->radius;
-    // The point as the meanders carry it: a passage is a straight run in this offset space.
-    const DVec3 at = direction * radius;
-    // Each of the three offsets changes by at most the noise's slope, so together by root three
-    // of it.
-    const double reach = karst_meander / (std::numbers::sqrt3 * fbm_steepest(meandering));
-    const std::uint64_t seed = context.seed(Term::Meander);
-    const DVec3 point = at + (reach * DVec3{fbm(at, meandering, lod, seed).value,
-                                            fbm(at, meandering, lod, seed + 1).value,
-                                            fbm(at, meandering, lod, seed + 2).value});
-    const int level = shape.cut_level;
-    const Cell home = cell_under(direction, level);
-    const CellNeighbors beside = around(home);
-    double nearest = cave_reach;
-    const auto run_from = [&](Cell cell) {
-        const auto from = static_cast<std::size_t>(index_of(cell));
-        const std::size_t to = shape.receiver[from];
-        const double catchment = static_cast<double>(shape.catchment[from]);
-        if (to == from || catchment < karst_catchment) {
-            return;
-        }
-        const Cell receiver = cell_at_index(level, to);
-        const DVec3 a = center(cell) * (planet_radius + karst_level(shape, from));
-        const DVec3 b = center(receiver) * (planet_radius + karst_level(shape, to));
-        const DVec3 along = b - a;
-        const double share =
-            std::clamp(glm::dot(point - a, along) / glm::dot(along, along), 0.0, 1.0);
-        const double away = glm::length(point - (a + (share * along)));
-        const double narrow = karst_width(catchment);
-        const double wide = karst_width(static_cast<double>(shape.catchment[to]));
-        if (bound) {
-            // The meanders can stretch a distance by up to their slope, but never a way inside.
-            const double clear = away - std::max(narrow, wide);
-            nearest = std::min(nearest, clear < 0.0 ? clear : clear / (1.0 + karst_meander));
-            return;
-        }
-        const double width = narrow + (share * (wide - narrow));
-        // Too narrow for the detail asked for, a passage closes up smoothly.
-        nearest = std::min(nearest, away - (width * smoothstep((width / lod) - 1.0)));
-    };
-    run_from(home);
-    for (const Cell cell : beside.all()) {
-        run_from(cell);
-    }
-    return nearest;
-}
 
 double cave_floor(const Context& context) noexcept {
     const Planet& planet = *context.planet;
@@ -326,8 +249,7 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
         if (open <= 0.0 || unit.outside >= nearest) {
             continue;
         }
-        const double inside =
-            cave_in(context, fields, unit.rock, open, watered, cover, lod, planet, bound);
+        const double inside = cave_in(fields, unit.rock, open, watered, cover, lod, planet, bound);
         nearest = std::min(nearest, std::max(inside, unit.outside));
     }
     return nearest;

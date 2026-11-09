@@ -13,23 +13,11 @@
 
 namespace hog::globe {
 
-// How the planet's lid moves: plates that ride and sink, one lid that never moves, or one that
-// founders now and then and is laid down again whole.
-enum class Regime : std::uint8_t { Plates, StagnantLid, Episodic };
-
-// Where the thick, high crust lies: scattered as continents, or gathered on one side.
-enum class Layout : std::uint8_t { Scattered, OneSide };
-
 // What can stand on the surface as liquid and ice.
 enum class Volatile : std::uint8_t { None, Water, Methane };
 
-struct Crust {
-    Material rock = Material::Basalt;
-    double thickness = 7'000.0; // metres
-};
-
-// A planet as physical knobs; Earth's by default, at the game's size. Presets carry a real
-// body's physics, not its size, and gravity is set rather than grown from the radius.
+// A planet as physical knobs, at the game's size; gravity is set rather than grown from the
+// radius.
 struct Planet {
     std::uint64_t seed = 1;
 
@@ -37,59 +25,30 @@ struct Planet {
     double gravity = 9.81;     // m/s²
     double day = 86'400.0;     // seconds, sunrise to sunrise
     double tilt = 23.44;       // degrees
-    // Feature widths as a share of the same features on Earth, over the radius's share of
-    // Earth's, so a small world keeps its landforms in proportion to its size.
-    double lateral_scale = 1.0;
 
     // The voxel shell: impassable below the floor, open sky above the ceiling.
     double voxel = 2.5;           // metres
     double floor_depth = 4'000.0; // metres of rock kept under the lowest ground
     double sky_height = 10'000.0; // metres above the reference level
 
-    Regime regime = Regime::Plates;
-    Crust high{.rock = Material::Granite, .thickness = 35'000.0};
-    Crust low{.rock = Material::Basalt, .thickness = 7'000.0};
-    double high_fraction = 0.4; // of the surface
-    Layout layout = Layout::Scattered;
-    double mantle_density = 3'300.0; // kg/m³
-    double heat_flow = 0.087;        // W/m² out through the surface
-
-    double surface_age = 0.1; // Gyr since the surface last kept its craters
-    double impact_flux = 1.0; // the Moon's rate as 1
+    double heat_flow = 0.087; // W/m² out through the surface
 
     double pressure = 101'325.0;        // pascals at the reference level
     double equator_temperature = 300.0; // kelvin, the year's mean
     double pole_temperature = 245.0;
     Volatile volatiles = Volatile::Water;
-    double sea_fraction = 0.7; // of the surface, where liquid can stand
-    // How hard running water has worn the land before the world begins, as the drainage's erosion
-    // rate; none at 0.
-    double wear = 0.0;
-    // Metres of loose ground rock has weathered into on level ground in a temperate climate;
-    // the climate and the rock make it more or less.
-    double weathering = 8.0;
     // Splits of the sphere the land is formed on, stage by stage from plates to soil
-    // (hog::formation), its heights, ice, lakes and layers then read from it; none at 0, the
-    // generator's own terms shaping the land instead.
-    double formed_detail = 0.0;
+    // (hog::formation), its heights, ice, lakes and layers then read from it.
+    double formed_detail = 5.0;
 };
 
 // What follows from the knobs by known physics.
 struct Derived {
-    // How tall rock stands before its own weight crushes it, Y/(ρg), in the high crust.
-    double strength_height = 0.0;
-    double crater_transition = 0.0; // metres across, where simple bowls give way to complex
-    double tallest = 0.0;           // metres, the highest a mountain can stand over its base
-    double isostatic_step = 0.0;    // metres the high crust floats above the low, dry
     double geotherm = 0.0;          // K/m down through the crust
     double floor_temperature = 0.0; // kelvin
-    double lateral = 0.0;           // feature widths as a share of Earth's
     double vertical = 0.0;          // heights as a share of those at the default radius
     bool liquid = false;            // the volatile is liquid somewhere on the surface
     bool ice = false;               // and frozen somewhere
-    bool fluvial = false;
-    bool glacial = false;
-    bool aeolian = false;
 };
 
 [[nodiscard]] Derived derive(const Planet& planet);
@@ -134,14 +93,10 @@ enum class Surroundings : std::uint8_t {
 // Where the volatile boils at a pressure, in kelvin; none below its triple point's pressure.
 [[nodiscard]] std::optional<double> boiling_point(Volatile volatiles, double pressure);
 
-// "earth", "mars", "venus" or "moon".
-[[nodiscard]] std::optional<Planet> preset(std::string_view name);
-
 // Whether every knob is one a planet can have.
 [[nodiscard]] Result<void> validate(const Planet& planet);
 
-// A `[globe]` table: an optional `preset`, then any knobs by name to change from it, the crusts as
-// `[globe.high]` and `[globe.low]`.
+// A `[globe]` table: any knobs by name to change from the defaults.
 [[nodiscard]] Result<Planet> parse_planet(std::string_view text);
 [[nodiscard]] Result<Planet> load_planet(const std::filesystem::path& path);
 

@@ -23,7 +23,7 @@ constexpr int level = 3;
 constexpr int layers = 8;
 
 Planet small_earth() {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     return planet;
 }
@@ -58,6 +58,27 @@ std::size_t land_column(const Field& field) {
     for (std::size_t column = 0; column < field.grid.columns(); ++column) {
         const hog::DVec3 up = hog::globe::center(hog::globe::cell_at_index(level, column));
         if (field.over_sea[column] == 0 && lowest_open(field, column) > 0 && up.z > 0.3) {
+            return column;
+        }
+    }
+    return field.grid.columns();
+}
+
+// A land column as above whose lowest open air has open air on every side too: level ground, so
+// no slope's own winds outweigh what's done to it.
+std::size_t open_land_column(const Field& field, const Stencil& stencil) {
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        const hog::DVec3 up = hog::globe::center(hog::globe::cell_at_index(level, column));
+        const int low = lowest_open(field, column);
+        if (field.over_sea[column] != 0 || low == 0 || low >= layers || up.z <= 0.3) {
+            continue;
+        }
+        const auto& links = stencil.links(field.grid.index(column, low));
+        bool open = true;
+        for (int side = 0; side < 4; ++side) {
+            open = open && field.blocked[links[static_cast<std::size_t>(side)].cell] == 0;
+        }
+        if (open) {
             return column;
         }
     }
@@ -236,7 +257,7 @@ TEST_CASE("steps from rest stay finite and the wind stays within bounds", "[weat
 
 TEST_CASE("ground warmed by the sun draws air in and lifts it", "[weather][wind]") {
     World world;
-    const std::size_t column = land_column(world.field);
+    const std::size_t column = open_land_column(world.field, world.stencil);
     REQUIRE(column < world.field.grid.columns());
     // Settle for a day, then heat one column's surface and its air hard.
     for (int step = 0; step < 12; ++step) {

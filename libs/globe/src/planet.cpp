@@ -15,21 +15,9 @@
 namespace hog::globe {
 namespace {
 
-constexpr double earth_radius = 6'371'000.0;
-constexpr double earth_gravity = 9.81;
 // Rock conducts heat about this well through the crust, W/m/K.
 constexpr double conductivity = 2.5;
 constexpr double gas_constant = 8.314'462;
-
-double strength_height(const Crust& crust, double gravity) {
-    const Properties& rock = properties(crust.rock);
-    return rock.strength / (rock.density * gravity);
-}
-
-// Both scale with Y/(ρg); fitted to Earth's granite crust: simple craters to 3.2 km across, and
-// its highest mountain at 8.8 km.
-constexpr double earth_transition = 3'200.0;
-constexpr double earth_tallest = 8'800.0;
 
 struct Phase {
     double triple_temperature; // kelvin
@@ -70,65 +58,6 @@ bool positive(double value) {
 
 bool within(double value, double low, double high) {
     return value >= low && value <= high;
-}
-
-Planet mars() {
-    return {.gravity = 3.71,
-            .day = 88'775.0,
-            .tilt = 25.19,
-            .sky_height = 25'000.0,
-            .regime = Regime::StagnantLid,
-            .high = {.rock = Material::Basalt, .thickness = 58'000.0},
-            .low = {.rock = Material::Basalt, .thickness = 32'000.0},
-            .high_fraction = 0.6,
-            .layout = Layout::OneSide,
-            .mantle_density = 3'500.0,
-            .heat_flow = 0.02,
-            .surface_age = 3.5,
-            .impact_flux = 2.0,
-            .pressure = 636.0,
-            .equator_temperature = 224.0,
-            .pole_temperature = 150.0,
-            .volatiles = Volatile::Water,
-            .sea_fraction = 0.0};
-}
-
-Planet venus() {
-    return {.gravity = 8.87,
-            .day = 10'087'200.0,
-            .tilt = 2.64,
-            .sky_height = 12'000.0,
-            .regime = Regime::Episodic,
-            .high = {.rock = Material::Basalt, .thickness = 30'000.0},
-            .low = {.rock = Material::Basalt, .thickness = 30'000.0},
-            .high_fraction = 0.0,
-            .heat_flow = 0.04,
-            .surface_age = 0.5,
-            .pressure = 9'200'000.0,
-            .equator_temperature = 737.0,
-            .pole_temperature = 737.0,
-            .volatiles = Volatile::None,
-            .sea_fraction = 0.0};
-}
-
-Planet moon() {
-    return {.gravity = 1.62,
-            .day = 2'551'443.0,
-            .tilt = 1.54,
-            .sky_height = 12'000.0,
-            .regime = Regime::StagnantLid,
-            .high = {.rock = Material::Anorthosite, .thickness = 50'000.0},
-            .low = {.rock = Material::Basalt, .thickness = 30'000.0},
-            .high_fraction = 0.84,
-            .layout = Layout::OneSide,
-            .mantle_density = 3'360.0,
-            .heat_flow = 0.02,
-            .surface_age = 4.0,
-            .pressure = 0.0,
-            .equator_temperature = 295.0,
-            .pole_temperature = 100.0,
-            .volatiles = Volatile::None,
-            .sea_fraction = 0.0};
 }
 
 } // namespace
@@ -200,22 +129,10 @@ std::optional<double> boiling_point(Volatile volatiles, double pressure) {
 Derived derive(const Planet& planet) {
     Derived derived;
     // Heights are tuned at the game's size and keep their proportion to the planet's width at
-    // any other: a smaller world has proportionately lower mountains, thinner crust and smaller
-    // craters, not Earth's relief on a few kilometres of radius.
-    derived.vertical = planet.lateral_scale * planet.radius / Planet{}.radius;
-    derived.strength_height = strength_height(planet.high, planet.gravity);
-    const double earth = strength_height({.rock = Material::Granite}, earth_gravity);
-    derived.crater_transition =
-        earth_transition * derived.strength_height / earth * derived.vertical;
-    derived.tallest = earth_tallest * derived.strength_height / earth * derived.vertical;
-    const auto floats = [&](const Crust& crust) {
-        return crust.thickness * derived.vertical *
-               (1.0 - (properties(crust.rock).density / planet.mantle_density));
-    };
-    derived.isostatic_step = floats(planet.high) - floats(planet.low);
+    // any other.
+    derived.vertical = planet.radius / Planet{}.radius;
     derived.geotherm = planet.heat_flow / conductivity;
     derived.floor_temperature = mean_temperature(planet) + (derived.geotherm * planet.floor_depth);
-    derived.lateral = planet.lateral_scale * planet.radius / earth_radius;
 
     const double warmest = std::max(planet.equator_temperature, planet.pole_temperature);
     const double coldest = std::min(planet.equator_temperature, planet.pole_temperature);
@@ -224,41 +141,16 @@ Derived derive(const Planet& planet) {
         derived.liquid = boils && warmest >= phase->triple_temperature && coldest < *boils;
         derived.ice = coldest < phase->triple_temperature;
     }
-    derived.fluvial = derived.liquid;
-    derived.glacial = derived.ice;
-    // Pluto's dunes formed under about a pascal of air.
-    derived.aeolian = planet.pressure >= 1.0;
     return derived;
 }
 
-std::optional<Planet> preset(std::string_view name) {
-    if (name == "earth") {
-        return Planet{};
-    }
-    if (name == "mars") {
-        return mars();
-    }
-    if (name == "venus") {
-        return venus();
-    }
-    if (name == "moon") {
-        return moon();
-    }
-    return std::nullopt;
-}
-
 Result<void> validate(const Planet& planet) {
-    const auto floats = [&](const Crust& crust) {
-        return crust.thickness >= 0.0 && std::isfinite(crust.thickness) &&
-               properties(crust.rock).density < planet.mantle_density;
-    };
     const double shell = planet.floor_depth + planet.sky_height;
     const auto checks = std::to_array<std::pair<bool, std::string_view>>({
         {positive(planet.radius), "radius must be positive"},
         {positive(planet.gravity), "gravity must be positive"},
         {positive(planet.day), "day must be positive"},
         {within(planet.tilt, 0.0, 180.0), "tilt must be 0 to 180 degrees"},
-        {positive(planet.lateral_scale), "lateral_scale must be positive"},
         {positive(planet.voxel), "voxel must be positive"},
         {positive(planet.floor_depth) && planet.floor_depth < planet.radius,
          "floor_depth must be positive and less than the radius"},
@@ -266,23 +158,13 @@ Result<void> validate(const Planet& planet) {
         {planet.voxel <= std::min(planet.floor_depth, planet.sky_height) &&
              shell / planet.voxel < std::numeric_limits<int>::max(),
          "voxel must fit the shell, and the shell not hold too many layers"},
-        {positive(planet.mantle_density), "mantle_density must be positive"},
-        {floats(planet.high) && floats(planet.low),
-         "crusts must have a thickness and be lighter than the mantle"},
-        {within(planet.high_fraction, 0.0, 1.0), "high_fraction must be 0 to 1"},
         {within(planet.heat_flow, 0.0, 1e3), "heat_flow must be 0 to 1000 W/m²"},
-        {within(planet.surface_age, 0.0, 4.6), "surface_age must be 0 to 4.6 Gyr"},
-        {within(planet.impact_flux, 0.0, 1e3), "impact_flux must be 0 to 1000"},
         {within(planet.pressure, 0.0, 1e9), "pressure must be 0 to 1e9 Pa"},
         {positive(planet.equator_temperature) && positive(planet.pole_temperature),
          "temperatures must be positive kelvin"},
-        {planet.wear >= 0.0 && planet.wear <= 1.0, "wear must be 0 to 1"},
-        {within(planet.weathering, 0.0, 100.0), "weathering must be 0 to 100 metres"},
-        {planet.sea_fraction >= 0.0 && planet.sea_fraction < 1.0,
-         "sea_fraction must be at least 0 and below 1"},
-        {planet.formed_detail == 0.0 || (within(planet.formed_detail, 4.0, 9.0) &&
-                                         planet.formed_detail == std::floor(planet.formed_detail)),
-         "formed_detail must be 0, or a whole 4 to 9 splits"},
+        {within(planet.formed_detail, 4.0, 9.0) &&
+             planet.formed_detail == std::floor(planet.formed_detail),
+         "formed_detail must be a whole 4 to 9 splits"},
     });
     for (const auto& [holds, message] : checks) {
         if (!holds) {
@@ -294,23 +176,17 @@ Result<void> validate(const Planet& planet) {
 
 std::uint64_t world_id(const Planet& planet) noexcept {
     const auto bits = [](double value) { return std::bit_cast<std::uint64_t>(value); };
-    return hash_values(
-        planet.seed, bits(planet.radius), bits(planet.gravity), bits(planet.day), bits(planet.tilt),
-        bits(planet.lateral_scale), bits(planet.voxel), bits(planet.floor_depth),
-        bits(planet.sky_height), static_cast<int>(planet.regime),
-        static_cast<int>(planet.high.rock), bits(planet.high.thickness),
-        static_cast<int>(planet.low.rock), bits(planet.low.thickness), bits(planet.high_fraction),
-        static_cast<int>(planet.layout), bits(planet.mantle_density), bits(planet.heat_flow),
-        bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
-        bits(planet.equator_temperature), bits(planet.pole_temperature),
-        static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear),
-        bits(planet.weathering), bits(planet.formed_detail));
+    return hash_values(planet.seed, bits(planet.radius), bits(planet.gravity), bits(planet.day),
+                       bits(planet.tilt), bits(planet.voxel), bits(planet.floor_depth),
+                       bits(planet.sky_height), bits(planet.heat_flow), bits(planet.pressure),
+                       bits(planet.equator_temperature), bits(planet.pole_temperature),
+                       static_cast<int>(planet.volatiles), bits(planet.formed_detail));
 }
 
 namespace {
 
 // The knobs' version in the bytes, so a planet from another is refused, not misread.
-constexpr std::uint8_t planet_bytes_version = 3;
+constexpr std::uint8_t planet_bytes_version = 4;
 
 void write_double(ByteWriter& out, double value) {
     out.write(std::bit_cast<std::uint64_t>(value));
@@ -323,26 +199,12 @@ std::vector<std::byte> encode_planet(const Planet& planet) {
     out.write(planet_bytes_version);
     out.write(planet.seed);
     for (const double value :
-         {planet.radius, planet.gravity, planet.day, planet.tilt, planet.lateral_scale,
-          planet.voxel, planet.floor_depth, planet.sky_height}) {
-        write_double(out, value);
-    }
-    out.write(static_cast<std::uint8_t>(planet.regime));
-    for (const Crust& crust : {planet.high, planet.low}) {
-        out.write(static_cast<std::uint8_t>(crust.rock));
-        write_double(out, crust.thickness);
-    }
-    write_double(out, planet.high_fraction);
-    out.write(static_cast<std::uint8_t>(planet.layout));
-    for (const double value :
-         {planet.mantle_density, planet.heat_flow, planet.surface_age, planet.impact_flux,
-          planet.pressure, planet.equator_temperature, planet.pole_temperature}) {
+         {planet.radius, planet.gravity, planet.day, planet.tilt, planet.voxel, planet.floor_depth,
+          planet.sky_height, planet.heat_flow, planet.pressure, planet.equator_temperature,
+          planet.pole_temperature}) {
         write_double(out, value);
     }
     out.write(static_cast<std::uint8_t>(planet.volatiles));
-    write_double(out, planet.sea_fraction);
-    write_double(out, planet.wear);
-    write_double(out, planet.weathering);
     write_double(out, planet.formed_detail);
     return std::move(out).take();
 }
@@ -376,37 +238,20 @@ Result<Planet> decode_planet(std::span<const std::byte> bytes) {
         into = *value;
         return true;
     };
-    std::uint8_t regime = 0;
-    std::uint8_t high_rock = 0;
-    std::uint8_t low_rock = 0;
-    std::uint8_t layout = 0;
     std::uint8_t volatiles = 0;
-    const bool whole =
-        read_double(planet.radius) && read_double(planet.gravity) && read_double(planet.day) &&
-        read_double(planet.tilt) && read_double(planet.lateral_scale) &&
-        read_double(planet.voxel) && read_double(planet.floor_depth) &&
-        read_double(planet.sky_height) && read_byte(regime) && read_byte(high_rock) &&
-        read_double(planet.high.thickness) && read_byte(low_rock) &&
-        read_double(planet.low.thickness) && read_double(planet.high_fraction) &&
-        read_byte(layout) && read_double(planet.mantle_density) && read_double(planet.heat_flow) &&
-        read_double(planet.surface_age) && read_double(planet.impact_flux) &&
-        read_double(planet.pressure) && read_double(planet.equator_temperature) &&
-        read_double(planet.pole_temperature) && read_byte(volatiles) &&
-        read_double(planet.sea_fraction) && read_double(planet.wear) &&
-        read_double(planet.weathering) && read_double(planet.formed_detail);
+    const bool whole = read_double(planet.radius) && read_double(planet.gravity) &&
+                       read_double(planet.day) && read_double(planet.tilt) &&
+                       read_double(planet.voxel) && read_double(planet.floor_depth) &&
+                       read_double(planet.sky_height) && read_double(planet.heat_flow) &&
+                       read_double(planet.pressure) && read_double(planet.equator_temperature) &&
+                       read_double(planet.pole_temperature) && read_byte(volatiles) &&
+                       read_double(planet.formed_detail);
     if (!whole) {
         return cut();
     }
-    if (regime > static_cast<std::uint8_t>(Regime::Episodic) ||
-        layout > static_cast<std::uint8_t>(Layout::OneSide) ||
-        volatiles > static_cast<std::uint8_t>(Volatile::Methane) || high_rock >= material_count ||
-        low_rock >= material_count) {
+    if (volatiles > static_cast<std::uint8_t>(Volatile::Methane)) {
         return make_error(ErrorCode::Parse, "a planet with a kind it doesn't know");
     }
-    planet.regime = static_cast<Regime>(regime);
-    planet.high.rock = static_cast<Material>(high_rock);
-    planet.low.rock = static_cast<Material>(low_rock);
-    planet.layout = static_cast<Layout>(layout);
     planet.volatiles = static_cast<Volatile>(volatiles);
     if (in.remaining() != 0) {
         return make_error(ErrorCode::Parse, "a planet's bytes with bytes left over");

@@ -67,8 +67,10 @@ ColumnMeshes::ColumnMeshes(const globe::World& world, jobs::JobSystem& jobs)
 
 void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     const globe::World* world = world_;
-    const std::optional<double> sea =
-        world->planet().sea_fraction > 0.0 ? std::optional{world->planet().radius} : std::nullopt;
+    // A formed world's sea stands at the radius wherever its volatile can lie liquid.
+    const std::optional<double> sea = globe::derive(world->planet()).liquid
+                                          ? std::optional{world->planet().radius}
+                                          : std::nullopt;
     const double voxel = world->layers().thickness;
     // Those beside each, meshed, show their sides against it as it was.
     std::vector<globe::Site> all{corners.begin(), corners.end()};

@@ -238,8 +238,10 @@ TEST_CASE("how finely a planet's land is formed is one of its knobs", "[globe][f
     CHECK(validate(planet).has_value());
     const auto decoded = hog::globe::decode_planet(hog::globe::encode_planet(planet));
     REQUIRE(decoded.has_value());
-    CHECK(decoded->formed_detail == 5.0);
-    CHECK(world_id(planet) != world_id(Planet{}));
+    CHECK(decoded->formed_detail == planet.formed_detail);
+    Planet finer = planet;
+    finer.formed_detail = 6.0;
+    CHECK(world_id(finer) != world_id(planet));
     planet.formed_detail = 5.5;
     CHECK_FALSE(validate(planet).has_value());
     planet.formed_detail = 10.0;

@@ -17,7 +17,7 @@ using namespace hog::weather;
 namespace {
 
 hog::globe::Planet small_earth() {
-    hog::globe::Planet planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     planet.radius = 20'000.0;
     return planet;
 }

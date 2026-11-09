@@ -106,8 +106,9 @@ void World::column(Site base, int bottom, int count, int apart, std::span<Voxel>
         const std::uint32_t at = layer;
         Cube cube;
         if (lowest && at < *lowest) {
-            // Under a column's floor nothing is made yet: deep ground, taken as the crust's rock.
-            cube = {.solid = planet.high.rock, .solid_amount = Voxel::full};
+            // Under a column's floor nothing is made yet: deep ground, taken as the continents'
+            // basement.
+            cube = {.solid = Material::Granite, .solid_amount = Voxel::full};
         } else {
             if (tile_k != at / side) {
                 tile_k = at / side;

@@ -12,7 +12,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -39,10 +38,8 @@ struct Sample {
 
 // What lies under the ground in one column, top down: sedimentary beds, then the crust's own rock.
 struct Strata {
-    double cover = 0.0;    // sedimentary rock's base, metres below the ground
-    double fold = 0.0;     // metres the beds are lifted here
-    DVec3 fold_tilt{0.0};  // how much more, per metre across
-    DVec3 cover_tilt{0.0}; // how much more `cover`, per metre across
+    double cover = 0.0; // sedimentary rock's base, metres below the ground
+    double fold = 0.0;  // metres the beds are lifted here
     Material basement = Material::Basalt;
     // What a formed world laid over its beds, metres each, from the top down; within `cover`.
     double ice = 0.0;
@@ -107,9 +104,6 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
         [[nodiscard]] double water() const noexcept { return water_; }
-        // Metres from the centre to the water table, under which the open space in the ground is
-        // flooded; 0 where the planet has no drainage.
-        [[nodiscard]] double table() const noexcept { return table_; }
         // Kelvin, the mean the year round at the planet's reference level.
         [[nodiscard]] double surface_temperature() const noexcept { return surface_temperature_; }
         // Rise per metre across the ground.
@@ -134,7 +128,7 @@ public:
         };
         // The stretches of radius between `lowest` and `highest`, lowest first, where voxels may
         // differ from one layer to the next but for their temperature: about the ground, open
-        // water, the water table, the beds' edges and caves, each `margin` wider either way.
+        // water, the beds' edges and caves, each `margin` wider either way.
         // Outside them, voxels are alike all the way to the next, and no cave reaches them.
         // Without `beds`, the beds' edges are left out, as inside() tells them; without `caves`,
         // the caves.
@@ -151,7 +145,6 @@ public:
         double lod_ = 0.0;
         double ground_ = 0.0; // metres from the centre
         double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
-        double table_ = 0.0;  // metres from the centre to the water table; 0 none
         double slope_ = 0.0;  // across the ground, at the radius
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
@@ -159,18 +152,6 @@ public:
     };
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
-
-    // Where rain on the ground under `direction` has gathered, as the worn ground drains: the lake
-    // standing there, as metres from the centre to its surface, if one does, and the square metres
-    // draining through the place. Nothing on a world without wear.
-    struct Gathering {
-        std::optional<double> lake;
-        double catchment = 0.0;
-    };
-    [[nodiscard]] Gathering gathered(DVec3 direction) const;
-    // Where a lake's water stands over the ground under `direction`, as metres from the centre,
-    // if it's flooded there.
-    [[nodiscard]] std::optional<double> pond_at(DVec3 direction) const;
 
     // The fallen rocks, as generated at `lod`, whose cells lie within about a cell of `point`;
     // those reaching further than that from it are among them too.
@@ -188,42 +169,10 @@ public:
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {
-        double province_threshold = 0.0;
-        double province_band = 1.0; // of the province field, across the margin
-        DVec3 one_side{0.0, 0.0, 1.0};
-        double datum = 0.0;   // raw height of the radius: the sea's level, or the mean ground's
-        double lowest = 0.0;  // the lowest ground surveyed, metres over the radius
+        double lowest = 0.0;  // the lowest ground formed, metres over the radius
         double highest = 0.0; // and the highest
         bool sea = false;
-        // Metres the running water has cut from the ground at each cell of `cut_level`, from the
-        // erosion of the generated ground; empty on a world without wear.
-        int cut_level = 0;
-        std::vector<float> cut{}; // NOLINT(readability-redundant-member-init)
-        // At those cells too: where a hollow in the worn ground holds a lake, the height its
-        // water stands at over the radius, else `no_lake`; and the area draining through it.
-        static constexpr float no_lake = -1e30F;
-        std::vector<float> lake{};      // NOLINT(readability-redundant-member-init)
-        std::vector<float> catchment{}; // NOLINT(readability-redundant-member-init)
-        // And the drainage's network: the cell the water leaves each by (itself at the sea), and
-        // the height the water table stands at under it, the worn ground with its hollows filled.
-        std::vector<std::uint32_t> receiver{}; // NOLINT(readability-redundant-member-init)
-        std::vector<float> table{};            // NOLINT(readability-redundant-member-init)
-        // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
-        // into, a layer for each level its water stands at there, and which of the cell's 64 by 64
-        // columns hold it. The columns are wider than the voxels', so `rim` also marks the ring of
-        // columns round the flooded ones, where the voxels' own ground may lie under the level
-        // too.
-        struct Pond {
-            struct Layer {
-                float level = 0.0F;
-                std::array<std::uint64_t, 64> rows{};
-                std::array<std::uint64_t, 64> rim{};
-            };
-            std::vector<Layer> layers{}; // NOLINT(readability-redundant-member-init)
-        };
-        std::unordered_map<std::uint64_t, Pond>
-            ponds{}; // NOLINT(readability-redundant-member-init)
-        // The world formed stage by stage the land is read from, on a planet asking for one.
+        // The world formed stage by stage the land is read from.
         std::shared_ptr<const Formed> formed{}; // NOLINT(readability-redundant-member-init)
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }

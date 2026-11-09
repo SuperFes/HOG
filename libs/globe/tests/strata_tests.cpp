@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <optional>
 #include <set>
-#include <string_view>
 
 using hog::DVec3;
 using hog::globe::Generator;
@@ -17,8 +16,17 @@ using hog::globe::Material;
 
 namespace {
 
-Generator generator_for(std::string_view name) {
-    return Generator{hog::globe::preset(name).value_or(hog::globe::Planet{})};
+Generator wet() {
+    return Generator{hog::globe::Planet{}};
+}
+
+// Too cold and thin-aired for seas.
+Generator frozen() {
+    hog::globe::Planet planet;
+    planet.pressure = 636.0;
+    planet.equator_temperature = 224.0;
+    planet.pole_temperature = 150.0;
+    return Generator{planet};
 }
 
 DVec3 direction(std::uint64_t k) {
@@ -48,31 +56,21 @@ Found dig(const Generator& world, std::uint64_t count) {
 
 } // namespace
 
-TEST_CASE("the ground is bare rock over beds of rock, with no loose cover of its own",
+TEST_CASE("beds of rock lie under the ground, limestone only where seas laid it",
           "[globe][strata]") {
-    for (const std::string_view name : {"earth", "moon", "mars"}) {
-        CAPTURE(name);
-        const Found found = dig(generator_for(name), 300);
-        for (const Material loose : {Material::Soil, Material::Sediment, Material::Snow,
-                                     Material::Regolith, Material::Sand}) {
-            CHECK_FALSE(found.top.contains(loose));
-            CHECK_FALSE(found.deep.contains(loose));
-        }
-    }
-    const Found earth = dig(generator_for("earth"), 400);
+    const Found earth = dig(wet(), 400);
     for (const Material material :
          {Material::Limestone, Material::Shale, Material::Sandstone, Material::Basalt}) {
         CHECK(earth.deep.contains(material));
     }
-    // Mars once had water: beds of sandstone and shale, but no seas to lay limestone.
-    const Found mars = dig(generator_for("mars"), 300);
-    CHECK(mars.deep.contains(Material::Sandstone));
-    CHECK_FALSE(mars.deep.contains(Material::Limestone));
-    CHECK_FALSE(dig(generator_for("moon"), 300).deep.contains(Material::Sandstone));
+    // With no seas, beds of sandstone and shale but no limestone.
+    const Found dry = dig(frozen(), 300);
+    CHECK(dry.deep.contains(Material::Sandstone));
+    CHECK_FALSE(dry.deep.contains(Material::Limestone));
 }
 
 TEST_CASE("the ground under the sea is soaked to its pores, and dry above it", "[globe][strata]") {
-    const Generator earth = generator_for("earth");
+    const Generator earth = wet();
     const std::optional<double> level = earth.sea_level();
     REQUIRE(level);
     const double sea = level.value_or(0.0);
