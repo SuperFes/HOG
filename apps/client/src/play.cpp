@@ -1181,16 +1181,15 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, globe::World&
     return {};
 }
 
-// Metres from the eye the server sends the ground, and the client keeps it: a little further.
+// Metres from the eye the server sends the ground.
 constexpr double streamed_ground = 8'000.0;
-constexpr double kept_ground = 9'000.0;
 
-// The ground the server sends, held as it comes: voxels alone, over the planet and its layers.
+// The ground the server sends, held as it comes: tiles alone, over the planet and its layers,
+// read by the world and meshed to draw, the same trees shared.
 struct StreamedGround {
     StreamedGround(const globe::Planet& planet, const globe::Layers& layers, jobs::JobSystem& jobs)
-        : planet{planet}, world{this->planet, layers, volume}, meshes{world, jobs},
-          tiles{this->planet, layers, jobs} {
-        world.read_coarse(&held);
+        : planet{planet}, world{this->planet, layers, volume}, meshes{this->planet, layers, jobs} {
+        world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
     StreamedGround& operator=(const StreamedGround&) = delete;
@@ -1199,59 +1198,50 @@ struct StreamedGround {
     ~StreamedGround() = default;
 
     globe::Planet planet;
-    globe::Volume volume;
+    globe::Volume volume; // none: the ground is the tiles sent
+    globe::HeldTiles tiles;
     globe::World world;
-    globe::ColumnCache held{volume};
-    client::ColumnMeshes meshes;
-    client::TileMeshes tiles;
-    std::optional<globe::Site> over; // the tile column last kept about
+    client::TileMeshes meshes;
 };
 
-// Takes in the tiles the server sent, meshing them, and the tile columns, once the columns being
-// meshed from the world are done, and has those they changed meshed again. Lets go columns far
-// off as the eye moves on.
-void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye) {
+// Takes in the tiles the server sent, held for the world and the player's footing and meshed to
+// draw.
+void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene,
+                 std::optional<client::Player>& player, DVec3 eye) {
     HOG_ZONE("ground");
-    for (const protocol::SentTile& tile : connection.take_tiles()) {
-        if (auto taken = ground.tiles.take(tile); !taken) {
-            log::warn(connection_log, "can't hold a tile sent: {}", taken.error());
+    for (const protocol::SentTile& sent : connection.take_tiles()) {
+        auto tile = client::sent_tree(sent, ground.world.layers());
+        if (!tile) {
+            log::warn(connection_log, "can't hold a tile sent: {}", tile.error());
+            continue;
+        }
+        ground.tiles.put(tile->key, tile->tree);
+        ground.meshes.take(*tile);
+        if (player) {
+            player->changed(tile->key);
         }
     }
-    if (client::GroundChanges changes = ground.tiles.collect(); !changes.empty()) {
-        scene.show_ground(std::move(changes));
-    }
-    scene.set_ground_state(ground.tiles.covered(eye, streamed_ground),
-                           ground.tiles.in_flight() > 0);
-    const std::vector<protocol::SentColumn> sent = connection.take_columns();
-    globe::ColumnCache& held = ground.held;
-    std::optional<globe::Site>& over = ground.over;
-    const globe::Layers& layers = ground.world.layers();
-    const globe::Cell cell = globe::cell_under(glm::normalize(eye), layers.level);
-    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
-    const globe::Site under{
-        .face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
-    if (sent.empty() && over == under) {
-        return;
-    }
-    ground.meshes.finish();
-    for (const protocol::SentColumn& column : sent) {
-        if (auto taken = held.take(column.face, column.i, column.j, column.level, column.bytes);
-            !taken) {
-            log::warn(connection_log, "can't hold a tile column sent: {}", taken.error());
-        }
-    }
-    if (over != under) {
-        over = under;
-        held.keep_near(layers, eye, kept_ground);
-    }
-    ground.meshes.changed(held.take_changed());
     if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
+    scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
+                           ground.meshes.in_flight() > 0);
 }
 
-// Flies over the ground the server streams until the window closes or it's time to quit, drawing
-// it from the tile columns held.
+// Starts or stops playing the character as asked, as take_part does; walking waits for the ground
+// under the eye to be held as finely as it'll be sent.
+void take_part_streamed(Controls& controls, std::optional<client::Player>& player,
+                        client::Flight& flight, const render::Camera& camera,
+                        const StreamedGround& ground) {
+    if (controls.walking && !player &&
+        !client::ground_settled(ground.world, ground.tiles, flight.eye.metres())) {
+        return;
+    }
+    take_part(controls, player, flight, camera, ground.world);
+}
+
+// Flies or walks over the ground the server streams until the window closes or it's time to quit,
+// drawing it from the tiles held.
 Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, StreamedGround& ground,
                           client::Flight flight, Connection& connection,
                           const client::Options& options, const render::Device& device,
@@ -1266,7 +1256,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
     const MonotonicClock::time_point started = MonotonicClock::now();
     MonotonicClock::time_point last = started;
     ShaderReloader shaders{options.reload_shaders};
-    std::optional<client::Player> player; // never: walking waits for the server's ground
+    std::optional<client::Player> player;
     client::Forecast forecast{radius};
     ChatBox chat;
     bool routed_to_chat = false;
@@ -1291,9 +1281,9 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        controls.walking = false;
+        take_part_streamed(controls, player, flight, camera, ground);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        take_ground(connection, ground, scene, flight.eye.metres());
+        take_ground(connection, ground, scene, player, camera.eye.metres());
         // Where the server remembers the player, unless they said where to start.
         if (const auto placed = connection.take_placed(); placed && !options.start) {
             const WorldPosition at = protocol::to_world(placed->at);
@@ -1301,15 +1291,8 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                                           glm::length(at.metres()) - radius, planet::north_pole);
         }
         const client::Session* session = connection.session();
-        const double ground_height = globe::ground_height(ground.world, flight.eye.metres());
-        const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
-        flight = client::fly(
-            flight, {.move = movement(controls), .look = controls.look, .seconds = seconds}, radius,
-            ground_height,
-            {.speed = controls.speed * (faster ? fast : 1.0),
-             .through = controls.through,
-             .underground = client::FlySettings{}.underground * (faster ? fast : 1.0)});
-        camera = client::flight_camera(flight, client::vertical_fov);
+        camera = move(controls, player, flight, ground.world, seconds);
+        const double ground_height = drawn_ground(ground.world, camera.eye);
         if (std::exchange(controls.dig, false)) {
             connection.dig(WorldPosition{camera.eye.metres() + (camera.forward * edit_ahead)},
                            edit_radius);
