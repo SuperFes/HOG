@@ -338,13 +338,13 @@ void lay(const Land& land, const Cover& cold, Ice& ice) {
         }
         const double total = going + flowing;
         share_down(land, cold, point, total, [&](std::uint32_t to, double amount) {
-            const double rock = amount * going / total;
+            const double load_to = amount * going / total;
             if (in_sea(rivers, to)) {
-                laid[to] += rock;
+                laid[to] += load_to;
             } else if (done[to] != 0) {
-                laid[point] += rock;
+                laid[point] += load_to;
             } else {
-                carrying[to] += rock;
+                carrying[to] += load_to;
                 water[to] += amount * flowing / total;
             }
         });
