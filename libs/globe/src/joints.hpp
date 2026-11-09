@@ -2,25 +2,31 @@
 
 #include <hog/core/math.hpp>
 
+#include <array>
 #include <cstdint>
 
 namespace hog::globe {
 
 // Rock is broken by joints, planes in three sets across each other; between them it stands in
 // blocks. Its joints run from closely jointed rock's spacing to extremely widely jointed rock's
-// (ISRM's spacing classes, 0.75 m to over 6 m). The widest set apart run the length of the planet
-// along fixed directions, twice that; each block between them is split again along each direction
-// as often as the rock is more closely jointed, more so in some stretches than others, as rock is
-// broken more in some places than in others.
+// (ISRM's spacing classes, 0.75 m to over 6 m). The rock lies in domains `joint_domain` metres
+// apart, faults between them, each with its joint sets turned its own way; in each, the widest
+// set apart run right across it, twice the widest spacing apart, and each block between them is
+// split again along each direction as often as the rock is more closely jointed, more so in some
+// stretches than others, as rock is broken more in some places than in others.
 inline constexpr double closest_joints = 0.75;
 inline constexpr double widely_jointed = 6.0;
 inline constexpr double widest_joints = 2.0 * widely_jointed;
+inline constexpr double joint_domain = 96.0;
 
-// One block of rock between joints, as its corners along the fixed directions, in metres.
+// One block of rock between joints, as its corners in metres along its domain's joint sets from
+// the domain's middle.
 struct Block {
     DVec3 low{0.0};
     DVec3 high{0.0};
     std::uint64_t id = 0;
+    DVec3 origin{0.0};           // the domain's middle, metres from the planet's centre
+    std::array<DVec3, 3> sets{}; // unit, square to each of its joint sets
 
     [[nodiscard]] DVec3 size() const noexcept { return high - low; }
     // How wide it is as weathering sees it, by how much face it shows for its volume: a cube's

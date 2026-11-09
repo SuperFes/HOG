@@ -29,9 +29,10 @@ std::vector<DVec3> scattered(int count) {
     return points;
 }
 
+// Blocks of one domain cross nowhere.
 bool overlap(const Block& a, const Block& b) {
-    return a.low.x < b.high.x && b.low.x < a.high.x && a.low.y < b.high.y && b.low.y < a.high.y &&
-           a.low.z < b.high.z && b.low.z < a.high.z;
+    return a.origin == b.origin && a.low.x < b.high.x && b.low.x < a.high.x && a.low.y < b.high.y &&
+           b.low.y < a.high.y && a.low.z < b.high.z && b.low.z < a.high.z;
 }
 
 } // namespace
@@ -88,8 +89,30 @@ TEST_CASE("blocks are as wide as the rock's joints are apart", "[globe][joints]"
     }
 }
 
+TEST_CASE("each domain of rock has its joints turned its own way", "[globe][joints]") {
+    int turned = 0;
+    for (const DVec3& point : scattered(400)) {
+        const Block block = block_at(point, 0.5, 3);
+        for (std::size_t a = 0; a < 3; ++a) {
+            CHECK(std::abs(glm::length(block.sets[a]) - 1.0) < 1e-12);
+            CHECK(std::abs(glm::dot(block.sets[a], block.sets[(a + 1) % 3])) < 1e-12);
+        }
+        // Its domain's middle the nearest, so no further off than a domain's corner.
+        CHECK(glm::length(point - block.origin) < 1.6 * hog::globe::joint_domain);
+        turned +=
+            block_at(point + DVec3{3.0 * hog::globe::joint_domain, 0.0, 0.0}, 0.5, 3).sets[0] !=
+                    block.sets[0]
+                ? 1
+                : 0;
+    }
+    CHECK(turned == 400);
+}
+
 TEST_CASE("a block's inset is the way to its nearest joint", "[globe][joints]") {
-    const Block block{.low = {0.0, 0.0, 0.0}, .high = {4.0, 2.0, 6.0}, .id = 1};
+    const Block block{.low = {0.0, 0.0, 0.0},
+                      .high = {4.0, 2.0, 6.0},
+                      .id = 1,
+                      .sets = {DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0}, DVec3{0.0, 0.0, 1.0}}};
     CHECK(block.inset({2.0, 1.0, 3.0}) == 1.0);
     CHECK(block.inset({3.5, 1.0, 3.0}) == 0.5);
     CHECK(block.inset({2.0, 1.0, 5.9}) < 0.1 + 1e-12);

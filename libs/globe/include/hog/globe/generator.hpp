@@ -57,19 +57,22 @@ struct Strata {
     double lava = 0.0;
 };
 
-// A block of rock fallen from a cliff and lying on the ground below it, as an ellipsoid sunk
-// part way in.
+// A block of rock fallen from a crag and lying on the ground below it, as the box its joints
+// broke it out as, its edges knocked off in the fall, sunk part way in.
 struct Rock {
     DVec3 middle{0.0}; // metres from the planet's centre
-    DVec3 up{0.0};     // unit, out of the ground
-    DVec3 across{0.0}; // unit, along the long axis, level
-    DVec3 axes{0.0};   // half-lengths in metres along `across`, level across that, and `up`
+    DVec3 up{0.0};     // unit, out of the ground it lies on
+    DVec3 across{0.0}; // unit, along its long side, square to `up`
+    DVec3 axes{0.0};   // half-lengths in metres along `across`, square to it, and `up`
+    double edge = 0.0; // metres its edges and corners are rounded off
     Material material = Material::Air;
 
     // Metres from `point` to the rock's surface, negative inside; `normal` takes the way out.
     [[nodiscard]] double distance(DVec3 point, DVec3& normal) const noexcept;
     // The highest point's metres from the planet's centre.
     [[nodiscard]] double top() const noexcept;
+    // Cubic metres of it.
+    [[nodiscard]] double volume() const noexcept;
 };
 
 // The world as maths: a pure function of the planet's description and a point, the same bits on

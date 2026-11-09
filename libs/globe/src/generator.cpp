@@ -87,15 +87,24 @@ std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const Cell cell = cell_under(glm::normalize(point), terms::rock_level(planet_));
     std::vector<Rock> found;
-    const auto add = [&](Cell at) {
+    // Each coarsest cell's block and those of the cells inside it.
+    std::vector<Cell> waiting{cell};
+    const CellNeighbors near = around(cell);
+    for (const Cell beside : near.all()) {
+        waiting.push_back(beside);
+    }
+    const int finest = terms::rock_level(planet_) + terms::rock_sizes - 1;
+    while (!waiting.empty()) {
+        const Cell at = waiting.back();
+        waiting.pop_back();
         if (const std::optional<Rock> rock = terms::rock_in(context, at, lod)) {
             found.push_back(*rock);
         }
-    };
-    add(cell);
-    const CellNeighbors near = around(cell);
-    for (const Cell beside : near.all()) {
-        add(beside);
+        if (std::cmp_less(at.level, finest)) {
+            for (const Cell inside : children(at)) {
+                waiting.push_back(inside);
+            }
+        }
     }
     return found;
 }
@@ -477,6 +486,13 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     made.layers = here.layers;
     made.height = here.top.value;
     made.lake = here.lake;
+    made.rise = tangential(here.top.gradient, direction);
+    made.loosening = here.weathering.loosening;
+    made.weathering = here.weathering.rate;
+    made.worn = here.weathering.worn;
+    made.years = here.weathering.years;
+    made.strength = here.weathering.strength;
+    made.bare = here.weathering.bare;
     return made;
 }
 
