@@ -29,6 +29,10 @@ struct Drifts {
 // open water would lose to the air.
 [[nodiscard]] double dryness(double celsius, double rain, const Body& body);
 
+// What of a drift lies as a layer of its own: none where it's thin enough for plants and burrows
+// to mix it into the soil.
+[[nodiscard]] double layered(double drift, const Body& body);
+
 // Where each point's wind blows on to: the neighbour most nearly downwind; itself where none is.
 [[nodiscard]] std::vector<std::uint32_t> downwind(const Sphere& sphere, const Climate& climate);
 

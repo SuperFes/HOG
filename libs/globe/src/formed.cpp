@@ -47,8 +47,8 @@ Formed::Formed(const Planet& planet, const Derived& derived)
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field :
-         {&top_, &organic_, &topsoil_, &subsoil_, &alluvium_, &lake_beds_, &till_, &ice_, &lava_,
-          &rock_cover_, &light_, &lake_depth_, &lake_level_, &lake_share_}) {
+         {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_, &lake_beds_, &till_,
+          &ice_, &lava_, &rock_cover_, &light_, &lake_depth_, &lake_level_, &lake_share_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -56,12 +56,20 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         has_sea_ = has_sea_ || !land;
         // The ice, rock and deposits stand as tall against the planet as its relief does; the
         // soil and what lies on it keep their true depths.
-        const double ground = land ? world.rivers.ground[point] + world.sediment.alluvium[point]
-                                   : world.rivers.height[point] + world.sediment.delta[point];
+        // The wind took off what rivers and ice laid, and laid sand and loess over it all.
+        const double taken = std::min(world.drifts.deflated[point],
+                                      world.sediment.alluvium[point] + world.ice.till[point]);
+        const double blown = formation::layered(world.drifts.loess[point], world.body) +
+                             formation::layered(world.drifts.sand[point], world.body);
+        const double ground =
+            land ? world.rivers.ground[point] + world.sediment.alluvium[point] - taken + blown
+                 : world.rivers.height[point] + world.sediment.delta[point];
         top_[point] = (vertical_ * ground) + (land ? world.soil.organic[point] : 0.0);
         organic_[point] = world.soil.organic[point];
         topsoil_[point] = world.soil.topsoil[point];
         subsoil_[point] = std::max(0.0, world.soil.depth[point] - world.soil.topsoil[point]);
+        loess_[point] = vertical_ * world.soil.loess[point];
+        sand_[point] = vertical_ * world.soil.sand[point];
         alluvium_[point] = vertical_ * world.soil.alluvium[point];
         lake_beds_[point] = vertical_ * world.soil.lake_beds[point];
         till_[point] = vertical_ * world.soil.till[point];
@@ -137,12 +145,15 @@ Formed::Here Formed::at(DVec3 direction) const {
     layers.organic = value(organic_);
     layers.topsoil = value(topsoil_);
     layers.subsoil = value(subsoil_);
+    layers.loess = value(loess_);
+    layers.sand = value(sand_);
     layers.alluvium = value(alluvium_);
     layers.lake_beds = value(lake_beds_);
     layers.till = value(till_);
     layers.lava = value(lava_);
-    layers.cover = layers.ice + layers.organic + layers.topsoil + layers.subsoil + layers.alluvium +
-                   layers.lake_beds + layers.till + layers.lava + value(rock_cover_);
+    layers.cover = layers.ice + layers.organic + layers.topsoil + layers.subsoil + layers.loess +
+                   layers.sand + layers.alluvium + layers.lake_beds + layers.till + layers.lava +
+                   value(rock_cover_);
     layers.basement = here.light >= 0.5 ? Material::Granite : Material::Basalt;
     return here;
 }

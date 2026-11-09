@@ -73,6 +73,7 @@ TEST_CASE("under a formed planet's ground its layers lie as they were laid", "[g
     const double lod = generator.planet().voxel;
     int soiled = 0;
     int iced = 0;
+    int sanded = 0;
     for (std::uint64_t n = 0; n < 2'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here here = formed.at(direction);
@@ -89,11 +90,17 @@ TEST_CASE("under a formed planet's ground its layers lie as they were laid", "[g
             ++soiled;
             CHECK(at_depth(layers.organic + (layers.topsoil / 2.0)) == Material::Soil);
         }
+        if (layers.ice == 0.0 && layers.sand > lod) {
+            ++sanded;
+            const double soil = layers.organic + layers.topsoil + layers.subsoil;
+            CHECK(at_depth(soil + layers.loess + (layers.sand / 2.0)) == Material::Sand);
+        }
         const Material deep = at_depth(layers.cover + 10.0);
         CHECK((deep == Material::Granite || deep == Material::Basalt));
     }
     CHECK(soiled > 0);
     CHECK(iced > 0);
+    CHECK(sanded > 0);
 }
 
 TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[globe][formed]") {

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <numbers>
+#include <utility>
 
 namespace hog::formation {
 
@@ -94,12 +95,16 @@ double gathered(double gain, double rate, double years) {
 
 namespace {
 
-// What was laid at a point, top down: what water laid (in a hollow or along a river), then the till
-// ice laid before it.
+// What was laid at a point, top down: what the wind laid, loess over sand, then what water laid (in
+// a hollow or along a river), then the till ice laid before it.
 struct Laid {
+    double loess = 0.0;
+    double sand = 0.0;
     double water = 0.0;
     double till = 0.0;
     bool hollow = false;
+
+    [[nodiscard]] double total() const noexcept { return loess + sand + water + till; }
 };
 
 // How deep soil grows over what was laid on rock: from the loose deposit where it's deep enough to
@@ -121,6 +126,8 @@ Soil bare(std::uint32_t size) {
     soil.depth.assign(size, 0.0);
     soil.topsoil.assign(size, 0.0);
     soil.organic.assign(size, 0.0);
+    soil.loess.assign(size, 0.0);
+    soil.sand.assign(size, 0.0);
     soil.alluvium.assign(size, 0.0);
     soil.lake_beds.assign(size, 0.0);
     soil.till.assign(size, 0.0);
@@ -131,6 +138,8 @@ Soil bare(std::uint32_t size) {
 }
 
 void leave(Soil& soil, std::uint32_t point, const Laid& laid) {
+    soil.loess[point] = laid.loess;
+    soil.sand[point] = laid.sand;
     (laid.hollow ? soil.lake_beds : soil.alluvium)[point] = laid.water;
     soil.till[point] = laid.till;
 }
@@ -139,22 +148,45 @@ void leave(Soil& soil, std::uint32_t point, const Laid& laid) {
 // formed from.
 void grow(Soil& soil, std::uint32_t point, const Laid& laid, double rock_making, double wear,
           double years, const Body& body) {
-    const double depth = grown_over(rock_making, wear, laid.water + laid.till, years, body);
-    const double from_water = std::min(laid.water, depth);
-    const double from_till = std::min(laid.till, depth - from_water);
-    const double from_rock = depth - from_water - from_till;
+    const double depth = grown_over(rock_making, wear, laid.total(), years, body);
+    // Down through each layer in turn, as deep as the soil goes.
+    double left = depth;
+    const auto through = [&](double layer) {
+        const double taken = std::min(layer, left);
+        left -= taken;
+        return taken;
+    };
+    const double from_loess = through(laid.loess);
+    const double from_sand = through(laid.sand);
+    const double from_water = through(laid.water);
+    const double from_till = through(laid.till);
+    const double from_rock = left;
     leave(soil, point,
-          {.water = laid.water - from_water, .till = laid.till - from_till, .hollow = laid.hollow});
-    // Bare ground would form soil from whatever lies on top.
-    const double water = depth > 0.0 ? from_water : laid.water;
-    const double till = depth > 0.0 ? from_till : laid.till;
-    const double rock = depth > 0.0 ? from_rock : 0.0;
+          {.loess = laid.loess - from_loess,
+           .sand = laid.sand - from_sand,
+           .water = laid.water - from_water,
+           .till = laid.till - from_till,
+           .hollow = laid.hollow});
+    // Bare ground would form soil from whatever lies on top; otherwise its parent is what most
+    // of it formed from.
+    const Parent water_laid = laid.hollow ? Parent::LakeBed : Parent::Alluvium;
     Parent parent = Parent::Rock;
-    if (till > rock) {
-        parent = Parent::Till;
-    }
-    if (water > std::max(till, rock) || (depth <= 0.0 && water > 0.0)) {
-        parent = laid.hollow ? Parent::LakeBed : Parent::Alluvium;
+    if (depth <= 0.0) {
+        for (const auto& [layer, kind] :
+             {std::pair{laid.till, Parent::Till}, std::pair{laid.water, water_laid},
+              std::pair{laid.sand, Parent::Sand}, std::pair{laid.loess, Parent::Loess}}) {
+            parent = layer > 0.0 ? kind : parent;
+        }
+    } else {
+        double most = from_rock;
+        for (const auto& [layer, kind] :
+             {std::pair{from_till, Parent::Till}, std::pair{from_water, water_laid},
+              std::pair{from_sand, Parent::Sand}, std::pair{from_loess, Parent::Loess}}) {
+            if (layer > most) {
+                most = layer;
+                parent = kind;
+            }
+        }
     }
     soil.depth[point] = depth;
     soil.making[point] = parent == Parent::Rock ? rock_making : rock_making * body.loose_weathering;
@@ -202,13 +234,25 @@ Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
 
 Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate, const Ice& ice,
              const Lakes& lakes, const Sediment& sediment, const Body& body) {
+    const std::vector<double> none(sphere.size(), 0.0);
+    return soil_on(sphere, rivers, climate, ice, lakes, sediment,
+                   Drifts{.deflated = none, .sand = none, .loess = none, .dunes = none}, body);
+}
+
+Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate, const Ice& ice,
+             const Lakes& lakes, const Sediment& sediment, const Drifts& drifts, const Body& body) {
     Soil soil = bare(sphere.size());
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
         if (rivers.receiver[point] == point) {
             continue; // under the liquid
         }
-        const Laid laid{.water = sediment.alluvium[point],
-                        .till = ice.till[point],
+        // What the wind took came off the rivers' ground first, then the till.
+        const double alluvium = std::max(sediment.alluvium[point] - drifts.deflated[point], 0.0);
+        const double from_till = std::max(drifts.deflated[point] - sediment.alluvium[point], 0.0);
+        const Laid laid{.loess = layered(drifts.loess[point], body),
+                        .sand = layered(drifts.sand[point], body),
+                        .water = alluvium,
+                        .till = std::max(ice.till[point] - from_till, 0.0),
                         .hollow = lakes.basin[point] != Lakes::none};
         if (ice.thickness[point] > 0.0 || sediment.lake_depth[point] > 0.0 ||
             lakes.salt_flat[point] != 0) {
@@ -220,7 +264,7 @@ Soil soil_on(const Sphere& sphere, const Rivers& rivers, const Climate& climate,
         const double celsius = climate.temperature[point];
         const double rain = climate.rain[point];
         // Ground gathering what's laid on it isn't wearing away.
-        const double wear = laid.water + laid.till > 0.0 ? 0.0 : rivers.wear[point];
+        const double wear = laid.total() > 0.0 ? 0.0 : rivers.wear[point];
         grow(soil, point, laid, soil_making(celsius, rain, body), rivers.wear[point], years, body);
         rot(soil, point, celsius, rain, wear, years, body);
     }
@@ -232,6 +276,8 @@ Profile profile_at(const Sphere& sphere, const Soil& soil, const Sphere::Spot& s
     return {.organic = sphere.sample(soil.organic, spot),
             .topsoil = topsoil,
             .subsoil = std::max(0.0, sphere.sample(soil.depth, spot) - topsoil),
+            .loess = sphere.sample(soil.loess, spot),
+            .sand = sphere.sample(soil.sand, spot),
             .alluvium = sphere.sample(soil.alluvium, spot),
             .lake_beds = sphere.sample(soil.lake_beds, spot),
             .till = sphere.sample(soil.till, spot)};
@@ -249,6 +295,14 @@ Layer layer_at(const Profile& profile, double depth) {
     bottom += profile.subsoil;
     if (depth < bottom) {
         return Layer::Subsoil;
+    }
+    bottom += profile.loess;
+    if (depth < bottom) {
+        return Layer::Loess;
+    }
+    bottom += profile.sand;
+    if (depth < bottom) {
+        return Layer::Sand;
     }
     bottom += profile.alluvium;
     if (depth < bottom) {

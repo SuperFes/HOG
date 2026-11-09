@@ -104,6 +104,10 @@ double dryness(double celsius, double rain, const Body& body) {
     return 1.0 - smoothstep(0.3, 1.0, wetness(celsius, rain, body));
 }
 
+double layered(double drift, const Body& body) {
+    return drift >= body.thinnest_drift ? drift : 0.0;
+}
+
 std::vector<std::uint32_t> downwind(const Sphere& sphere, const Climate& climate) {
     std::vector<std::uint32_t> down(sphere.size());
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
