@@ -11,8 +11,8 @@ axial_tilt = 23.44
 [globe]
 preset = "earth"
 radius = 115000.0
-floor_depth = 2500.0
-sky_height = 12000.0
+floor_depth = 500.0
+sky_height = 2000.0
 wear = 0.08
 voxel = 0.333333333
 # The land formed stage by stage, plates to soil, on a sphere split this many times; 0 leaves it
