@@ -263,21 +263,28 @@ TEST_CASE("ground warmed by the sun draws air in and lifts it", "[weather][wind]
     for (int step = 0; step < 12; ++step) {
         hog::weather::step(world.field, world.stencil, world.planet, 120.0);
     }
+    // Its winds are read against the same air left unheated, so the planet's own stirring doesn't
+    // count.
+    Field still = world.field;
     const int low = lowest_open(world.field, column);
     for (int layer = low; layer < layers; ++layer) {
         world.field.air[world.field.grid.index(column, layer)].temperature += 8.0F;
     }
     // Soon after, before the air rocks back about its level.
     hog::weather::step(world.field, world.stencil, world.planet, 60.0);
+    hog::weather::step(still, world.stencil, world.planet, 60.0);
+    const auto added = [&](std::size_t cell) {
+        return world.field.air[cell].wind - still.air[cell].wind;
+    };
     const Vec3 up = world.stencil.up(column);
-    CHECK(glm::dot(world.field.air[world.field.grid.index(column, low + 1)].wind, up) > 0.0F);
+    CHECK(glm::dot(added(world.field.grid.index(column, low + 1)), up) > 0.0F);
     // Air close to the ground flows in from the sides.
     float inflow = 0.0F;
     const auto& links = world.stencil.links(world.field.grid.index(column, low));
     for (int side = 0; side < 4; ++side) {
         const Link& link = links[static_cast<std::size_t>(side)];
         if (world.field.blocked[link.cell] == 0) {
-            inflow -= glm::dot(world.field.air[link.cell].wind, link.direction);
+            inflow -= glm::dot(added(link.cell), link.direction);
         }
     }
     CHECK(inflow > 0.0F);

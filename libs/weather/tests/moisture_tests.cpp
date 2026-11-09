@@ -155,6 +155,7 @@ TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
           "[weather][moisture]") {
     Planet planet;
     planet.body.radius = 20'000.0;
+    planet.body.land_share = 0.0; // open sea, its air stirred by no land
     const hog::globe::Generator generator{planet};
     const Field start = start_field(generator, 3, 8);
     const Stencil stencil{start.grid};
@@ -163,8 +164,10 @@ TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
     while (start.over_sea[column] == 0 || std::abs(stencil.up(column).z) > 0.4F) {
         ++column;
     }
+    // Measured against the same air left unwarmed, so the planet's own stirring doesn't count.
     const auto strongest_updraft = [&](bool moist) {
         Field field = start;
+        Field still = start;
         for (int layer = 0; layer < 3; ++layer) {
             Air& air = field.at(column, layer);
             air.temperature += 6.0F;
@@ -178,8 +181,10 @@ TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
         float best = 0.0F;
         for (int i = 0; i < 20; ++i) {
             step(field, stencil, planet, 60.0);
+            step(still, stencil, planet, 60.0);
             for (int layer = 0; layer < field.grid.layers; ++layer) {
-                best = std::max(best, glm::dot(field.at(column, layer).wind, stencil.up(column)));
+                const auto added = field.at(column, layer).wind - still.at(column, layer).wind;
+                best = std::max(best, glm::dot(added, stencil.up(column)));
             }
         }
         return best;
