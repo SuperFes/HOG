@@ -50,7 +50,8 @@ TEST_CASE("the land as the server cuts it and the client draws it, to look at", 
                           });
     };
     hog::globe::Land land{generator};
-    const hog::server::TileSending sending;
+    const hog::server::TileSending sending{
+        hog::server::TileSending::reach_for(generator.layers().thickness)};
     constexpr double degree = std::numbers::pi / 180.0;
     // As the window's title has them: latitude, longitude, metres up, heading and pitch.
     struct Spot {

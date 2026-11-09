@@ -55,7 +55,8 @@ public:
                                     }
                                 });
         };
-        const server::TileSending sending;
+        const server::TileSending sending{
+            server::TileSending::reach_for(world_.layers().thickness)};
         server::TileSending::Cut cut = sending.cut(at, held_, land_, each);
         for (const protocol::SentTile& coded : cut.sent) {
             auto tile = sent_tree(coded, world_.layers());

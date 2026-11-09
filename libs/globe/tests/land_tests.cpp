@@ -165,6 +165,32 @@ TEST_CASE("a tile deep under the ground is hidden until something in it changes"
     CHECK_FALSE(land.hidden(deep));
 }
 
+TEST_CASE("a tile is hidden only where nothing finer under it shows", "[globe][land]") {
+    const auto& generator = hog::globe::bed::earth();
+    Land land{generator};
+    const TileKey ground = ground_tile(generator);
+    for (std::uint8_t level = 1; level <= 3; ++level) {
+        TileKey middle = ground;
+        for (std::uint8_t up = 0; up < level; ++up) {
+            middle = middle.parent();
+        }
+        for (const std::uint32_t i : {middle.i - 1, middle.i, middle.i + 1}) {
+            for (const std::uint32_t j : {middle.j - 1, middle.j, middle.j + 1}) {
+                for (const std::uint32_t k : {middle.k - 1, middle.k, middle.k + 1}) {
+                    const TileKey key{.level = level, .face = middle.face, .i = i, .j = j, .k = k};
+                    if (!land.hidden(key)) {
+                        continue;
+                    }
+                    for (std::size_t octant = 0; octant < 8; ++octant) {
+                        CAPTURE(level, i, j, k, octant);
+                        CHECK(land.hidden(key.child(octant)));
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("a tile made is the generator's voxel by voxel, at every level", "[globe][land]") {
     const auto& generator = hog::globe::bed::earth();
     const TileKey ground = ground_tile(generator);
@@ -292,4 +318,3 @@ TEST_CASE("generator term cost", "[.bench][globe][land]") {
         WARN(sink);
     }
 }
-

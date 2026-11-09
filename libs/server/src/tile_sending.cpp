@@ -49,6 +49,11 @@ double metres_to(const globe::Layers& layers, globe::TileKey key, DVec3 at) {
     return std::hypot(across, rise);
 }
 
+double TileSending::reach_for(double voxel, double pixels) noexcept {
+    const double texel = 2.0 * std::tan(view_fov / 2.0) / view_height;
+    return voxel / (pixels * texel);
+}
+
 std::uint8_t TileSending::level_at(double metres, std::uint8_t top) const noexcept {
     if (metres < reach_) {
         return 0;

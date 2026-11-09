@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -60,6 +61,21 @@ TileKey holding(std::uint8_t level, std::uint8_t face, std::uint32_t i, std::uin
 }
 
 } // namespace
+
+TEST_CASE("a voxel spans from the pixels asked to twice them, however far", "[server][tiles]") {
+    constexpr double voxel = 2.5;
+    constexpr double pixels = 6.0;
+    const TileSending sending{TileSending::reach_for(voxel, pixels)};
+    const double texel = 2.0 * std::tan(TileSending::view_fov / 2.0) / TileSending::view_height;
+    for (int step = 0; step < 40; ++step) {
+        const double metres = TileSending::reach_for(voxel, pixels) * 1.01 * std::pow(1.37, step);
+        const std::uint8_t level = sending.level_at(metres, 20);
+        const double spans = std::ldexp(voxel, level) / (metres * texel);
+        CAPTURE(metres, level);
+        CHECK(spans >= pixels * 0.99);
+        CHECK(spans <= pixels * 2.0 * 1.01);
+    }
+}
 
 TEST_CASE("the tiles wanted about a place stand for every place once, finer the nearer",
           "[server][tiles]") {
@@ -168,7 +184,7 @@ TEST_CASE("first view cost", "[.bench][server][tiles]") {
                           });
     };
     Land land{generator};
-    const TileSending sending;
+    const TileSending sending{TileSending::reach_for(generator.layers().thickness)};
     const DVec3 up = glm::normalize(DVec3{0.3, 0.4, 0.86});
     const DVec3 here =
         up * (hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))

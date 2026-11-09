@@ -1,6 +1,7 @@
 #include <hog/bot/bot.hpp>
 #include <hog/client/tile_meshes.hpp>
 #include <hog/core/log.hpp>
+#include <hog/globe/world.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -31,7 +32,12 @@ Bot::Bot(std::unique_ptr<Held> held, client::Session session, DVec3 direction, s
       planet_radius_(held_->world.planet().radius), settings_(settings) {}
 
 WorldPosition Bot::feet() const {
-    return player_ ? player_->feet() : WorldPosition{direction_ * planet_radius_};
+    if (player_) {
+        return player_->feet();
+    }
+    // Until it stands it hangs on the ground as finely as it's been sent, so the finer comes.
+    return WorldPosition{direction_ *
+                         globe::top_of(held_->world, direction_).value_or(planet_radius_)};
 }
 
 void Bot::take_ground() {

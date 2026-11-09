@@ -20,11 +20,20 @@ namespace hog::server {
 // player holds a tile once sent it, until it's cut otherwise.
 class TileSending {
 public:
-    // Metres from a player within which its tiles are the finest; a level coarser for each
-    // doubling past it.
-    static constexpr double finest_reach = 1000.0;
+    // Pixels a voxel spans where its tiles are coarsest for their distance, in a picture 900 texels
+    // high seen through a vertical field of view of one radian, as the client draws it. A voxel
+    // spans this to twice it everywhere.
+    static constexpr double voxel_pixels = 8.0;
+    static constexpr double view_height = 900.0;
+    static constexpr double view_fov = 1.0;
 
-    explicit TileSending(double reach = finest_reach) : reach_{reach} {}
+    // Metres from a player within which its tiles are the finest, for voxels `voxel` metres
+    // across to span `pixels` at most.
+    [[nodiscard]] static double reach_for(double voxel, double pixels = voxel_pixels) noexcept;
+
+    // Tiles are the finest within `reach` metres of a player; a level coarser for each doubling
+    // past it.
+    explicit TileSending(double reach) : reach_{reach} {}
 
     void join(net::ConnectionId player);
     void leave(net::ConnectionId player);
