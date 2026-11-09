@@ -112,6 +112,7 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
         const Generator::Column column = generator.column(direction, lod);
         return std::max(0.0, column.water() - column.ground());
     };
+    const auto ground = [&](DVec3 direction) { return generator.column(direction, lod).ground(); };
     const double step = 0.05 * world.sphere.spacing();
     int walked = 0;
     int wet = 0;
@@ -124,13 +125,17 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
         const DVec3 middle = world.sphere.point(point);
         // A lake only a point or two across can be smoothed away with the hollow holding it.
         wet += formed.at(middle).lake.has_value() ? 1 : 0;
-        // Out across the shore every way, the water thinning as it goes: however steep the shore,
-        // narrowing in on the steepest stretch shrinks the change, where a wall would keep it.
+        // Out across the shore every way, the water deepening and thinning only as the ground
+        // under it falls and rises: narrowing in on the steepest stretch, a wall of water would
+        // keep its change in depth however little the ground changed.
         const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, middle));
         const DVec3 north = glm::cross(middle, east);
         for (const DVec3 way : {east, north, -east, -north}) {
             const auto along = [&](double far) {
                 return depth(glm::normalize(middle + (way * far)));
+            };
+            const auto under = [&](double far) {
+                return ground(glm::normalize(middle + (way * far)));
             };
             for (int n = 0; n < 60; ++n) {
                 double near = step * n;
@@ -144,7 +149,8 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
                     }
                 }
                 const double metres = (far - near) * generator.planet().radius;
-                CHECK(std::abs(along(far) - along(near)) < 1.0 + metres);
+                CHECK(std::abs(along(far) - along(near)) <
+                      std::abs(under(far) - under(near)) + 1.0 + metres);
             }
         }
     }
