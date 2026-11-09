@@ -14,8 +14,6 @@ namespace hog::formation {
 
 namespace {
 
-// Lengths and areas are reckoned at Earth's scale, as plate speeds are.
-constexpr double earth_radius = 6'371'000.0;
 constexpr int most_rounds = 200;
 
 double angle(const DVec3& a, const DVec3& b) noexcept {
@@ -106,7 +104,7 @@ void flood_from_sea(const Ground& ground, std::vector<std::uint32_t>& receiver) 
 // floods still cut deserts; the discharge kept is the water truly passing.
 void gather(const Ground& ground, std::span<const std::uint32_t> order, Rivers& rivers,
             std::vector<double>& wearing) {
-    const double cell_area = earth_radius * earth_radius;
+    const double cell_area = ground.body->radius * ground.body->radius;
     for (std::uint32_t point = 0; point < ground.sphere->size(); ++point) {
         const double gathering =
             ground.land[point] != 0 ? ground.sphere->area(point) * cell_area : 0.0;
@@ -130,7 +128,7 @@ void raise(const Ground& ground, std::span<const std::uint32_t> order,
         const std::uint32_t down = rivers.receiver[point];
         const double below = ground.land[down] != 0 ? rivers.height[down] : 0.0;
         const double length =
-            angle(ground.sphere->point(point), ground.sphere->point(down)) * earth_radius;
+            angle(ground.sphere->point(point), ground.sphere->point(down)) * body.radius;
         const double flow = std::max(wearing[point], 1.0);
         const double slope = (ground.crust->uplift[point] + body.wear_threshold) /
                              (ground.erodibility[point] * maths::pow(flow, body.discharge_power));
@@ -178,7 +176,7 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
         const std::uint32_t down = rivers.receiver[point];
         const double below = ground.land[down] != 0 ? rivers.height[down] : 0.0;
         const double length =
-            angle(ground.sphere->point(point), ground.sphere->point(down)) * earth_radius;
+            angle(ground.sphere->point(point), ground.sphere->point(down)) * body.radius;
         const double slope = (rivers.height[point] - below) / length;
         if (slope >= body.steepest * (1.0 - 1e-9)) {
             rivers.wear[point] = uplift;

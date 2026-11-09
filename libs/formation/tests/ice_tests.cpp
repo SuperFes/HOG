@@ -227,7 +227,7 @@ TEST_CASE("water rerouted round the ice all still reaches the sea, filling only 
 
 TEST_CASE("all the rock ice carved is laid down as till or washed off", "[formation][ice]") {
     const Made made;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     double carved = 0.0;
     double laid = 0.0;
     double washed = 0.0;
@@ -236,7 +236,7 @@ TEST_CASE("all the rock ice carved is laid down as till or washed off", "[format
         CHECK(made.ice.outwash[point] >= 0.0);
         carved += made.ice.carved[point] * made.sphere.area(point);
         laid += made.ice.till[point] * made.sphere.area(point);
-        washed += made.ice.outwash[point] / (earth_radius * earth_radius);
+        washed += made.ice.outwash[point] / (radius * radius);
     }
     CHECK(carved > 0.0);
     CHECK(washed > 0.0);

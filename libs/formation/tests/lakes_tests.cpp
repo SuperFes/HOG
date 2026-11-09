@@ -85,14 +85,14 @@ TEST_CASE("lakes stand in hollows, brim-full only where they can keep up", "[for
 TEST_CASE("what reaches the sea is the rain on land less what lakes give the air",
           "[formation][lakes]") {
     const Made made;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     double fallen = 0.0;
     double out = 0.0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (made.crust.sea[point] != 0) {
             continue;
         }
-        fallen += made.climate.rain[point] * made.sphere.area(point) * earth_radius * earth_radius;
+        fallen += made.climate.rain[point] * made.sphere.area(point) * radius * radius;
         if (made.crust.sea[made.rivers.receiver[point]] != 0) {
             out += made.lakes.discharge[point];
         }

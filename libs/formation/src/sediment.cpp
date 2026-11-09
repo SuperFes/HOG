@@ -14,9 +14,6 @@ namespace hog::formation {
 
 namespace {
 
-// Lengths and areas are reckoned at Earth's scale, as the rivers' are.
-constexpr double earth_radius = 6'371'000.0;
-
 double angle(const DVec3& a, const DVec3& b) noexcept {
     return maths::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
@@ -58,7 +55,7 @@ double dropped_at(const Sphere& sphere, const Rivers& rivers, const Lakes& lakes
                   std::uint32_t point, double passing) {
     const std::uint32_t down = rivers.receiver[point];
     const double below = in_sea(rivers, down) ? 0.0 : rivers.height[down];
-    const double length = angle(sphere.point(point), sphere.point(down)) * earth_radius;
+    const double length = angle(sphere.point(point), sphere.point(down)) * body.radius;
     const double slope = std::max(0.0, rivers.height[point] - below) / length;
     // Floods carry what floods cut, less the share of water lakes upstream have taken.
     const double kept_water =
@@ -69,8 +66,8 @@ double dropped_at(const Sphere& sphere, const Rivers& rivers, const Lakes& lakes
         return excess;
     }
     const double graded = passing / (body.carrying * flow);
-    const double built = std::max(0.0, graded - slope) * length * sphere.area(point) *
-                         earth_radius * earth_radius / std::max(body.sediment_age, 1.0);
+    const double built = std::max(0.0, graded - slope) * length * sphere.area(point) * body.radius *
+                         body.radius / std::max(body.sediment_age, 1.0);
     return std::min(excess, built);
 }
 
@@ -79,7 +76,7 @@ double dropped_at(const Sphere& sphere, const Rivers& rivers, const Lakes& lakes
 // can't keep from their outlet; at the coast the rest settles on the sea floor.
 void carry(const Sphere& sphere, const Rivers& rivers, const Lakes& lakes, const Body& body,
            Sediment& sediment, Carried& carried) {
-    const double cell_area = earth_radius * earth_radius;
+    const double cell_area = body.radius * body.radius;
     for (const std::uint32_t point : highest_first(rivers)) {
         const std::uint32_t basin = lakes.basin[point];
         double passing = carried.arriving[point];
@@ -110,9 +107,10 @@ void carry(const Sphere& sphere, const Rivers& rivers, const Lakes& lakes, const
 // What settles in the sea over `years`, laid from each river mouth outwards over the sea floor,
 // nearest first, each point filled no higher than the waterline: a delta builds out over the
 // shelf rather than piling up where the river meets the sea.
-void spread_deltas(const Sphere& sphere, const Rivers& rivers, double years, Sediment& sediment) {
+void spread_deltas(const Sphere& sphere, const Rivers& rivers, double years, double radius,
+                   Sediment& sediment) {
     const std::uint32_t size = sphere.size();
-    const double cell_area = earth_radius * earth_radius;
+    const double cell_area = radius * radius;
     std::vector<double> room(size, 0.0);
     for (std::uint32_t point = 0; point < size; ++point) {
         if (in_sea(rivers, point)) {
@@ -217,11 +215,11 @@ Sediment sediment_on(const Sphere& sphere, const Rivers& rivers, const Lakes& la
             continue;
         }
         const double thickness =
-            sediment.settling[point] * years / (sphere.area(point) * earth_radius * earth_radius);
+            sediment.settling[point] * years / (sphere.area(point) * body.radius * body.radius);
         sediment.alluvium[point] = thickness;
         sediment.lake_depth[point] = std::max(0.0, lakes.depth[point] - thickness);
     }
-    spread_deltas(sphere, rivers, years, sediment);
+    spread_deltas(sphere, rivers, years, body.radius, sediment);
     return sediment;
 }
 

@@ -19,8 +19,6 @@ namespace hog::formation {
 namespace {
 
 constexpr std::uint16_t unclaimed = 0xFFFF;
-// Metres of Earth's surface per radian, for speeds given at Earth's scale.
-constexpr double earth_radius = 6'371'000.0;
 // Sea floor older than this has sunk back into the mantle.
 constexpr double oldest_floor = 200.0;
 
@@ -351,7 +349,7 @@ struct Shaped {
 Shaped shaped_by(const Boundary& kind, double distance, double light, bool riding, double floor,
                  const Body& body) {
     const double x = distance / body.belt_width;
-    const double closing = kind.closing * earth_radius / 1.0e6;
+    const double closing = kind.closing * body.radius / 1.0e6;
     switch (kind.meeting) {
     case Meeting::Collision:
         // Thickened crust spreads over the whole widened belt; rock is pushed up hardest at the

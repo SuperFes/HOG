@@ -32,8 +32,6 @@ using hog::formation::World;
 
 namespace {
 
-constexpr double earth_radius = 6'371'000.0;
-
 double angle(const DVec3& a, const DVec3& b) {
     return std::acos(std::clamp(glm::dot(a, b), -1.0, 1.0));
 }
@@ -97,7 +95,7 @@ struct Coast {
                                    [&](std::uint32_t near) { return !in_sea(near); });
     }
 
-    [[nodiscard]] double length() const { return sphere.spacing() * earth_radius; }
+    [[nodiscard]] double length() const { return sphere.spacing() * body.radius; }
 };
 
 // The mean of `field` over shore points `where` says.
