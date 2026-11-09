@@ -26,7 +26,7 @@ double bowl(int x, int y, double notch) {
 TEST_CASE("water fills a hollow up to the notch it runs out of, and stands level there",
           "[globe][lake]") {
     constexpr double notch = 22.0;
-    const Pool pool = fill_pool(40, [](int x, int y) { return bowl(x, y, notch); }, 1e9);
+    const Pool pool = fill_pool(40, [](int x, int y) { return bowl(x, y, notch); }, 1e9, 0.0);
     // The notch's lowest point on the way out is where its floor meets the rising bowl.
     CHECK(pool.level <= notch + 0.1);
     CHECK(pool.level >= notch - 0.5);
@@ -48,7 +48,7 @@ TEST_CASE("water fills a hollow up to the notch it runs out of, and stands level
 
 TEST_CASE("water that hasn't enough to brim stands at what it has, under its rim",
           "[globe][lake]") {
-    const Pool pool = fill_pool(40, [](int x, int y) { return bowl(x, y, 22.0); }, 5.0);
+    const Pool pool = fill_pool(40, [](int x, int y) { return bowl(x, y, 22.0); }, 5.0, 0.0);
     CHECK(pool.level == 5.0);
     CHECK(pool.at(0, 0) == Pool::Cell::Water);
     // Seven cells out the bowl stands at 4.9, eight out at 6.4: the shore.
@@ -64,7 +64,7 @@ TEST_CASE("the slope past the rim water runs out over stays dry", "[globe][lake]
         const double near = static_cast<double>((x * x) + (y * y)) / 10.0;
         return x > 0 ? std::min(near, 20.0 - x) : near;
     };
-    const Pool pool = fill_pool(40, ground, 1e9);
+    const Pool pool = fill_pool(40, ground, 1e9, 0.0);
     CHECK(pool.level == 10.0);
     CHECK(pool.at(0, 0) == Pool::Cell::Water);
     CHECK(pool.at(9, 0) == Pool::Cell::Water);
@@ -80,7 +80,7 @@ TEST_CASE("water running over into a further closed hollow fills it too", "[glob
         const double far = (static_cast<double>(((x - 20) * (x - 20)) + (y * y)) / 10.0) - 5.0;
         return std::min(near, far);
     };
-    const Pool pool = fill_pool(40, ground, 20.0);
+    const Pool pool = fill_pool(40, ground, 20.0, 0.0);
     CHECK(pool.level == 20.0);
     CHECK(pool.at(0, 0) == Pool::Cell::Water);
     CHECK(pool.at(20, 0) == Pool::Cell::Water);
@@ -89,7 +89,8 @@ TEST_CASE("water running over into a further closed hollow fills it too", "[glob
 
 TEST_CASE("water poured on a hollow's side runs down and fills it from its bottom",
           "[globe][lake]") {
-    const Pool pool = fill_pool(40, [](int x, int y) { return bowl(x - 6, y + 4, 22.0); }, 5.0);
+    const Pool pool =
+        fill_pool(40, [](int x, int y) { return bowl(x - 6, y + 4, 22.0); }, 5.0, 0.0);
     CHECK(pool.level == 5.0);
     CHECK(pool.at(6, -4) == Pool::Cell::Water);
     CHECK(pool.at(4, -2) == Pool::Cell::Water);
@@ -103,7 +104,32 @@ TEST_CASE("a fill reads only the ground near the water", "[globe][lake]") {
             ++read;
             return bowl(x, y, 22.0);
         },
-        5.0);
+        5.0, 0.0);
     CHECK(pool.level == 5.0);
     CHECK(read < 400);
+}
+
+TEST_CASE("a lake's shore runs on over ground its cells' middles stand over but dips under",
+          "[globe][lake]") {
+    // A hollow filled to 5, with a shelf east of it whose cells' middles stand a little over the
+    // water but which dips under it here and there all the way out.
+    const auto ground = [](int x, int y) {
+        const double hollow = static_cast<double>((x * x) + (y * y)) / 10.0;
+        if (x > 7 && x < 20 && std::abs(y) < 3) {
+            return std::min(hollow, 5.2);
+        }
+        return hollow;
+    };
+    const Pool pool = fill_pool(40, ground, 5.0, 1.0);
+    CHECK(pool.level == 5.0);
+    for (int x = 8; x < 20; ++x) {
+        CAPTURE(x);
+        CHECK(pool.at(x, 0) == Pool::Cell::Shore);
+    }
+    // Higher ground beyond stays dry.
+    CHECK(pool.at(25, 0) == Pool::Cell::Dry);
+    // Without the room, the shore stops at the first cell.
+    const Pool tight = fill_pool(40, ground, 5.0, 0.0);
+    CHECK(tight.at(8, 0) == Pool::Cell::Shore);
+    CHECK(tight.at(12, 0) == Pool::Cell::Dry);
 }

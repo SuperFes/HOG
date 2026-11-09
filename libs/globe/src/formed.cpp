@@ -202,7 +202,9 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
         near = weights.nearest;
         return carved(direction, weights).value;
     };
-    water.pool = fill_pool(half, ground, most);
+    // A cell's middle may stand over the water while ground in it lies under: as much as its
+    // own width up, on all but cliffs.
+    water.pool = fill_pool(half, ground, most, water.step * radius_);
     return water;
 }
 
