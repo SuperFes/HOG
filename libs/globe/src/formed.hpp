@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lake_fill.hpp"
+
 #include <hog/formation/smooth.hpp>
 #include <hog/formation/world.hpp>
 #include <hog/globe/generator.hpp>
@@ -36,6 +38,16 @@ public:
 
 private:
     [[nodiscard]] std::uint32_t start_near(DVec3 direction) const noexcept;
+    struct Lake;
+    // Fills each lake on the ground as it's read here, lowest first from its floor, until it
+    // runs out over its rim or stands at the level formed for it.
+    void fill_lakes();
+    // The lake with its floor at the point `floor`, its points `reach` radians round it, standing
+    // at `most` at the highest.
+    [[nodiscard]] Lake fill_lake(std::uint32_t floor, double reach, double most,
+                                 formation::Smooth::Weights& weights) const;
+    // Lists the lake at the points by its cells, unless `listed` already has it there.
+    void list_lake(std::uint32_t lake, std::uint32_t floor, std::vector<std::uint32_t>& listed);
 
     formation::World world_;
     formation::Smooth smooth_;
@@ -59,10 +71,21 @@ private:
     std::vector<double> lava_;
     std::vector<double> rock_cover_;
     std::vector<double> light_;
-    std::vector<double> lake_depth_; // metres of a lake's water over the top; 0 where none
-    std::vector<double>
-        lake_level_; // the level its water stands at, over the sea, at a lake's points
-    std::vector<double> lake_share_; // 1 at a lake's points, else 0
+    // A lake's water about its floor, on a grid of cells `step` radians across laid on the plane
+    // touching the sphere there.
+    struct Lake {
+        DVec3 middle{0.0};
+        DVec3 east{0.0};
+        DVec3 north{0.0};
+        double step = 0.0;
+        Pool pool;
+
+        // The middle of the cell at `x`, `y`.
+        [[nodiscard]] DVec3 toward(int x, int y) const noexcept;
+    };
+    std::vector<Lake> lakes_;
+    // The lakes whose water may stand about each point.
+    std::vector<std::vector<std::uint32_t>> lakes_near_;
     // The nearest point to each cell of a cube's faces, for searches to start near.
     static constexpr std::size_t starts_across = 64;
     std::vector<std::uint32_t> starts_;
