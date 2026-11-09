@@ -165,6 +165,36 @@ TEST_CASE("a tile deep under the ground is hidden until something in it changes"
     CHECK_FALSE(land.hidden(deep));
 }
 
+TEST_CASE("a tile the ground comes within a voxel of is never hidden, all one or not",
+          "[globe][land]") {
+    const auto& generator = hog::globe::bed::earth();
+    Land land{generator};
+    const hog::DVec3 up = hog::globe::bed::ground_between(generator, 10.0, 300.0);
+    const double ground = hog::globe::ground_below(generator, up, 0.5).value_or(0.0);
+    int near = 0;
+    for (std::uint8_t level = 1; level <= 4; ++level) {
+        TileKey key = ground_tile(generator);
+        for (std::uint8_t step = 0; step < level; ++step) {
+            key = key.parent();
+        }
+        const hog::globe::Layers layers = hog::globe::coarser_layers(generator.layers(), level);
+        for (const int by : {-1, 0, 1}) {
+            TileKey at = key;
+            at.k = static_cast<std::uint32_t>(static_cast<int>(key.k) + by);
+            const int bottom = static_cast<int>(at.k) * side;
+            const double low = layers.bottom(bottom) - layers.thickness;
+            const double high =
+                layers.top(std::min(bottom + side, layers.count) - 1) + layers.thickness;
+            if (ground >= low && ground <= high) {
+                ++near;
+                CAPTURE(level, by);
+                CHECK_FALSE(land.hidden(at));
+            }
+        }
+    }
+    CHECK(near >= 4);
+}
+
 TEST_CASE("a tile is hidden only where nothing finer under it shows", "[globe][land]") {
     const auto& generator = hog::globe::bed::earth();
     Land land{generator};

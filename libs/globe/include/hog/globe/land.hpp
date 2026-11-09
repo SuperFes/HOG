@@ -42,8 +42,9 @@ public:
     [[nodiscard]] VoxelTree made(TileKey key) const;
     // Whether the tile at `key` is all one voxel, made first where not known.
     [[nodiscard]] bool all_one(TileKey key);
-    // Whether nothing of the tile at `key` shows from outside it, made first where not known: it's
-    // all one voxel, or buried as the generator made it and unchanged since.
+    // Whether nothing of the tile at `key` shows from outside it at any level, made first where
+    // not known: as the generator made it and unchanged since, it's buried, or all one voxel with
+    // no surface near it.
     [[nodiscard]] bool hidden(TileKey key);
 
     // The voxel at `site` as finely as it's known; air where nothing is.
@@ -69,7 +70,7 @@ private:
     const Generator* generator_;
     std::uint8_t top_ = 0;
     std::map<TileKey, VoxelTree> roots_;
-    std::set<TileKey> buried_;
+    std::set<TileKey> hidden_;
 };
 
 // A tile's open leaves' mark as the generator makes it at `level`: 0 at the finest, as fine as it
