@@ -1,4 +1,5 @@
 #include "../src/formed.hpp"
+#include "../src/joints.hpp"
 
 #include <hog/core/hash.hpp>
 #include <hog/globe/generator.hpp>
@@ -201,6 +202,8 @@ TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too"
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const double radius = generator.planet().body.radius;
+    // Read coarser than the widest block of rock, whose crags step from the next by design.
+    const double lod = hog::globe::widest_joints;
     for (const double pole : {1.0, -1.0}) {
         for (int ring = 0; ring < 40; ++ring) {
             const double from_pole = 0.002 * (ring + 1);
@@ -208,7 +211,7 @@ TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too"
                 const DVec3 direction{std::sin(from_pole) * std::cos(turn),
                                       std::sin(from_pole) * std::sin(turn),
                                       pole * std::cos(from_pole)};
-                return formed.at(direction).top.value;
+                return formed.at(direction, lod).top.value;
             };
             constexpr int steps = 100;
             for (int n = 0; n < steps; ++n) {
@@ -271,6 +274,44 @@ TEST_CASE("soil lies on formed ground only as steep as it holds", "[globe][forme
     CHECK(steep > 10);
 }
 
+TEST_CASE("formed rock stands out as crags only where it stands taller than its cover is deep",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double voxel = generator.planet().voxel;
+    int land = 0;
+    int crags = 0;
+    double tallest = 0.0;
+    for (std::uint64_t n = 0; n < 4'000; ++n) {
+        const DVec3 direction = somewhere(n);
+        const Formed::Here here = formed.at(direction, voxel);
+        const Formed::Here::Weathering& rock = here.weathering;
+        land += here.top.value > 0.0 ? 1 : 0;
+        CHECK(rock.bare >= 0.0);
+        CHECK(rock.bare <= 1.0);
+        // Standing no higher than the ground about it has been worn down.
+        CHECK(rock.loosening <= rock.worn);
+        CHECK(here.crag <= (rock.loosening * rock.years) + 1e-9);
+        if (here.crag <= 0.0) {
+            continue;
+        }
+        ++crags;
+        tallest = std::max(tallest, here.crag);
+        // Bare rock: nothing laid, rotted or grown on it.
+        CHECK(here.layers.ice == 0.0);
+        CHECK(here.layers.loess + here.layers.sand + here.layers.alluvium + here.layers.lake_beds +
+                  here.layers.till + here.layers.lava + here.layers.saprolite ==
+              0.0);
+        CHECK(here.layers.organic + here.layers.topsoil + here.layers.subsoil == 0.0);
+        // Read too coarsely for its block, it's gone.
+        CHECK(formed.at(direction, 1e9).crag == 0.0);
+    }
+    WARN("crags at " << crags << " of " << land << " on land, the tallest " << tallest << " m");
+    CHECK(crags > 10);
+    // Most land keeps a cover over its rock.
+    CHECK(crags < land / 2);
+}
+
 TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][formed]") {
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
@@ -285,7 +326,8 @@ TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][fo
         // Read too coarsely for any gully, then finely.
         const Formed::Here uncut = formed.at(direction, 1e9);
         const Formed::Here here = formed.at(direction, voxel);
-        if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0) {
+        // Crags come out of what's laid rather than being cut down through it.
+        if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0 || here.crag != 0.0) {
             continue;
         }
         // Under the beach the waves build up on it.
