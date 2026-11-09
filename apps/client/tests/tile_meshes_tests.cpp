@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -145,8 +146,72 @@ TEST_CASE("tiles that aren't, or aren't on the planet, are refused", "[client][t
     CHECK(meshes.collect().empty());
 }
 
-TEST_CASE("a client flying on draws each place once, as the server last cut it",
+namespace {
+
+// A tile all one voxel: rock right through, or air.
+hog::protocol::SentTile all_of(TileKey key, bool rock) {
+    const hog::globe::VoxelTree tree =
+        hog::globe::VoxelTree::build(hog::globe::Volume::tile_side, [&](int, int, int) {
+            return rock ? hog::globe::Cube{.solid = hog::globe::Material::Granite,
+                                           .solid_amount = hog::globe::Voxel::full}
+                        : hog::globe::Cube{};
+        });
+    return {.level = key.level,
+            .face = key.face,
+            .i = key.i,
+            .j = key.j,
+            .k = key.k,
+            .bytes = tree.encode()};
+}
+
+} // namespace
+
+TEST_CASE("a tile is meshed again when a coarser tile it read beside it is dropped",
           "[client][tiles]") {
+    hog::jobs::JobSystem jobs;
+    const auto& generator = hog::client::testing::globe().generator;
+    TileMeshes meshes{generator.planet(), generator.layers(), jobs};
+    // Rock, and over it air a level coarser; then the air's place sent finer than the rock, as
+    // rock all through.
+    const TileKey rock{.level = 1, .face = 1, .i = 40, .j = 40, .k = 3};
+    const TileKey air{.level = 2, .face = 1, .i = 20, .j = 20, .k = 2};
+    REQUIRE(meshes.take(all_of(rock, true)));
+    REQUIRE(meshes.take(all_of(air, false)));
+    const auto drawn = [&](const GroundChanges& changes) -> std::optional<std::size_t> {
+        std::optional<std::size_t> indices;
+        for (const auto& shown : changes.shown) {
+            if (shown.key == tile_key(rock)) {
+                indices = shown.ground->indices.size();
+            }
+        }
+        return indices;
+    };
+    const std::optional<std::size_t> lid = drawn(settle(meshes));
+    REQUIRE(lid);
+    CHECK(lid.value_or(0) > 0);
+    for (std::uint32_t i = 0; i < 4; ++i) {
+        for (std::uint32_t j = 0; j < 4; ++j) {
+            for (std::uint32_t k = 0; k < 4; ++k) {
+                REQUIRE(meshes.take(
+                    all_of({.level = 0, .face = 1, .i = 80 + i, .j = 80 + j, .k = 8 + k}, true)));
+            }
+        }
+    }
+    GroundChanges changes = settle(meshes);
+    const GroundChanges more = settle(meshes);
+    changes.shown.insert(changes.shown.end(), more.shown.begin(), more.shown.end());
+    CHECK_FALSE(meshes.holds(air));
+    // Against rock now all round, it shows nothing.
+    const std::optional<std::size_t> after = drawn(changes);
+    REQUIRE(after);
+    CHECK(after.value_or(1) == 0);
+}
+
+namespace {
+
+// A client flown through `eyes`, cut for and sent the land at each as the server does, checking
+// after each that it draws each place once, as the server last cut it.
+void fly_through(const std::vector<hog::DVec3>& eyes) {
     const hog::globe::Generator& generator = hog::client::testing::globe().generator;
     hog::jobs::JobSystem jobs;
     const hog::globe::EachOf each = [&](std::size_t count,
@@ -162,19 +227,11 @@ TEST_CASE("a client flying on draws each place once, as the server last cut it",
     const hog::server::TileSending sending{
         hog::server::TileSending::reach_for(generator.layers().thickness)};
     TileMeshes meshes{generator.planet(), generator.layers(), jobs};
-    const double radius = generator.planet().radius;
-    const hog::DVec3 start = hog::client::testing::on_land();
-    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, start));
     std::map<std::uint64_t, TileKey> keys;
     std::set<std::uint64_t> drawn;
     std::set<TileKey> held;
-    for (int step = 0; step < 10; ++step) {
-        const hog::DVec3 up = glm::normalize(start + (east * (150.0 * step / radius)));
-        const double ground =
-            hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))
-                .value_or(radius);
-        const hog::DVec3 eye = up * (ground + 60.0);
-        const hog::server::TileSending::Cut cut = sending.cut(eye, held, land, each);
+    for (std::size_t step = 0; step < eyes.size(); ++step) {
+        const hog::server::TileSending::Cut cut = sending.cut(eyes[step], held, land, each);
         CHECK(cut.too_big == 0);
         held = {cut.keys.begin(), cut.keys.end()};
         for (const hog::protocol::SentTile& tile : cut.sent) {
@@ -205,4 +262,31 @@ TEST_CASE("a client flying on draws each place once, as the server last cut it",
         CHECK(stale == 0);
         CHECK(over == 0);
     }
+}
+
+// The point `metres` over the ground at `up`.
+hog::DVec3 over_ground(hog::DVec3 up, double metres) {
+    const hog::globe::Generator& generator = hog::client::testing::globe().generator;
+    const double ground = hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))
+                              .value_or(generator.planet().radius);
+    return up * (ground + metres);
+}
+
+} // namespace
+
+TEST_CASE("a client flying in from far and high draws each place once, as last cut",
+          "[client][tiles]") {
+    // From fifteen kilometres off and three high down to sixty metres over the land.
+    const double radius = hog::client::testing::globe().generator.planet().radius;
+    const hog::DVec3 end = hog::client::testing::on_land();
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, end));
+    constexpr int steps = 30;
+    std::vector<hog::DVec3> eyes;
+    eyes.reserve(steps + 1);
+    for (int step = 0; step <= steps; ++step) {
+        const double left = 1.0 - (static_cast<double>(step) / steps);
+        eyes.push_back(over_ground(glm::normalize(end - (east * (15'000.0 * left / radius))),
+                                   60.0 + (2'940.0 * left)));
+    }
+    fly_through(eyes);
 }

@@ -361,6 +361,17 @@ void TileMeshes::drop(globe::TileKey key) {
     for (const globe::TileKey finer : under(key)) {
         touched_.insert(finer);
     }
+    // Those that read it at their edges read what's held there now.
+    for (const globe::TileKey next : beside(key)) {
+        if (held_.contains(next)) {
+            waiting_.insert(next);
+        }
+        for (const globe::TileKey finer : under(next)) {
+            if (globe::meets(finer, key)) {
+                waiting_.insert(finer);
+            }
+        }
+    }
 }
 
 GroundChanges TileMeshes::collect() {
