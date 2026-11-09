@@ -10,6 +10,7 @@ add_library(hog_formation
     src/plates.cpp
     src/rivers.cpp
     src/sediment.cpp
+    src/shores.cpp
     src/smooth.cpp
     src/soil.cpp
     src/sphere.cpp
@@ -32,6 +33,7 @@ hog_add_tests(hog_formation
     tests/plates_tests.cpp
     tests/rivers_tests.cpp
     tests/sediment_tests.cpp
+    tests/shores_tests.cpp
     tests/smooth_tests.cpp
     tests/soil_tests.cpp
     tests/sphere_tests.cpp)
