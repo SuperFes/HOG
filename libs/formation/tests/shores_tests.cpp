@@ -224,6 +224,9 @@ TEST_CASE("lava's dark sand breaks down along the shore, staying by the lava it 
     Coast coast{[](const DVec3& at) { return at.z < 0.0; }};
     coast.body.shell_sand = 0.0;
     coast.body.drift_reach = 1.0e6;
+    // A planet big against the drift, so the stones the surf rolls along stop well short of the
+    // stretch looked at while sand that lasted would still reach it.
+    coast.body.radius = 6.0 * coast.body.drift_reach;
     const DVec3 lava_at{1.0, 0.0, 0.0};
     for (std::uint32_t point = 0; point < coast.sphere.size(); ++point) {
         if (angle(coast.sphere.point(point), lava_at) < 0.04) {

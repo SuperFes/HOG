@@ -34,4 +34,7 @@ struct Rivers {
 [[nodiscard]] Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
                                std::span<const double> strength, const Body& body);
 
+// The steepest land stands on the whole over a run of `length` metres, rise over run.
+[[nodiscard]] double steepest_over(double length, const Body& body);
+
 } // namespace hog::formation

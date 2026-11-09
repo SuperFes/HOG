@@ -29,12 +29,17 @@ struct Body {
                                        // over to be open sea; smaller is a basin on land
 
     // What happens where plates meet.
-    double belt_width = 0.035;     // radians from a boundary to a belt's edge
-    double thickening = 0.25;      // share of a collision's shortening kept as thicker crust
-    double trench_depth = 3'000.0; // metres under the sea floor beside it
-    double arc_height = 2'000.0;   // metres volcanoes build behind a trench
-    double rift_depth = 1'500.0;   // metres a continent sags where it's pulled apart
-    double uplift_share = 0.15;    // of the closing speed that pushes rock up in a belt
+    // The lid bending under a load spreads it over a reach set by its stiffness against the
+    // mantle's buoyancy; belts and the margins of light crust are as wide as it bends.
+    double lid_thickness = 200.0;    // metres of the lid that bends as one plate
+    double lid_stiffness = 7.0e10;   // pascals, its rock's Young's modulus
+    double mantle_density = 3'300.0; // kilograms a cubic metre
+    double liquid_density = 1'000.0; // and of the liquid standing on it
+    double thickening = 0.25;        // share of a collision's shortening kept as thicker crust
+    double trench_depth = 3'000.0;   // metres under the sea floor beside it
+    double arc_height = 2'000.0;     // metres volcanoes build behind a trench
+    double rift_depth = 1'500.0;     // metres a continent sags where it's pulled apart
+    double uplift_share = 0.15;      // of the closing speed that pushes rock up in a belt
 
     // Rock as it lies, by what shapes the land: layered rock laid over a hard basement, folded
     // where plates collided, lava over both. What the planet's history laid where is seeded.
@@ -88,7 +93,13 @@ struct Body {
     double rock_hardness = 1.0;   // powers of ten slower the strongest rock wears than the softest
     double driest_wear = 0.05;    // metres a year of rain wear acts as if on at least: flash floods
     double wear_threshold = 1.5e-4; // metres a year of cutting a river must pass before it cuts
-    double steepest = 0.05;         // steepest mean slope land holds across tens of kilometres
+    // Land stands as steep as its rock holds across a hillslope and gentler over longer runs, its
+    // relief growing only as the run to the power `roughness` as valleys cut into it.
+    double hillslope_steepest = 0.6;   // rise over run across a hillslope, about 31 degrees
+    double hillslope_length = 1'000.0; // metres
+    double roughness = 0.46;
+    // Rise over run the mud and silt draping a sea's margins stand at; steeper, they slump.
+    double sea_floor_steepest = 0.07;
 
     // Snow lying through summers, gathering into ice that flows and carves.
     double freezing = 0.0;           // °C the liquid freezes at

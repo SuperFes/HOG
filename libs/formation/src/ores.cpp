@@ -190,7 +190,7 @@ Ores ores_on(const Sphere& sphere, const Crust& crust, const Bedrock& bedrock,
         field->assign(size, 0.0);
     }
     const Body::OreAbundance& rich = body.ore_abundance;
-    const double belt = std::max(body.belt_width, 1e-6);
+    const double belt = std::max(belt_width(body), 1e-6);
     std::vector<double> heavy_source(size, 0.0);
     for (std::uint32_t point = 0; point < size; ++point) {
         if (in_sea(rivers, point)) {

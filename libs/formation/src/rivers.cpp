@@ -134,9 +134,43 @@ void raise(const Ground& ground, std::span<const std::uint32_t> order,
                              (ground.erodibility[point] * maths::pow(flow, body.discharge_power));
         // Where the crust's cap falls under the ground downstream, the hollow is filled all but
         // flat, so water still finds its way out; lakes are left to a stage of their own.
-        const double worn = below + (length * std::min(slope, body.steepest));
+        const double worn = below + (length * std::min(slope, steepest_over(length, body)));
         rivers.ground[point] = std::min(worn, ground.crust->base[point]);
         rivers.height[point] = std::max(rivers.ground[point], below + (1e-6 * length));
+    }
+}
+
+// Out from the waterline the sea floor stands no steeper than the mud and silt draping it hold:
+// where the crust falls away faster, what slumped off it lies at its foot. Highest first, each
+// point stands as high as any neighbour less that slope over the way between them.
+void settle_sea_floor(const Ground& ground, Rivers& rivers) {
+    const Sphere& sphere = *ground.sphere;
+    const Body& body = *ground.body;
+    using Entry = std::pair<double, std::uint32_t>;
+    std::priority_queue<Entry> open;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        if (ground.land[point] != 0) {
+            open.emplace(0.0, point);
+        }
+    }
+    while (!open.empty()) {
+        const auto [height, point] = open.top();
+        open.pop();
+        if (ground.land[point] == 0 && height < rivers.height[point]) {
+            continue;
+        }
+        for (const std::uint32_t next : sphere.neighbors(point)) {
+            if (ground.land[next] != 0) {
+                continue;
+            }
+            const double run = angle(sphere.point(point), sphere.point(next)) * body.radius;
+            const double held = height - (run * body.sea_floor_steepest);
+            if (held > rivers.height[next]) {
+                rivers.height[next] = held;
+                rivers.ground[next] = held;
+                open.emplace(held, next);
+            }
+        }
     }
 }
 
@@ -178,7 +212,7 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
         const double length =
             angle(ground.sphere->point(point), ground.sphere->point(down)) * body.radius;
         const double slope = (rivers.height[point] - below) / length;
-        if (slope >= body.steepest * (1.0 - 1e-9)) {
+        if (slope >= steepest_over(length, body) * (1.0 - 1e-9)) {
             rivers.wear[point] = uplift;
             continue;
         }
@@ -190,6 +224,11 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
 }
 
 } // namespace
+
+double steepest_over(double length, const Body& body) {
+    const double hillslopes = std::max(length / std::max(body.hillslope_length, 1e-9), 1.0);
+    return body.hillslope_steepest * maths::pow(hillslopes, body.roughness - 1.0);
+}
 
 Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climate,
                  const Body& body) {
@@ -240,6 +279,7 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
     }
     rivers.rounds = std::min(rivers.rounds, most_rounds);
     wear_down(ground, wearing, rivers);
+    settle_sea_floor(ground, rivers);
     rivers.flood = std::move(wearing);
     return rivers;
 }
