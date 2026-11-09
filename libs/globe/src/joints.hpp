@@ -36,6 +36,13 @@ struct Block {
     [[nodiscard]] double inset(DVec3 point) const noexcept;
 };
 
+// How broken the rock at `point`, metres from the planet's centre, is by faults: 1 in a fault's
+// crushed core, falling to nothing out past its damaged rock. Faults part the crust into blocks
+// `fault_blocks` metres across and blocks four times as wide, their traces wandering as the rock
+// gave way, each broken over a fiftieth of its blocks' width.
+inline constexpr double fault_blocks = 800.0;
+[[nodiscard]] double faulted(DVec3 point, std::uint64_t seed) noexcept;
+
 // The mean spacing of the joints in rock standing `strength`, 0 to 1: the weakest rock is closely
 // jointed, the strongest widely, rock's strength being mostly how far apart its joints are.
 [[nodiscard]] double joint_spacing(double strength) noexcept;

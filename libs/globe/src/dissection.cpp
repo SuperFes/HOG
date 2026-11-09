@@ -2,6 +2,7 @@
 
 #include <hog/core/hash.hpp>
 #include <hog/globe/maths.hpp>
+#include <hog/globe/noise.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -21,6 +22,9 @@ constexpr double jitter = 0.25;
 constexpr double rounding = 0.25;
 // Where the gullies about cross out of step, they fade out, branching there.
 constexpr double in_step = 1.0;
+// Gullies wind as the ground they cut through varies, off a straight line by up to this share of
+// their spacing, the same at every scale.
+constexpr double winding = 0.35;
 
 // The stripes the gullies about make, running across `across`: how far along them, as an angle,
 // from a crest at 0 to a floor at ±π, and how strongly they agree.
@@ -97,6 +101,14 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
     double room = ground.above_floor;
     double under_crest = 1e30;
     double cut = 0.0;
+    // Which way the ground about turns them, in their spacings.
+    const DVec3 metres = direction * radius;
+    const Octaves turning{
+        .wavelength = gullies.longest, .gain = 0.5, .finest = gullies.longest / 8.0};
+    const DVec3 wound = DVec3{fbm(metres, turning, lod, hash_values(gullies.seed, 0x77)).value,
+                              fbm(metres, turning, lod, hash_values(gullies.seed, 0x78)).value,
+                              fbm(metres, turning, lod, hash_values(gullies.seed, 0x79)).value} *
+                        winding;
     for (int octave = 0; octave < gullies.octaves; ++octave) {
         const double wavelength = std::ldexp(gullies.longest, -octave);
         if (wavelength < 2.0 * lod) {
@@ -115,7 +127,7 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
         }
         const DVec3 across = glm::cross(direction, fall) / slope;
         const Stripes made =
-            stripes(direction * (radius / wavelength), across, hash_values(gullies.seed, octave));
+            stripes((metres / wavelength) + wound, across, hash_values(gullies.seed, octave));
         depth *= smoothstep(in_step, made.strength);
         const auto [down, steepness] = profile(std::abs(made.phase) / std::numbers::pi);
         const double offset = depth * (0.5 - down);

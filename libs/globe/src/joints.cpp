@@ -3,6 +3,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/noise.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -61,7 +62,60 @@ std::array<DVec3, 3> turned(std::uint64_t bits) noexcept {
                   1.0 - (2.0 * ((x * x) + (y * y)))}};
 }
 
+// Metres from `point` to the nearest boundary between the blocks of a lattice `size` across, each
+// about a middle scattered in its cell.
+double to_boundary(DVec3 point, double size, std::uint64_t seed) noexcept {
+    const glm::i64vec3 home{glm::floor(point / size)};
+    DVec3 nearest{0.0};
+    DVec3 second{0.0};
+    double best = 1e300;
+    double next = 1e300;
+    for (std::int64_t dx = -1; dx <= 1; ++dx) {
+        for (std::int64_t dy = -1; dy <= 1; ++dy) {
+            for (std::int64_t dz = -1; dz <= 1; ++dz) {
+                const glm::i64vec3 cell = home + glm::i64vec3{dx, dy, dz};
+                const std::uint64_t bits = hash_values(seed, cell.x, cell.y, cell.z);
+                const DVec3 middle =
+                    (DVec3{cell} + 0.15 +
+                     (0.7 * DVec3{unit(hash_values(bits, 0)), unit(hash_values(bits, 1)),
+                                  unit(hash_values(bits, 2))})) *
+                    size;
+                const DVec3 off = point - middle;
+                const double apart = glm::dot(off, off);
+                if (apart < best) {
+                    next = best;
+                    second = nearest;
+                    best = apart;
+                    nearest = middle;
+                } else if (apart < next) {
+                    next = apart;
+                    second = middle;
+                }
+            }
+        }
+    }
+    // To the plane halfway between the two nearest middles.
+    return (next - best) / (2.0 * glm::length(second - nearest));
+}
+
 } // namespace
+
+double faulted(DVec3 point, std::uint64_t seed) noexcept {
+    // Traces wander about as far as a quarter of the smaller blocks, at every scale finer.
+    constexpr Octaves wandering{.wavelength = fault_blocks / 2.0, .gain = 0.55, .finest = 8.0};
+    const DVec3 wandered = point + (DVec3{fbm(point, wandering, 0.0, hash_values(seed, 0)).value,
+                                          fbm(point, wandering, 0.0, hash_values(seed, 1)).value,
+                                          fbm(point, wandering, 0.0, hash_values(seed, 2)).value} *
+                                    (fault_blocks / 4.0));
+    double broken = 0.0;
+    for (const int scale : {1, 4}) {
+        const double size = scale * fault_blocks;
+        const double zone = size / 50.0;
+        const double off = to_boundary(wandered, size, hash_values(seed, 3, scale)) / zone;
+        broken = std::max(broken, off < 1.0 ? (1.0 - off) * (1.0 - off) : 0.0);
+    }
+    return broken;
+}
 
 double Block::inset(DVec3 point) const noexcept {
     const DVec3 offset = point - origin;

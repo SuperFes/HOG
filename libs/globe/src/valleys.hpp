@@ -14,6 +14,10 @@ struct Valley {
     double floor_to = 0.0;
     double wall = 0.0;
     double reach = 1e30;
+    // Where along the whole valley the line runs, 0 at its head to 1 at its foot, when it's one
+    // stretch of a winding valley: water turns only at the valley's own ends.
+    double head = 0.0;
+    double foot = 1.0;
 };
 
 // How high the ground beside a valley may stand at `direction`, on a planet `radius` metres

@@ -38,13 +38,16 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
         wall.gradient += outward / size * (valley.wall + steepening);
     }
     const DVec3 ahead = along - (direction * glm::dot(along, direction));
-    if (const double size = glm::length(ahead); size > 0.0 && t > 0.0 && t < 1.0) {
+    const bool inside = (t > 0.0 || valley.head > 0.0) && (t < 1.0 || valley.foot < 1.0);
+    if (const double size = glm::length(ahead); size > 0.0 && inside) {
         const double run = std::sqrt(length) * radius;
         const DVec3 falling = ahead / size * ((valley.floor_to - valley.floor_from) / run);
         wall.gradient += falling;
-        // The floor stops falling past its ends; water running off turns there smoothly.
+        // The floor stops falling past the valley's ends; water running off turns there
+        // smoothly.
         constexpr double turning = 0.1;
-        const double end = std::min(t, 1.0 - t) / turning;
+        const double whole = valley.head + ((valley.foot - valley.head) * t);
+        const double end = std::min(whole, 1.0 - whole) / turning;
         const double kept = end >= 1.0 ? 1.0 : end * end * (3.0 - (2.0 * end));
         wall.fall += falling * kept;
     }
