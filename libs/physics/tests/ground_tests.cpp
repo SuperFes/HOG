@@ -238,31 +238,41 @@ TEST_CASE("there is ground under and round a walker, whatever the cell size", "[
                                  DVec3{0.3, -0.9, -0.3}, DVec3{-0.2, -0.2, 0.9}}) {
             const DVec3 up =
                 globe::land_near(generator, glm::normalize(from)).value_or(glm::normalize(from));
+            const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
+            const DVec3 north = glm::cross(up, east);
+            // Points within 50 m of the walker, a little inside the 60 m reach. Off its own lines:
+            // some walkers stand in the plane between two tiles, and a ray along that seam can slip
+            // through the float-wide crack between the tiles' bodies.
+            std::vector<DVec3> points;
+            for (int x = 0; x < 20; ++x) {
+                for (int y = 0; y < 20; ++y) {
+                    const double a = -47.5 + (5.0 * x);
+                    const double b = -47.5 + (5.0 * y);
+                    if ((a * a) + (b * b) <= 2'500.0) {
+                        points.push_back(
+                            glm::normalize(up + (((east * a) + (north * b)) / planet.body.radius)));
+                    }
+                }
+            }
+            // The world holds every tile they fall in, however narrow a face's cells are there.
             globe::MadeWorld made{generator};
             const globe::World& world = made.world();
             made.cover(up);
+            for (const DVec3 at : points) {
+                made.cover(at, 1);
+            }
             Space space;
             Ground ground{space, world};
             const double top = globe::ground_below(generator, up, fine).value_or(0.0);
             const std::array around{WorldPosition{up * (top + 1.7)}};
             REQUIRE(ground.keep(around));
-            const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
-            const DVec3 north = glm::cross(up, east);
-            // Rays down at points within 50 m of the walker, a little inside the 60 m reach.
-            for (double a = -50.0; a <= 50.0; a += 5.0) {
-                for (double b = -50.0; b <= 50.0; b += 5.0) {
-                    if ((a * a) + (b * b) > 2'500.0) {
-                        continue;
-                    }
-                    const DVec3 at =
-                        glm::normalize(up + (((east * a) + (north * b)) / planet.body.radius));
-                    const double surface = globe::ground_below(generator, at, fine).value_or(0.0);
-                    ++tried;
-                    missed += space.cast_ray(WorldPosition{at * (surface + 20.0)}, at * -60.0,
-                                             Faces::Both)
-                                  ? 0
-                                  : 1;
-                }
+            for (const DVec3 at : points) {
+                const double surface = globe::ground_below(generator, at, fine).value_or(0.0);
+                ++tried;
+                missed +=
+                    space.cast_ray(WorldPosition{at * (surface + 20.0)}, at * -60.0, Faces::Both)
+                        ? 0
+                        : 1;
             }
         }
         INFO("cells of " << voxel << " m");

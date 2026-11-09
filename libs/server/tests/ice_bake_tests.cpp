@@ -24,17 +24,6 @@ const Generator& earth() {
     return generator;
 }
 
-// The air's temperature over a column, brought down to the reference level at the lapse rate.
-hog::weather::Climate climate_of(const Cell& column) {
-    const Planet& planet = earth().planet();
-    const auto here = earth().column(center(column), 1.0);
-    const double height = std::max(here.ground(), planet.body.radius) + 20.0;
-    return {.surface = here.sample(height).temperature +
-                       (hog::weather::lapse_rate(planet) * (height - planet.body.radius)),
-            .swing = 12.0,
-            .precipitation = 0.15};
-}
-
 // The cell under the highest ground of a coarse sweep of the sphere.
 Cell highest() {
     Cell best{
@@ -52,6 +41,17 @@ Cell highest() {
         }
     }
     return best;
+}
+
+// A climate freezing halfway up the highest mountain, so whatever the world, its heights hold ice.
+hog::weather::Climate climate_of(const Cell& /*column*/) {
+    static const double freezing_level = [] {
+        const Planet& planet = earth().planet();
+        return 0.5 * (earth().column(center(highest()), 1.0).ground() - planet.body.radius);
+    }();
+    return {.surface = 273.15 + (hog::weather::lapse_rate(earth().planet()) * freezing_level),
+            .swing = 12.0,
+            .precipitation = 0.15};
 }
 
 } // namespace

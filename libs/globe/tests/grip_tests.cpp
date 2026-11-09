@@ -13,8 +13,13 @@ using namespace hog::globe;
 
 namespace {
 
+// Voxels thick enough that a full one is a deep drift.
 const Generator& earth() {
-    static const Generator generator{Planet{}};
+    static const Generator generator{[] {
+        Planet planet;
+        planet.voxel = 2.5;
+        return planet;
+    }()};
     return generator;
 }
 
