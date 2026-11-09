@@ -26,7 +26,7 @@ struct Climate {
 // to read many times.
 using LatitudeTemperatures = std::array<double, 181>;
 [[nodiscard]] LatitudeTemperatures sea_level_temperatures(const Body& body);
-[[nodiscard]] double temperature_at(const LatitudeTemperatures& rows, double latitude) noexcept;
+[[nodiscard]] double temperature_at(const LatitudeTemperatures& table, double latitude) noexcept;
 
 // `heights` are metres from the liquid's level; `sea` is 1 where open liquid lies, which moisture
 // comes off.
