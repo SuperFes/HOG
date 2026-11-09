@@ -29,6 +29,7 @@ using hog::formation::Rivers;
 using hog::formation::rivers_on;
 using hog::formation::seasonal_swing;
 using hog::formation::Sphere;
+using hog::formation::sublimated;
 
 TEST_CASE("a year spends degree-days over 0 as its mean and swing allow", "[formation][ice]") {
     CHECK_THAT(degree_days(5.0, 0.0), WithinRel(5.0 * 365.25, 1e-12));
@@ -98,6 +99,18 @@ double iced_area(const Sphere& sphere, const std::vector<double>& thickness) {
 }
 
 } // namespace
+
+TEST_CASE("ice gives the air most where it's dry, the less the colder", "[formation][ice]") {
+    const Body body;
+    CHECK(sublimated(-10.0, 0.0, body) > sublimated(-30.0, 0.0, body));
+    CHECK(sublimated(-30.0, 0.0, body) > sublimated(-50.0, 0.0, body));
+    CHECK(sublimated(-10.0, 0.001, body) > sublimated(-10.0, 1.0, body));
+    // A high cold desert loses more than its snow; a snowy ice cap's summit and a polar plateau
+    // keep theirs.
+    CHECK(sublimated(-13.5, 0.0015, body) > 0.1);
+    CHECK(sublimated(-30.0, 0.25, body) < 0.05);
+    CHECK(sublimated(-50.0, 0.04, body) < 0.01);
+}
 
 TEST_CASE("ice lies only where snow outlasts summers or ice flows in", "[formation][ice]") {
     const Made made;

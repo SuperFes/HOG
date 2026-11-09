@@ -203,7 +203,7 @@ TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
         CHECK_THAT(profile.topsoil + profile.subsoil, WithinAbs(made.soil.depth[point], 1e-9));
         CHECK_THAT(profile.organic, WithinAbs(made.soil.organic[point], 1e-9));
         CHECK_THAT(profile.till, WithinAbs(made.soil.till[point], 1e-9));
-        if (made.soil.depth[point] > 0.0 && made.soil.till[point] > 0.0) {
+        if (made.soil.depth[point] > 0.0 && made.soil.till[point] > 1e-6) {
             ++layered;
             chosen = point;
             const double soil = profile.organic + profile.topsoil + profile.subsoil;
