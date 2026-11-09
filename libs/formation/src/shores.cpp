@@ -19,6 +19,9 @@ constexpr double earth_radius = 6'371'000.0;
 // (Hasselmann et al. 1973; Pierson and Moskowitz 1964).
 constexpr double growth = 0.0016;
 constexpr double grown = 0.2433;
+// A fully grown sea peaks at 0.877 g / U radians a second, so its waves are this steep, height over
+// deep water wavelength.
+constexpr double grown_steepness = grown * 0.877 * 0.877 / (2.0 * std::numbers::pi);
 // Ways about a coast that waves are looked for coming in along.
 constexpr int ways = 16;
 // Steps along the shore what's carried is followed before the rest is laid where it's got to.
@@ -30,6 +33,12 @@ constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
 double smoothstep(double from, double to, double x) noexcept {
     const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
     return t * t * (3.0 - (2.0 * t));
+}
+
+// The share of what goes `distance` metres that's still there, most gone by `reach`; none ever
+// goes for a reach of 0.
+double lasting(double distance, double reach) {
+    return reach > 0.0 ? maths::exp(-distance / reach) : 1.0;
 }
 
 bool in_sea(const Rivers& rivers, std::uint32_t point) {
@@ -59,6 +68,7 @@ double fetch_toward(const Sphere& sphere, const Rivers& rivers, std::uint32_t fr
 
 struct Waves {
     double height = 0.0;
+    double usual = 0.0;
     DVec3 coming{0.0}; // the way their power comes in, as long as its share of the whole
 };
 
@@ -82,9 +92,10 @@ Waves waves_at(const Sphere& sphere, const Climate& climate, const Rivers& river
             continue;
         }
         const double onshore = std::max(glm::dot(climate.wind[point], -way), 0.0);
-        const double height =
-            wave_height(fetch, body) * (body.swell_share + ((1.0 - body.swell_share) * onshore));
+        const double share = body.swell_share + ((1.0 - body.swell_share) * onshore);
+        const double height = wave_height(fetch, body) * share;
         waves.height = std::max(waves.height, height);
+        waves.usual = std::max(waves.usual, wave_height(fetch, body.usual_wind, body) * share);
         waves.coming -= height * height * way;
         power += height * height;
     }
@@ -93,6 +104,7 @@ Waves waves_at(const Sphere& sphere, const Climate& climate, const Rivers& river
     }
     // Sea ice lying on it keeps the waves off for its share of the year.
     waves.height *= 1.0 - ice.sea_ice[point];
+    waves.usual *= 1.0 - ice.sea_ice[point];
     return waves;
 }
 
@@ -148,9 +160,14 @@ RiverSand river_sand(const Sphere& sphere, const Rivers& rivers, const Bedrock& 
         volcanic[point] += lava ? grain : 0.0;
         dropped[point] += sediment.settling[point];
         const std::uint32_t down = rivers.receiver[point];
-        grains[down] += grains[point];
+        // Glassy grains break down to mud as they go.
+        const double hop =
+            std::acos(std::clamp(glm::dot(sphere.point(point), sphere.point(down)), -1.0, 1.0)) *
+            earth_radius;
+        const double broken = volcanic[point] * (1.0 - lasting(hop, body.volcanic_reach));
+        grains[down] += grains[point] - broken;
         worn_all[down] += worn_all[point];
-        volcanic[down] += volcanic[point];
+        volcanic[down] += volcanic[point] - broken;
         dropped[down] += dropped[point];
         if (!in_sea(rivers, down) && --inflow[down] == 0) {
             order.push_back(down);
@@ -277,14 +294,24 @@ void onward_from(const Sphere& sphere, const Shore& shore, std::size_t at, Onwar
     }
 }
 
-// Where what's put on the shore each year ends up, followed step by step along it: going on a
-// step `reach` metres before most has stayed; where it stays, the share `kept` of it lies and the
-// rest is washed out to sea. `passing`, if given, gathers all that goes by each point.
+// How far what's put on the shore goes and what becomes of it on the way: going on a step `reach`
+// metres before most has stayed, breaking down to what the sea carries off over `wearing` metres
+// (never, for 0); where it stays, the share `kept` of it lies, the rest washed out to sea.
+struct Drifting {
+    double reach = 0.0;
+    double wearing = 0.0;
+    const std::vector<double>* kept = nullptr;
+};
+
+// Where what's put on the shore each year ends up, followed step by step along it. `passing`, if
+// given, gathers all that goes by each point.
 std::vector<double> drift_along(const Sphere& sphere, const Shore& shore,
-                                const std::vector<double>& put, double reach,
-                                const std::vector<double>& kept, std::vector<double>* passing) {
+                                const std::vector<double>& put, const Drifting& drifting,
+                                std::vector<double>* passing) {
     const std::size_t count = shore.points.size();
-    const double going = reach > 0.0 ? maths::exp(-shore.length / reach) : 0.0;
+    const std::vector<double>& kept = *drifting.kept;
+    const double going = drifting.reach > 0.0 ? maths::exp(-shore.length / drifting.reach) : 0.0;
+    const double lasts = lasting(shore.length, drifting.wearing);
     std::vector<double> carried = put;
     std::vector<double> laid(count, 0.0);
     std::vector<double> next(count, 0.0);
@@ -303,7 +330,7 @@ std::vector<double> drift_along(const Sphere& sphere, const Shore& shore,
             const double on = onward.to.empty() ? 0.0 : going;
             laid[at] += amount * (1.0 - on) * kept[at];
             for (std::size_t way = 0; way < onward.to.size(); ++way) {
-                next[onward.to[way]] += amount * on * onward.share[way];
+                next[onward.to[way]] += amount * on * lasts * onward.share[way];
             }
         }
         std::swap(carried, next);
@@ -416,16 +443,17 @@ Laid lay_beaches(const Sphere& sphere, const Shore& shore, const std::vector<Kin
         return amounts;
     };
     const std::vector<double> all(count, 1.0);
-    const auto sand = [&](double Kinds::* member) {
-        return drift_along(sphere, shore, kind(member), body.drift_reach, all, nullptr);
+    const auto sand = [&](double Kinds::* member, double wearing) {
+        return drift_along(sphere, shore, kind(member),
+                           {.reach = body.drift_reach, .wearing = wearing, .kept = &all}, nullptr);
     };
     const auto stones = [&](double Kinds::* member) {
-        return drift_along(sphere, shore, kind(member), body.drift_reach / stones_slower, all,
-                           nullptr);
+        return drift_along(sphere, shore, kind(member),
+                           {.reach = body.drift_reach / stones_slower, .kept = &all}, nullptr);
     };
-    Laid laid{.quartz = sand(&Kinds::quartz),
-              .volcanic = sand(&Kinds::volcanic),
-              .carbonate = sand(&Kinds::carbonate),
+    Laid laid{.quartz = sand(&Kinds::quartz, 0.0),
+              .volcanic = sand(&Kinds::volcanic, body.volcanic_reach),
+              .carbonate = sand(&Kinds::carbonate, 0.0),
               .shingle = std::vector<double>(count, 0.0)};
     const std::vector<double> pale_stones = stones(&Kinds::stones);
     const std::vector<double> dark_stones = stones(&Kinds::dark_stones);
@@ -458,6 +486,7 @@ void share_ashore(const Sphere& sphere, const Rivers& rivers, const Shore& shore
             const double there = shores.beach[near];
             beach += there;
             shores.waves[point] = std::max(shores.waves[point], shores.waves[near]);
+            shores.usual[point] = std::max(shores.usual[point], shores.usual[near]);
             shores.mud[point] += shores.mud[near];
             shores.reef[point] = std::max(shores.reef[point], shores.reef[near]);
             for (auto* share : made_of) {
@@ -478,9 +507,17 @@ void share_ashore(const Sphere& sphere, const Rivers& rivers, const Shore& shore
 } // namespace
 
 double wave_height(double fetch, const Body& body) {
-    const double wind = body.storm_wind;
+    return wave_height(fetch, body.storm_wind, body);
+}
+
+double wave_height(double fetch, double wind, const Body& body) {
     return std::min(growth * wind * std::sqrt(std::max(fetch, 0.0) / body.gravity),
                     grown * wind * wind / body.gravity);
+}
+
+double wave_period(double height, const Body& body) {
+    return std::sqrt(2.0 * std::numbers::pi * std::max(height, 0.0) /
+                     (grown_steepness * body.gravity));
 }
 
 Shores shores_on(const Sphere& sphere, const Climate& climate, const Rivers& rivers,
@@ -488,8 +525,8 @@ Shores shores_on(const Sphere& sphere, const Climate& climate, const Rivers& riv
                  const Sediment& sediment, const Body& body) {
     Shores shores;
     for (auto* field :
-         {&shores.waves, &shores.beach, &shores.quartz, &shores.volcanic, &shores.carbonate,
-          &shores.shingle, &shores.mud, &shores.reef, &shores.retreat}) {
+         {&shores.waves, &shores.usual, &shores.beach, &shores.quartz, &shores.volcanic,
+          &shores.carbonate, &shores.shingle, &shores.mud, &shores.reef, &shores.retreat}) {
         field->assign(sphere.size(), 0.0);
     }
     Shore shore = shore_of(sphere, rivers);
@@ -498,6 +535,7 @@ Shores shores_on(const Sphere& sphere, const Climate& climate, const Rivers& riv
         const std::uint32_t point = shore.points[at];
         const Waves waves = waves_at(sphere, climate, rivers, ice, point, body);
         shores.waves[point] = waves.height;
+        shores.usual[point] = waves.usual;
         shore.drift[at] = drift_of(sphere, rivers, point, waves.coming);
     }
 
@@ -514,8 +552,8 @@ Shores shores_on(const Sphere& sphere, const Climate& climate, const Rivers& riv
         mud_put[at] = put[at].mud;
     }
     std::vector<double> mud_passing(count, 0.0);
-    const std::vector<double> mud =
-        drift_along(sphere, shore, mud_put, body.drift_reach, sheltered, &mud_passing);
+    const std::vector<double> mud = drift_along(
+        sphere, shore, mud_put, {.reach = body.drift_reach, .kept = &sheltered}, &mud_passing);
     grow_shells(climate, rivers, ice, body, shore, mud_passing, shores, put);
     const Laid laid = lay_beaches(sphere, shore, put, body);
 
