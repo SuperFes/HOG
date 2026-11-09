@@ -20,15 +20,18 @@ enum class Material : std::uint8_t {
     Basalt,
     Mantle, // peridotite
     Iron,
-    Anorthosite, // the Moon's pale highland rock
-    Regolith,    // rock shattered and gardened by impacts, where no air weathers it
-    Firn,        // snow packed and sintered over the years, still full of air
-    Ice,         // firn squeezed to a solid, the glacier's body
-    Clay,        // rock weathered to fine sticky earth, nearly watertight
-    Gravel,      // rocky dirt: rock broken where it lies, a little earth between the stones
+    Anorthosite,  // the Moon's pale highland rock
+    Regolith,     // rock shattered and gardened by impacts, where no air weathers it
+    Firn,         // snow packed and sintered over the years, still full of air
+    Ice,          // firn squeezed to a solid, the glacier's body
+    Clay,         // rock weathered to fine sticky earth, nearly watertight
+    Gravel,       // rocky dirt: rock broken where it lies, a little earth between the stones
+    VolcanicSand, // lava and basalt worn to sand by the surf: dark and heavy
+    ShellSand,    // shells and coral broken up: pale, light and full of pores
+    Shingle,      // stones the surf has rounded, nothing fine between them
 };
 
-inline constexpr int material_count = 19;
+inline constexpr int material_count = 22;
 
 // Only what changes how the world forms, at the surface's pressure.
 struct Properties {
@@ -46,7 +49,8 @@ struct Properties {
     double settling = 0.0;         // m/s it sinks through still water once carried
     // What holds a thing on it. A loose material sticks together by `cohesion` (pascals) and
     // slides on a hard bed at `bed_friction`; hard ground grips what lies on it or walks on it at
-    // `friction`, dry, and `wet_friction` when a film of water or melt is on it. Radians from level.
+    // `friction`, dry, and `wet_friction` when a film of water or melt is on it. Radians from
+    // level.
     double cohesion = 0.0;
     double bed_friction = 0.0;
     double friction = 0.0;
@@ -69,9 +73,10 @@ struct Properties {
 [[nodiscard]] double footing(Material material, double wetness);
 
 // The tangent of the steepest slope a layer of `grain`, `depth` metres deep, holds on a bed of
-// `bed` under `gravity`, `wetness` from 0 dry to 1 soaked. A thick layer is held by its own friction; a thin one by its grip on the
-// bed, which loose ground gives as much as it holds itself and hard ground as its surface does;
-// and cohesion holds a dusting of snow or clay where dry sand would run.
+// `bed` under `gravity`, `wetness` from 0 dry to 1 soaked. A thick layer is held by its own
+// friction; a thin one by its grip on the bed, which loose ground gives as much as it holds itself
+// and hard ground as its surface does; and cohesion holds a dusting of snow or clay where dry sand
+// would run.
 [[nodiscard]] double holding_slope(Material grain, Material bed, double wetness, double depth,
                                    double gravity);
 
