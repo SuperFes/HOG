@@ -3,6 +3,7 @@
 #include <hog/formation/bedrock.hpp>
 #include <hog/formation/body.hpp>
 #include <hog/formation/climate.hpp>
+#include <hog/formation/drifts.hpp>
 #include <hog/formation/ice.hpp>
 #include <hog/formation/lakes.hpp>
 #include <hog/formation/landforms.hpp>
@@ -38,6 +39,7 @@ struct World {
     Outcrop outcrop;
     Lakes lakes;
     Sediment sediment;
+    Drifts drifts;
     Soil soil;
     Landforms landforms;
     Ores ores;

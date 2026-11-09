@@ -138,6 +138,23 @@ struct Body {
     double topsoil_humus = 40.0; // kilograms of humus in a cubic metre of topsoil
     double peat_density =
         100.0; // kilograms of dead plant matter in a cubic metre of litter or peat
+
+    // Wind carrying loose ground off where it lies bare and dry: sand into dunes near by, silt far
+    // off as loess.
+    double deflation = 0.3;          // share of bare, dry loose ground the wind has taken
+    double deflation_depth = 60.0;   // metres down the wind can strip loose ground at most
+    double glacial_deflation = 0.15; // share of till and outwash taken while the coldest times'
+                                     // ice had just left it bare
+    double beach_sand = 0.05;        // share of the sea floor's deposits off a coast blown ashore
+    double rock_deflation = 0.03;    // share of what bare, dry rock has weathered the wind takes
+    double sand_share = 0.6;         // of river-laid ground, the share that's sand; of what ice
+                                     // ground, a third of that, the rest flour
+    double silt_share = 0.3;         // of river-laid ground, the share that's silt
+    double sand_reach = 150'000.0;   // metres sand goes before most has settled, over bare, dry
+                                     // level ground; less where plants or water catch it
+    double climb_stop = 0.003;       // rise over run of the ground ahead that stops sand going on
+    double silt_reach = 800'000.0;   // metres silt goes before most has settled, in open air
+    double silt_trapped = 0.6;       // share less far it goes over ground plants wholly cover
 };
 
 } // namespace hog::formation
