@@ -40,7 +40,8 @@ using hog::formation_lab::Rgb;
 
 constexpr std::string_view usage =
     "usage: hog-formation [--seed N] [--plates N] [--continents N] [--land SHARE]\n"
-    "                     [--speed DEG_PER_MYR] [--age MYR] [--radius M]\n"
+    "                     [--speed DEG_PER_MYR] [--age MYR] [--radius M] [--lid M]\n"
+    "                     [--cooling DEG_C]\n"
     "                     [--layout SPLITS] [--detail SPLITS] [--width N] [--out DIR]\n"
     "Forms a planet in stages and writes a map of each stage's result to DIR:\n"
     "plates.png (plates, light crust, and how they meet), base.png (how the crust stands),\n"
@@ -92,6 +93,10 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.body.boundary_age = std::max(n, 0.0);
     } else if (name == "--radius") {
         options.body.radius = std::max(n, 1.0);
+    } else if (name == "--lid") {
+        options.body.lid_thickness = std::max(n, 0.0);
+    } else if (name == "--cooling") {
+        options.body.ice_cooling = n;
     } else if (name == "--layout") {
         options.layout = std::clamp(whole(), 2, Sphere::max_subdivisions);
     } else if (name == "--detail") {

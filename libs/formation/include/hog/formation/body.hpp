@@ -9,7 +9,7 @@ namespace hog::formation {
 // is only a starting point.
 struct Body {
     std::uint64_t seed = 1;
-    double radius = 115'000.0; // metres
+    double radius = 135'000.0; // metres
 
     // Plates, and the thick light crust riding on them.
     int plates = 14;
