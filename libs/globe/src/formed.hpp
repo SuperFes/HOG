@@ -2,6 +2,7 @@
 
 #include "dissection.hpp"
 #include "lake_fill.hpp"
+#include "shoreface.hpp"
 
 #include <hog/formation/smooth.hpp>
 #include <hog/formation/world.hpp>
@@ -9,6 +10,7 @@
 #include <hog/globe/noise.hpp>
 #include <hog/globe/planet.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -57,11 +59,23 @@ private:
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
     // runs out over its rim or stands at the level formed for it.
     void fill_lakes();
-    // The shores' fields, carried a couple of points either way from the waterline so they read
+    // The shores' fields, carried a few points either way from the waterline so they read
     // whole along it.
     void fill_shores();
-    // What of the top of ground `height` metres over the sea the waves laid as beach.
-    void lay_beach(double height, const formation::Smooth::Weights& weights, Strata& layers) const;
+    // What the waves make of the shore about a place, from the shores' fields as `value` reads
+    // them there; nothing where they make no beach.
+    struct Beach {
+        Sea sea;
+        Grains grains;
+        Profile profile;
+        double volume = 0.0; // cubic metres a metre of shore
+        bool mud = false;
+    };
+    template <typename Value>
+    [[nodiscard]] std::optional<Beach> beach_from(const Value& value) const;
+    // Builds the beach the waves laid up on the ground `top` at `direction`, the beach its top.
+    void lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, Noise& top,
+                   Strata& layers) const;
     // The lake with its floor at the point `floor`, its points `reach` radians round it, standing
     // at `most` at the highest.
     [[nodiscard]] Lake fill_lake(std::uint32_t floor, double reach, double most,
@@ -101,12 +115,18 @@ private:
     // What the sea's waves made of the shore, held at the points about the waterline: storms'
     // wave height, the beach a metre of coast holds and the mud, and what the beach is made of.
     std::vector<double> waves_;
+    std::vector<double> usual_;
     std::vector<double> beach_;
     std::vector<double> mud_;
     std::vector<double> quartz_;
     std::vector<double> volcanic_;
     std::vector<double> carbonate_;
     std::vector<double> shingle_;
+    // How deep the sea gets about each point.
+    std::vector<double> floor_;
+    // Beaches' grains: sand, volcanic sand, shell sand, shingle, and mud.
+    std::array<Grains, 5> grains_{};
+    std::uint64_t bars_seed_ = 0;
     // At each point a lake was formed over, 1 and the level formed for it; elsewhere nothing.
     std::vector<double> lake_share_;
     std::vector<double> lake_cap_;

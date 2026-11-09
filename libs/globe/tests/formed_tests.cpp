@@ -8,11 +8,17 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 using hog::DVec3;
@@ -20,6 +26,7 @@ using hog::globe::Formed;
 using hog::globe::Generator;
 using hog::globe::Material;
 using hog::globe::Planet;
+using hog::globe::properties;
 
 namespace {
 
@@ -280,7 +287,9 @@ TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][fo
         if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0) {
             continue;
         }
-        const double cut = std::max(0.0, uncut.top.value - here.top.value);
+        // Under the beach the waves build up on it.
+        const double cut = std::max(0.0, (uncut.top.value - uncut.layers.beach) -
+                                             (here.top.value - here.layers.beach));
         CHECK_THAT(laid(here), WithinAbs(std::max(0.0, laid(uncut) - cut), 1e-6));
         // Less soil and beach, which form again on what's left.
         CHECK(here.layers.cover <= std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
@@ -291,14 +300,18 @@ TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][fo
     CHECK(cut_into > 100);
 }
 
-TEST_CASE("beaches lie along formed shores about the waterline, bare of soil", "[globe][formed]") {
+TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare of soil",
+          "[globe][formed]") {
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
-    // Storms' waves stir the bottom no deeper than twice the tallest fully grown sea's, about
-    // 10 m, and throw their swash no higher than its height.
+    // Storms' waves run up no higher than about twice the tallest fully grown sea's, near 10 m,
+    // even on shingle.
     constexpr double tallest = 10.0;
+    const double steepest = std::tan(properties(Material::Shingle).saturated_repose);
     int beaches = 0;
+    int steep = 0;
+    std::vector<double> sand;
     for (std::uint64_t n = 0; n < 200'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here here = formed.at(direction, voxel);
@@ -306,15 +319,30 @@ TEST_CASE("beaches lie along formed shores about the waterline, bare of soil", "
             continue;
         }
         ++beaches;
-        CHECK(here.top.value > -2.0 * tallest);
-        CHECK(here.top.value < tallest);
+        CHECK(here.top.value < 2.0 * tallest);
         CHECK(here.layers.organic + here.layers.topsoil + here.layers.subsoil == 0.0);
         const Material made_of = here.layers.beach_of;
         CHECK((made_of == Material::Sand || made_of == Material::VolcanicSand ||
                made_of == Material::ShellSand || made_of == Material::Shingle ||
                made_of == Material::Sediment));
+        const double slope =
+            glm::length(here.top.gradient - (glm::dot(here.top.gradient, direction) * direction));
+        steep += slope > steepest ? 1 : 0;
+        // Over the shoreface, from the water down as far as storms move it; past that its toe
+        // lies as steep as it holds.
+        if (made_of == Material::Sand && here.top.value < 0.0 && here.top.value > -2.0 * tallest) {
+            sand.push_back(slope);
+        }
     }
     CHECK(beaches > 20);
+    // No beach lies steeper than its stones hold soaked, but for a veneer thinning out where a
+    // hollow funnels its sand away.
+    CHECK(steep * 100 <= beaches);
+    // Sand lies far flatter than it could where the waves work it.
+    REQUIRE(sand.size() > 20);
+    const auto middle = sand.begin() + static_cast<std::ptrdiff_t>(sand.size() / 2);
+    std::ranges::nth_element(sand, middle);
+    CHECK(*middle < 0.25 * std::tan(properties(Material::Sand).saturated_repose));
 }
 
 TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
@@ -339,5 +367,153 @@ TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
         }
         WARN("lod " << lod << ": " << seconds(started) / reads * 1e6 << " us a read (" << sink
                     << ")");
+    }
+}
+
+namespace {
+
+// What a few hundred transects across a world's shores find.
+struct Survey {
+    double spacing = 0.0;
+    int transects = 0;
+    int with_beach = 0;
+    int with_dry = 0;
+    std::vector<double> waterline;   // spacings in from the sea point
+    std::vector<double> slope_there; // the ground's at the waterline, beach or not
+    std::vector<double> dry_width;
+    std::array<std::vector<double>, 3> slopes; // over the water, to 20 m down, deeper
+    std::array<int, hog::globe::material_count> kinds{};
+};
+
+// Metres from `from` towards `way` the ground comes out of the water, none within `reach`.
+std::optional<double> waterline_from(const Formed& formed, const DVec3& from, const DVec3& way,
+                                     double radius, double reach) {
+    constexpr int steps = 1'200;
+    for (int at = 0; at < steps; ++at) {
+        const double metres = reach * at / steps;
+        if (formed.at(glm::normalize(from + (way * (metres / radius))), 1e9).top.value > 0.0) {
+            return metres;
+        }
+    }
+    return std::nullopt;
+}
+
+// Across the shore at a waterline `crossing` metres from `from` towards `way`, half a spacing
+// either side, every 2 m.
+void across_waterline(const Formed& formed, const Planet& planet, const DVec3& from,
+                      const DVec3& way, double crossing, Survey& survey) {
+    constexpr double step = 2.0;
+    const auto steps = static_cast<int>(survey.spacing / step);
+    bool beach = false;
+    double dry = 0.0;
+    for (int at = 0; at < steps; ++at) {
+        const double metres = crossing - (0.5 * survey.spacing) + (at * step);
+        const DVec3 direction = glm::normalize(from + (way * (metres / planet.radius)));
+        const Formed::Here here = formed.at(direction, planet.voxel);
+        const double slope =
+            glm::length(here.top.gradient - (glm::dot(here.top.gradient, direction) * direction));
+        if (at == steps / 2) {
+            survey.slope_there.push_back(slope);
+        }
+        if (here.layers.beach <= 0.0) {
+            continue;
+        }
+        beach = true;
+        ++survey.kinds[static_cast<std::size_t>(here.layers.beach_of)];
+        const double top = here.top.value;
+        std::size_t band = 2;
+        if (top > 0.0) {
+            band = 0;
+            dry += step;
+        } else if (top > -20.0) {
+            band = 1;
+        }
+        survey.slopes[band].push_back(slope);
+    }
+    survey.with_beach += beach ? 1 : 0;
+    survey.with_dry += dry > 0.0 ? 1 : 0;
+    if (dry > 0.0) {
+        survey.dry_width.push_back(dry);
+    }
+}
+
+// From sea points beside land towards the land, to where the ground comes out of the water.
+Survey survey_shores(const Planet& planet) {
+    const Generator generator{planet};
+    const Formed& formed = *generator.shape().formed;
+    const auto& world = formed.world();
+    const auto& sphere = world.sphere;
+    Survey survey;
+    survey.spacing = sphere.spacing() * planet.radius;
+    const auto in_sea = [&](std::uint32_t point) { return world.rivers.receiver[point] == point; };
+    for (std::uint32_t point = 0; point < sphere.size() && survey.transects < 300; point += 7) {
+        const auto neighbors = sphere.neighbors(point);
+        const auto land =
+            std::ranges::find_if(neighbors, [&](std::uint32_t near) { return !in_sea(near); });
+        if (!in_sea(point) || land == neighbors.end()) {
+            continue;
+        }
+        const DVec3 from = sphere.point(point);
+        const DVec3 way = glm::normalize(sphere.point(*land) - from);
+        const std::optional<double> crossing =
+            waterline_from(formed, from, way, planet.radius, 6.0 * survey.spacing);
+        if (!crossing) {
+            continue;
+        }
+        ++survey.transects;
+        survey.waterline.push_back(*crossing / survey.spacing);
+        across_waterline(formed, planet, from, way, *crossing, survey);
+    }
+    return survey;
+}
+
+// The tenth, middle and ninth tenth of `values`.
+std::string spread(std::vector<double> values) {
+    if (values.empty()) {
+        return "none";
+    }
+    std::ostringstream text;
+    for (const double share : {0.1, 0.5, 0.9}) {
+        const auto at = values.begin() +
+                        static_cast<std::ptrdiff_t>(share * static_cast<double>(values.size() - 1));
+        std::ranges::nth_element(values, at);
+        text << *at << (share < 0.9 ? " / " : "");
+    }
+    return text.str();
+}
+
+} // namespace
+
+TEST_CASE("beaches across the shores of a few worlds", "[.bench][globe][formed]") {
+    struct Shell {
+        std::uint64_t seed = 1;
+        double radius = 115'000.0;
+        double detail = 5.0;
+        double voxel = 2.5;
+    };
+    // The test planet's shell on a few seeds, and the development world's.
+    for (const Shell shell : {Shell{.seed = 1}, Shell{.seed = 2}, Shell{.seed = 3},
+                              Shell{.radius = 135'000.0, .detail = 7.0, .voxel = 1.0 / 3.0}}) {
+        Planet planet;
+        planet.seed = shell.seed;
+        planet.radius = shell.radius;
+        planet.formed_detail = shell.detail;
+        planet.voxel = shell.voxel;
+        const Survey survey = survey_shores(planet);
+        const auto& kinds = survey.kinds;
+        const auto kind = [&](Material material) {
+            return kinds[static_cast<std::size_t>(material)];
+        };
+        WARN("seed " << shell.seed << " radius " << shell.radius << " detail " << shell.detail
+                     << " (spacing " << survey.spacing << " m): transects " << survey.transects
+                     << ", with beach " << survey.with_beach << ", with dry beach "
+                     << survey.with_dry << "; waterline in from the sea point, spacings "
+                     << spread(survey.waterline) << "; ground slope there "
+                     << spread(survey.slope_there) << "; dry width " << spread(survey.dry_width)
+                     << " m; beach slope over water " << spread(survey.slopes[0]) << ", to 20 m "
+                     << spread(survey.slopes[1]) << ", deeper " << spread(survey.slopes[2])
+                     << "; sand " << kind(Material::Sand) << ", mud " << kind(Material::Sediment)
+                     << ", black " << kind(Material::VolcanicSand) << ", shell "
+                     << kind(Material::ShellSand) << ", shingle " << kind(Material::Shingle));
     }
 }

@@ -21,15 +21,15 @@ namespace {
 constexpr double rock_steepest = 1.73; // 60 degrees
 constexpr double loose_steepest = 0.7; // 35 degrees
 constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
-// Dean's equilibrium shoreface, depth rising as distance out to the two thirds: its scale, metres
-// to the third, for fine sand and for shingle.
-constexpr double sand_shoreface = 0.11;
-constexpr double shingle_shoreface = 0.9;
-
 double smoothstep(double from, double to, double x) noexcept {
     const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
     return t * t * (3.0 - (2.0 * t));
 }
+
+// Rip currents cut crescent bars about this many times the surf zone's width apart.
+constexpr double rip_spacing = 4.0;
+// The gentlest ground a beach is reckoned across, rise over run.
+constexpr double shallowest = 1e-4;
 
 formation::Body body_for(const Planet& planet) {
     formation::Body body;
@@ -73,7 +73,8 @@ Formed::Formed(const Planet& planet, const Derived& derived)
                            world_.sphere.spacing() * planet.radius / 2.0 / (3.0 * planet.voxel)))),
                .seed = hash_values(planet.seed, 0x6775'6c6c'6965'73ULL)},
       // As far apart as the widest gullies cut deep, so they fade over their own width at least.
-      fall_blend_{gullies_.longest * rock_steepest / 2.0} {
+      fall_blend_{gullies_.longest * rock_steepest / 2.0},
+      bars_seed_{hash_values(planet.seed, 0x6261'7273ULL)} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field :
@@ -271,56 +272,144 @@ Material most_sand(double quartz, double volcanic, double carbonate) {
 } // namespace
 
 void Formed::fill_shores() {
-    const formation::Shores& shores = world_.shores;
+    const formation::World& world = world_;
+    const formation::Shores& shores = world.shores;
+    const double gravity = world.body.gravity;
+    for (const auto [at, material] :
+         {std::pair{0, Material::Sand}, std::pair{1, Material::VolcanicSand},
+          std::pair{2, Material::ShellSand}, std::pair{3, Material::Shingle},
+          std::pair{4, Material::Sediment}}) {
+        grains_[static_cast<std::size_t>(at)] = grains_of(material, gravity);
+    }
     waves_ = shores.waves;
+    usual_ = shores.usual;
     beach_ = shores.beach;
     mud_ = shores.mud;
     quartz_ = shores.quartz;
     volcanic_ = shores.volcanic;
     carbonate_ = shores.carbonate;
     shingle_ = shores.shingle;
-    const std::array fields{&waves_, &beach_, &mud_, &quartz_, &volcanic_, &carbonate_, &shingle_};
-    std::vector<std::uint8_t> held = at_waterline(world_);
-    constexpr int rounds = 2;
+    const std::array fields{&waves_,  &usual_,    &beach_,     &mud_,
+                            &quartz_, &volcanic_, &carbonate_, &shingle_};
+    std::vector<std::uint8_t> held = at_waterline(world);
+    // The ground between the points sinks towards a deep sea beside them, so it comes out of the
+    // water up to a few points inland of where they have the coast.
+    constexpr int rounds = 6;
     for (int round = 0; round < rounds; ++round) {
-        spread_round(world_.sphere, fields, held);
+        spread_round(world.sphere, fields, held);
+    }
+
+    const formation::Sphere& sphere = world.sphere;
+    const std::uint32_t size = sphere.size();
+    floor_.assign(size, 0.0);
+    for (std::uint32_t point = 0; point < size; ++point) {
+        double lowest = top_[point];
+        for (const std::uint32_t near : sphere.neighbors(point)) {
+            lowest = std::min(lowest, top_[near]);
+        }
+        floor_[point] = std::max(0.0, -lowest);
     }
 }
 
-void Formed::lay_beach(double height, const formation::Smooth::Weights& weights,
+template <typename Value>
+std::optional<Formed::Beach> Formed::beach_from(const Value& value) const {
+    const double storm = value(waves_);
+    const double sand = std::max(0.0, value(beach_));
+    const double mud = std::max(0.0, value(mud_));
+    if (storm <= 0.0 || (sand <= 0.0 && mud <= 0.0)) {
+        return std::nullopt;
+    }
+    const formation::Body& body = world_.body;
+    Beach beach;
+    beach.sea = {.storm = storm,
+                 .usual = std::clamp(value(usual_), 0.0, storm),
+                 .period = formation::wave_period(storm, body)};
+    // Where more mud than sand comes, it's mud flats.
+    beach.mud = mud > sand;
+    if (beach.mud) {
+        beach.grains = grains_[4];
+        beach.volume = mud;
+    } else {
+        std::array shares{std::max(0.0, value(quartz_)), std::max(0.0, value(volcanic_)),
+                          std::max(0.0, value(carbonate_)), std::max(0.0, value(shingle_))};
+        double all = 0.0;
+        for (const double share : shares) {
+            all += share;
+        }
+        if (all <= 0.0) {
+            shares = {1.0, 0.0, 0.0, 0.0};
+            all = 1.0;
+        }
+        for (double& share : shares) {
+            share /= all;
+        }
+        beach.grains = mixed(std::span{grains_}.first<4>(), shares);
+        beach.volume = sand;
+    }
+    beach.profile = profile_for(beach.sea, beach.grains, body.gravity);
+    return beach;
+}
+
+void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, Noise& top,
                        Strata& layers) const {
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
-    // From where storms' waves stop stirring the bottom, about twice their height down, to the
-    // top of their swash, about their height up.
-    const double waves = value(waves_);
-    const double stirred = 2.0 * waves;
-    const double swash = waves;
-    if (waves <= 0.0 || height <= -stirred || height >= swash) {
+    const std::optional<Beach> beach = beach_from(value);
+    if (!beach) {
         return;
     }
-    const double beach = std::max(0.0, value(beach_));
-    const double shingle = std::clamp(value(shingle_), 0.0, 1.0);
-    // Spread over the shoreface out to where the waves stop stirring it, the narrower the coarser.
-    const double scale = sand_shoreface + ((shingle_shoreface - sand_shoreface) * shingle);
-    const double across = maths::pow(stirred / scale, 1.5);
-    const double ends = 0.2 * (stirred + swash);
-    const double inside = smoothstep(-stirred, ends - stirred, height) *
-                          (1.0 - smoothstep(swash - ends, swash, height));
-    layers.beach = std::min(beach / across, stirred + swash) * inside;
-    if (layers.beach <= 0.0) {
+    const double floor = value(floor_);
+    if (floor <= 0.0) {
         return;
     }
+    // Built on the ground as the points have it, out from its waterline across its slope here.
+    const formation::Smooth::Read plane = formation::Smooth::read(top_, weights);
+    const DVec3 rise =
+        (plane.gradient - (glm::dot(plane.gradient, direction) * direction)) / radius_;
+    const Ground ground{.slope = std::max(glm::length(rise), shallowest), .floor = floor};
+    const Built built = built_on(beach->profile, ground, beach->volume);
+    const double out = -plane.value / ground.slope;
+    const std::optional<Across> on = beach_top(beach->profile, ground, built, out);
+    if (!on) {
+        return;
+    }
+    Across surface = *on;
+    const Profile profile = as_built(beach->profile, built);
+    const double offshore = out - built.ahead;
+    if (offshore > 0.0 && offshore < out_to(profile, profile.closure)) {
+        const Bars bars = bars_on(beach->profile, beach->sea, beach->grains, world_.body.gravity);
+        if (bars.count > 0) {
+            const double spacing =
+                rip_spacing * bars.crest[static_cast<std::size_t>(bars.count - 1)];
+            const double shift =
+                bars.rhythm * gradient_noise(direction * (radius_ / spacing), bars_seed_).value;
+            const Across bar = bars_at(bars, offshore, shift);
+            surface.height += bar.height;
+            surface.slope += bar.slope;
+        }
+    }
+    // Hollows deeper under the ground's plane than the storms rework funnel the sand on down.
+    const double sunk = (plane.value - top.value) / std::max(profile.closure, 1.0);
+    const double kept = built.share * (1.0 - smoothstep(1.0, 2.0, sunk));
+    const double fill = kept * (surface.height - top.value);
+    if (fill <= 0.0) {
+        return;
+    }
+    const DVec3 seaward = glm::length(rise) > 0.0 ? -rise / glm::length(rise) : DVec3{0.0};
+    top.gradient = ((1.0 - kept) * top.gradient) + (kept * surface.slope * seaward);
+    top.value += fill;
+    layers.beach = fill;
     layers.organic = 0.0;
     layers.topsoil = 0.0;
     layers.subsoil = 0.0;
-    // The swash throws stones to the top of the beach, sand lies under them; where more mud than
-    // sand comes, it's mud flats.
-    if (height >= swash - (shingle * (stirred + swash))) {
-        layers.beach_of = Material::Shingle;
-    } else if (value(mud_) > beach) {
+    // The swash throws stones to the top of the beach, sand lies under them.
+    const double shingle = std::clamp(value(shingle_), 0.0, 1.0);
+    const double band = profile.berm + profile.closure;
+    if (beach->mud) {
         layers.beach_of = Material::Sediment;
+    } else if (top.value >= profile.berm - (shingle * band)) {
+        layers.beach_of = Material::Shingle;
     } else {
         layers.beach_of = most_sand(value(quartz_), value(volcanic_), value(carbonate_));
     }
@@ -493,10 +582,9 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
-    const Dissected top = surface(direction, weights, lod);
+    Dissected top = surface(direction, weights, lod);
 
     Here here;
-    here.top = top.top;
     const formation::World& world = world_;
     // A lake's water stands level over what of its cells lies lower.
     for (const std::uint32_t lake : lakes_near_[weights.nearest]) {
@@ -539,7 +627,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     }
     layers.saprolite = std::max(0.0, layers.saprolite - cut);
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut);
-    lay_beach(top.top.value, weights, layers);
+    lay_beach(direction, weights, top.top, layers);
+    here.top = top.top;
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.
     const DVec3 rise = top.top.gradient - (glm::dot(top.top.gradient, direction) * direction);
