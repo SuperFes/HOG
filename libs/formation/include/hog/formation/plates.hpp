@@ -83,4 +83,10 @@ struct Crust {
 
 [[nodiscard]] Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body);
 
+// Metres over which the lid bends under a load, its flexural parameter (Turcotte and Schubert).
+[[nodiscard]] double bending_reach(const Body& body);
+// Radians from a boundary to a belt's edge, and across the margin of light crust: as far as the
+// lid bends.
+[[nodiscard]] double belt_width(const Body& body);
+
 } // namespace hog::formation

@@ -63,7 +63,7 @@ Bedrock bedrock_on(const Sphere& sphere, const Crust& crust, const Body& body) {
     bedrock.soluble.assign(size, 0.0);
     bedrock.folding.assign(size, 0.0);
     bedrock.lava.assign(size, 0.0);
-    const double belt = std::max(body.belt_width, 1e-6);
+    const double belt = std::max(belt_width(body), 1e-6);
     for (std::uint32_t point = 0; point < size; ++point) {
         const double light = crust.light[point];
         const double near = crust.boundary[point] / belt;

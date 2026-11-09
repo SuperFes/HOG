@@ -96,7 +96,9 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
                         &forms.volcanoes, &forms.scree, &forms.strength, &forms.slope}) {
         field->assign(size, 0.0);
     }
-    const double belt = std::max(body.belt_width, 1e-6);
+    const double belt = std::max(belt_width(body), 1e-6);
+    // Slopes count as steep against what land stands at over a point's run, at any size.
+    const double stands = steepest_over(sphere.spacing() * body.radius, body);
     for (std::uint32_t point = 0; point < size; ++point) {
         if (in_sea(rivers, point)) {
             continue;
@@ -110,7 +112,7 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
         const double wet = wetness(celsius, climate.rain[point], body);
         // Drought keeps faces sharp; rain rounds them under soil and plants.
         const double dry = smoothstep(1.0, 0.3, wet);
-        const double steep = smoothstep(0.002, 0.03, slope);
+        const double steep = smoothstep(0.04 * stands, 0.6 * stands, slope);
         const double cutting = smoothstep(1.0e-5, 2.0e-4, rivers.wear[point]);
         const double river = smoothstep(
             8.0, 10.5, maths::log(std::max(rivers.discharge[point], 1.0)) / std::numbers::ln10);
@@ -131,7 +133,8 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
         forms.mesas[point] = flat * cap_of(rock, layering) * dissected * dry;
         // Steps in hard beds show at gentler slopes than whole mountainsides.
         forms.escarpments[point] =
-            rock == Rock::Layered ? layering * flat * smoothstep(0.001, 0.01, slope) : 0.0;
+            rock == Rock::Layered ? layering * flat * smoothstep(0.02 * stands, 0.2 * stands, slope)
+                                  : 0.0;
         forms.badlands[point] = rock == Rock::Layered ? (1.0 - layering) * (1.0 - soluble) * dry *
                                                             std::max(cutting, raised)
                                                       : 0.0;

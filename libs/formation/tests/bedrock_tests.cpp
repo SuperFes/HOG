@@ -86,11 +86,11 @@ TEST_CASE("layered rock lies folded where plates collide and flat far from them"
     int belts = 0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (made.crust.meeting[point] == Meeting::Collision &&
-            made.crust.boundary[point] < 0.5 * body.belt_width) {
+            made.crust.boundary[point] < 0.5 * belt_width(body)) {
             belt += made.bedrock.folding[point];
             ++belts;
         }
-        if (made.crust.boundary[point] > 4.0 * body.belt_width) {
+        if (made.crust.boundary[point] > 4.0 * belt_width(body)) {
             CHECK(made.bedrock.folding[point] < 1e-6);
         }
     }
