@@ -97,8 +97,12 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
         field->assign(size, 0.0);
     }
     const double belt = std::max(belt_width(body), 1e-6);
-    // Slopes count as steep against what land stands at over a point's run, at any size.
+    // Slopes count as steep against what land stands at over a point's run, and rivers as big
+    // against the planet's biggest, at any size.
     const double stands = steepest_over(sphere.spacing() * body.radius, body);
+    const double biggest = std::max(std::ranges::max(rivers.discharge), 1.0);
+    // Ice's troughs show once they're a share of the relief land stands at over a point's run.
+    const double relief = stands * sphere.spacing() * body.radius;
     for (std::uint32_t point = 0; point < size; ++point) {
         if (in_sea(rivers, point)) {
             continue;
@@ -115,7 +119,8 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
         const double steep = smoothstep(0.04 * stands, 0.6 * stands, slope);
         const double cutting = smoothstep(1.0e-5, 2.0e-4, rivers.wear[point]);
         const double river = smoothstep(
-            8.0, 10.5, maths::log(std::max(rivers.discharge[point], 1.0)) / std::numbers::ln10);
+            -2.5, 0.0,
+            maths::log(std::max(rivers.discharge[point], 1.0) / biggest) / std::numbers::ln10);
         // Beds lifted high enough for rivers to cut them into tables, with some cap still left.
         const bool capped = outcrop.cover[point] > 0.0 || outcrop.lava[point] > 0.0;
         const double raised = smoothstep(200.0, 1'200.0, rivers.height[point]);
@@ -125,7 +130,7 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
 
         forms.strength[point] = strength;
         forms.slope[point] = slope;
-        forms.glacial[point] = smoothstep(20.0, 500.0, ice.carved[point]);
+        forms.glacial[point] = smoothstep(0.004 * relief, 0.1 * relief, ice.carved[point]);
         if (ice.thickness[point] > 0.0) {
             continue; // the rest lies hidden under the ice
         }

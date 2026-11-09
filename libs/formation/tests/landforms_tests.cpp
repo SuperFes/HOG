@@ -38,7 +38,16 @@ TEST_CASE("crystalline rock stands steepest, soft flat beds least", "[formation]
 
 namespace {
 
+// A planet lit dimmer than the default, so its coldest times laid ice sheets wide enough to have
+// insides and edges.
+Body glaciated() {
+    Body body;
+    body.star_flux = 1'300.0;
+    return body;
+}
+
 struct Made {
+    explicit Made(Body made_with = {}) : body{made_with} {}
     Body body;
     Sphere layout{5, body.seed};
     Sphere sphere{6, body.seed + 1};
@@ -107,12 +116,14 @@ TEST_CASE("each landform comes only where what makes it is", "[formation][landfo
             CHECK(forms.sea_cliffs[point] == 0.0);
         }
     }
-    // The default planet has some of each.
+    // The default planet has some of each, and one through colder times glacial forms too.
     for (const auto* field :
          {&forms.canyons, &forms.mesas, &forms.escarpments, &forms.karst, &forms.sea_cliffs,
-          &forms.glacial, &forms.fault_scarps, &forms.volcanoes, &forms.scree}) {
+          &forms.fault_scarps, &forms.volcanoes, &forms.scree}) {
         CHECK(std::ranges::max(*field) > 0.3);
     }
+    const Made cold{glaciated()};
+    CHECK(std::ranges::max(cold.forms.glacial) > 0.3);
 }
 
 TEST_CASE("a wetter world rounds off its mesas", "[formation][landforms]") {

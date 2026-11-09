@@ -281,9 +281,10 @@ void read_layout(const Sphere& sphere, const Plates& plates, const Body& body, C
     const double half = 0.5 * belt_width(body);
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
         const double inside = lightness[point] > 0.0 ? 1.0 : -1.0;
-        crust.light[point] = from_edge.source[point] == Nearest::none
-                                 ? (inside > 0.0 ? 1.0 : 0.0)
-                                 : smoothstep(-half, half, inside * from_edge.distance[point]);
+        // With no edge anywhere, every point is as far from one as can be.
+        const double away =
+            from_edge.source[point] == Nearest::none ? std::numbers::pi : from_edge.distance[point];
+        crust.light[point] = smoothstep(-half, half, inside * away);
     }
 }
 
