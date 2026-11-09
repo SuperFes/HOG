@@ -3,6 +3,7 @@ add_library(hog_globe
     src/caves.cpp
     src/cell.cpp
     src/dissection.cpp
+    src/joints.cpp
     src/drainage.cpp
     src/formed.cpp
     src/lake_fill.cpp
@@ -44,6 +45,7 @@ hog_add_tests(hog_globe
     tests/caves_tests.cpp
     tests/cell_tests.cpp
     tests/dissection_tests.cpp
+    tests/joints_tests.cpp
     tests/drainage_tests.cpp
     tests/formed_tests.cpp
     tests/lake_fill_tests.cpp
