@@ -152,6 +152,37 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
     CHECK(wet * 2 > walked);
 }
 
+TEST_CASE("a formed lake stands level, no higher than formed, over lower ground only",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double vertical = generator.derived().vertical;
+    int paired = 0;
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        const std::uint32_t lake = world.lakes.lake[point];
+        if (lake == hog::formation::Lakes::none || world.sediment.lake_depth[point] <= 0.0) {
+            continue;
+        }
+        const Formed::Here here = formed.at(world.sphere.point(point));
+        if (!here.lake) {
+            continue;
+        }
+        CHECK(*here.lake > here.top.value);
+        CHECK(*here.lake <= (vertical * world.lakes.lakes[lake].level) + 1e-9);
+        for (const std::uint32_t beside : world.sphere.neighbors(point)) {
+            if (world.lakes.lake[beside] != lake) {
+                continue;
+            }
+            if (const auto there = formed.at(world.sphere.point(beside)).lake) {
+                CHECK(*there == *here.lake);
+                ++paired;
+            }
+        }
+    }
+    CHECK(paired > 0);
+}
+
 TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too",
           "[globe][formed]") {
     const Generator& generator = formed_generator();

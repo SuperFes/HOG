@@ -7,6 +7,7 @@ add_library(hog_globe
     src/drainage.cpp
     src/erosion.cpp
     src/formed.cpp
+    src/lake_fill.cpp
     src/generator.cpp
     src/grip.cpp
     src/layers.cpp
@@ -47,6 +48,7 @@ hog_add_tests(hog_globe
     tests/craters_tests.cpp
     tests/drainage_tests.cpp
     tests/formed_tests.cpp
+    tests/lake_fill_tests.cpp
     tests/generator_tests.cpp
     tests/grip_tests.cpp
     tests/held_tiles_tests.cpp

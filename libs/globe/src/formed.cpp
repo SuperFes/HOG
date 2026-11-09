@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <thread>
 
 namespace hog::globe {
 
@@ -47,8 +49,7 @@ Formed::Formed(const Planet& planet, const Derived& derived)
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
-                        &lake_beds_, &till_, &saprolite_, &ice_, &lava_, &rock_cover_, &light_,
-                        &lake_depth_, &lake_level_, &lake_share_}) {
+                        &lake_beds_, &till_, &saprolite_, &ice_, &lava_, &rock_cover_, &light_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -78,12 +79,6 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         lava_[point] = vertical_ * world.outcrop.lava[point];
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
-        const std::uint32_t lake = world.lakes.lake[point];
-        if (land && lake != formation::Lakes::none && world.sediment.lake_depth[point] > 0.0) {
-            lake_level_[point] = vertical_ * world.lakes.lakes[lake].level;
-            lake_depth_[point] = std::max(0.0, lake_level_[point] - top_[point]);
-            lake_share_[point] = 1.0;
-        }
     }
     const auto [lowest, highest] = std::ranges::minmax(top_);
     lowest_ = lowest;
@@ -102,6 +97,114 @@ Formed::Formed(const Planet& planet, const Derived& derived)
                 direction[(axis + 2) % 3] = ((2.0 * (static_cast<double>(j) + 0.5)) / across) - 1.0;
                 near = world.sphere.nearest(glm::normalize(direction), near);
                 starts_[(((face * starts_across) + i) * starts_across) + j] = near;
+            }
+        }
+    }
+    fill_lakes();
+}
+
+DVec3 Formed::Lake::toward(int x, int y) const noexcept {
+    return glm::normalize(middle + (east * (x * step)) + (north * (y * step)));
+}
+
+void Formed::fill_lakes() {
+    const formation::World& world = world_;
+    const formation::Sphere& sphere = world.sphere;
+    const std::uint32_t size = sphere.size();
+    constexpr std::uint32_t none = formation::Lakes::none;
+    // Each lake's floor, the lowest of its points, and how far its points reach from there.
+    std::vector<std::uint32_t> floor(world.lakes.lakes.size(), none);
+    std::vector<double> reach(floor.size(), 0.0);
+    const auto lake_at = [&](std::uint32_t point) {
+        const bool land = world.rivers.receiver[point] != point;
+        return land && world.sediment.lake_depth[point] > 0.0 ? world.lakes.lake[point] : none;
+    };
+    for (std::uint32_t point = 0; point < size; ++point) {
+        if (const std::uint32_t lake = lake_at(point);
+            lake != none && (floor[lake] == none || top_[point] < top_[floor[lake]])) {
+            floor[lake] = point;
+        }
+    }
+    for (std::uint32_t point = 0; point < size; ++point) {
+        if (const std::uint32_t lake = lake_at(point); lake != none) {
+            const double dot = glm::dot(sphere.point(point), sphere.point(floor[lake]));
+            reach[lake] = std::max(reach[lake], std::acos(std::clamp(dot, -1.0, 1.0)));
+        }
+    }
+
+    lakes_.resize(floor.size());
+    std::atomic<std::size_t> next = 0;
+    const auto fill = [&] {
+        formation::Smooth::Weights weights;
+        for (std::size_t lake = next++; lake < floor.size(); lake = next++) {
+            if (floor[lake] != none) {
+                lakes_[lake] = fill_lake(floor[lake], reach[lake],
+                                         vertical_ * world.lakes.lakes[lake].level, weights);
+            }
+        }
+    };
+    {
+        std::vector<std::jthread> workers;
+        const unsigned count = std::max(1U, std::thread::hardware_concurrency());
+        workers.reserve(count);
+        for (unsigned worker = 0; worker < count; ++worker) {
+            workers.emplace_back(fill);
+        }
+    }
+
+    lakes_near_.assign(size, {});
+    std::vector<std::uint32_t> listed(size, none);
+    for (std::uint32_t lake = 0; lake < lakes_.size(); ++lake) {
+        if (floor[lake] != none) {
+            list_lake(lake, floor[lake], listed);
+        }
+    }
+}
+
+Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
+                               formation::Smooth::Weights& weights) const {
+    const formation::Sphere& sphere = world_.sphere;
+    Lake water;
+    water.middle = sphere.point(floor);
+    const DVec3 pole = std::abs(water.middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    water.east = glm::normalize(glm::cross(pole, water.middle));
+    water.north = glm::cross(water.middle, water.east);
+    // Cells a sixteenth of the points' spacing, finer than the ground read between them bends,
+    // with room to brim past its points by a few spacings.
+    water.step = sphere.spacing() / 16.0;
+    const int half = std::clamp(
+        static_cast<int>(std::ceil((reach + (3.0 * sphere.spacing())) / water.step)), 16, 2048);
+    std::uint32_t near = floor;
+    const auto ground = [&](int x, int y) {
+        smooth_.weigh(water.toward(x, y), weights, near);
+        near = weights.nearest;
+        return formation::Smooth::read(top_, weights).value;
+    };
+    water.pool = fill_pool(half, ground, most);
+    return water;
+}
+
+void Formed::list_lake(std::uint32_t lake, std::uint32_t floor,
+                       std::vector<std::uint32_t>& listed) {
+    // At the points nearest its cells and beside them, for reads to find it by.
+    const formation::Sphere& sphere = world_.sphere;
+    const Lake& water = lakes_[lake];
+    const auto list = [&](std::uint32_t point) {
+        if (listed[point] != lake) {
+            listed[point] = lake;
+            lakes_near_[point].push_back(lake);
+        }
+    };
+    std::uint32_t near = floor;
+    for (int y = water.pool.y0; y < water.pool.y0 + water.pool.height; ++y) {
+        for (int x = water.pool.x0; x < water.pool.x0 + water.pool.width; ++x) {
+            if (water.pool.at(x, y) == Pool::Cell::Dry) {
+                continue;
+            }
+            near = sphere.nearest(water.toward(x, y), near);
+            list(near);
+            for (const std::uint32_t beside : sphere.neighbors(near)) {
+                list(beside);
             }
         }
     }
@@ -129,14 +232,20 @@ Formed::Here Formed::at(DVec3 direction) const {
     Here here;
     here.top = {.value = top.value, .gradient = top.gradient / radius_};
     const formation::World& world = world_;
-    // A lake's water stands at its level, ending where the ground rises over it; where the ground
-    // falls away instead, out of its outlet, it thins as its depth read like the ground's does,
-    // rather than standing up as a wall where the lake's points end.
-    if (const double share = value(lake_share_); share > 0.0) {
-        const double level = value(lake_level_) / share;
-        const double surface = std::min(level, top.value + value(lake_depth_));
-        if (surface > top.value + 0.01) {
-            here.lake = surface;
+    // A lake's water stands level over what of its cells lies lower.
+    for (const std::uint32_t lake : lakes_near_[weights.nearest]) {
+        const Lake& water = lakes_[lake];
+        const double toward = glm::dot(direction, water.middle);
+        if (toward <= 0.0) {
+            continue;
+        }
+        const auto cell = [&](const DVec3& axis) {
+            return static_cast<int>(std::lround(glm::dot(direction, axis) / toward / water.step));
+        };
+        if (water.pool.at(cell(water.east), cell(water.north)) != Pool::Cell::Dry &&
+            water.pool.level > top.value + 0.01) {
+            here.lake = water.pool.level;
+            break;
         }
     }
     here.light = value(light_);
