@@ -116,7 +116,16 @@ TEST_CASE("fast-rising mountains are bare and still lowlands soiled", "[formatio
 
 namespace {
 
+// A planet lit dimmer than the default, so its coldest times laid ice sheets wide enough to have
+// insides and edges.
+Body glaciated() {
+    Body body;
+    body.star_flux = 1'300.0;
+    return body;
+}
+
 struct Made {
+    explicit Made(Body made_with = {}) : body{made_with} {}
     Body body;
     Sphere layout{5, body.seed};
     Sphere sphere{6, body.seed + 1};
@@ -192,7 +201,7 @@ TEST_CASE("soil grows down through what was laid, faster than into rock", "[form
 
 TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
           "[formation][soil]") {
-    const Made made;
+    const Made made{glaciated()};
     // At a point the profile is the point's own; going down, layers only ever give way to the
     // ones under them, ending in rock.
     std::uint32_t layered = 0;

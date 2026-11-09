@@ -78,6 +78,14 @@ TEST_CASE("plastic ice thickens up from where it ends", "[formation][ice]") {
 
 namespace {
 
+// A planet lit dimmer than the default, so its coldest times laid ice sheets wide enough to have
+// insides and edges.
+Body glaciated() {
+    Body body;
+    body.star_flux = 1'300.0;
+    return body;
+}
+
 struct Made {
     explicit Made(Body made_with = {}) : body{made_with} {}
     Body body;
@@ -244,7 +252,7 @@ TEST_CASE("all the rock ice carved is laid down as till or washed off", "[format
 }
 
 TEST_CASE("till lies where the coldest ice lay, thickest where it ended", "[formation][ice]") {
-    const Made made;
+    const Made made{glaciated()};
     const auto iced = [&](std::uint32_t point) {
         return made.rivers.receiver[point] != point && made.ice.coldest[point] > 0.0;
     };
