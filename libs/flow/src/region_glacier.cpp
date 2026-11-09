@@ -200,7 +200,12 @@ void Region::glaciate(Stepped& stepped, double years) {
         left -= glacier.step(left);
     }
 
-    // Written back as whole units, to what each column has room for.
+    // Written back as whole units, to what each column has room for, rounded along the columns'
+    // running total from one draw: each column rounds up as often as its fraction says, and
+    // together they keep the glacier's total.
+    const double offset = drawn(base, 3);
+    double total = 0.0;
+    std::int64_t given = 0;
     for (std::size_t n = 0; n < tops.size(); ++n) {
         const Site column{.face = tops[n].key.face,
                            .i = tops[n].key.i,
@@ -212,9 +217,10 @@ void Region::glaciate(Stepped& stepped, double years) {
                 scour(column, static_cast<int>(mm));
             }
         }
-        const auto units = std::min(
-            dithered(glacier[n].ice / thickness * static_cast<double>(full), column, 3),
-            std::int64_t{tops[n].voxels} * full);
+        total += glacier[n].ice / thickness * static_cast<double>(full);
+        const auto whole = static_cast<std::int64_t>(std::floor(total + offset));
+        const auto units = std::min(whole - given, std::int64_t{tops[n].voxels} * full);
+        given = whole;
         if (units == tops[n].ice) {
             continue;
         }

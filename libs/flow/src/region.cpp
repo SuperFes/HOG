@@ -768,13 +768,16 @@ void Region::report_wet(const Column& column, Stepped& stepped) const {
     }
 }
 
-std::int64_t Region::dithered(double value, Site site, std::uint64_t salt) const {
-    const double whole = std::floor(value);
+double Region::drawn(Site site, std::uint64_t salt) const {
     const std::uint64_t draw =
         hash_values(steps_, salt, std::uint64_t{site.face}, std::uint64_t{site.i},
                     std::uint64_t{site.j}, std::uint64_t{site.layer});
-    const double unit = static_cast<double>(draw >> 11U) * 0x1.0p-53;
-    return static_cast<std::int64_t>(whole) + (unit < value - whole ? 1 : 0);
+    return static_cast<double>(draw >> 11U) * 0x1.0p-53;
+}
+
+std::int64_t Region::dithered(double value, Site site, std::uint64_t salt) const {
+    const double whole = std::floor(value);
+    return static_cast<std::int64_t>(whole) + (drawn(site, salt) < value - whole ? 1 : 0);
 }
 
 std::int64_t Region::seeped(double rate, double seconds, Site site) const {

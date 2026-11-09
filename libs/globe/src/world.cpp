@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <span>
@@ -330,10 +332,11 @@ std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 cen
     if (lowest > highest) {
         return near;
     }
-    // Columns out from the one under the middle, while their middles are near enough; a cell
-    // is never wider than this slack.
+    // Columns out from the one under the middle, while their middles are near enough: no side of
+    // an equal-angle cube's cell spans more than a quarter turn split `level` times, so no point
+    // in a cell lies farther than that from its middle.
     const DVec3 direction = centre / from;
-    const double slack = 8.0 * layers.thickness;
+    const double slack = std::numbers::pi / 2.0 * from / std::ldexp(1.0, layers.level);
     std::set<Cell> seen{cell_under(direction, layers.level)};
     std::vector<Cell> open{*seen.begin()};
     while (!open.empty()) {

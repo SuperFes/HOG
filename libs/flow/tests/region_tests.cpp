@@ -629,8 +629,7 @@ TEST_CASE("a tall pile of ice stays put until the years run, then spreads withou
     CHECK(moved > 0);
     CHECK(block.grain(13, 12, 0) > 0);
     CHECK(block.grain(12, 12, 11) < full);
-    // Whole units are written back, so a rounding or two may stray, but no more.
-    CHECK(std::abs(block.region().grain() - before) < 64);
+    CHECK(block.region().grain() == before);
 }
 
 TEST_CASE("snow above the snowline grows ice on bare ground, and melt takes it away",
