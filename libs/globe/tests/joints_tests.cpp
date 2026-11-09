@@ -10,7 +10,9 @@ using hog::DVec3;
 using hog::globe::Block;
 using hog::globe::block_at;
 using hog::globe::closest_joints;
+using hog::globe::crag_relief;
 using hog::globe::joint_spacing;
+using hog::globe::widely_jointed;
 using hog::globe::widest_joints;
 
 namespace {
@@ -37,7 +39,7 @@ bool overlap(const Block& a, const Block& b) {
 TEST_CASE("joint spacing runs from closely jointed weak rock to widely jointed strong rock",
           "[globe][joints]") {
     CHECK(std::abs(joint_spacing(0.0) - closest_joints) < 1e-12);
-    CHECK(std::abs(joint_spacing(1.0) - widest_joints) < 1e-12);
+    CHECK(std::abs(joint_spacing(1.0) - widely_jointed) < 1e-12);
     CHECK(joint_spacing(0.3) < joint_spacing(0.7));
 }
 
@@ -70,7 +72,8 @@ TEST_CASE("blocks are as wide as the rock's joints are apart", "[globe][joints]"
         for (const DVec3& point : scattered(600)) {
             const DVec3 size = block_at(point, strength, 5).size();
             for (glm::length_t axis = 0; axis < 3; ++axis) {
-                CHECK(size[axis] > 0.3 * closest_joints);
+                // The widest joints' nearest, split four times nearest a side.
+                CHECK(size[axis] > 0.4 * widest_joints * std::pow(0.35, 4.0));
                 CHECK(size[axis] < 1.7 * widest_joints);
                 logs += std::log(size[axis]);
                 ++sides;
@@ -90,4 +93,26 @@ TEST_CASE("a block's inset is the way to its nearest joint", "[globe][joints]") 
     CHECK(block.inset({2.0, 1.0, 3.0}) == 1.0);
     CHECK(block.inset({3.5, 1.0, 3.0}) == 0.5);
     CHECK(block.inset({2.0, 1.0, 5.9}) < 0.1 + 1e-12);
+}
+
+TEST_CASE("widely jointed blocks stand as crags over closely jointed rock worn into hollows",
+          "[globe][joints]") {
+    const Block wide{.low = {0.0, 0.0, 0.0}, .high = {6.0, 6.0, 6.0}, .id = 1};
+    const Block narrow{.low = {0.0, 0.0, 0.0}, .high = {1.0, 1.0, 1.0}, .id = 2};
+    const Block even{.low = {0.0, 0.0, 0.0}, .high = {3.0, 3.0, 3.0}, .id = 3};
+    CHECK(wide.breadth() == 6.0);
+    CHECK(crag_relief(wide, 3.0, 0.0, 0.0) == 0.0);
+    CHECK(crag_relief(wide, 3.0, 4.0, 0.0) == 2.0);
+    CHECK(crag_relief(even, 3.0, 4.0, 0.0) == 0.0);
+    CHECK(crag_relief(narrow, 3.0, 4.0, 0.0) < 0.0);
+    // A crag topples off a slope once it stands taller than its foot is wide across the rise.
+    CHECK(crag_relief(wide, 3.0, 40.0, 0.5) == 12.0);
+    CHECK(crag_relief(wide, 3.0, 40.0, 2.0) == 3.0);
+    // A hollow fills with rubble from its sides, the narrower the shallower.
+    const double hollow = crag_relief(narrow, 3.0, 1'000.0, 0.0);
+    CHECK(hollow > -1.0);
+    CHECK(hollow < -0.2);
+    // A slab weathers as its thin side has it.
+    const Block slab{.low = {0.0, 0.0, 0.0}, .high = {6.0, 6.0, 1.0}, .id = 4};
+    CHECK(slab.breadth() < 2.5);
 }

@@ -30,6 +30,20 @@ public:
         Strata layers;
         double light = 0.0;   // share of light crust
         double folding = 0.0; // how folded the beds are, 0 to 1
+        // Metres a block of rock stands out of the ground about it as a crag, or under it where
+        // the hollows between blocks aren't filled.
+        double crag = 0.0;
+        // How the rock at the top weathers where it stands bare, which crags and the rock that
+        // falls off them come of.
+        struct Weathering {
+            double rate = 0.0;     // metres a year bare rock here breaks up
+            double worn = 0.0;     // metres a year the ground here is worn down
+            double years = 0.0;    // years it has weathered
+            double strength = 0.0; // how well the rock stands steep, 0 to 1
+            double bare = 0.0;     // share of the ground that stands as bare rock, 0 to 1
+            // Metres a year of rock coming loose from it in blocks, weathered or slid out.
+            double loosening = 0.0;
+        } weathering;
     };
     // Gullies narrower than twice `lod` are left out.
     [[nodiscard]] Here at(DVec3 direction, double lod = 0.0) const;
@@ -106,6 +120,13 @@ private:
     std::vector<double> lava_;
     std::vector<double> rock_cover_;
     std::vector<double> light_;
+    // Metres a year bare rock breaks up and the ground is worn down, the years it has had to,
+    // and how well it stands.
+    std::vector<double> weathering_;
+    std::vector<double> worn_;
+    std::vector<double> years_;
+    std::vector<double> strength_;
+    std::uint64_t joints_seed_ = 0;
     // How steeply valley walls rise about each point, metres up per metre across.
     std::vector<double> wall_;
     // The steepest soil lies on about each point, the wetter the less steep, likewise.

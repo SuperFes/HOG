@@ -1,5 +1,6 @@
 #include "formed.hpp"
 
+#include "joints.hpp"
 #include "valleys.hpp"
 
 #include <hog/core/hash.hpp>
@@ -61,12 +62,13 @@ Formed::Formed(const Planet& planet)
                .seed = hash_values(planet.body.seed, 0x6775'6c6c'6965'73ULL)},
       // As far apart as the widest gullies cut deep, so they fade over their own width at least.
       fall_blend_{gullies_.longest * rock_steepest / 2.0},
+      joints_seed_{hash_values(planet.body.seed, 0x6a6f'696e'7473ULL)},
       bars_seed_{hash_values(planet.body.seed, 0x6261'7273ULL)} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
-    for (auto* field :
-         {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_, &lake_beds_, &till_,
-          &saprolite_, &ice_, &lava_, &rock_cover_, &light_, &soil_holds_}) {
+    for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
+                        &lake_beds_, &till_, &saprolite_, &ice_, &lava_, &rock_cover_, &light_,
+                        &soil_holds_, &weathering_, &worn_, &years_, &strength_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -94,6 +96,12 @@ Formed::Formed(const Planet& planet)
         lava_[point] = world.outcrop.lava[point];
         rock_cover_[point] = world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
+        // Under the sea it has had no years to.
+        weathering_[point] = formation::soil_making(world.climate.temperature[point],
+                                                    world.climate.rain[point], world.body);
+        worn_[point] = world.rivers.wear[point];
+        years_[point] = world.soil.years[point];
+        strength_[point] = world.landforms.strength[point];
         // Soaked through, soil slides on gentler slopes than dry.
         const Properties& soil = properties(Material::Soil);
         const double soaked = formation::waterlogged(formation::wetness(
@@ -752,7 +760,60 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
         cut -= taken;
     }
     layers.saprolite = std::max(0.0, layers.saprolite - cut);
-    const double rock_cover = std::max(0.0, value(rock_cover_) - cut);
+    // Under what covers it the rock weathers apart along its joints (Linton's tors), each block
+    // as fast as its joints let frost and water in, the broken rock lying about it until it's
+    // carried off: so the blocks stand apart no further than the ground has been worn down. On
+    // ground steeper than their rubble rests on, blocks slide and topple out along the joints as
+    // fast as the ground under them wears, weathered or not, the rock's jointing setting how it
+    // stands (Schmidt and Montgomery). What lies over the rock fills the hollows and buries the
+    // blocks standing lower than it's deep; one standing higher comes out of it as a crag, bare.
+    const double strength = value(strength_);
+    const double spacing = joint_spacing(strength);
+    const DVec3 cut_rise = top.top.gradient - (glm::dot(top.top.gradient, direction) * direction);
+    const double cut_slope = glm::length(cut_rise);
+    const double holds = cut_slope / value(soil_holds_);
+    const double over = ((layers.organic + layers.topsoil + layers.subsoil) *
+                         std::max(0.0, 1.0 - (holds * holds))) +
+                        layers.loess + layers.sand + layers.alluvium + layers.lake_beds +
+                        layers.till + layers.lava + layers.saprolite;
+    here.weathering = {.rate = value(weathering_),
+                       .worn = value(worn_),
+                       .years = value(years_),
+                       .strength = strength};
+    const double steep = std::min(1.0, cut_slope / maths::tan(properties(Material::Gravel).repose));
+    here.weathering.loosening =
+        top.ice > 0.0 ? 0.0
+                      : std::min(here.weathering.worn,
+                                 here.weathering.rate + (here.weathering.worn * steep * steep));
+    const double weathered = here.weathering.loosening * here.weathering.years;
+    // Rock shows where the blocks twice as wide as the joints are apart stand out of it.
+    if (const double tallest =
+            crag_relief({.high = DVec3{2.0 * spacing}}, spacing, weathered, cut_slope);
+        tallest > 0.0) {
+        here.weathering.bare = std::max(0.0, 1.0 - (over / tallest));
+    }
+    // Metres the rock's top rises with its block.
+    double rock_rises = 0.0;
+    if (weathered > 0.0) {
+        const Block block = block_at(direction * (radius_ + top.top.value), strength, joints_seed_);
+        // Blocks too narrow for the detail asked fade out, as gullies do.
+        const double fade = std::clamp((block.breadth() / (2.0 * lod)) - 1.0, 0.0, 1.0);
+        const double relief = crag_relief(block, spacing, weathered, cut_slope) * fade;
+        if (relief > over) {
+            here.crag = relief - over;
+            rock_rises = relief;
+            for (double* loose : {&layers.organic, &layers.topsoil, &layers.subsoil, &layers.loess,
+                                  &layers.sand, &layers.alluvium, &layers.lake_beds, &layers.till,
+                                  &layers.lava, &layers.saprolite}) {
+                *loose = 0.0;
+            }
+        } else if (relief < -over) {
+            here.crag = relief + over;
+            rock_rises = relief;
+        }
+        top.top.value += here.crag;
+    }
+    const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);
     lay_beach(direction, weights, top.top, layers);
     here.top = top.top;
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
