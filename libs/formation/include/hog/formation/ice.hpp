@@ -35,6 +35,11 @@ struct Ice {
 [[nodiscard]] double degree_days(double mean, double swing);
 [[nodiscard]] double cold_share(double mean, double swing);
 
+// Metres of water a year ice gives straight to the air at `celsius` where `rain` falls: what the
+// air can take short of saturation over ice, most where it's dry and the less the colder. In a
+// cold desert it outruns what little snow falls, so ice can't lie there.
+[[nodiscard]] double sublimated(double celsius, double rain, const Body& body);
+
 // How far a place's year swings either side of its mean, from its latitude and the tilt.
 [[nodiscard]] double seasonal_swing(double latitude, bool sea, const Body& body);
 

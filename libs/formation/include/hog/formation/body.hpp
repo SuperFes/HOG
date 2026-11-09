@@ -97,6 +97,8 @@ struct Body {
                                      // over land at Earth's tilt; none at the equator or no tilt
     double sea_swing = 0.4;          // share of that swing over open liquid, which holds heat
     double melt_rate = 0.005;        // metres of water a day melted per °C over freezing
+    double sublimation = 1.0;        // metres of water a year ice gives straight to fully dry air
+                                     // at freezing, less the colder as the air holds less
     double gravity = 9.81;           // metres a second squared
     double ice_density = 917.0;      // kilograms a cubic metre
     double ice_strength = 100'000.0; // pascals of shear ice stands on its bed before it flows

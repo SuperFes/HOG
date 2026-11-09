@@ -88,9 +88,10 @@ void balance(const Land& land, double cooling, Cover& cover) {
         const double raised = cover.surface[point] - std::max(land.crust->base[point], 0.0);
         const double celsius =
             land.climate->temperature[point] - cooling - (body.lapse_rate * raised) - body.freezing;
-        cover.balance[point] =
-            (std::max(land.climate->rain[point], 0.0) * cold_share(celsius, swing)) -
-            (body.melt_rate * degree_days(celsius, swing));
+        const double rain = std::max(land.climate->rain[point], 0.0);
+        cover.balance[point] = (rain * cold_share(celsius, swing)) -
+                               (body.melt_rate * degree_days(celsius, swing)) -
+                               sublimated(celsius + body.freezing, rain, body);
     }
 }
 
@@ -369,6 +370,14 @@ double degree_days(double mean, double swing) {
     const double thawed = acos(-mean / swing);
     return days_a_year / std::numbers::pi *
            ((mean * thawed) + std::sqrt((swing * swing) - (mean * mean)));
+}
+
+double sublimated(double celsius, double rain, const Body& body) {
+    // What the air could take as it's colder: Magnus's vapour pressure over ice, against
+    // freezing's. It's the drier the less of that comes back as snow.
+    const double below = std::min(celsius, 0.0);
+    const double could = body.sublimation * maths::exp(22.46 * below / (272.62 + below));
+    return could * could / (could + std::max(rain, 0.0));
 }
 
 double cold_share(double mean, double swing) {
