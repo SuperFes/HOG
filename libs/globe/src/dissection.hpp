@@ -22,6 +22,7 @@ struct Undissected {
 struct Dissected {
     Noise top;
     double ice = 0.0;
+    double cut = 0.0; // metres of the bed the gullies took off, negative where crests stand over it
 };
 
 // Gullies `longest` metres apart and finer ones down their walls, each `octaves` half the last.

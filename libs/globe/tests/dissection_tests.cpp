@@ -114,6 +114,15 @@ TEST_CASE("gullies keep the ground as high as it stood, on the whole", "[globe][
     CHECK(std::abs(total / count) < 0.1 * deepest);
 }
 
+TEST_CASE("what the gullies take off the ground is told", "[globe][dissection]") {
+    for (int east_at = 0; east_at < 60; ++east_at) {
+        const double east = east_at * 7.3;
+        const Undissected ground = sloping(east, 0.5, 1.73);
+        const Dissected cut_down = cut(east, east * 1.7, ground);
+        CHECK_THAT(cut_down.cut, WithinAbs(ground.top.value - cut_down.top.value, 1e-9));
+    }
+}
+
 TEST_CASE("no gully cuts below the floor its ground drains to", "[globe][dissection]") {
     constexpr double room = 6.0;
     for (int east_at = 0; 0.0 + (east_at * 3.1) < 500.0; ++east_at) {

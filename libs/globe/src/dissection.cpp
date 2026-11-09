@@ -129,7 +129,8 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
     }
 
     Dissected dissected{.top = {.value = height + ground.ice, .gradient = gradient},
-                        .ice = ground.ice};
+                        .ice = ground.ice,
+                        .cut = bed - height};
     if (ground.ice > 0.0) {
         // Ice as deep as it lay over the uncut bed settles into what's cut, its top level: over
         // all of it if as deep as the cut, else to where it fills the gullies, crests out of it.
