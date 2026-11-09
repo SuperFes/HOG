@@ -1,17 +1,23 @@
 #include "test_planet.hpp"
 
 #include <hog/client/tile_meshes.hpp>
+#include <hog/globe/generator.hpp>
+#include <hog/globe/land.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_tree.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/protocol/messages.hpp>
+#include <hog/server/tile_sending.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <map>
+#include <set>
 #include <vector>
 
 namespace {
@@ -137,4 +143,66 @@ TEST_CASE("tiles that aren't, or aren't on the planet, are refused", "[client][t
     CHECK_FALSE(meshes.take(rock_at({.face = 6})).has_value());
     CHECK_FALSE(meshes.take(rock_at({.level = 40, .face = 1})).has_value());
     CHECK(meshes.collect().empty());
+}
+
+TEST_CASE("a client flying on draws each place once, as the server last cut it",
+          "[client][tiles]") {
+    const hog::globe::Generator& generator = hog::client::testing::globe().generator;
+    hog::jobs::JobSystem jobs;
+    const hog::globe::EachOf each = [&](std::size_t count,
+                                        const std::function<void(std::size_t)>& body) {
+        jobs.parallel_for(static_cast<std::uint32_t>(count), 1,
+                          [&](hog::jobs::Range range, std::uint32_t /*thread*/) {
+                              for (std::uint32_t n = range.begin; n < range.end; ++n) {
+                                  body(n);
+                              }
+                          });
+    };
+    hog::globe::Land land{generator};
+    const hog::server::TileSending sending{
+        hog::server::TileSending::reach_for(generator.layers().thickness)};
+    TileMeshes meshes{generator.planet(), generator.layers(), jobs};
+    const double radius = generator.planet().radius;
+    const hog::DVec3 start = hog::client::testing::on_land();
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, start));
+    std::map<std::uint64_t, TileKey> keys;
+    std::set<std::uint64_t> drawn;
+    std::set<TileKey> held;
+    for (int step = 0; step < 10; ++step) {
+        const hog::DVec3 up = glm::normalize(start + (east * (150.0 * step / radius)));
+        const double ground =
+            hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))
+                .value_or(radius);
+        const hog::DVec3 eye = up * (ground + 60.0);
+        const hog::server::TileSending::Cut cut = sending.cut(eye, held, land, each);
+        CHECK(cut.too_big == 0);
+        held = {cut.keys.begin(), cut.keys.end()};
+        for (const hog::protocol::SentTile& tile : cut.sent) {
+            const TileKey key{
+                .level = tile.level, .face = tile.face, .i = tile.i, .j = tile.j, .k = tile.k};
+            keys.insert_or_assign(tile_key(key), key);
+            REQUIRE(meshes.take(tile));
+        }
+        const GroundChanges changes = settle(meshes);
+        for (const std::uint64_t gone : changes.gone) {
+            drawn.erase(gone);
+        }
+        for (const auto& shown : changes.shown) {
+            drawn.insert(shown.key);
+        }
+        // Nothing drawn over what's drawn finer, and nothing drawn the server no longer cuts.
+        std::size_t stale = 0;
+        std::size_t over = 0;
+        for (const std::uint64_t one : drawn) {
+            const TileKey key = keys.at(one);
+            stale += held.contains(key) ? 0 : 1;
+            for (TileKey parent = key; parent.level < land.top();) {
+                parent = parent.parent();
+                over += drawn.contains(tile_key(parent)) ? 1 : 0;
+            }
+        }
+        CAPTURE(step, drawn.size(), held.size(), cut.sent.size());
+        CHECK(stale == 0);
+        CHECK(over == 0);
+    }
 }
