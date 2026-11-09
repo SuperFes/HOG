@@ -91,6 +91,8 @@ private:
     std::vector<double> light_;
     // How steeply valley walls rise about each point, metres up per metre across.
     std::vector<double> wall_;
+    // The steepest soil lies on about each point, the wetter the less steep, likewise.
+    std::vector<double> soil_holds_;
     // At each point a lake was formed over, 1 and the level formed for it; elsewhere nothing.
     std::vector<double> lake_share_;
     std::vector<double> lake_cap_;

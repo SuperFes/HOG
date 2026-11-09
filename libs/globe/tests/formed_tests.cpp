@@ -239,6 +239,57 @@ TEST_CASE("how finely a planet's land is formed is one of its knobs", "[globe][f
     CHECK_FALSE(validate(planet).has_value());
 }
 
+TEST_CASE("soil lies on formed ground only as steep as it holds", "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double voxel = generator.planet().voxel;
+    // Dry soil holds up to its repose, soaked soil less.
+    const double steepest = std::tan(hog::globe::properties(Material::Soil).repose);
+    int soiled = 0;
+    int steep = 0;
+    for (std::uint64_t n = 0; n < 4'000; ++n) {
+        const DVec3 direction = somewhere(n);
+        const Formed::Here here = formed.at(direction, voxel);
+        const DVec3 gradient = here.top.gradient;
+        const double slope = glm::length(gradient - (glm::dot(gradient, direction) * direction));
+        const double soil = here.layers.organic + here.layers.topsoil + here.layers.subsoil;
+        soiled += soil > 0.0 ? 1 : 0;
+        if (slope >= steepest) {
+            ++steep;
+            CHECK(soil == 0.0);
+        }
+    }
+    CHECK(soiled > 1'000);
+    CHECK(steep > 10);
+}
+
+TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double voxel = generator.planet().voxel;
+    const auto laid = [](const Formed::Here& here) {
+        return here.layers.loess + here.layers.sand + here.layers.alluvium + here.layers.lake_beds +
+               here.layers.till + here.layers.lava;
+    };
+    int cut_into = 0;
+    for (std::uint64_t n = 0; n < 4'000; ++n) {
+        const DVec3 direction = somewhere(n);
+        // Read too coarsely for any gully, then finely.
+        const Formed::Here uncut = formed.at(direction, 1e9);
+        const Formed::Here here = formed.at(direction, voxel);
+        if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0) {
+            continue;
+        }
+        const double cut = std::max(0.0, uncut.top.value - here.top.value);
+        CHECK_THAT(laid(here), WithinAbs(std::max(0.0, laid(uncut) - cut), 1e-6));
+        CHECK(here.layers.cover <=
+              std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
+                  (here.layers.organic + here.layers.topsoil + here.layers.subsoil));
+        cut_into += cut > 0.0 && laid(uncut) > 0.0 ? 1 : 0;
+    }
+    CHECK(cut_into > 100);
+}
+
 TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
     // The working world's shell.
     Planet planet;

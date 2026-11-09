@@ -3,6 +3,7 @@
 #include "valleys.hpp"
 
 #include <hog/core/hash.hpp>
+#include <hog/core/portable_maths.hpp>
 
 #include <algorithm>
 #include <array>
@@ -65,8 +66,9 @@ Formed::Formed(const Planet& planet, const Derived& derived)
       fall_blend_{gullies_.longest * rock_steepest / 2.0} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
-    for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
-                        &lake_beds_, &till_, &saprolite_, &ice_, &lava_, &rock_cover_, &light_}) {
+    for (auto* field :
+         {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_, &lake_beds_, &till_,
+          &saprolite_, &ice_, &lava_, &rock_cover_, &light_, &soil_holds_}) {
         field->assign(size, 0.0);
     }
     for (std::uint32_t point = 0; point < size; ++point) {
@@ -96,6 +98,12 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         lava_[point] = vertical_ * world.outcrop.lava[point];
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
+        // Soaked through, soil slides on gentler slopes than dry.
+        const Properties& soil = properties(Material::Soil);
+        const double soaked = formation::waterlogged(formation::wetness(
+            world.climate.temperature[point], world.climate.rain[point], world.body));
+        soil_holds_[point] =
+            maths::tan(soil.repose + ((soil.saturated_repose - soil.repose) * soaked));
     }
     // Walls as steep as the ground falls to the point's nearest, no steeper than they stand.
     wall_.assign(size, 0.0);
@@ -399,10 +407,29 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.till = value(till_);
     layers.saprolite = value(saprolite_);
     layers.lava = value(lava_);
+    // Gullies cut down through what was laid and into the rock under it, the top of which is
+    // what's rotted.
+    double cut = std::max(0.0, top.cut);
+    for (double* laid : {&layers.loess, &layers.sand, &layers.alluvium, &layers.lake_beds,
+                         &layers.till, &layers.lava}) {
+        const double taken = std::min(*laid, cut);
+        *laid -= taken;
+        cut -= taken;
+    }
+    layers.saprolite = std::max(0.0, layers.saprolite - cut);
+    const double rock_cover = std::max(0.0, value(rock_cover_) - cut);
+    // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
+    // comes to the steepest it holds (Roering's critical slope), none lying past it.
+    const DVec3 rise = top.top.gradient - (glm::dot(top.top.gradient, direction) * direction);
+    const double steepness = glm::length(rise) / value(soil_holds_);
+    const double lying = std::max(0.0, 1.0 - (steepness * steepness));
+    layers.organic *= lying;
+    layers.topsoil *= lying;
+    layers.subsoil *= lying;
     // Rotted rock is the top of the rock itself, so the beds under it lie no deeper for it.
     layers.cover = layers.ice + layers.organic + layers.topsoil + layers.subsoil + layers.loess +
                    layers.sand + layers.alluvium + layers.lake_beds + layers.till + layers.lava +
-                   std::max(value(rock_cover_), layers.saprolite);
+                   std::max(rock_cover, layers.saprolite);
     layers.basement = here.light >= 0.5 ? Material::Granite : Material::Basalt;
     return here;
 }
