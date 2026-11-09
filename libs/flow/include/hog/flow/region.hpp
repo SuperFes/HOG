@@ -322,6 +322,8 @@ private:
     // Seeps from a voxel into the one under it; how much moved.
     [[nodiscard]] std::int64_t seep_down(globe::Site site, globe::Voxel& over, globe::Voxel& under,
                                          double seconds) const;
+    // A share in [0, 1) by a hash of the site, the step and `salt`.
+    [[nodiscard]] double drawn(globe::Site site, std::uint64_t salt) const;
     // `value` rounded to whole units, the fraction by a hash of the site, the step and `salt`,
     // so what moves slowly still adds up.
     [[nodiscard]] std::int64_t dithered(double value, globe::Site site, std::uint64_t salt) const;

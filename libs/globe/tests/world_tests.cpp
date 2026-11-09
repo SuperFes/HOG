@@ -17,9 +17,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -183,6 +185,45 @@ TEST_CASE("a brick written as it is changes nothing", "[globe][world]") {
     CHECK(world.changed_since(before) == std::vector{brick});
     CHECK(world.brick(brick)[5].condition == 100);
     CHECK(made.volume().unsaved().size() == 1);
+}
+
+TEST_CASE("the sites near a point are every column in reach and none a cell past it",
+          "[globe][world]") {
+    const hog::globe::Layers& layers = earth().layers();
+    // Well inside a face, so every column in reach is on it.
+    const DVec3 direction = glm::normalize(DVec3{1.0, 0.3, -0.2});
+    const double from = layers.middle(layers.count / 2);
+    const DVec3 centre = direction * from;
+    const double reach = 3.0 * layers.thickness;
+    const double cell = std::numbers::pi / 2.0 * from / std::ldexp(1.0, layers.level);
+
+    std::set<std::pair<std::uint32_t, std::uint32_t>> found;
+    for (const auto& [brick, indices] : hog::globe::sites_near(layers, centre, reach)) {
+        for (const int index : indices) {
+            const Site site = hog::globe::site_in(brick, index);
+            CHECK(site.face == hog::globe::cell_under(direction, layers.level).face);
+            found.emplace(site.i, site.j);
+        }
+    }
+    const hog::globe::Cell under = hog::globe::cell_under(direction, layers.level);
+    const auto span = static_cast<int>(std::ceil(reach / cell)) + 3;
+    for (int di = -span; di <= span; ++di) {
+        for (int dj = -span; dj <= span; ++dj) {
+            const hog::globe::Cell column{
+                .level = under.level,
+                .face = under.face,
+                .i = static_cast<std::uint32_t>(static_cast<int>(under.i) + di),
+                .j = static_cast<std::uint32_t>(static_cast<int>(under.j) + dj)};
+            const double apart = glm::length((hog::globe::center(column) * from) - centre);
+            const bool near = found.contains({column.i, column.j});
+            if (apart <= reach) {
+                CHECK(near);
+            }
+            if (apart > reach + cell) {
+                CHECK_FALSE(near);
+            }
+        }
+    }
 }
 
 TEST_CASE("a ball given as a shape digs and builds as a ball does", "[globe][world]") {
