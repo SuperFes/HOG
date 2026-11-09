@@ -176,7 +176,8 @@ TEST_CASE("a probe's cube holds the sky each way round the eye, laid out by the 
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("a probe's cube holds what stands round the eye over the sky", "[render][gpu][atmosphere]") {
+TEST_CASE("a probe's cube holds what stands round the eye over the sky",
+          "[render][gpu][atmosphere]") {
     const auto device = test_device();
     auto atmosphere = hog::render::Atmosphere::create(*device);
     REQUIRE(atmosphere);
@@ -235,5 +236,76 @@ TEST_CASE("a probe's cube holds what stands round the eye over the sky", "[rende
     CHECK(found[0][1] > 2.0F * found[0][0]);
     CHECK(found[0][1] > 2.0F * found[0][2]);
     CHECK(found[1][2] > found[1][1]);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a probe draws one face a time after the first, keeping the others", "[render][gpu]") {
+    const auto device = test_device();
+    auto atmosphere = hog::render::Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(*device, colour_format, depth_format);
+    REQUIRE(sky);
+    auto probe = hog::render::EnvironmentProbe::create(*device, colour_format, depth_format, 64);
+    REQUIRE(probe);
+    const hog::terrain::MaterialImage tile =
+        hog::terrain::material_image({.colour = DVec3{0.0, 1.0, 0.0}}, 64);
+    const std::vector<hog::terrain::MaterialImage> green{tile, tile};
+    auto blocks = hog::render::Blocks::create(*device, colour_format, depth_format, green);
+    REQUIRE(blocks);
+
+    // A green wall twenty metres east of the eye, as above.
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 east{1.0, 0.0, 0.0};
+    const DVec3 north{0.0, 1.0, 0.0};
+    const hog::WorldPosition eye{up * (earth + 10.0)};
+    const auto wall = std::make_shared<hog::terrain::BlockMesh>();
+    wall->origin = eye;
+    for (const auto& [across, high] : std::array<std::pair<double, double>, 4>{
+             {{-20.0, -20.0}, {20.0, -20.0}, {20.0, 20.0}, {-20.0, 20.0}}}) {
+        wall->vertices.push_back(
+            {.position = hog::Vec3{(east * 20.0) + (north * across) + (up * high)},
+             .normal = hog::Vec3{-east},
+             .tiles = {0, 0, 0},
+             .corner = 0});
+    }
+    wall->indices = {0, 2, 1, 0, 3, 2};
+    hog::terrain::mix_corners(*wall);
+    blocks->show(wall);
+
+    const hog::render::SkyView view{
+        .camera = {.eye = eye, .forward = east, .up = up},
+        .sun = glm::normalize(DVec3{0.0, 1.0, 1.0}),
+        .bend = {.up = up, .eye_height = 10.0, .radius = earth, .faked = earth},
+        .exposure = 1.0};
+    const auto record = [&] {
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
+            CHECK(blocks->prepare(0));
+            const auto around = [&](VkCommandBuffer drawing, const hog::render::Camera& camera,
+                                    VkExtent2D extent) -> hog::Result<> {
+                blocks->draw_prepared(drawing, extent,
+                                      {.camera = camera, .sun = view.sun, .bend = view.bend}, 0);
+                return {};
+            };
+            CHECK(probe->record(commands, 0, *atmosphere, *sky, {.sky = view, .around = around}));
+        }));
+    };
+    const auto east_is_green = [&] {
+        const std::array<float, 4> found = sampled(
+            *device, *probe, std::vector<DVec3>{hog::render::probe_direction(east, up, east)})[0];
+        CAPTURE(found[0], found[1], found[2]);
+        return found[1] > 2.0F * found[0] && found[1] > 2.0F * found[2];
+    };
+
+    record();
+    REQUIRE(east_is_green());
+    // Gone, the wall stays in the east face until its turn comes round: after the four others.
+    blocks->show(std::make_shared<hog::terrain::BlockMesh>());
+    for (int other = 0; other < 4; ++other) {
+        record();
+        CHECK(east_is_green());
+    }
+    record();
+    CHECK_FALSE(east_is_green());
     CHECK(device->validation_errors() == 0);
 }
