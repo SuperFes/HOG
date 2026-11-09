@@ -7,18 +7,23 @@
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_tree.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/net/events.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/tile_sending.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace {
@@ -166,6 +171,30 @@ hog::protocol::SentTile all_of(TileKey key, bool rock) {
 
 } // namespace
 
+TEST_CASE("a tile sent again after one over it gives way to it once all of its place comes",
+          "[client][tiles]") {
+    hog::jobs::JobSystem jobs;
+    const auto& generator = hog::client::testing::globe().generator;
+    TileMeshes meshes{generator.planet(), generator.layers(), jobs};
+    const TileKey coarse{.level = 1, .face = 1, .i = 40, .j = 40, .k = 1};
+    // A tile, then the one over it, drawn in its place; then all of that place finer again,
+    // the first among it.
+    REQUIRE(meshes.take(rock_at(coarse.child(0))));
+    static_cast<void>(settle(meshes));
+    REQUIRE(meshes.take(rock_at(coarse)));
+    static_cast<void>(settle(meshes));
+    CHECK(meshes.drawn(coarse));
+    for (std::size_t octant = 0; octant < 8; ++octant) {
+        REQUIRE(meshes.take(rock_at(coarse.child(octant))));
+    }
+    static_cast<void>(settle(meshes));
+    static_cast<void>(settle(meshes));
+    CHECK_FALSE(meshes.holds(coarse));
+    for (std::size_t octant = 0; octant < 8; ++octant) {
+        CHECK(meshes.drawn(coarse.child(octant)));
+    }
+}
+
 TEST_CASE("a tile is meshed again when a coarser tile it read beside it is dropped",
           "[client][tiles]") {
     hog::jobs::JobSystem jobs;
@@ -264,6 +293,27 @@ void fly_through(const std::vector<hog::DVec3>& eyes) {
     }
 }
 
+// Of the tiles drawn, those not among the server's last cut, and those drawn over others drawn
+// finer.
+struct Drawn {
+    std::size_t stale = 0;
+    std::size_t over = 0;
+};
+Drawn drawn_against(const std::set<std::uint64_t>& drawn,
+                    const std::map<std::uint64_t, TileKey>& keys, const std::set<TileKey>& held,
+                    std::uint8_t top) {
+    Drawn counted;
+    for (const std::uint64_t one : drawn) {
+        const TileKey key = keys.at(one);
+        counted.stale += held.contains(key) ? 0 : 1;
+        for (TileKey parent = key; parent.level < top;) {
+            parent = parent.parent();
+            counted.over += drawn.contains(tile_key(parent)) ? 1 : 0;
+        }
+    }
+    return counted;
+}
+
 // The point `metres` over the ground at `up`.
 hog::DVec3 over_ground(hog::DVec3 up, double metres) {
     const hog::globe::Generator& generator = hog::client::testing::globe().generator;
@@ -289,4 +339,76 @@ TEST_CASE("a client flying in from far and high draws each place once, as last c
                                    60.0 + (2'940.0 * left)));
     }
     fly_through(eyes);
+}
+
+TEST_CASE("a client flown high over the planet and back down settles on the last cut",
+          "[client][tiles]") {
+    const hog::globe::Generator& generator = hog::client::testing::globe().generator;
+    hog::jobs::JobSystem jobs;
+    const hog::globe::EachOf each = [&](std::size_t count,
+                                        const std::function<void(std::size_t)>& body) {
+        jobs.parallel_for(static_cast<std::uint32_t>(count), 1,
+                          [&](hog::jobs::Range range, std::uint32_t /*thread*/) {
+                              for (std::uint32_t n = range.begin; n < range.end; ++n) {
+                                  body(n);
+                              }
+                          });
+    };
+    hog::globe::Land land{generator};
+    hog::server::TileSending sending{
+        hog::server::TileSending::reach_for(generator.layers().thickness)};
+    constexpr hog::net::ConnectionId player{1};
+    sending.join(player);
+    TileMeshes meshes{generator.planet(), generator.layers(), jobs};
+    std::map<std::uint64_t, TileKey> keys;
+    std::set<std::uint64_t> drawn;
+    // As the server does each tick: a cut finished taken; one begun where the player's moved, on
+    // what it held then, done some ticks later; and the next tiles sent meanwhile.
+    std::optional<hog::server::TileSending::Cut> cutting;
+    int ready = 0;
+    const auto tick = [&](hog::DVec3 at) {
+        if (cutting && --ready <= 0) {
+            sending.take(player, std::move(*cutting));
+            cutting.reset();
+        }
+        if (!cutting && sending.moved(player, at, generator.layers())) {
+            cutting = sending.cut(at, sending.held(player), land, each);
+            ready = 2;
+        }
+        for (const hog::protocol::SentTile& tile :
+             sending.next(player, std::size_t{256} * 1024).tiles) {
+            const TileKey key{
+                .level = tile.level, .face = tile.face, .i = tile.i, .j = tile.j, .k = tile.k};
+            keys.insert_or_assign(tile_key(key), key);
+            REQUIRE(meshes.take(tile));
+        }
+        const GroundChanges changes = settle(meshes);
+        for (const std::uint64_t gone : changes.gone) {
+            drawn.erase(gone);
+        }
+        for (const auto& shown : changes.shown) {
+            drawn.insert(shown.key);
+        }
+    };
+
+    // Up from the land to fifteen kilometres over ten across, and back down to where it began.
+    const double radius = generator.planet().radius;
+    const hog::DVec3 start = hog::client::testing::on_land();
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, start));
+    const auto at = [&](double share) {
+        const double arc = 10'000.0 * std::sin(share * std::numbers::pi);
+        return over_ground(glm::normalize(start + (east * (arc / radius))),
+                           60.0 + (15'000.0 * std::sin(share * std::numbers::pi)));
+    };
+    constexpr int ticks = 60;
+    for (int n = 0; n <= ticks; ++n) {
+        tick(at(static_cast<double>(n) / ticks));
+    }
+    for (int n = 0; n < 4 || cutting || sending.due(player) > 0; ++n) {
+        tick(at(1.0));
+    }
+    const Drawn counted = drawn_against(drawn, keys, sending.held(player), land.top());
+    CAPTURE(drawn.size());
+    CHECK(counted.stale == 0);
+    CHECK(counted.over == 0);
 }
