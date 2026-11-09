@@ -7,7 +7,6 @@
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/net/server.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/testing/ports.hpp>
@@ -42,7 +41,7 @@ constexpr GameTime start{
 
 // A server on a free players' port, for a small planet in `directory`.
 std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory) {
-    std::ofstream{directory / "planet.toml"} << "[planet]\nseed = 1\nradius_km = 115\n";
+    std::ofstream{directory / "planet.toml"} << "[planet]\nseed = 1\nradius = 115000.0\n";
     hog::server::ServerConfig config;
     config.world = directory / "var" / "world.db";
     config.planet = directory / "planet.toml";

@@ -28,16 +28,17 @@ const Generator& earth() {
 hog::weather::Climate climate_of(const Cell& column) {
     const Planet& planet = earth().planet();
     const auto here = earth().column(center(column), 1.0);
-    const double height = std::max(here.ground(), planet.radius) + 20.0;
+    const double height = std::max(here.ground(), planet.body.radius) + 20.0;
     return {.surface = here.sample(height).temperature +
-                       (hog::weather::lapse_rate(planet) * (height - planet.radius)),
+                       (hog::weather::lapse_rate(planet) * (height - planet.body.radius)),
             .swing = 12.0,
             .precipitation = 0.15};
 }
 
 // The cell under the highest ground of a coarse sweep of the sphere.
 Cell highest() {
-    Cell best{.level = static_cast<std::uint8_t>(earth().layers().level), .face = 0, .i = 0, .j = 0};
+    Cell best{
+        .level = static_cast<std::uint8_t>(earth().layers().level), .face = 0, .i = 0, .j = 0};
     double top = 0.0;
     constexpr int points = 40'000;
     for (int k = 0; k < points; ++k) {

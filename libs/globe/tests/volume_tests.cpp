@@ -246,7 +246,7 @@ TEST_CASE("a voxel's heat is told over the open air's warmth where it is", "[glo
     };
     const hog::DVec3 equator{1.0, 0.0, 0.0};
     const hog::DVec3 north{0.1, 0.0, 1.0};
-    const int sea = layers.layer_at(planet.radius);
+    const int sea = layers.layer_at(planet.body.radius);
     // Colder up high and towards a pole, and no warmer under the sea than at it.
     CHECK(at(equator, sea + 400) < at(equator, sea));
     CHECK(at(north, sea) < at(equator, sea));

@@ -96,7 +96,7 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
                         if (glm::length(across) > range) {
                             continue;
                         }
-                        const DVec3 direction = glm::normalize((up * planet.radius) + across);
+                        const DVec3 direction = glm::normalize((up * planet.body.radius) + across);
                         const Cell cell = cell_under(direction, layers.level);
                         found.clear();
                         open_runs(world, cell, std::max(0, layers.layer_at(floor)),
@@ -144,7 +144,7 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
         Gathered& into = gathered[root_of(parent, k)];
         const Run& run = runs[k];
         const double middle = (run.bottom + run.top) / 2.0;
-        const DVec3 at = (up * planet.radius) +
+        const DVec3 at = (up * planet.body.radius) +
                          (east * (static_cast<double>(run.i - half) * spacing)) +
                          (north * (static_cast<double>(run.j - half) * spacing));
         const double weight = std::max(run.top - run.bottom, lod);

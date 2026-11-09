@@ -98,7 +98,7 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         return false;
     }
     if (name == "--seed") {
-        options.planet.seed = static_cast<std::uint64_t>(*given);
+        options.planet.body.seed = static_cast<std::uint64_t>(*given);
     } else if (name == "--width") {
         options.width = static_cast<int>(*given);
     } else if (name == "--threads") {
@@ -179,8 +179,8 @@ int run(std::span<const std::string_view> arguments) {
     // The section's window is taken from the ground under its middle.
     const double ground =
         hog::globe::ground_below(generator, options.at->direction(), options.span / options.width)
-            .value_or(options.planet.radius) -
-        options.planet.radius;
+            .value_or(options.planet.body.radius) -
+        options.planet.body.radius;
     if (const int failed = write(options.out / "section.png",
                                  hog::stills::section(generator, *options.at, options.span,
                                                       ground + options.bottom, ground + options.top,
@@ -194,7 +194,7 @@ int run(std::span<const std::string_view> arguments) {
     hog::globe::Volume volume = hog::globe::generate_area(
         generator, hog::globe::around(generator, options.at->direction(), 3));
     hog::globe::World world{generator, volume};
-    const double radius = options.planet.radius;
+    const double radius = options.planet.body.radius;
     hog::globe::dig(world, options.at->direction() * (radius + ground), *options.dig);
     return write(options.out / "voxels.png",
                  hog::stills::voxel_section(world, *options.at, options.span,

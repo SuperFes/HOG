@@ -142,7 +142,7 @@ Heights heights(const Generator& generator, int width, int height, double lod, i
                  .height = height,
                  .values = std::vector<double>(static_cast<std::size_t>(width) *
                                                static_cast<std::size_t>(height))};
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const double floor = generator.layers().floor - radius;
     each_row(height, threads, [&](int y) {
         for (int x = 0; x < width; ++x) {
@@ -241,7 +241,7 @@ DVec3 Place::direction() const noexcept {
 
 Image map(const Generator& generator, int width, int threads) {
     const int height = std::max(width / 2, 1);
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const double spacing = 2.0 * std::numbers::pi * radius / width;
     const auto direction_at = [&](int x, int y) {
         return Place{.latitude = 90.0 - ((y + 0.5) * 180.0 / height),
@@ -288,7 +288,7 @@ std::vector<float> worn_by(const std::vector<float>& ground, int level, double r
 
 Image drainage(const Generator& generator, int width, int level, int threads,
                const globe::Erosion& erosion) {
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const std::uint64_t count = globe::cells_at(level);
     const double lod = radius * std::numbers::pi / 2.0 / static_cast<double>(1 << level);
     std::vector<float> ground(static_cast<std::size_t>(count));
@@ -350,7 +350,7 @@ Image drainage(const Generator& generator, int width, int level, int threads,
 
 Image relief(const Generator& generator, const Place& place, double span, int size, int threads) {
     const Frame frame = frame_at(place);
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const double spacing = span / size;
     const auto direction_at = [&](int x, int y) {
         const double u = ((x + 0.5) * spacing) - (span / 2.0);
@@ -364,7 +364,7 @@ Image relief(const Generator& generator, const Place& place, double span, int si
 Image section(const Generator& generator, const Place& place, double length, double bottom,
               double top, int width, int threads) {
     const Frame frame = frame_at(place);
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const double spacing = length / width;
     const int height = std::max(static_cast<int>(std::lround((top - bottom) / spacing)), 1);
     Image image{.width = width,
@@ -395,7 +395,7 @@ Image voxel_section(const globe::World& world, const Place& place, double length
                     double top, int width) {
     const Frame frame = frame_at(place);
     const globe::Layers& layers = world.layers();
-    const double radius = world.planet().radius;
+    const double radius = world.planet().body.radius;
     const double spacing = length / width;
     const int height = std::max(static_cast<int>(std::lround((top - bottom) / spacing)), 1);
     Image image{.width = width,
@@ -442,7 +442,7 @@ Image voxel_section(const globe::World& world, const Place& place, double length
 Image plan(const Generator& generator, const Place& place, double span, double depth, int size,
            int threads) {
     const Frame frame = frame_at(place);
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const double spacing = span / size;
     Image image{.width = size,
                 .height = size,

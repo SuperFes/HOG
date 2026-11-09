@@ -45,7 +45,7 @@ public:
     // Holds the land cut round the point on the planet over `up`, and has the scene draw it;
     // fails on a tile made that can't be held.
     Result<> show_round(Scene& scene, DVec3 up) {
-        const DVec3 at = glm::normalize(up) * world_.planet().radius;
+        const DVec3 at = glm::normalize(up) * world_.planet().body.radius;
         const globe::EachOf each = [this](std::size_t count,
                                           const std::function<void(std::size_t)>& body) {
             jobs_->parallel_for(static_cast<std::uint32_t>(count), 1,

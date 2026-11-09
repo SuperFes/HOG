@@ -355,7 +355,7 @@ struct WorldPatch {
 WorldPatch patch_of(const hog::globe::Generator& generator, hog::DVec3 centre, int size,
                     double cell) {
     const auto& planet = generator.planet();
-    const double datum = generator.sea_level().value_or(planet.radius);
+    const double datum = generator.sea_level().value_or(planet.body.radius);
     const hog::DVec3 up = glm::normalize(centre);
     const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, up));
     const hog::DVec3 north = glm::cross(up, east);
@@ -365,7 +365,8 @@ WorldPatch patch_of(const hog::globe::Generator& generator, hog::DVec3 centre, i
         for (int x = 0; x < size; ++x) {
             const double dx = (x - (size / 2.0)) * cell;
             const double dy = (y - (size / 2.0)) * cell;
-            const hog::DVec3 at = glm::normalize((up * planet.radius) + (east * dx) + (north * dy));
+            const hog::DVec3 at =
+                glm::normalize((up * planet.body.radius) + (east * dx) + (north * dy));
             out.bed.rock[out.bed.index(x, y)] = generator.column(at, lod).ground() - datum;
         }
     }
@@ -384,13 +385,13 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     REQUIRE(where != nullptr);
     const std::string dir{where};
     hog::globe::Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const auto began = std::chrono::steady_clock::now();
     const hog::globe::Generator generator{planet};
     const auto lod = hog::globe::voxel_lod(generator) * 8.0;
     std::printf("generator: %.2f s\n",
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
-    const double datum = generator.sea_level().value_or(planet.radius);
+    const double datum = generator.sea_level().value_or(planet.body.radius);
     const auto snowline_at = [&](const hog::DVec3& d) {
         return std::max((hog::globe::temperature_at(planet, std::asin(d.z)) - 273.15) / 0.0065,
                         0.0);

@@ -1,17 +1,13 @@
-# The working world: Earth's air, water and plates on a 30 km radius. Heights follow the radius,
-# so the relief is proportionate to it; only the shell is set here.
+# The working world: a 115 km planet of water and air that turns in four hours, locked to real
+# time, through Earth's year and seasons. Every knob of a planet is set here by name, in [planet]
+# and its tables; what's left out keeps the working world's value.
 [planet]
 seed = 1 # 812080951
-ocean_fraction = 0.7
-radius_km = 115
-# Locked to real time: four hours of day and night, through Earth's year and seasons.
-day_hours = 4
-axial_tilt = 23.44
-
-[globe]
 radius = 115000.0
+day = 4.0
+tilt = 23.44
+voxel = 0.333333333
 floor_depth = 500.0
 sky_height = 2000.0
-voxel = 0.333333333
 # The land formed stage by stage, plates to soil, on a sphere split this many times.
 formed_detail = 7.0

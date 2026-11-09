@@ -1,4 +1,3 @@
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/system.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -6,30 +5,31 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <span>
 #include <string>
+#include <vector>
 
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinRel;
 using hog::planet::astronomical_unit;
-using hog::planet::parse_planet_config;
-using hog::planet::PlanetConfig;
+using hog::planet::parse_system;
+using hog::planet::System;
 
 namespace {
 
-PlanetConfig parsed(const std::string& rest) {
-    auto config = parse_planet_config("[planet]\nseed = 1\nradius_km = 115\n" + rest);
-    INFO((config ? std::string{} : config.error().message));
-    REQUIRE(config.has_value());
-    return config.value_or(PlanetConfig{});
+System parsed(const std::string& rest) {
+    auto system = parse_system("[planet]\n" + rest);
+    INFO((system ? std::string{} : system.error().message));
+    REQUIRE(system.has_value());
+    return system.value_or(System{});
 }
 
 } // namespace
 
 TEST_CASE("a planet left to its defaults sits in Earth's system", "[planet][system]") {
-    const hog::planet::System system = parsed("").system;
+    const System system = parsed("");
 
     CHECK(system == hog::planet::System{});
-    CHECK(system.gravity == 9.81);
     REQUIRE(system.stars.size() == 1);
     CHECK(system.stars.front().luminosity == 1.0);
     CHECK(system.stars.front().orbit.distance == 0.0);
@@ -40,7 +40,6 @@ TEST_CASE("a planet left to its defaults sits in Earth's system", "[planet][syst
     CHECK_THAT(system.moons.front().orbit.period, WithinRel(29.53, 1e-4));
     CHECK_FALSE(system.rings.has_value());
     CHECK(system.air.pressure == 101'325.0);
-    CHECK(system.water_depth == 2'620.0);
 
     // Mercury, Venus, Mars, Jupiter and Saturn, in order out from the Sun.
     REQUIRE(system.planets.size() == 5);
@@ -52,9 +51,7 @@ TEST_CASE("a planet left to its defaults sits in Earth's system", "[planet][syst
 }
 
 TEST_CASE("a config puts two suns, two moons and rings round the planet", "[planet][system]") {
-    const hog::planet::System system = parsed(R"(
-        gravity = 7.5
-        water_depth = 1_000
+    const System system = parsed(R"(
         planets = []
 
         [planet.air]
@@ -87,11 +84,8 @@ TEST_CASE("a config puts two suns, two moons and rings round the planet", "[plan
         [planet.rings]
         inner = 1.8
         outer = 3.0
-    )")
-                                           .system;
+    )");
 
-    CHECK(system.gravity == 7.5);
-    CHECK(system.water_depth == 1'000.0);
     CHECK(system.planets.empty());
     CHECK_THAT(system.air.pressure, WithinRel(80'000.0, 1e-12));
     CHECK(system.air.oxygen == 0.25);
@@ -123,7 +117,7 @@ TEST_CASE("a config puts two suns, two moons and rings round the planet", "[plan
 }
 
 TEST_CASE("a planet may have no moons", "[planet][system]") {
-    CHECK(parsed("moons = []\n").system.moons.empty());
+    CHECK(parsed("moons = []\n").moons.empty());
 }
 
 TEST_CASE("a config sets how the orbit and axis wander", "[planet][system]") {
@@ -133,7 +127,7 @@ TEST_CASE("a config sets how the orbit and axis wander", "[planet][system]") {
         eccentricity = []
         precession_years = -30_000
     )")
-                                           .system.cycles;
+                                           .cycles;
     REQUIRE(cycles.tilt.size() == 1);
     CHECK(cycles.tilt.front() ==
           hog::planet::Cycle{.size = 5.0, .period = 100'000.0, .phase = 90.0});
@@ -143,8 +137,6 @@ TEST_CASE("a config sets how the orbit and axis wander", "[planet][system]") {
 
 TEST_CASE("bad system settings are rejected with a reason", "[planet][system]") {
     const auto [rest, reason] = GENERATE(table<std::string, std::string>({
-        {"gravity = 0\n", "planet.gravity"},
-        {"water_depth = -1\n", "planet.water_depth"},
         {"stars = []\n", "at least one star"},
         {"moons = 3\n", "list of tables"},
         {"moons = [1]\n", "planet.moons[0] must be a table"},
@@ -168,8 +160,42 @@ TEST_CASE("bad system settings are rejected with a reason", "[planet][system]") 
         {"[planet.cycles]\nwobble = 1\n", "unknown key planet.cycles.wobble"},
     }));
     CAPTURE(rest);
-    const auto config = parse_planet_config("[planet]\nseed = 1\nradius_km = 115\n" + rest);
-    REQUIRE_FALSE(config.has_value());
-    CHECK(config.error().code == hog::ErrorCode::InvalidArgument);
-    CHECK_THAT(config.error().message, ContainsSubstring(reason));
+    const auto system = parse_system("[planet]\n" + rest);
+    REQUIRE_FALSE(system.has_value());
+    CHECK(system.error().code == hog::ErrorCode::InvalidArgument);
+    CHECK_THAT(system.error().message, ContainsSubstring(reason));
+}
+
+TEST_CASE("a system goes to bytes and back the same, to the bit", "[planet][system]") {
+    System system = parsed(R"(
+        [planet.rings]
+        inner = 1.8
+        outer = 3.0
+
+        [[planet.moons]]
+
+        [[planet.moons]]
+        radius_km = 500
+    )");
+    system.air.oxygen = 0.3;
+    hog::ByteWriter out;
+    hog::planet::write_system(out, system);
+    const std::vector<std::byte> bytes = std::move(out).take();
+    hog::ByteReader in{bytes};
+    System read;
+    REQUIRE(hog::planet::read_system(in, read));
+    CHECK(in.remaining() == 0);
+    CHECK(read == system);
+    CHECK(hog::planet::system_id(read) == hog::planet::system_id(system));
+
+    hog::ByteReader cut{std::span{bytes}.first(bytes.size() - 1)};
+    System partial;
+    CHECK_FALSE(hog::planet::read_system(cut, partial));
+}
+
+TEST_CASE("the system's keys are told from the rest of [planet]", "[planet][system]") {
+    CHECK(hog::planet::system_key("moons"));
+    CHECK(hog::planet::system_key("air"));
+    CHECK_FALSE(hog::planet::system_key("radius"));
+    CHECK_FALSE(parse_system("[globe]\n"));
 }

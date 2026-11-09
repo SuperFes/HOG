@@ -6,9 +6,9 @@
 
 #include <array>
 #include <cmath>
-#include <optional>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 
 namespace hog::globe {
 namespace {
@@ -35,14 +35,14 @@ double unit(std::uint64_t value) {
 
 std::optional<Volcano> volcano_in(const Planet& planet, Cell cell) {
     const double ratio = planet.heat_flow / earth_heat_flow;
-    const double area_km2 = 4.0 * std::numbers::pi * planet.radius * planet.radius * 1e-6;
+    const double area_km2 = 4.0 * std::numbers::pi * planet.body.radius * planet.body.radius * 1e-6;
     const std::uint64_t cells = 6ULL << (2 * scatter_level);
     const double chance = vents_per_km2 * ratio * ratio * area_km2 / static_cast<double>(cells);
-    const std::uint64_t key = hash_values(planet.seed, vent_salt, cell.face, cell.i, cell.j);
+    const std::uint64_t key = hash_values(planet.body.seed, vent_salt, cell.face, cell.i, cell.j);
     if (cell.level != scatter_level || unit(key) >= chance) {
         return std::nullopt;
     }
-    const double side = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.radius /
+    const double side = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.body.radius /
                         static_cast<double>(1 << scatter_level);
     const DVec3 middle = center(cell);
     const DVec3 side_axis = std::abs(middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
@@ -51,10 +51,9 @@ std::optional<Volcano> volcano_in(const Planet& planet, Cell cell) {
     Volcano volcano;
     volcano.key = key;
     volcano.extinct = unit(hash_values(key, 14)) < extinct_share;
-    volcano.centre = glm::normalize(
-        middle + ((((unit(hash_values(key, 1)) - 0.5) * east) +
-                   ((unit(hash_values(key, 2)) - 0.5) * north)) *
-                  (0.8 * side / planet.radius)));
+    volcano.centre = glm::normalize(middle + ((((unit(hash_values(key, 1)) - 0.5) * east) +
+                                               ((unit(hash_values(key, 2)) - 0.5) * north)) *
+                                              (0.8 * side / planet.body.radius)));
     volcano.radius = 0.2 * side * (1.0 + unit(hash_values(key, 3)));
     // Flanks of about sixteen degrees, steeper near the top.
     volcano.height = volcano.radius * (0.2 + (0.2 * unit(hash_values(key, 4))));
@@ -86,13 +85,13 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
     }
     // Pools on cavern floors, in whatever rock holds a cave open near the surface.
     const double ratio = planet.heat_flow / earth_heat_flow;
-    const double area_km2 = 4.0 * std::numbers::pi * planet.radius * planet.radius * 1e-6;
+    const double area_km2 = 4.0 * std::numbers::pi * planet.body.radius * planet.body.radius * 1e-6;
     const double chance = pools_per_km2 * ratio * ratio * area_km2 / static_cast<double>(cells);
-    const double side = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.radius /
+    const double side = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.body.radius /
                         static_cast<double>(1 << scatter_level);
     for (std::uint64_t index = 0; index < cells; ++index) {
         const Cell cell = cell_at_index(scatter_level, index);
-        const std::uint64_t key = hash_values(planet.seed, pool_salt, index);
+        const std::uint64_t key = hash_values(planet.body.seed, pool_salt, index);
         if (unit(key) >= chance) {
             continue;
         }
@@ -103,10 +102,10 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
         const DVec3 north = glm::cross(middle, east);
         for (int attempt = 0; attempt < pool_tries; ++attempt) {
             const std::uint64_t own = hash_values(key, attempt);
-            const DVec3 direction = glm::normalize(
-                middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
-                           ((unit(hash_values(own, 2)) - 0.5) * north)) *
-                          (side / planet.radius)));
+            const DVec3 direction =
+                glm::normalize(middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
+                                          ((unit(hash_values(own, 2)) - 0.5) * north)) *
+                                         (side / planet.body.radius)));
             const Generator::Column column = generator.column(direction, 0.5);
             if (column.ground() <= sea) {
                 continue;
@@ -118,13 +117,15 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
                 bool solid = false;
                 for (double at = bottom - pool_step; at + pool_headroom < top && !found;
                      at += pool_step) {
-                    const bool open = column.sample(at).distance > 0.0;
+                    const double distance = column.sample(at).distance;
+                    const bool open = distance > 0.0;
                     if (open && solid && column.sample(at + pool_headroom).distance > 0.0) {
-                        sites.push_back({.direction = direction, .ground = at, .pool = true,
-                                         .key = own});
+                        sites.push_back(
+                            {.direction = direction, .ground = at, .pool = true, .key = own});
                         found = true;
                     }
-                    solid = !open;
+                    // On the surface itself is neither: the floor is under rock.
+                    solid = distance < 0.0;
                 }
                 if (found) {
                     break;

@@ -48,9 +48,7 @@ IceMap bake_ice_map(const globe::Generator& generator, globe::Cell corner, std::
     // The column's width where the ground is, for the distance between nodes.
     const globe::Cell middle = column_of(side / 2, side / 2);
     const auto ground_there =
-        generator
-            .column(globe::center(middle), layers.thickness * stride)
-            .ground();
+        generator.column(globe::center(middle), layers.thickness * stride).ground();
     const double width = std::sqrt(
         layers.volume(middle, std::max(layers.layer_at(ground_there), 0)) / layers.thickness);
 
@@ -71,8 +69,10 @@ IceMap bake_ice_map(const globe::Generator& generator, globe::Cell corner, std::
         }
     }
     const auto rim = [&](std::size_t n) {
-        return glacier[n].next[0] == flow::Glacier::none || glacier[n].next[1] == flow::Glacier::none ||
-               glacier[n].next[2] == flow::Glacier::none || glacier[n].next[3] == flow::Glacier::none;
+        return glacier[n].next[0] == flow::Glacier::none ||
+               glacier[n].next[1] == flow::Glacier::none ||
+               glacier[n].next[2] == flow::Glacier::none ||
+               glacier[n].next[3] == flow::Glacier::none;
     };
     // Each node's balance is what its climate gives at the height of its surface, taken afresh as
     // the ice raises or the rock under it lies.
@@ -82,7 +82,7 @@ IceMap bake_ice_map(const globe::Generator& generator, globe::Cell corner, std::
     }
     for (int year = 0; year < years; ++year) {
         for (std::size_t n = 0; n < count; ++n) {
-            const double height = glacier.surface(n) - planet.radius;
+            const double height = glacier.surface(n) - planet.body.radius;
             glacier[n].ice = std::max(
                 glacier[n].ice + weather::ice_balance(planet, climates[n], height).net(), 0.0);
             if (rim(n)) {

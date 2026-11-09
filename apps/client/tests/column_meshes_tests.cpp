@@ -127,7 +127,7 @@ TEST_CASE(
     Volume volume;
     const hog::globe::World world{made.generator.planet(), layers, volume};
     const hog::DVec3 here =
-        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().radius;
+        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().body.radius;
     const std::vector<Site> near = hog::globe::tile_columns_near(layers, here, 300.0);
     for (const Site corner : near) {
         volume.set_floor(corner, 10);
@@ -158,7 +158,7 @@ TEST_CASE("the ground's covered out to the nearest tile column not drawn round t
     Volume volume;
     const hog::globe::World world{made.generator.planet(), layers, volume};
     const hog::DVec3 here =
-        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().radius;
+        glm::normalize(hog::DVec3{0.3, 0.4, 0.86}) * made.generator.planet().body.radius;
     constexpr double reach = 300.0;
     const std::vector<Site> near = hog::globe::tile_columns_near(layers, here, reach);
     // The middle of a tile column, metres from here.

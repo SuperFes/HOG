@@ -26,7 +26,7 @@ constexpr std::array voxels{0.5, 2.5};
 
 hog::globe::Generator world(double voxel) {
     hog::globe::Planet planet;
-    planet.radius = 4'000.0;
+    planet.body.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
     planet.voxel = voxel;

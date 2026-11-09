@@ -18,7 +18,7 @@ namespace {
 
 hog::globe::Planet small_earth() {
     hog::globe::Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     return planet;
 }
 
@@ -26,18 +26,11 @@ constexpr hog::DVec3 sun{1.0, 0.0, 0.0};
 
 } // namespace
 
-TEST_CASE("an atmosphere spins at the day it is given, not the planet's", "[weather][atmosphere]") {
-    const hog::globe::Generator generator{small_earth()};
-    const Atmosphere air{generator, 14'400.0, 2, 8};
-    CHECK(air.planet().day == 14'400.0);
-    CHECK(generator.planet().day != 14'400.0);
-}
-
 TEST_CASE(
     "advancing steps the air in pieces no longer than the longest, at the sun of their middle",
     "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 8};
+    Atmosphere air{generator, 2, 8};
     std::vector<double> asked;
     air.advance(300.0, [&](double elapsed) {
         asked.push_back(elapsed);
@@ -52,7 +45,7 @@ TEST_CASE(
 TEST_CASE("a day's weather is finite and a column's cloud, rain and wind are readable",
           "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 8};
+    Atmosphere air{generator, 2, 8};
     air.advance(6.0 * 3600.0, [](double) { return sun; });
     float cloud = 0.0F;
     for (std::size_t column = 0; column < air.field().grid.columns(); ++column) {
@@ -73,7 +66,7 @@ TEST_CASE("a day's weather is finite and a column's cloud, rain and wind are rea
 
 TEST_CASE("cold ground's rain is snow and warm ground's is rain", "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 8};
+    Atmosphere air{generator, 2, 8};
     const Field& field = air.field();
     // The pole's first open layer is cold, the equator's warm.
     float cold = 1.0F;
@@ -96,7 +89,7 @@ TEST_CASE("cold ground's rain is snow and warm ground's is rain", "[weather][atm
 TEST_CASE("cloud touching the ground is fog and cloud above it has a base and top",
           "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 8};
+    Atmosphere air{generator, 2, 8};
     Field& field = air.field();
     std::size_t column = 0;
     while (field.solid(column, 0) || field.over_sea[column] == 0) {
@@ -121,7 +114,7 @@ TEST_CASE("cloud touching the ground is fog and cloud above it has a base and to
 
 TEST_CASE("a column says whether the sea lies under it", "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    const Atmosphere air{generator, 14'400.0, 2, 8};
+    const Atmosphere air{generator, 2, 8};
     std::size_t seas = 0;
     for (std::size_t column = 0; column < air.field().grid.columns(); ++column) {
         const bool sea = air.column(column).sea;
@@ -135,7 +128,7 @@ TEST_CASE("a column says whether the sea lies under it", "[weather][atmosphere]"
 TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on layer edges",
           "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 10};
+    Atmosphere air{generator, 2, 10};
     const Grid& grid = air.field().grid;
     std::size_t open = air.field().grid.columns();
     for (std::size_t column = 0; column < grid.columns(); ++column) {
@@ -151,7 +144,7 @@ TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on 
             air.field().at(open, i).cloud = i == layer ? cloud : 0.0F;
         }
         const Column shown = air.column(open);
-        const double sea = air.planet().radius;
+        const double sea = air.planet().body.radius;
         return std::pair{static_cast<double>(shown.base) - (grid.floor_of(layer) - sea),
                          static_cast<double>(shown.top) - (grid.floor_of(layer) - sea)};
     };
@@ -175,7 +168,7 @@ TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on 
 TEST_CASE("cover is how much of the sky cloud closes over, by what the air could hold",
           "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 14'400.0, 2, 12};
+    Atmosphere air{generator, 2, 12};
     Field& field = air.field();
     std::size_t column = 0;
     while (column < field.grid.columns() &&

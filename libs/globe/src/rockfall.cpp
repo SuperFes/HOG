@@ -62,7 +62,7 @@ double steepness(const Context& context, DVec3 direction) noexcept {
     const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side, direction));
     const DVec3 north = glm::cross(direction, east);
-    const double turn = shedding_scale / context.planet->radius;
+    const double turn = shedding_scale / context.planet->body.radius;
     const auto height = [&](DVec3 along, double by) {
         return ground(context, glm::normalize(direction + (along * by)), shedding_scale).height;
     };
@@ -74,7 +74,7 @@ double steepness(const Context& context, DVec3 direction) noexcept {
 
 int rock_level(const Planet& planet) noexcept {
     return std::max(0, static_cast<int>(std::ceil(
-                           std::log2(std::numbers::pi / 2.0 * planet.radius / rock_cell))));
+                           std::log2(std::numbers::pi / 2.0 * planet.body.radius / rock_cell))));
 }
 
 std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexcept {
@@ -90,8 +90,8 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     const std::array<DVec3, 4> corner = corners(cell);
     double width = rock_cell;
     for (std::size_t k = 0; k < corner.size(); ++k) {
-        width = std::min(width,
-                         glm::length(corner[(k + 1) % corner.size()] - corner[k]) * planet.radius);
+        width = std::min(width, glm::length(corner[(k + 1) % corner.size()] - corner[k]) *
+                                    planet.body.radius);
     }
     const double length =
         std::min(smallest * std::pow(largest / smallest, draw * draw), 0.2 * width);
@@ -104,8 +104,8 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     const DVec3 east = glm::normalize(glm::cross(axis, middle_direction));
     const DVec3 north = glm::cross(middle_direction, east);
     // Inside the middle of the cell, so the block never crosses into the next.
-    const double by_east = (unit(seed, 2) - 0.5) * 0.5 * width / planet.radius;
-    const double by_north = (unit(seed, 3) - 0.5) * 0.5 * width / planet.radius;
+    const double by_east = (unit(seed, 2) - 0.5) * 0.5 * width / planet.body.radius;
+    const double by_north = (unit(seed, 3) - 0.5) * 0.5 * width / planet.body.radius;
     const DVec3 at = glm::normalize(middle_direction + (east * by_east) + (north * by_north));
     const double shed =
         smoothstep((steepness(context, at) - sheds_from) / (sheds_fully - sheds_from));
@@ -123,7 +123,7 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     const DVec3 level_east = glm::normalize(glm::cross(side, at));
     const DVec3 level_north = glm::cross(at, level_east);
     rock.across = (std::cos(turn) * level_east) + (std::sin(turn) * level_north);
-    const double radius = planet.radius + found.height;
+    const double radius = planet.body.radius + found.height;
     rock.middle = at * (radius + ((1.0 - (2.0 * sunk)) * rock.axes.z));
     constexpr double depth = 4.0;
     rock.material = material_at(context, found.layers, depth, radius - depth);
@@ -138,7 +138,7 @@ namespace {
 // The rock in `cell`, if it reaches the column under `direction`.
 std::optional<Rock> reaching(const Context& context, const std::optional<Rock>& rock,
                              DVec3 direction) noexcept {
-    if (rock && glm::length(rock->up - direction) * context.planet->radius > rock->axes.x) {
+    if (rock && glm::length(rock->up - direction) * context.planet->body.radius > rock->axes.x) {
         return std::nullopt;
     }
     return rock;

@@ -7,9 +7,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
-#include <array>
 #include <cstdio>
 #include <map>
 #include <vector>
@@ -107,13 +107,13 @@ private:
 // A voxel as it would be stored: its materials and how full of each it is, in eighths. What the
 // generator can say from the voxel's place alone (distance, normal, temperature) is left out.
 std::uint32_t stored_key(const Voxel& voxel, std::map<std::uint64_t, std::uint32_t>& ids) {
-    const auto eighth = [](std::uint16_t amount) { return static_cast<std::uint64_t>(amount >> 12U); };
-    const std::uint64_t key = static_cast<std::uint64_t>(voxel.solid) |
-                              (eighth(voxel.solid_amount) << 8U) |
-                              (static_cast<std::uint64_t>(voxel.grain) << 16U) |
-                              (eighth(voxel.grain_amount) << 24U) |
-                              (static_cast<std::uint64_t>(voxel.liquid) << 32U) |
-                              (eighth(voxel.liquid_amount) << 40U);
+    const auto eighth = [](std::uint16_t amount) {
+        return static_cast<std::uint64_t>(amount >> 12U);
+    };
+    const std::uint64_t key =
+        static_cast<std::uint64_t>(voxel.solid) | (eighth(voxel.solid_amount) << 8U) |
+        (static_cast<std::uint64_t>(voxel.grain) << 16U) | (eighth(voxel.grain_amount) << 24U) |
+        (static_cast<std::uint64_t>(voxel.liquid) << 32U) | (eighth(voxel.liquid_amount) << 40U);
     return ids.try_emplace(key, static_cast<std::uint32_t>(ids.size())).first->second;
 }
 
@@ -126,10 +126,11 @@ void report(const char* label, const char* what, const std::vector<Runs>& column
     for (const Runs& runs : columns) {
         changes += static_cast<std::int64_t>(runs.size()) - 1;
     }
-    std::printf("%-9s %-8s %5.1f changes/column, nodes/column: %6.2f as a tree, %.3f shared (%.0fx)\n",
-                label, what, static_cast<double>(changes) / count,
-                static_cast<double>(total.tree) / count, static_cast<double>(total.shared) / count,
-                static_cast<double>(total.tree) / static_cast<double>(total.shared));
+    std::printf(
+        "%-9s %-8s %5.1f changes/column, nodes/column: %6.2f as a tree, %.3f shared (%.0fx)\n",
+        label, what, static_cast<double>(changes) / count, static_cast<double>(total.tree) / count,
+        static_cast<double>(total.shared) / count,
+        static_cast<double>(total.tree) / static_cast<double>(total.shared));
 }
 
 // The patch's columns over all their depth, as runs of material alone, and as runs of the voxel
@@ -160,11 +161,11 @@ void measure(const Generator& generator, const char* label, hog::DVec3 at, int a
             Runs by_voxel;
             for (int layer = 0; layer < layers.count; ++layer) {
                 const Voxel& voxel = filled[static_cast<std::size_t>(layer)];
-                const std::uint32_t kind =
-                    voxel.solid_amount >= Voxel::full / 2 ? static_cast<std::uint32_t>(voxel.solid)
-                    : voxel.liquid_amount >= Voxel::full / 2
-                        ? static_cast<std::uint32_t>(Material::Water)
-                        : static_cast<std::uint32_t>(Material::Air);
+                const std::uint32_t kind = voxel.solid_amount >= Voxel::full / 2
+                                               ? static_cast<std::uint32_t>(voxel.solid)
+                                           : voxel.liquid_amount >= Voxel::full / 2
+                                               ? static_cast<std::uint32_t>(Material::Water)
+                                               : static_cast<std::uint32_t>(Material::Air);
                 if (by_material.empty() || by_material.back().kind != kind) {
                     by_material.push_back({layer, kind});
                 }
@@ -184,7 +185,7 @@ void measure(const Generator& generator, const char* label, hog::DVec3 at, int a
 // How many leaves a patch needs when every uniform cube is one. Hidden: it samples whole columns.
 TEST_CASE("octree leaves per column over land, coast and sea", "[.octree_estimate]") {
     const Generator generator{Planet{}};
-    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     hog::DVec3 peak{0.0, 0.0, 1.0};
     hog::DVec3 coast{0.0, 0.0, 1.0};
     hog::DVec3 deep{0.0, 0.0, 1.0};

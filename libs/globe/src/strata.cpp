@@ -48,12 +48,12 @@ Material material_at(const Context& context, const Layering& layers, double dept
 }
 
 std::int64_t bed_at(const Context& context, const Layering& layers, double radius) noexcept {
-    const double lifted = radius - context.planet->radius + layers.fold;
+    const double lifted = radius - context.planet->body.radius + layers.fold;
     return static_cast<std::int64_t>(std::floor(lifted / bed_thickness));
 }
 
 double bed_bottom(const Context& context, const Layering& layers, std::int64_t bed) noexcept {
-    return context.planet->radius - layers.fold + (static_cast<double>(bed) * bed_thickness);
+    return context.planet->body.radius - layers.fold + (static_cast<double>(bed) * bed_thickness);
 }
 
 Material bed_rock(const Context& context, std::int64_t bed) noexcept {

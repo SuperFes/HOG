@@ -18,12 +18,11 @@
 
 namespace hog::globe {
 
-// A planet's land formed stage by stage, from plates to soil, read anywhere on it. Its heights
-// are as tall against the planet as the generator's own (`Derived::vertical`); what lives at a
-// person's scale, the soil, keeps its true depth.
+// A planet's land formed stage by stage, from plates to soil, at the planet's own size, read
+// anywhere on it.
 class Formed {
 public:
-    Formed(const Planet& planet, const Derived& derived);
+    explicit Formed(const Planet& planet);
 
     struct Here {
         Noise top;                  // metres over the sea, slope per metre at the radius
@@ -86,7 +85,6 @@ private:
     formation::World world_;
     formation::Smooth smooth_;
     double radius_;
-    double vertical_;
     Gullies gullies_;
     // How far apart in height the ground's ways down may be and still blend into where it runs.
     double fall_blend_ = 0.0;

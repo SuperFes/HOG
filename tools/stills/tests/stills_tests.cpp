@@ -16,8 +16,7 @@ namespace {
 // section's half-metre pixels.
 hog::globe::Planet airless() {
     hog::globe::Planet planet;
-    planet.pressure = 0.0;
-    planet.volatiles = hog::globe::Volatile::None;
+    planet.system.air.pressure = 0.0;
     planet.voxel = 0.5;
     return planet;
 }
@@ -59,7 +58,7 @@ TEST_CASE("a section shows air over the ground and rock under it", "[stills]") {
 TEST_CASE("a voxel section shows a dug ball open where the ground was", "[stills]") {
     const hog::globe::Generator moon{airless()};
     const hog::stills::Place place{.latitude = -30.0, .longitude = 70.0};
-    const double radius = moon.planet().radius;
+    const double radius = moon.planet().body.radius;
     const double ground = hog::globe::ground_below(moon, place.direction(), 0.5).value_or(radius);
     hog::globe::MadeWorld made{moon};
     hog::globe::World& world = made.world();

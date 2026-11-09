@@ -318,7 +318,7 @@ Drawn drawn_against(const std::set<std::uint64_t>& drawn,
 hog::DVec3 over_ground(hog::DVec3 up, double metres) {
     const hog::globe::Generator& generator = hog::client::testing::globe().generator;
     const double ground = hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))
-                              .value_or(generator.planet().radius);
+                              .value_or(generator.planet().body.radius);
     return up * (ground + metres);
 }
 
@@ -327,7 +327,7 @@ hog::DVec3 over_ground(hog::DVec3 up, double metres) {
 TEST_CASE("a client flying in from far and high draws each place once, as last cut",
           "[client][tiles]") {
     // From fifteen kilometres off and three high down to sixty metres over the land.
-    const double radius = hog::client::testing::globe().generator.planet().radius;
+    const double radius = hog::client::testing::globe().generator.planet().body.radius;
     const hog::DVec3 end = hog::client::testing::on_land();
     const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, end));
     constexpr int steps = 30;
@@ -392,7 +392,7 @@ TEST_CASE("a client flown high over the planet and back down settles on the last
     };
 
     // Up from the land to fifteen kilometres over ten across, and back down to where it began.
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     const hog::DVec3 start = hog::client::testing::on_land();
     const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, start));
     const auto at = [&](double share) {

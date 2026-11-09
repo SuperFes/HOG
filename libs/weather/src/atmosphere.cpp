@@ -81,11 +81,9 @@ double edge_below(const Field& field, std::size_t column, int layer) {
 
 } // namespace
 
-Atmosphere::Atmosphere(const globe::Generator& generator, double day, int level, int layers)
+Atmosphere::Atmosphere(const globe::Generator& generator, int level, int layers)
     : planet_(generator.planet()), field_(start_field(generator, level, layers)),
-      stencil_(field_.grid) {
-    planet_.day = day;
-}
+      stencil_(field_.grid) {}
 
 void Atmosphere::advance_once(DVec3 sun, double seconds) {
     warm_surface(field_, planet_, sun, seconds);
@@ -113,15 +111,15 @@ Column Atmosphere::column(std::size_t column) const {
             continue;
         }
         const Air& air = field_.at(column, layer);
-        const double height = grid.radius_of(layer) - planet_.radius;
+        const double height = grid.radius_of(layer) - planet_.body.radius;
         const double pressure = pressure_at(planet_, surface, height);
         const auto temperature = static_cast<double>(air.temperature);
         const double mass = air_density(temperature, pressure) * grid.depth_of(layer);
         const auto cloud = static_cast<double>(air.cloud);
-        const double held_here = saturation_ratio(planet_.volatiles, temperature, pressure);
-        const double covered =
-            cloud > 0.0 && held_here > 0.0 ? 1.0 - std::exp(-cloud / (cover_spread * held_here))
-                                           : 0.0;
+        const double held_here = saturation_ratio(temperature, pressure);
+        const double covered = cloud > 0.0 && held_here > 0.0
+                                   ? 1.0 - std::exp(-cloud / (cover_spread * held_here))
+                                   : 0.0;
         if (covered > 0.0) {
             run = std::max(run, covered);
         } else if (run > 0.0) {
@@ -131,22 +129,24 @@ Column Atmosphere::column(std::size_t column) const {
 
         if (lowest) {
             shown.wind = along(frame, air.wind);
-            const double held = saturation_ratio(planet_.volatiles, temperature, pressure);
+            const double held = saturation_ratio(temperature, pressure);
             shown.humidity = held > 0.0 ? static_cast<float>(std::clamp(
                                               static_cast<double>(air.vapour) / held, 0.0, 1.0))
                                         : 0.0F;
         }
         const bool misty = cloud > visible;
         if (misty && grounded) {
-            shown.fog_top = static_cast<float>(edge_above(field_, column, layer) - planet_.radius);
+            shown.fog_top =
+                static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
         } else {
             grounded = false;
             if (misty) {
                 if (shown.top == 0.0F) {
                     shown.base =
-                        static_cast<float>(edge_below(field_, column, layer) - planet_.radius);
+                        static_cast<float>(edge_below(field_, column, layer) - planet_.body.radius);
                 }
-                shown.top = static_cast<float>(edge_above(field_, column, layer) - planet_.radius);
+                shown.top =
+                    static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
             }
         }
         lowest = false;

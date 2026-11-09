@@ -49,9 +49,8 @@ struct Field {
 // condensing in rising air slows it.
 [[nodiscard]] double lapse_rate(const globe::Planet& planet);
 
-// Mass of its vapour per kilogram of dry air at saturation, at a temperature and pressure.
-[[nodiscard]] double saturation_ratio(globe::Volatile volatiles, double temperature,
-                                      double pressure);
+// Mass of water vapour per kilogram of dry air at saturation, at a temperature and pressure.
+[[nodiscard]] double saturation_ratio(double temperature, double pressure);
 
 // Pressure `height` metres over the reference level, in air that cools with height at the lapse
 // rate from `surface_temperature` there.

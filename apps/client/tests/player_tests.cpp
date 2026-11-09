@@ -28,7 +28,7 @@ DVec3 on_land() {
 }
 
 double radius() {
-    return client::testing::globe().generator.planet().radius;
+    return client::testing::globe().generator.planet().body.radius;
 }
 
 // Metres the ground stands over the radius at a direction.

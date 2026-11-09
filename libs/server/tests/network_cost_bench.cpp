@@ -28,20 +28,24 @@ TEST_CASE("what the network carries for everyday happenings", "[.network]") {
     const protocol::Millimetres far{115'000'000, 3'000'000, 2'000'000};
     const protocol::Moved moved{.sequence = 1'000'000, .corrections = 3, .at = far};
     std::printf("Moved (client to server, one move):            %zu bytes\n", size_of(moved));
-    protocol::Snapshot one{.tick = 100'000, .baseline = 99'999, .entered = {}, .changed = {}, .left = {}};
+    protocol::Snapshot one{
+        .tick = 100'000, .baseline = 99'999, .entered = {}, .changed = {}, .left = {}};
     one.changed.push_back({.id = protocol::NetId{7}, .moved_by = protocol::Millimetres{400, 0, 0}});
     std::printf("Snapshot, one other player moving:            %zu bytes\n", size_of(one));
     protocol::Snapshot ten = one;
     for (std::uint32_t id = 8; id < 17; ++id) {
-        ten.changed.push_back({.id = protocol::NetId{id}, .moved_by = protocol::Millimetres{400, 100, 0}});
+        ten.changed.push_back(
+            {.id = protocol::NetId{id}, .moved_by = protocol::Millimetres{400, 100, 0}});
     }
     std::printf("Snapshot, ten others moving:                   %zu bytes\n", size_of(ten));
     std::printf("Dug (client to server):                        %zu bytes\n",
                 size_of(protocol::Dug{.centre = far, .radius = 750}));
     for (const int level : {3, 4, 5}) {
-        const protocol::Weather weather{.level = static_cast<std::uint8_t>(level),
-                                        .fade = std::chrono::milliseconds{2000},
-                                        .cells = std::vector<protocol::CellWeather>(protocol::weather_cells(static_cast<std::uint8_t>(level)))};
+        const protocol::Weather weather{
+            .level = static_cast<std::uint8_t>(level),
+            .fade = std::chrono::milliseconds{2000},
+            .cells = std::vector<protocol::CellWeather>(
+                protocol::weather_cells(static_cast<std::uint8_t>(level)))};
         std::printf("Weather at level %d (%zu cells):                  %zu bytes\n", level,
                     weather.cells.size(), size_of(weather));
     }
@@ -56,7 +60,7 @@ TEST_CASE("what the network carries for everyday happenings", "[.network]") {
     const globe::Generator generator{globe::Planet{}};
     globe::MadeWorld made{generator};
     globe::World& world = made.world();
-    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     DVec3 up{};
     for (std::uint64_t k = 0;; ++k) {
         up = globe::center(globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304));

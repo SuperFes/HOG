@@ -3,7 +3,6 @@ add_library(hog_planet
     src/ephemeris.cpp
     src/level_grid.cpp
     src/neighbors.cpp
-    src/planet_config.cpp
     src/projection.cpp
     src/system.cpp
     src/tangent_frame.cpp
@@ -20,7 +19,6 @@ hog_add_tests(hog_planet
     tests/level_grid_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
-    tests/planet_config_tests.cpp
     tests/projection_tests.cpp
     tests/system_tests.cpp
     tests/tangent_frame_tests.cpp

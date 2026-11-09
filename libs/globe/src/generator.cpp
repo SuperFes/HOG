@@ -39,7 +39,7 @@ double ground_slope(const terms::Context& context, DVec3 direction, double lod) 
     const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side, direction));
     const DVec3 north = glm::cross(direction, east);
-    const double turn = step / context.planet->radius;
+    const double turn = step / context.planet->body.radius;
     const auto height = [&](DVec3 along, double by) {
         return terms::ground(context, glm::normalize(direction + (along * by)), lod).height;
     };
@@ -59,13 +59,13 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     };
     // A formed world's heights are already over its own sea, and its rivers have worn it.
     say("forming the land");
-    const auto formed = std::make_shared<const Formed>(planet_, derived_);
+    const auto formed = std::make_shared<const Formed>(planet_);
     shape_.sea = derived_.liquid && formed->has_sea();
     shape_.lowest = formed->lowest();
     shape_.highest = formed->highest();
     shape_.formed = formed;
     say("laying out the voxel layers");
-    layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
+    layers_ = layers_about(planet_.body.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
                            planet_.sky_height, planet_.voxel);
 }
 
@@ -73,7 +73,7 @@ std::optional<double> Generator::sea_level() const noexcept {
     if (!shape_.sea) {
         return std::nullopt;
     }
-    return planet_.radius;
+    return planet_.body.radius;
 }
 
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
@@ -167,7 +167,7 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         double yh = 0.0;
         const CellNeighbors beside = sides(cells[k], apart);
         for (const Cell cell : beside.all()) {
-            const DVec3 offset = (center(cell) - down) * planet_.radius;
+            const DVec3 offset = (center(cell) - down) * planet_.body.radius;
             const double x = glm::dot(offset, east);
             const double y = glm::dot(offset, north);
             const double rise = height_at(cell) - found[k].height;
@@ -193,12 +193,12 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.generator_ = this;
     column.direction_ = down;
     column.lod_ = lod;
-    column.ground_ = planet_.radius + made.height;
+    column.ground_ = planet_.body.radius + made.height;
     if (shape_.sea) {
-        column.water_ = planet_.radius;
+        column.water_ = planet_.body.radius;
     }
     if (derived_.liquid && made.lake) {
-        column.water_ = std::max(column.water_, planet_.radius + *made.lake);
+        column.water_ = std::max(column.water_, planet_.body.radius + *made.lake);
     }
     column.slope_ = slope;
     column.surface_temperature_ = made.surface_temperature;
@@ -220,7 +220,7 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     }
     const Planet& planet = generator_->planet_;
     const auto cover_at = [&](double at) {
-        const double slope = slope_ * planet.radius / at;
+        const double slope = slope_ * planet.body.radius / at;
         return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
     };
     // Down by as far as no cave can lie within `within`. Nearer than a voxel's step counts as
@@ -320,7 +320,7 @@ Material Generator::Column::inside(double radius) const noexcept {
 Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     const Planet& planet = generator_->planet_;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
-    const double slope = slope_ * planet.radius / radius;
+    const double slope = slope_ * planet.body.radius / radius;
     Sample sample;
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
     const terms::Context context{.planet = &generator_->planet_,
@@ -363,7 +363,7 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     const double thickness = lod_ / 2.0;
     const double filled = std::clamp(((water - radius) / thickness) + 0.5, 0.0, 1.0);
     if (water > 0.0 && filled > 0.0) {
-        sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
+        sample.liquid = Material::Water;
         if (sample.distance < 0.0) {
             if (radius < water) {
                 sample.water = properties(sample.material).porosity;
@@ -403,7 +403,7 @@ std::optional<DVec3> land_near(const Generator& generator, DVec3 direction, doub
     if (!sea) {
         return up;
     }
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     // Coarsely, as land a kilometre across is sought, not an islet.
     const double lod = voxel_lod(generator) * 16.0;
     const auto land = [&](DVec3 at) {

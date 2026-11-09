@@ -60,10 +60,11 @@ std::vector<globe::Site> Region::weather(globe::BrickSite site, double seconds) 
                 for (const auto& [di, dj, dl] :
                      {std::tuple{1, 0, 0}, std::tuple{-1, 0, 0}, std::tuple{0, 1, 0},
                       std::tuple{0, -1, 0}, std::tuple{0, 0, 1}, std::tuple{0, 0, -1}}) {
-                    const globe::Voxel* next = voxel({.face = where.face,
-                                                      .i = where.i + static_cast<std::uint32_t>(di),
-                                                      .j = where.j + static_cast<std::uint32_t>(dj),
-                                                      .layer = where.layer + static_cast<std::uint32_t>(dl)});
+                    const globe::Voxel* next =
+                        voxel({.face = where.face,
+                               .i = where.i + static_cast<std::uint32_t>(di),
+                               .j = where.j + static_cast<std::uint32_t>(dj),
+                               .layer = where.layer + static_cast<std::uint32_t>(dl)});
                     if (next != nullptr && next->solid == globe::Material::Air) {
                         ++open;
                         exposure.damp = std::max(
@@ -83,9 +84,9 @@ std::vector<globe::Site> Region::weather(globe::BrickSite site, double seconds) 
                                           (std::uint64_t{where.i} * 73'856'093U) ^
                                           (std::uint64_t{where.j} * 19'349'663U) ^
                                           (std::uint64_t{where.layer} * 83'492'791U);
-                const double chance =
-                    softness(key ^ (round * 0x9E3779B97F4A7C15ULL)) / 2.6;
-                const std::uint8_t after = worn(here->condition, rate * softness(key), seconds, chance);
+                const double chance = softness(key ^ (round * 0x9E3779B97F4A7C15ULL)) / 2.6;
+                const std::uint8_t after =
+                    worn(here->condition, rate * softness(key), seconds, chance);
                 if (after != here->condition) {
                     here->condition = after;
                     held(site)->dirty = true;
@@ -155,7 +156,7 @@ bool Region::check_support(globe::BrickSite site, double seconds, Stepped& stepp
     const std::uint32_t i0 = (site.i - 1) * globe::brick_side;
     const std::uint32_t j0 = (site.j - 1) * globe::brick_side;
     const std::uint32_t l0 = (site.layer - 1) * globe::brick_side;
-    Support support{side, side, side, layers.thickness, world_->planet().gravity};
+    Support support{side, side, side, layers.thickness, world_->planet().body.gravity};
     for (int l = 0; l < side; ++l) {
         for (int j = 0; j < side; ++j) {
             for (int i = 0; i < side; ++i) {
@@ -259,18 +260,20 @@ void Region::fall(const std::vector<globe::Site>& sites, Stepped& stepped) {
 
         // The ground they stood in is taken out, a ball about each voxel's middle.
         const double ball = carve_ball * thickness;
-        reshape(centre, reach + ball,
-                [&](DVec3 at) {
-                    double nearest = 1e30;
-                    for (const DVec3& middle : middles) {
-                        nearest = std::min(nearest, glm::length(at - middle) - ball);
-                    }
-                    return nearest;
-                },
-                [&](globe::Voxel& voxel, double to) { globe::dig_voxel(voxel, to, thickness); });
+        reshape(
+            centre, reach + ball,
+            [&](DVec3 at) {
+                double nearest = 1e30;
+                for (const DVec3& middle : middles) {
+                    nearest = std::min(nearest, glm::length(at - middle) - ball);
+                }
+                return nearest;
+            },
+            [&](globe::Voxel& voxel, double to) { globe::dig_voxel(voxel, to, thickness); });
         stepped.collapsed += static_cast<std::int64_t>(middles.size());
 
-        const double volume = static_cast<double>(middles.size()) * thickness * thickness * thickness;
+        const double volume =
+            static_cast<double>(middles.size()) * thickness * thickness * thickness;
         const std::int64_t amount =
             static_cast<std::int64_t>(static_cast<double>(middles.size()) * globe::Voxel::full);
         if (!crumbled && volume >= least_boulder && volume <= most_boulder) {

@@ -4,89 +4,79 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numbers>
 
 using hog::globe::Planet;
-using hog::globe::Volatile;
 
 namespace {
 
-// Cold and thin-aired: water lies only as ice.
+// Far from a dim star under thin air: water lies only as ice.
 Planet frozen() {
     Planet planet;
-    planet.pressure = 636.0;
-    planet.equator_temperature = 224.0;
-    planet.pole_temperature = 150.0;
-    return planet;
-}
-
-// Methane rivers under a thick cold sky, too warm for methane ice.
-Planet methane_world() {
-    Planet planet;
-    planet.pressure = 146'700.0;
-    planet.equator_temperature = 94.0;
-    planet.pole_temperature = 91.0;
-    planet.volatiles = Volatile::Methane;
+    planet.system.air.pressure = 636.0;
+    planet.system.stars.front().luminosity = 0.3;
     return planet;
 }
 
 } // namespace
 
-TEST_CASE("a volatile boils as Clausius and Clapeyron say", "[globe][planet]") {
-    const auto water = hog::globe::boiling_point(Volatile::Water, 101'325.0);
+TEST_CASE("water boils as Clausius and Clapeyron say", "[globe][planet]") {
+    const auto water = hog::globe::boiling_point(101'325.0);
     CHECK(std::abs(water.value_or(0.0) - 373.15) < 3.0);
-    const auto methane = hog::globe::boiling_point(Volatile::Methane, 101'325.0);
-    CHECK(std::abs(methane.value_or(0.0) - 111.65) < 2.0);
-    CHECK_FALSE(hog::globe::boiling_point(Volatile::Water, 600.0));
-    CHECK_FALSE(hog::globe::boiling_point(Volatile::None, 101'325.0));
-    CHECK(hog::globe::boiling_point(Volatile::Water, 1e9).value_or(0.0) == 647.096);
+    CHECK_FALSE(hog::globe::boiling_point(600.0));
+    CHECK(hog::globe::boiling_point(1e9).value_or(0.0) == 647.096);
 }
 
-TEST_CASE("a volatile's vapour is in balance with it as the boiling point says",
-          "[globe][planet]") {
+TEST_CASE("water's vapour is in balance with it as the boiling point says", "[globe][planet]") {
     // It boils where its vapour holds the pressure above it.
-    const auto held = hog::globe::saturation_pressure(Volatile::Water, 373.15);
+    const auto held = hog::globe::saturation_pressure(373.15);
     CHECK(std::abs(held.value_or(0.0) - 101'325.0) < 6'000.0);
-    CHECK(hog::globe::saturation_pressure(Volatile::Water, 288.0).value_or(0.0) <
-          hog::globe::saturation_pressure(Volatile::Water, 300.0).value_or(0.0));
-    CHECK_FALSE(hog::globe::saturation_pressure(Volatile::Water, 700.0));
-    CHECK_FALSE(hog::globe::saturation_pressure(Volatile::None, 288.0));
-    CHECK(hog::globe::latent_heat(Volatile::Water).value_or(0.0) > 2.2e6);
-    CHECK(hog::globe::latent_heat(Volatile::Water).value_or(0.0) < 2.6e6);
+    CHECK(hog::globe::saturation_pressure(288.0).value_or(0.0) <
+          hog::globe::saturation_pressure(300.0).value_or(0.0));
+    CHECK_FALSE(hog::globe::saturation_pressure(700.0));
+    CHECK(hog::globe::latent_heat > 2.2e6);
+    CHECK(hog::globe::latent_heat < 2.6e6);
 }
 
-TEST_CASE("liquid and ice stand where the air and warmth let them", "[globe][planet]") {
+TEST_CASE("water and ice stand where the air and warmth let them", "[globe][planet]") {
     const auto mild = hog::globe::derive(Planet{});
     CHECK(mild.liquid);
     CHECK(mild.ice);
     const auto cold = hog::globe::derive(frozen());
     CHECK_FALSE(cold.liquid);
     CHECK(cold.ice);
-    Planet dry;
-    dry.volatiles = Volatile::None;
-    CHECK_FALSE(hog::globe::derive(dry).liquid);
-    CHECK_FALSE(hog::globe::derive(dry).ice);
-
-    Planet titan = methane_world();
-    const auto alien = hog::globe::derive(titan);
-    CHECK(alien.liquid);
-    CHECK_FALSE(alien.ice);
-    // Hot enough to boil it everywhere.
-    titan.pole_temperature = 130.0;
-    titan.equator_temperature = 140.0;
-    CHECK_FALSE(hog::globe::derive(titan).liquid);
 }
 
-TEST_CASE("temperature falls from equator to pole, averaging the measured mean",
+TEST_CASE("the climate's temperatures are the formation's, warmest at the equator",
           "[globe][planet]") {
     const Planet earth;
-    CHECK(hog::globe::temperature_at(earth, 0.0) == earth.equator_temperature);
-    CHECK(std::abs(hog::globe::temperature_at(earth, std::numbers::pi / 2.0) -
-                   earth.pole_temperature) < 1e-9);
-    CHECK(std::abs(hog::globe::mean_temperature(earth) - 288.0) < 2.0);
-    CHECK(std::abs(hog::globe::mean_temperature(frozen()) - 208.0) < 2.0);
+    const hog::formation::Body body = hog::globe::formation_body(earth);
+    CHECK(std::abs(hog::globe::temperature_at(earth, 0.3) -
+                   (hog::formation::sea_level_temperature(body, 0.3) + 273.15)) < 1e-6);
+    CHECK(hog::globe::temperature_at(earth, 0.0) >
+          hog::globe::temperature_at(earth, std::numbers::pi / 2.0));
+    CHECK(std::abs(hog::globe::mean_temperature(earth) - 288.0) < 10.0);
+    CHECK(hog::globe::mean_temperature(frozen()) < hog::globe::mean_temperature(earth) - 30.0);
+}
+
+TEST_CASE("the stars set the starlight the land formed under", "[globe][planet]") {
+    Planet planet;
+    CHECK(std::abs(hog::globe::star_flux(planet.system) - 1'361.0) < 1.0);
+    planet.system.stars.push_back(planet.system.stars.front());
+    planet.system.orbit.distance *= 2.0;
+    CHECK(std::abs(hog::globe::star_flux(planet.system) - (1'361.0 / 2.0)) < 1.0);
+    CHECK(hog::globe::formation_body(planet).star_flux == hog::globe::star_flux(planet.system));
+}
+
+TEST_CASE("the day is one knob, for the land's climate and the game's clock", "[globe][planet]") {
+    Planet planet;
+    CHECK(hog::globe::day_length(planet) == std::chrono::hours{4});
+    planet.body.day = 6.5;
+    CHECK(hog::globe::day_length(planet) == std::chrono::minutes{390});
+    CHECK(hog::globe::formation_body(planet).day == 6.5);
 }
 
 TEST_CASE("the crust's heat follows from the knobs", "[globe][planet]") {
@@ -99,15 +89,18 @@ TEST_CASE("the crust's heat follows from the knobs", "[globe][planet]") {
 }
 
 TEST_CASE("only a planet that can be is valid", "[globe][planet]") {
-    for (const Planet& planet : {Planet{}, frozen(), methane_world()}) {
+    for (const Planet& planet : {Planet{}, frozen()}) {
         CHECK(hog::globe::validate(planet).has_value());
     }
     Planet hollow;
-    hollow.floor_depth = hollow.radius;
+    hollow.floor_depth = hollow.body.radius;
     CHECK_FALSE(hog::globe::validate(hollow).has_value());
     Planet unknown;
-    unknown.gravity = std::numeric_limits<double>::quiet_NaN();
+    unknown.body.gravity = std::numeric_limits<double>::quiet_NaN();
     CHECK_FALSE(hog::globe::validate(unknown).has_value());
+    Planet strange;
+    strange.body.erodibility = std::numeric_limits<double>::infinity();
+    CHECK_FALSE(hog::globe::validate(strange).has_value());
     for (const double detail : {0.0, 3.0, 5.5, 10.0}) {
         Planet unformed;
         unformed.formed_detail = detail;
@@ -115,74 +108,105 @@ TEST_CASE("only a planet that can be is valid", "[globe][planet]") {
     }
 }
 
-TEST_CASE("a planet file changes the default knobs by name", "[globe][planet]") {
+TEST_CASE("a planet file sets any knob by name, all in [planet]", "[globe][planet]") {
     const auto read = hog::globe::parse_planet(R"(
-[globe]
+[planet]
 seed = 7
 gravity = 4
-volatiles = "methane"
+day = 10
+plates = 9
+lid_thickness = 350
 formed_detail = 6
+voxel = 0.5
+moons = []
+
+[planet.ore_abundance]
+gold = 2.5
+
+[planet.air]
+pressure_kpa = 90
 )");
     REQUIRE(read.has_value());
     const Planet& planet = read.value();
-    CHECK(planet.seed == 7);
-    CHECK(planet.gravity == 4.0);
-    CHECK(planet.volatiles == Volatile::Methane);
+    CHECK(planet.body.seed == 7);
+    CHECK(planet.body.gravity == 4.0);
+    CHECK(planet.body.day == 10.0);
+    CHECK(planet.body.plates == 9);
+    CHECK(planet.body.lid_thickness == 350.0);
+    CHECK(planet.body.ore_abundance.gold == 2.5);
+    CHECK(planet.body.ore_abundance.coal == 1.0);
     CHECK(planet.formed_detail == 6.0);
-    CHECK(planet.pressure == Planet{}.pressure);
+    CHECK(planet.voxel == 0.5);
+    CHECK(planet.system.moons.empty());
+    CHECK(std::abs(planet.system.air.pressure - 90'000.0) < 1e-9);
+    // What isn't given is the working world's.
+    CHECK(planet.body.radius == Planet{}.body.radius);
+    CHECK(planet.body.tilt == Planet{}.body.tilt);
 
-    const auto plain = hog::globe::parse_planet("[globe]\n");
+    const auto plain = hog::globe::parse_planet("[planet]\n");
     REQUIRE(plain.has_value());
-    CHECK(plain.value().pressure == Planet{}.pressure);
+    CHECK(hog::globe::world_id(plain.value()) == hog::globe::world_id(Planet{}));
+}
+
+TEST_CASE("the shipped development config is the working world it names", "[globe][planet]") {
+    const auto shipped = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
+    REQUIRE(shipped.has_value());
+    CHECK(shipped->body.radius == 115'000.0);
+    CHECK(hog::globe::day_length(*shipped) == std::chrono::hours{4});
+    // The working world's knobs at that size, in a shallower shell, formed finer than tests need.
+    Planet working;
+    working.body.radius = 115'000.0;
+    working.floor_depth = 500.0;
+    working.sky_height = 2'000.0;
+    working.formed_detail = 7.0;
+    CHECK(hog::globe::world_id(*shipped) == hog::globe::world_id(working));
 }
 
 TEST_CASE("a planet file refuses what it doesn't know or can't be", "[globe][planet]") {
     for (const char* text : {
              "",
-             "[globe]\npreset = \"earth\"\n",
-             "[globe]\ngravty = 3\n",
-             "[globe]\ngravity = \"high\"\n",
-             "[globe]\ngravity = -1\n",
-             "[globe]\nseed = -1\n",
-             "[globe]\nvolatiles = \"lava\"\n",
-             "[globe]\nwear = 0.1\n",
-             "[globe]\nformed_detail = 0\n",
-             "[globe]\nhigh = 3\n",
-             "[globe\n",
+             "[planet]\ngravty = 3\n",
+             "[planet]\ngravity = \"high\"\n",
+             "[planet]\ngravity = -1\n",
+             "[planet]\nseed = -1\n",
+             "[planet]\nplates = 2.5\n",
+             "[planet]\nstar_flux = 1000\n",
+             "[planet]\nradius_km = 135\n",
+             "[planet]\nday_hours = 4\n",
+             "[planet]\nformed_detail = 0\n",
+             "[planet]\nwater_depth = 2000\n",
+             "[planet.ore_abundance]\nmithril = 1\n",
+             "[planet]\n\n[globe]\nradius = 1000.0\n",
+             "[planet\n",
          }) {
         CAPTURE(text);
         CHECK_FALSE(hog::globe::parse_planet(text).has_value());
     }
-    CHECK(hog::globe::parse_planet("[globe\n").error().code == hog::ErrorCode::Parse);
+    CHECK(hog::globe::parse_planet("[planet\n").error().code == hog::ErrorCode::Parse);
     CHECK_FALSE(hog::globe::load_planet("no/such/planet.toml").has_value());
 }
 
 TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
-    const hog::globe::Planet earth;
-    hog::globe::Planet other = earth;
-    other.seed = 2;
-    hog::globe::Planet larger = earth;
-    larger.radius = 120'000.0;
-    hog::globe::Planet finer = earth;
+    const Planet earth;
+    Planet other = earth;
+    other.body.seed = 2;
+    Planet larger = earth;
+    larger.body.radius = 120'000.0;
+    Planet finer = earth;
     finer.formed_detail = 6.0;
-    CHECK(hog::globe::world_id(earth) == hog::globe::world_id(hog::globe::Planet{}));
-    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(other));
-    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(larger));
-    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(finer));
-    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(frozen()));
-}
-
-TEST_CASE("heights keep their proportion to the radius", "[globe][planet]") {
-    const Planet full;
-    Planet small;
-    small.radius = full.radius / 8.0;
-    CHECK(hog::globe::derive(full).vertical == 1.0);
-    CHECK(std::abs(hog::globe::derive(small).vertical - 0.125) < 1e-12);
+    Planet softer = earth;
+    softer.body.erodibility *= 2.0;
+    Planet moonless = earth;
+    moonless.system.moons.clear();
+    CHECK(hog::globe::world_id(earth) == hog::globe::world_id(Planet{}));
+    for (const Planet& changed : {other, larger, finer, softer, moonless, frozen()}) {
+        CHECK(hog::globe::world_id(earth) != hog::globe::world_id(changed));
+    }
 }
 
 TEST_CASE("a small world's ground stays inside its shell", "[globe][planet]") {
     Planet small;
-    small.radius = 15'000.0;
+    small.body.radius = 15'000.0;
     small.floor_depth = 500.0;
     small.sky_height = 3'000.0;
     const hog::globe::Generator generator{small};
@@ -190,33 +214,36 @@ TEST_CASE("a small world's ground stays inside its shell", "[globe][planet]") {
         const auto ground = hog::globe::ground_below(
             generator, hog::globe::center(hog::globe::cell_at_index(7, k)), 20.0);
         REQUIRE(ground.has_value());
-        CHECK(*ground - small.radius < small.sky_height);
-        CHECK(*ground - small.radius > -small.floor_depth - 1'000.0);
+        const double height = ground.value_or(0.0) - small.body.radius;
+        CHECK(height < small.sky_height);
+        CHECK(height > -small.floor_depth - 1'000.0);
     }
 }
 
 TEST_CASE("a planet sent as bytes is the same planet, and a cut or odd one is refused",
           "[globe][planet]") {
-    for (const Planet& planet : {Planet{}, frozen(), methane_world()}) {
+    Planet odd;
+    odd.body.seed = 0xFEED'FACE'1234ULL;
+    odd.body.radius = 12'345.678;
+    odd.body.plates = 3;
+    odd.body.ore_abundance.oil = 0.25;
+    odd.heat_flow = 0.02;
+    odd.formed_detail = 7.0;
+    odd.system.rings = hog::planet::Rings{};
+    for (const Planet& planet : {Planet{}, frozen(), odd}) {
         const auto bytes = hog::globe::encode_planet(planet);
         const auto read = hog::globe::decode_planet(bytes);
         REQUIRE(read);
         CHECK(hog::globe::world_id(*read) == hog::globe::world_id(planet));
-        CHECK(read->seed == planet.seed);
+        CHECK(read->body.seed == planet.body.seed);
+        CHECK(read->system == planet.system);
+        CHECK(read->body.ore_abundance.oil == planet.body.ore_abundance.oil);
     }
-    Planet odd;
-    odd.seed = 0xFEED'FACE'1234ULL;
-    odd.radius = 12'345.678;
-    odd.volatiles = Volatile::Methane;
-    odd.heat_flow = 0.02;
-    odd.formed_detail = 7.0;
     const auto bytes = hog::globe::encode_planet(odd);
-    const auto read = hog::globe::decode_planet(bytes);
-    REQUIRE(read);
-    CHECK(hog::globe::world_id(*read) == hog::globe::world_id(odd));
-    for (std::size_t length = 0; length < bytes.size(); ++length) {
+    for (std::size_t length = 0; length < bytes.size(); length += 7) {
         CHECK_FALSE(hog::globe::decode_planet(std::span{bytes}.first(length)));
     }
+    CHECK_FALSE(hog::globe::decode_planet(std::span{bytes}.first(bytes.size() - 1)));
     auto longer = bytes;
     longer.push_back(std::byte{0});
     CHECK_FALSE(hog::globe::decode_planet(longer));

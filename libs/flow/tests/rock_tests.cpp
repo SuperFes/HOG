@@ -52,7 +52,7 @@ struct Found {
         for (std::uint64_t k = 0; k < 40'000 && !rock; ++k) {
             const auto cell = hog::globe::cell_at_index(level, (k * 2'654'435'761ULL) % cells);
             const std::vector<Rock> near =
-                generator.rocks_near(hog::globe::center(cell) * generator.planet().radius,
+                generator.rocks_near(hog::globe::center(cell) * generator.planet().body.radius,
                                      hog::globe::voxel_lod(generator));
             for (const Rock& candidate : near) {
                 if (!rock && candidate.axes.z > 2.5 && gentle(candidate)) {

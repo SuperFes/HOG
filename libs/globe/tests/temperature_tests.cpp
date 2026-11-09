@@ -9,7 +9,8 @@
 using namespace hog::globe;
 using Catch::Matchers::WithinAbs;
 
-TEST_CASE("the baseline temperature is what the generator says at every point", "[globe][temperature]") {
+TEST_CASE("the baseline temperature is what the generator says at every point",
+          "[globe][temperature]") {
     const Generator generator{Planet{}};
     const Planet& planet = generator.planet();
     for (int k = 0; k < 600; ++k) {
@@ -27,9 +28,9 @@ TEST_CASE("the baseline temperature is what the generator says at every point", 
             } else if (sample.water > 0.0) {
                 surroundings = Surroundings::Water;
             }
-            const double baseline = baseline_temperature(
-                planet, generator.derived(), temperature_at(planet, latitude), radius,
-                column.ground(), surroundings);
+            const double baseline =
+                baseline_temperature(planet, generator.derived(), temperature_at(planet, latitude),
+                                     radius, column.ground(), surroundings);
             CHECK_THAT(baseline, WithinAbs(sample.temperature, 1e-6));
         }
     }
@@ -39,7 +40,7 @@ TEST_CASE("it is colder the higher, and warmer the deeper", "[globe][temperature
     const Generator generator{Planet{}};
     const Planet& planet = generator.planet();
     const double at_sea = temperature_at(planet, 0.3);
-    const double ground = planet.radius + 100.0;
+    const double ground = planet.body.radius + 100.0;
     const auto at = [&](double radius, Surroundings in) {
         return baseline_temperature(planet, generator.derived(), at_sea, radius, ground, in);
     };

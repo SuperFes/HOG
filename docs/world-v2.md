@@ -195,7 +195,7 @@ Every process, where it runs and how. **Resolved** means the cells hold it; **be
 
 ### 0 · Planet
 
-Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. Gravity is set, Earth's by default, not worked out from the size: the planet is small for the game's sake, and everything on it behaves as on Earth.
+Every knob of a planet lives once, by name, in the one `[planet]` table of `config/planet.toml` (and its tables): the formation's (`radius` in metres, `gravity`, `day` in hours, `tilt`, rock, climate, wear and the rest), the voxel shell's, and the system's below. What's left out keeps the working world's value. Gravity is set, not worked out from the size.
 
 The planet belongs to a small system, Earth's by default: one or more stars (a binary is two, either both orbited or one far off), the planet's own orbit, any number of moons, optional rings in the equator's plane, and other planets seen as lights. Sunlight is the sum over the stars, and tides the sum over moons and stars, so another moon or a second sun is a matter of settings. The orbit's tilt, eccentricity and precession wander in slow cycles, which is what brings ice ages; a moon (or more) raises tides and lights the night; the air's makeup sets how much heat it holds. The sea comes from a water inventory, not a land fraction. The world starts with enough water to stand in an even layer about as deep as Earth's would, and the coast falls wherever that water actually sits. Once the world has settled, if the sea covers less than `ocean_fraction`, it's topped up with as much more as it takes, as if it came from space. Nothing is tested against the target before generation is done.
 

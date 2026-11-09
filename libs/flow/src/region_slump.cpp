@@ -63,7 +63,7 @@ std::optional<Key> across(int level, const Key& key, int di, int dj) {
 void Region::slump(Stepped& stepped) {
     const globe::Layers& layers = world_->layers();
     const double thickness = layers.thickness;
-    const double gravity = world_->planet().gravity;
+    const double gravity = world_->planet().body.gravity;
 
     // The columns with grain in the open.
     std::map<Key, int> columns;
@@ -338,7 +338,7 @@ std::optional<Ground> Region::ground_under(DVec3 at) {
                       layers.floor + (static_cast<double>(found->ground + surface.grain_amount) /
                                       static_cast<double>(full) * layers.thickness),
                   .normal = normal,
-                  .holds = surface.holds(layers.thickness, world_->planet().gravity)};
+                  .holds = surface.holds(layers.thickness, world_->planet().body.gravity)};
 }
 
 bool Region::land(const Parcel& parcel, Stepped& stepped) {
@@ -393,7 +393,7 @@ std::optional<globe::BrickSite> Region::unheld_below(DVec3 at) {
 
 void Region::fly(double seconds, Stepped& stepped) {
     const globe::Layers& layers = world_->layers();
-    const double gravity = world_->planet().gravity;
+    const double gravity = world_->planet().body.gravity;
     std::vector<Parcel> flying;
     flying.reserve(parcels_.size());
     for (Parcel& parcel : parcels_) {

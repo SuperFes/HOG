@@ -15,8 +15,8 @@ TEST_CASE("the flow's ice balance follows the weather's climate at the ground's 
     });
     const hog::globe::Cell cold{.level = 10, .face = 0, .i = 1, .j = 0};
     const hog::globe::Cell warm{.level = 10, .face = 0, .i = 2, .j = 0};
-    CHECK(balance(cold, planet.radius) > 0.0);
-    CHECK(balance(warm, planet.radius) < 0.0);
+    CHECK(balance(cold, planet.body.radius) > 0.0);
+    CHECK(balance(warm, planet.body.radius) < 0.0);
     // Higher is better for snow than lower.
-    CHECK(balance(warm, planet.radius + 6'000.0) > balance(warm, planet.radius));
+    CHECK(balance(warm, planet.body.radius + 6'000.0) > balance(warm, planet.body.radius));
 }

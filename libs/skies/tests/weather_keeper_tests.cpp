@@ -22,7 +22,7 @@ namespace {
 
 globe::Planet small_earth() {
     globe::Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     return planet;
 }
 
@@ -49,7 +49,7 @@ std::optional<protocol::Weather> next(skies::WeatherKeeper& keeper, GameTime now
 
 TEST_CASE("the keeper steps the air only once an interval has gone by", "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper keeper{generator, start, quick()};
     CHECK_FALSE(keeper.poll(start, 500ms));
     CHECK_FALSE(keeper.poll(start + 30s, 500ms));
     CHECK_FALSE(keeper.latest());
@@ -58,7 +58,7 @@ TEST_CASE("the keeper steps the air only once an interval has gone by", "[server
 TEST_CASE("the weather it makes has a cell for each of the level's, in the grid's order",
           "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper keeper{generator, start, quick()};
     REQUIRE_FALSE(keeper.poll(start + 2min, 500ms));
     const auto found = next(keeper, start + 2min);
     REQUIRE(found);
@@ -95,7 +95,7 @@ TEST_CASE("the weather it makes has a cell for each of the level's, in the grid'
 
 TEST_CASE("the wind raises waves on the sea and none on land", "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper keeper{generator, start, quick()};
     REQUIRE_FALSE(keeper.poll(start + 2min, 500ms));
     const auto found = next(keeper, start + 2min);
     REQUIRE(found);
@@ -123,7 +123,7 @@ TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
     const globe::Generator generator{small_earth()};
     auto settings = quick();
     settings.spin_up = 90min;
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, settings};
+    skies::WeatherKeeper keeper{generator, start, settings};
     const GameTime now = start;
     // Three jobs of at most half an hour bring 90 minutes of spin-up level with the clock.
     int made = 0;
@@ -138,13 +138,13 @@ TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
 
 TEST_CASE("a keeper given a save carries on from the air in it", "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper first{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper first{generator, start, quick()};
     REQUIRE_FALSE(first.poll(start + 2min, 500ms));
     const auto made = next(first, start + 2min);
     REQUIRE(made);
     REQUIRE_FALSE(first.saved().empty());
 
-    skies::WeatherKeeper second{generator, 4h, 23.44, start + 2min, quick()};
+    skies::WeatherKeeper second{generator, start + 2min, quick()};
     REQUIRE(second.restore(first.saved(), start + 2min));
     // Level with the clock, so the weather is there to be told to a joiner at once.
     const auto kept = second.latest().value_or(protocol::Weather{});
@@ -156,11 +156,11 @@ TEST_CASE("a keeper given a save carries on from the air in it", "[server][weath
 
 TEST_CASE("a save of another grid is refused", "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper first{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper first{generator, start, quick()};
     REQUIRE(next(first, start + 2min));
     auto other = quick();
     other.layers = 4;
-    skies::WeatherKeeper second{generator, 4h, 23.44, start, other};
+    skies::WeatherKeeper second{generator, start, other};
     CHECK_FALSE(second.restore(first.saved(), start + 2min));
     CHECK_FALSE(second.latest());
 }
@@ -172,11 +172,11 @@ TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
     const char* where = std::getenv("HOG_WEATHER");
     REQUIRE(where != nullptr);
     globe::Planet planet;
-    planet.radius = 115'000.0;
+    planet.body.radius = 115'000.0;
     const globe::Generator generator{planet};
     skies::WeatherSettings settings{};
     settings.spin_up = 48h;
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, settings};
+    skies::WeatherKeeper keeper{generator, start, settings};
     std::optional<protocol::Weather> found;
     while (!found) {
         found = keeper.poll(start, 500ms);
@@ -195,7 +195,7 @@ TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips 
     const globe::Generator generator{small_earth()};
     auto settings = quick();
     settings.lag = 1h;
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, settings};
+    skies::WeatherKeeper keeper{generator, start, settings};
     // The clock is a day ahead of the air, which is never to catch up.
     GameTime now = start + 24h;
     int made = 0;
@@ -218,7 +218,7 @@ TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips 
 TEST_CASE("a fade longer than the most a weather is faded over is kept as asked",
           "[server][weather]") {
     const globe::Generator generator{small_earth()};
-    skies::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    skies::WeatherKeeper keeper{generator, start, quick()};
     GameTime now = start + 2min;
     int made = 0;
     for (int tries = 0; tries < 100'000 && made < 2; ++tries) {

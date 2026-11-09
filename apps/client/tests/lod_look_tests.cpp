@@ -111,7 +111,7 @@ TEST_CASE("the land's detail against what it costs to draw", "[.profile]") {
     const auto planet = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(planet);
     const hog::globe::Generator generator{*planet};
-    const double radius = planet->radius;
+    const double radius = planet->body.radius;
     auto created = hog::render::Device::create({});
     if (!created) {
         SKIP("no Vulkan device: " << created.error().message);

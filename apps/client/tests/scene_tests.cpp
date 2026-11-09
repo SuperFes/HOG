@@ -10,7 +10,6 @@
 #include <hog/client/scene.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/jobs/job_system.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/protocol/messages.hpp>
@@ -48,7 +47,7 @@ using hog::render::testing::test_device;
 namespace {
 
 Shot shot_of(const hog::client::Flight& flight, const hog::globe::World& world) {
-    const double radius = world.planet().radius;
+    const double radius = world.planet().body.radius;
     const hog::DVec3 up = glm::normalize(flight.eye.metres());
     const hog::GameTime date = hog::to_game_time(
         hog::WallClock::time_point{std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}});
@@ -68,7 +67,7 @@ double over_ground(const hog::globe::World& world, hog::DVec3 up, double altitud
 }
 
 hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
-    hog::client::Forecast forecast{hog::client::testing::planet().radius};
+    hog::client::Forecast forecast{hog::client::testing::planet().body.radius};
     forecast.receive(
         {.level = 2,
          .fade = 0ms,
@@ -81,10 +80,10 @@ hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
 
 TEST_CASE("the weather at the eye is clear until some is known", "[client][scene]") {
     const hog::globe::Generator& generator = hog::client::testing::globe().generator;
-    Shot shot =
-        shot_of(hog::client::start_flight(hog::planet::start_direction, generator.planet().radius,
-                                          1'500.0, hog::planet::north_pole),
-                hog::client::testing::globe().world);
+    Shot shot = shot_of(hog::client::start_flight(hog::planet::start_direction,
+                                                  generator.planet().body.radius, 1'500.0,
+                                                  hog::planet::north_pole),
+                        hog::client::testing::globe().world);
     CHECK(hog::client::weather_at_eye(shot) == hog::protocol::CellWeather{});
     const hog::client::Forecast forecast = everywhere({.cloud = 2.0F, .falling = 4.0F});
     shot.forecast = &forecast;
@@ -129,15 +128,11 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
-    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
-                                                        "config" / "planet.toml")
-                            .value();
-    const double radius = config.radius;
+    const double radius = hog::client::testing::planet().body.radius;
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
     for (const char* name : {"earth", "moon"}) {
-        const hog::client::GlobeWorld globe{
-            hog::client::globe_planet(name, config.seed, radius).value()};
+        const hog::client::GlobeWorld globe{hog::client::testing::planet()};
         auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
                                    hog::client::still_format, 1);
         REQUIRE(scene);
@@ -166,10 +161,8 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
-    const double radius = hog::client::testing::planet().radius;
-    const hog::client::GlobeWorld globe{
-        hog::client::globe_planet(std::nullopt, hog::client::testing::planet().seed, radius)
-            .value()};
+    const double radius = hog::client::testing::planet().body.radius;
+    const hog::client::GlobeWorld globe{hog::client::testing::planet()};
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
     auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
@@ -262,18 +255,14 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
-    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
-                                                        "config" / "planet.toml")
-                            .value();
-    const double radius = config.radius;
+    const double radius = hog::client::testing::planet().body.radius;
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
     const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
     const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
     for (const char* name : {"earth", "mars", "moon"}) {
         for (const double voxel : {1.0, 0.5, 0.25, 0.1, 0.05}) {
-            hog::globe::Planet planet =
-                hog::client::globe_planet(name, config.seed, radius).value();
+            hog::globe::Planet planet = hog::client::testing::planet();
             planet.voxel = voxel;
             const hog::client::GlobeWorld globe{planet};
             auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
@@ -317,8 +306,7 @@ TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
     REQUIRE(weather != nullptr);
 
     const double radius = 115'000.0;
-    const hog::client::GlobeWorld globe{
-        hog::client::globe_planet("earth", hog::client::testing::planet().seed, radius).value()};
+    const hog::client::GlobeWorld globe{hog::client::testing::planet()};
     hog::client::Forecast forecast{radius};
     forecast.receive(*weather, hog::MonotonicClock::time_point{});
     const auto device = test_device();
@@ -354,10 +342,8 @@ TEST_CASE("a swell on the coast, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
-    const double radius = hog::client::testing::planet().radius;
-    const hog::client::GlobeWorld globe{
-        hog::client::globe_planet(std::nullopt, hog::client::testing::planet().seed, radius)
-            .value()};
+    const double radius = hog::client::testing::planet().body.radius;
+    const hog::client::GlobeWorld globe{hog::client::testing::planet()};
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
     auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
@@ -397,7 +383,7 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
     hog::jobs::JobSystem jobs{4};
     // A small planet, made in seconds.
     hog::globe::Planet planet;
-    planet.radius = 4'000.0;
+    planet.body.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
     planet.voxel = 2.5;
@@ -417,7 +403,7 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
         for (const double bubble : {8.0, 24.0}) {
             for (const double pitch : {-0.5, 0.0, 0.5}) {
                 hog::client::Flight flight =
-                    hog::client::start_flight(noon, planet.radius, ground - depth, at);
+                    hog::client::start_flight(noon, planet.body.radius, ground - depth, at);
                 flight.pitch = pitch;
                 Shot shot = shot_of(flight, built.world());
                 shot.cutaway = bubble;

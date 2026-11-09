@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 
 namespace hog::formation {
@@ -186,6 +187,15 @@ void carry_moisture(const Sphere& sphere, std::span<const double> heights,
 
 double sea_level_temperature(const Body& body, double latitude) {
     return read_rows(temperature_rows(body), latitude);
+}
+
+LatitudeTemperatures sea_level_temperatures(const Body& body) {
+    static_assert(std::tuple_size_v<LatitudeTemperatures> == static_cast<std::size_t>(rows));
+    return temperature_rows(body);
+}
+
+double temperature_at(const LatitudeTemperatures& rows, double latitude) noexcept {
+    return read_rows(rows, latitude);
 }
 
 Climate climate_on(const Sphere& sphere, std::span<const double> heights, const Body& body) {

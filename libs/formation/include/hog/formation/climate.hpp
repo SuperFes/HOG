@@ -3,6 +3,7 @@
 #include <hog/formation/body.hpp>
 #include <hog/formation/sphere.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -20,6 +21,12 @@ struct Climate {
 // Yearly mean temperature by latitude, from sunlight against what the planet radiates and
 // carries towards its poles (a Budyko–Sellers balance), at the liquid's level.
 [[nodiscard]] double sea_level_temperature(const Body& body, double latitude);
+
+// The same worked out once for every latitude, °C a degree apart from the south pole to the north,
+// to read many times.
+using LatitudeTemperatures = std::array<double, 181>;
+[[nodiscard]] LatitudeTemperatures sea_level_temperatures(const Body& body);
+[[nodiscard]] double temperature_at(const LatitudeTemperatures& rows, double latitude) noexcept;
 
 // `heights` are metres from the liquid's level; `sea` is 1 where open liquid lies, which moisture
 // comes off.

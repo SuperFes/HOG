@@ -67,15 +67,15 @@ std::vector<Region::Top> Region::tops() {
                 }
                 const Scan& top = floors_up.back();
                 const auto units = static_cast<double>(top.ground + top.surface.grain_amount);
-                found.push_back(
-                    {.face = face,
-                     .i = i,
-                     .j = j,
-                     .first = top.surface.first,
-                     .open = top.surface.open,
-                     .ground = layers.floor + (units / static_cast<double>(full) * layers.thickness),
-                     .grain_amount = top.surface.grain_amount,
-                     .grain = top.surface.grain});
+                found.push_back({.face = face,
+                                 .i = i,
+                                 .j = j,
+                                 .first = top.surface.first,
+                                 .open = top.surface.open,
+                                 .ground = layers.floor +
+                                           (units / static_cast<double>(full) * layers.thickness),
+                                 .grain_amount = top.surface.grain_amount,
+                                 .grain = top.surface.grain});
             }
         }
     }
@@ -98,10 +98,10 @@ void Region::lay_water(const std::vector<Top>& tops,
                 (level - layers.bottom(static_cast<int>(site.layer))) / layers.thickness, 0.0, 1.0);
             const std::int64_t taken =
                 here->grain_amount + (here->solid == Material::Air ? here->solid_amount : 0);
-            const auto amount = static_cast<std::uint16_t>(std::clamp<std::int64_t>(
-                std::llround(share * static_cast<double>(full)) - taken, 0,
-                std::max<std::int64_t>(full - taken, 0)));
-            if (amount != here->liquid_amount || (amount > 0 && here->liquid != liquid_)) {
+            const auto amount = static_cast<std::uint16_t>(
+                std::clamp<std::int64_t>(std::llround(share * static_cast<double>(full)) - taken, 0,
+                                         std::max<std::int64_t>(full - taken, 0)));
+            if (amount != here->liquid_amount || (amount > 0 && here->liquid != Material::Water)) {
                 stepped.changed += std::abs(std::int64_t{amount} - here->liquid_amount);
                 pour(site, amount);
             }
@@ -117,8 +117,10 @@ Runoff Region::run_off(const std::vector<Top>& held_tops, const Rainfall& rainfa
         index.emplace(Key{.face = held_tops[n].face, .i = held_tops[n].i, .j = held_tops[n].j}, n);
     }
     const auto cell_of = [&](const Top& top) {
-        return globe::Cell{
-            .level = static_cast<std::uint8_t>(layers.level), .face = top.face, .i = top.i, .j = top.j};
+        return globe::Cell{.level = static_cast<std::uint8_t>(layers.level),
+                           .face = top.face,
+                           .i = top.i,
+                           .j = top.j};
     };
     const auto index_beside = [&](const Top& top, std::size_t side) {
         const auto next = globe::next_to(cell_of(top), around[side].first, around[side].second);
@@ -168,11 +170,10 @@ Stepped Region::settle_water(const Rainfall& rainfall) {
     }
     const Runoff runoff = run_off(held_tops, rainfall);
     // The sea's own water is left as it is.
-    lay_water(held_tops,
-              [&](std::size_t n) {
-                  return sea && held_tops[n].ground < *sea ? 0.0 : runoff.surface(n);
-              },
-              stepped);
+    lay_water(
+        held_tops,
+        [&](std::size_t n) { return sea && held_tops[n].ground < *sea ? 0.0 : runoff.surface(n); },
+        stepped);
     return stepped;
 }
 

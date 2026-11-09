@@ -34,8 +34,8 @@ public:
     // Longest stretch the air is stepped in at once, seconds.
     static constexpr double longest_step = 120.0;
 
-    // The air over `generator`'s planet, spinning once in `day` seconds.
-    Atmosphere(const globe::Generator& generator, double day, int level, int layers);
+    // The air over `generator`'s planet.
+    Atmosphere(const globe::Generator& generator, int level, int layers);
 
     [[nodiscard]] const Field& field() const noexcept { return field_; }
     [[nodiscard]] Field& field() noexcept { return field_; }
