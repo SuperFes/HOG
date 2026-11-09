@@ -9,9 +9,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <vector>
 
 namespace {
@@ -95,7 +97,7 @@ TEST_CASE("water shows its top to the open, and the ground under it shows throug
           std::ptrdiff_t{4} * tile * tile);
 }
 
-TEST_CASE("water stands as high as it fills its voxel, showing its side over shallower water",
+TEST_CASE("water stands as high as it fills its voxel, as one sheet with the water beside it",
           "[globe][voxel_mesh]") {
     Volume volume;
     const hog::globe::World world{earth(), volume};
@@ -130,21 +132,39 @@ TEST_CASE("water stands as high as it fills its voxel, showing its side over sha
         CHECK(std::abs(top - (bottom + (0.25 * layers.thickness))) < 0.01);
     }
 
-    // Filled to half, one voxel's water stands over its neighbours' by a quarter of a voxel.
+    // Filled to half, one voxel's water is no step over its neighbours': the sheet rises to the
+    // water about each of its corners, whole, with no sides.
     const Site deeper{.face = 2, .i = middle.i + 5, .j = middle.j + 7, .layer = ground + 1};
     REQUIRE(volume.set(deeper, {.liquid = Material::Water,
                                 .liquid_amount = static_cast<std::uint16_t>(Voxel::full / 2)}));
     const VoxelMesh stepped = hog::globe::mesh_tile_column(world, middle, 0);
-    CHECK(quads(stepped) == quads(mesh) + 4);
-    CHECK(std::ranges::count_if(water_tops(stepped), [&](double top) {
-              return std::abs(top - (bottom + (0.5 * layers.thickness))) < 0.01;
-          }) == 4);
+    CHECK(quads(stepped) == quads(mesh));
+    const std::vector<double> tops = water_tops(stepped);
+    CHECK(std::ranges::count_if(tops, [&](double top) {
+              return std::abs(top - (bottom + (0.3125 * layers.thickness))) < 0.01;
+          }) == 16);
+    CHECK(std::ranges::none_of(tops, [&](double top) {
+        return std::abs(top - (bottom + (0.5 * layers.thickness))) < 0.01;
+    }));
+    // Every corner the sheet's quads share stands at one height.
+    std::map<std::array<std::int64_t, 3>, double> heights;
+    for (const hog::globe::VoxelVertex& vertex : stepped.vertices) {
+        if (vertex.material != Material::Water) {
+            continue;
+        }
+        const hog::DVec3 at = stepped.origin + hog::DVec3{vertex.position};
+        const hog::DVec3 way = glm::normalize(at) * 1e6;
+        const std::array<std::int64_t, 3> key{std::llround(way.x), std::llround(way.y),
+                                              std::llround(way.z)};
+        const auto [found, added] = heights.try_emplace(key, glm::length(at));
+        CHECK(std::abs(found->second - glm::length(at)) < 1e-3);
+    }
 
-    // Too little to stand in it, it doesn't show, and its neighbours show their sides over it.
+    // Too little to stand in it, it doesn't show: the sheet has a hole there, and no walls.
     REQUIRE(volume.set(deeper, {.liquid = Material::Water,
                                 .liquid_amount = static_cast<std::uint16_t>(Voxel::full / 32)}));
     const VoxelMesh wet = hog::globe::mesh_tile_column(world, middle, 0);
-    CHECK(quads(wet) == quads(mesh) - 1 + 4);
+    CHECK(quads(wet) == quads(mesh) - 1);
 }
 
 TEST_CASE("ground stands as high as its matter, keeping out water lower than it, and hangs as "
@@ -287,4 +307,51 @@ TEST_CASE("water over ground soaked through stands on it, its pores' water unsee
                   0.01);
         }
     }
+}
+
+TEST_CASE("the sea meets itself level across a tile held a level coarser beside it",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const auto share = [](double of) {
+        return static_cast<std::uint16_t>(of * static_cast<double>(Voxel::full));
+    };
+    // Water to 20.3 voxels up, finely, and the same water a level coarser: to 10.15 of its voxels.
+    const VoxelTree fine = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+        if (z < 20) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return z == 20 ? Cube{.liquid = Material::Water, .liquid_amount = share(0.3)} : Cube{};
+    });
+    const VoxelTree coarse = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+        if (z < 10) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return z == 10 ? Cube{.liquid = Material::Water, .liquid_amount = share(0.15)} : Cube{};
+    });
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 9, .j = 10, .k = 0};
+    const hog::globe::TileKey beside{.level = 1, .face = 2, .i = 5, .j = 5, .k = 0};
+    const VoxelMesh mesh =
+        hog::globe::mesh_tile(layers, key, fine, [&](hog::globe::TileKey at) -> const VoxelTree* {
+            return at == beside ? &coarse : nullptr;
+        });
+    const double surface = layers.bottom(20) + (0.3 * layers.thickness);
+    std::size_t tops = 0;
+    for (std::size_t face = 0; face + 3 < mesh.vertices.size(); face += 4) {
+        const hog::globe::VoxelVertex& vertex = mesh.vertices[face];
+        if (vertex.material != Material::Water) {
+            continue;
+        }
+        const hog::DVec3 at = mesh.origin + hog::DVec3{vertex.position};
+        const double facing = glm::dot(hog::DVec3{vertex.normal}, glm::normalize(at));
+        CHECK(std::abs(facing) > 0.5);
+        if (facing > 0.5) {
+            ++tops;
+            for (std::size_t k = 0; k < 4; ++k) {
+                const hog::DVec3 corner =
+                    mesh.origin + hog::DVec3{mesh.vertices[face + k].position};
+                CHECK(std::abs(glm::length(corner) - surface) < 0.01);
+            }
+        }
+    }
+    CHECK(tops == std::size_t{tile} * tile);
 }

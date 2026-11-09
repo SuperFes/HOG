@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -408,6 +409,9 @@ void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, in
             continue;
         }
         for (const Side& face : box_sides) {
+            if (liquid && (face.axis != 2 || face.by > 0)) {
+                continue;
+            }
             for (const Piece& part : shown(block, x, y, z, piece, liquid, face)) {
                 if (!part.empty()) {
                     quad(mesh, box_of(first, x, y, metres(part.from), metres(part.to)),
@@ -415,6 +419,85 @@ void add_voxel(VoxelMesh& mesh, const Block& block, Cell first, int x, int y, in
                 }
             }
         }
+    }
+}
+
+// The height water stands to in the column at `x`, `y`, in voxels up the layers: the top of the
+// liquid in its voxel at `z`, or one either side, with open space over it.
+std::optional<double> surface_near(const Block& block, int x, int y, int z) {
+    for (const int at : {z, z + 1, z - 1}) {
+        const Slot& here = block.at(x, y, at);
+        if (!here.liquid.empty() &&
+            !end_hidden(here.liquid, true, here, block.at(x, y, at + 1), 1)) {
+            return at + here.liquid.to;
+        }
+    }
+    return std::nullopt;
+}
+
+// The open top of the water in the voxel at `x`, `y`, `z` of the block, as one sheet with the
+// water beside it: each corner as high as the water of the columns about it stands, those within
+// a voxel of its own, so the sea meets itself across columns, tiles and levels rather than
+// standing in steps. Voxels are `size` layers tall.
+void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell first, int x, int y,
+               int z, int size) {
+    const Slot& here = block.at(x, y, z);
+    if (here.liquid.empty() || end_hidden(here.liquid, true, here, block.at(x, y, z + 1), 1)) {
+        return;
+    }
+    const double own = z + here.liquid.to;
+    const auto standing = [&](int corner_x, int corner_y) {
+        double sum = 0.0;
+        int count = 0;
+        for (const int by_x : {corner_x - 1, corner_x}) {
+            for (const int by_y : {corner_y - 1, corner_y}) {
+                if (const std::optional<double> surface =
+                        surface_near(block, x + by_x, y + by_y, z);
+                    surface && std::abs(*surface - own) <= 1.0) {
+                    sum += *surface;
+                    ++count;
+                }
+            }
+        }
+        return count > 0 ? sum / count : own;
+    };
+    const auto radius = [&](double height) {
+        const int below = static_cast<int>(std::floor(height));
+        const double low = layers.bottom(below * size);
+        return low + ((height - below) * (layers.bottom((below + 1) * size) - low));
+    };
+    const std::array<DVec3, 4> rim = corners(Cell{.level = first.level,
+                                                  .face = first.face,
+                                                  .i = first.i + static_cast<std::uint32_t>(x),
+                                                  .j = first.j + static_cast<std::uint32_t>(y)});
+    // Round the cell, as its corners run: by bits, 1 across and 2 along.
+    constexpr std::array<std::array<int, 2>, 4> round{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+    constexpr std::array<std::size_t, 4> rim_of{0, 1, 3, 2};
+    std::array<DVec3, 4> points{};
+    DVec3 out{0.0};
+    for (std::size_t k = 0; k < 4; ++k) {
+        const auto [corner_x, corner_y] = round.at(k);
+        const int bits = corner_x + (2 * corner_y);
+        const std::size_t at = rim_of.at(static_cast<std::size_t>(bits));
+        points.at(k) = rim.at(at) * radius(standing(corner_x, corner_y));
+        out += rim.at(at);
+    }
+    DVec3 normal = glm::cross(points[1] - points[0], points[2] - points[0]);
+    const bool flip = glm::dot(normal, out) < 0.0;
+    if (flip) {
+        normal = -normal;
+    }
+    const double length = glm::length(normal);
+    const Vec3 unit = length > 0.0 ? Vec3{normal / length} : Vec3{glm::normalize(out)};
+    const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+    for (const DVec3& point : points) {
+        mesh.vertices.push_back({.position = Vec3{point - mesh.origin},
+                                 .normal = unit,
+                                 .material = here.liquid.material});
+    }
+    for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
+                                           : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {
+        mesh.indices.push_back(base + corner);
     }
 }
 
@@ -535,10 +618,6 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
     Near near{key, tile, beside};
     for (int y = -1; y <= across; ++y) {
         for (int x = -1; x <= across; ++x) {
-            // Those past its corners are never looked at.
-            if ((x < 0 || x >= across) && (y < 0 || y >= across)) {
-                continue;
-            }
             for (std::size_t n = 0; n < column.size(); ++n) {
                 const int z = static_cast<int>(n) - 1;
                 column[n] = base + z < shell ? held_of(near(x, y, z)) : Held{};
@@ -552,6 +631,7 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
         for (int y = 0; y < across; ++y) {
             for (int x = 0; x < across; ++x) {
                 add_voxel(mesh, block, first, x, y, z, low, high);
+                add_sheet(mesh, block, layers, first, x, y, z, size);
             }
         }
     }
@@ -586,6 +666,7 @@ VoxelMesh mesh_tile_column(const World& world, Site corner, int level) {
         for (int y = 0; y < across; ++y) {
             for (int x = 0; x < across; ++x) {
                 add_voxel(mesh, block, first, x, y, z, low, high);
+                add_sheet(mesh, block, layers, first, x, y, z, size);
             }
         }
     }
