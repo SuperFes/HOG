@@ -164,6 +164,7 @@ struct Body {
 
     // The sea's waves working on its edge, sorting what reaches it into beaches.
     double storm_wind = 20.0; // metres a second the winds of the storms that shape coasts blow
+    double usual_wind = 7.0;  // and of an ordinary day's, about Earth's mean over the sea
     double swell_share = 0.5; // of a storm's waves, the share reaching coasts off its wind's way
     double shore_years = 7'000.0; // years the sea has stood at about its level, beaches building
     double cliff_retreat = 0.04;  // metres a year waves a metre high wear the softest rock back, as
@@ -173,9 +174,11 @@ struct Body {
     double rock_sand = 0.35; // share of rock rivers wear off that's sand, the rest silt and clay
     double stone_life = 2'000.0; // years the surf takes to grind most of a beach's stones to sand
     double stirring_waves = 2.0; // metres high storm waves are that wash half the mud off a coast
-    double drift_reach = 100'000.0; // metres sand goes along the shore before most has stayed
-    double reef_warmth = 23.0;      // °C of yearly sea coral reefs grow best in, few 5 °C colder
-    double shelf_depth = 200.0;     // metres of sea about a coast shallow enough for reefs near it
+    double drift_reach = 100'000.0;   // metres sand goes along the shore before most has stayed
+    double volcanic_reach = 20'000.0; // metres lava's and basalt's glassy sand goes, down rivers
+                                      // or along the shore, before most has broken down to mud
+    double reef_warmth = 23.0;        // °C of yearly sea coral reefs grow best in, few 5 °C colder
+    double shelf_depth = 200.0; // metres of sea about a coast shallow enough for reefs near it
     double reef_sand = 2.0; // cubic metres a year of broken coral a metre of reef-lined coast gets
     double shell_sand = 0.05;   // and of shells, a metre of any open coast
     double muddiest_reef = 1.0; // cubic metres a year of mud passing a metre of coast that smothers

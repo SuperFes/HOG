@@ -27,6 +27,7 @@ using hog::formation::Shores;
 using hog::formation::shores_on;
 using hog::formation::Sphere;
 using hog::formation::wave_height;
+using hog::formation::wave_period;
 using hog::formation::World;
 
 namespace {
@@ -142,6 +143,32 @@ TEST_CASE("waves grow with the open water the wind blows over, until the sea is 
     CHECK(wave_height(5.0e6, body) == wave_height(2.0e6, body));
 }
 
+TEST_CASE("a fully grown sea's waves come about fifteen seconds apart, smaller ones sooner",
+          "[formation][shores]") {
+    const Body body;
+    // A Pierson-Moskowitz sea peaks at 0.877 g / U radians a second.
+    const double grown = wave_height(5.0e6, body);
+    CHECK_THAT(wave_period(grown, body),
+               WithinRel(2.0 * 3.141592653589793 * body.storm_wind / (0.877 * body.gravity), 1e-6));
+    CHECK(wave_period(1.0, body) < wave_period(grown, body));
+    CHECK(wave_period(0.0, body) == 0.0);
+}
+
+TEST_CASE("an ordinary day's waves are smaller than storms', wherever any come in",
+          "[formation][shores]") {
+    const Coast coast{south_or_sound};
+    const Shores shores = coast.shores();
+    int coasts = 0;
+    for (std::uint32_t point = 0; point < coast.sphere.size(); ++point) {
+        if (coast.on_shore(point)) {
+            ++coasts;
+            CHECK(shores.usual[point] > 0.0);
+            CHECK(shores.usual[point] < 0.5 * shores.waves[point]);
+        }
+    }
+    CHECK(coasts > 0);
+}
+
 TEST_CASE("a sound's coasts get smaller waves than the open ocean's", "[formation][shores]") {
     const Coast coast{south_or_sound};
     const Shores shores = coast.shores();
@@ -190,6 +217,59 @@ TEST_CASE("a lava coast's beach is dark, a granite coast's pale", "[formation][s
     CHECK(mean_on_shore(coast, shores.volcanic, granite) < 0.01);
     // Hard rock breaks into stones the surf rounds; soft rock wears faster, into finer stuff.
     CHECK(mean_on_shore(coast, shores.shingle, granite) > 0.1);
+}
+
+TEST_CASE("lava's dark sand breaks down along the shore, staying by the lava it came from",
+          "[formation][shores]") {
+    // A short stretch of lava coast on a granite one.
+    // The drift carrying sand far, so it's breaking down that keeps the lava's to it.
+    Coast coast{[](const DVec3& at) { return at.z < 0.0; }};
+    coast.body.shell_sand = 0.0;
+    coast.body.drift_reach = 1.0e6;
+    const DVec3 lava_at{1.0, 0.0, 0.0};
+    for (std::uint32_t point = 0; point < coast.sphere.size(); ++point) {
+        if (angle(coast.sphere.point(point), lava_at) < 0.04) {
+            coast.outcrop.rock[point] = Rock::Lava;
+        }
+    }
+    const auto by_lava = [&](const DVec3& at) { return angle(at, lava_at) < 0.04; };
+    // Several of the shore's points along, out of reach of the lava's own cliffs.
+    const auto along = [&](const DVec3& at) {
+        return on_open_coast(at) && angle(at, lava_at) > 0.1 && angle(at, lava_at) < 0.2;
+    };
+    const Shores shores = coast.shores();
+    coast.body.volcanic_reach = 0.0;
+    const Shores lasting = coast.shores();
+    CHECK(mean_on_shore(coast, shores.volcanic, by_lava) > 0.3);
+    // Basalt's pebbles still go along as shingle and are ground to dark sand where they lie.
+    CHECK(mean_on_shore(coast, lasting.volcanic, along) > 0.05);
+    CHECK(mean_on_shore(coast, shores.volcanic, along) <
+          0.5 * mean_on_shore(coast, lasting.volcanic, along));
+}
+
+TEST_CASE("lava's dark sand breaks down to mud down long rivers", "[formation][shores]") {
+    // Lava far inland, the rivers wearing it and bringing what's left to the coast.
+    Coast coast{[](const DVec3& at) { return at.z < 0.0; }};
+    coast.body.shell_sand = 0.0;
+    coast.body.cliff_retreat = 0.0;
+    for (std::uint32_t point = 0; point < coast.sphere.size(); ++point) {
+        const DVec3 at = coast.sphere.point(point);
+        if (!coast.in_sea(point)) {
+            coast.rivers.wear[point] = 1e-4;
+            coast.outcrop.rock[point] = at.z > 0.3 ? Rock::Lava : Rock::Basement;
+        } else if (coast.on_shore(point)) {
+            coast.sediment.settling[point] = 1.0e6;
+        }
+    }
+    const Shores shores = coast.shores();
+    coast.body.volcanic_reach = 0.0;
+    const Shores lasting = coast.shores();
+    const auto mouths = [](const DVec3& at) { return std::abs(at.z) < 0.1; };
+    CHECK(mean_on_shore(coast, lasting.volcanic, mouths) > 0.2);
+    CHECK(mean_on_shore(coast, shores.volcanic, mouths) <
+          0.1 * mean_on_shore(coast, lasting.volcanic, mouths));
+    // What broke down came as mud.
+    CHECK(mean_on_shore(coast, shores.mud, mouths) >= mean_on_shore(coast, lasting.mud, mouths));
 }
 
 TEST_CASE("coral grows off warm, shallow, clear coasts, and its sand whitens their beaches",
