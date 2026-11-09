@@ -18,6 +18,7 @@ Pool::Cell Pool::at(int x, int y) const noexcept {
 Pool pool_of(const Reached& reached) {
     Pool pool;
     pool.level = reached.level;
+    pool.outlet = reached.outlet;
     std::vector<std::pair<std::pair<int, int>, Pool::Cell>> marked;
     marked.reserve(reached.water.size() + reached.shore.size());
     for (const auto& cell : reached.water) {

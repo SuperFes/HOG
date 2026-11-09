@@ -23,6 +23,8 @@ namespace {
 constexpr double rock_steepest = 1.73; // 60 degrees
 constexpr double loose_steepest = 0.7; // 35 degrees
 constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
+// Cells a lake may fill out to from its floor, either way.
+constexpr int farthest_fill = 4096;
 // Rip currents cut crescent bars about this many times the surf zone's width apart.
 constexpr double rip_spacing = 4.0;
 
@@ -148,7 +150,7 @@ Formed::Formed(const Planet& planet)
     fill_shores();
 }
 
-DVec3 Formed::Lake::toward(int x, int y) const noexcept {
+DVec3 Formed::Lake::toward(double x, double y) const noexcept {
     return glm::normalize(middle + (east * (x * step)) + (north * (y * step)));
 }
 
@@ -557,8 +559,9 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
     const DVec3 pole = std::abs(water.middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     water.east = glm::normalize(glm::cross(pole, water.middle));
     water.north = glm::cross(water.middle, water.east);
-    // Cells a sixteenth of the points' spacing, finer than the ground read between them bends,
-    // with room to brim past its points by a few spacings.
+    // Cells a sixteenth of the points' spacing, finer than the ground read between them bends.
+    // Its own reach runs a few spacings past its points; rising, it fills as far out as the
+    // ground holds it.
     water.step = sphere.spacing() / 16.0;
     const int half = std::clamp(
         static_cast<int>(std::ceil((reach + (3.0 * sphere.spacing())) / water.step)), 16, 2048);
@@ -571,7 +574,7 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
     };
     // A cell's middle may stand over the water while ground in it lies under: as much as its
     // own width up, on all but cliffs, gullies finer than it among them.
-    water.pool = fill_pool(half, ground, most, water.step * radius_);
+    water.pool = fill_pool(half, ground, most, water.step * radius_, farthest_fill);
     return water;
 }
 
@@ -599,6 +602,18 @@ void Formed::list_lake(std::uint32_t lake, std::uint32_t floor,
             }
         }
     }
+}
+
+std::vector<Formed::Outlet> Formed::lake_outlets() const {
+    std::vector<Outlet> outlets;
+    for (const Lake& water : lakes_) {
+        if (water.pool.outlet) {
+            outlets.push_back(
+                {.at = water.toward(water.pool.outlet->first, water.pool.outlet->second),
+                 .level = water.pool.level});
+        }
+    }
+    return outlets;
 }
 
 std::uint32_t Formed::start_near(DVec3 direction) const noexcept {

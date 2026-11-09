@@ -49,6 +49,13 @@ public:
     [[nodiscard]] Here at(DVec3 direction, double lod = 0.0) const;
 
     [[nodiscard]] bool has_sea() const noexcept { return has_sea_; }
+    // Where a lake that brims runs out over its rim, where a river leaves it: a unit direction,
+    // and the level it brims at, metres over the sea.
+    struct Outlet {
+        DVec3 at{0.0};
+        double level = 0.0;
+    };
+    [[nodiscard]] std::vector<Outlet> lake_outlets() const;
     [[nodiscard]] double lowest() const noexcept { return lowest_; }
     [[nodiscard]] double highest() const noexcept { return highest_; }
     [[nodiscard]] const formation::World& world() const noexcept { return world_; }
@@ -163,8 +170,8 @@ private:
         double step = 0.0;
         Pool pool;
 
-        // The middle of the cell at `x`, `y`.
-        [[nodiscard]] DVec3 toward(int x, int y) const noexcept;
+        // The middle of the cell at `x`, `y`, or anywhere across the grid in cells.
+        [[nodiscard]] DVec3 toward(double x, double y) const noexcept;
     };
     std::vector<Lake> lakes_;
     // The lakes whose water may stand about each point.

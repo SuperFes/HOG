@@ -167,6 +167,20 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
     CHECK(wet * 2 > walked);
 }
 
+TEST_CASE("a formed lake that brims runs out over its rim at its level", "[globe][formed]") {
+    const Formed& formed = *formed_generator().shape().formed;
+    const auto outlets = formed.lake_outlets();
+    WARN(outlets.size() << " lakes brim over their rims");
+    for (const Formed::Outlet& outlet : outlets) {
+        CHECK(std::abs(glm::length(outlet.at) - 1.0) < 1e-9);
+        // The rim as the lake read it, before crags.
+        const Formed::Here here = formed.at(outlet.at, 0.0);
+        const double rim = here.top.value - here.crag;
+        CAPTURE(rim, outlet.level);
+        CHECK(std::abs(rim - outlet.level) < 0.5);
+    }
+}
+
 TEST_CASE("a formed lake stands level, no higher than formed, over lower ground only",
           "[globe][formed]") {
     const Generator& generator = formed_generator();
