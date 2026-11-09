@@ -305,6 +305,7 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
+    const double planet_radius = generator.planet().radius;
     // Storms' waves run up no higher than about twice the tallest fully grown sea's, near 10 m,
     // even on shingle.
     constexpr double tallest = 10.0;
@@ -327,7 +328,19 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
                made_of == Material::Sediment));
         const double slope =
             glm::length(here.top.gradient - (glm::dot(here.top.gradient, direction) * direction));
-        steep += slope > steepest ? 1 : 0;
+        // How steep the ground under it is, across a metre either way.
+        const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, direction));
+        const DVec3 north = glm::cross(direction, east);
+        const auto ground = [&](const DVec3& way) {
+            const Formed::Here there =
+                formed.at(glm::normalize(direction + (way / planet_radius)), voxel);
+            return there.top.value - there.layers.beach;
+        };
+        const double under = std::hypot((ground(east) - ground(-east)) / 2.0,
+                                        (ground(north) - ground(-north)) / 2.0);
+        // On the shore, where the waves work it: further down it's what's slid off the shore.
+        const bool shore = here.top.value > -2.0 * tallest;
+        steep += shore && slope > steepest && under < steepest ? 1 : 0;
         // Over the shoreface, from the water down as far as storms move it; past that its toe
         // lies as steep as it holds.
         if (made_of == Material::Sand && here.top.value < 0.0 && here.top.value > -2.0 * tallest) {
@@ -335,8 +348,8 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
         }
     }
     CHECK(beaches > 20);
-    // No beach lies steeper than its stones hold soaked, but for a veneer thinning out where a
-    // hollow funnels its sand away.
+    // No beach on the shore lies steeper than its stones hold soaked on ground that isn't already
+    // as steep.
     CHECK(steep * 100 <= beaches);
     // Sand lies far flatter than it could where the waves work it.
     REQUIRE(sand.size() > 20);
@@ -516,4 +529,59 @@ TEST_CASE("beaches across the shores of a few worlds", "[.bench][globe][formed]"
                      << ", black " << kind(Material::VolcanicSand) << ", shell "
                      << kind(Material::ShellSand) << ", shingle " << kind(Material::Shingle));
     }
+}
+
+TEST_CASE("beaches meet the ground and the sea without walls or steps", "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const Planet& planet = generator.planet();
+    const auto& world = formed.world();
+    const auto& sphere = world.sphere;
+    const double spacing = sphere.spacing() * planet.radius;
+    const auto in_sea = [&](std::uint32_t point) { return world.rivers.receiver[point] == point; };
+    int transects = 0;
+    int with_beach = 0;
+    for (std::uint32_t point = 0; point < sphere.size() && transects < 40; point += 13) {
+        const auto neighbors = sphere.neighbors(point);
+        const auto land =
+            std::ranges::find_if(neighbors, [&](std::uint32_t near) { return !in_sea(near); });
+        if (!in_sea(point) || land == neighbors.end()) {
+            continue;
+        }
+        const DVec3 from = sphere.point(point);
+        const DVec3 way = glm::normalize(sphere.point(*land) - from);
+        const std::optional<double> crossing =
+            waterline_from(formed, from, way, planet.radius, 6.0 * spacing);
+        if (!crossing) {
+            continue;
+        }
+        ++transects;
+        // Every metre across, its thickness changes no faster than the ground under it does and
+        // a slope as steep as loose ground holds, down to twice the tallest storms' waves.
+        constexpr double step = 1.0;
+        constexpr double shore_depth = 20.0;
+        const auto steps = static_cast<int>(spacing / step);
+        double last_beach = -1.0;
+        double last_ground = 0.0;
+        double last_top = 0.0;
+        bool beach = false;
+        for (int at = 0; at < steps; ++at) {
+            const double metres = *crossing - (0.5 * spacing) + (at * step);
+            const DVec3 direction = glm::normalize(from + (way * (metres / planet.radius)));
+            const Formed::Here here = formed.at(direction, planet.voxel);
+            const double ground = here.top.value - here.layers.beach;
+            beach = beach || here.layers.beach > 0.0;
+            // On the shore, where the waves work it: further down it's what's slid off.
+            if (last_beach >= 0.0 && here.top.value > -shore_depth && last_top > -shore_depth) {
+                CHECK(std::abs(here.layers.beach - last_beach) <=
+                      std::abs(ground - last_ground) + (0.8 * step) + 0.05);
+            }
+            last_beach = here.layers.beach;
+            last_ground = ground;
+            last_top = here.top.value;
+        }
+        with_beach += beach ? 1 : 0;
+    }
+    CHECK(transects > 10);
+    CHECK(with_beach > 3);
 }
