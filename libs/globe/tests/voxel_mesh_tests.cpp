@@ -282,6 +282,30 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
     }
 }
 
+TEST_CASE("a tile beside which only finer tiles are held reads them where they meet it",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const VoxelTree full = VoxelTree::build(Volume::tile_side, [](int, int, int) {
+        return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+    });
+    const VoxelTree air{Volume::tile_side};
+    // Rock a level coarser, the place across it held as air a level finer, all of it or its lower
+    // half: the rock shows its side to that air, and only there.
+    const hog::globe::TileKey key{.level = 1, .face = 2, .i = 5, .j = 5, .k = 1};
+    const auto finer_air = [&](bool all) {
+        return [&, all](hog::globe::TileKey at) -> const VoxelTree* {
+            const bool across = at.level == 0 && at.face == key.face && at.i == (key.i * 2) + 2 &&
+                                at.j / 2 == key.j && at.k / 2 == key.k;
+            return across && (all || at.k == key.k * 2) ? &air : nullptr;
+        };
+    };
+    CHECK(hog::globe::mesh_tile(layers, key, full).indices.empty());
+    CHECK(quads(hog::globe::mesh_tile(layers, key, full, finer_air(true))) ==
+          std::size_t{tile} * tile);
+    CHECK(quads(hog::globe::mesh_tile(layers, key, full, finer_air(false))) ==
+          std::size_t{tile} * tile / 2);
+}
+
 TEST_CASE("water over ground soaked through stands on it, its pores' water unseen",
           "[globe][voxel_mesh]") {
     const auto soaked = VoxelTree::build(Volume::tile_side, [](int, int, int z) {
