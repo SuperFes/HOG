@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace hog::flow {
 namespace {
@@ -76,13 +75,13 @@ void Region::loosen(const globe::Rock& rock) {
             [thickness](globe::Voxel& voxel, double to) {
                 globe::dig_voxel(voxel, to, thickness);
             });
-    const double volume = 4.0 / 3.0 * std::numbers::pi * rock.axes.x * rock.axes.y * rock.axes.z;
-    parcels_.push_back({.id = ++parcel_ids_,
-                        .at = rock.middle,
-                        .material = rock.material,
-                        .amount = static_cast<std::int64_t>(
-                            volume / (thickness * thickness * thickness) * globe::Voxel::full),
-                        .radius = rolling_radius(rock)});
+    parcels_.push_back(
+        {.id = ++parcel_ids_,
+         .at = rock.middle,
+         .material = rock.material,
+         .amount = static_cast<std::int64_t>(rock.volume() / (thickness * thickness * thickness) *
+                                             globe::Voxel::full),
+         .radius = rolling_radius(rock)});
 }
 
 std::size_t Region::loosen_unsupported(DVec3 point, std::size_t& unjudged) {

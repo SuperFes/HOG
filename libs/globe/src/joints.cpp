@@ -34,10 +34,40 @@ double joint(std::uint64_t seed, glm::length_t axis, std::int64_t k) noexcept {
     return (static_cast<double>(k) + off) * widest_joints;
 }
 
+// The middle of the domain lattice's cell `cell`, scattered about it.
+DVec3 domain_middle(std::uint64_t seed, glm::i64vec3 cell) noexcept {
+    const std::uint64_t bits = hash_values(seed, cell.x, cell.y, cell.z);
+    const DVec3 scatter{unit(hash_values(bits, 0)), unit(hash_values(bits, 1)),
+                        unit(hash_values(bits, 2))};
+    return (DVec3{cell} + 0.25 + (0.5 * scatter)) * joint_domain;
+}
+
+// A rotation drawn evenly from all of them (Shoemake's), as the unit vectors it turns the axes to.
+std::array<DVec3, 3> turned(std::uint64_t bits) noexcept {
+    const double u = unit(hash_values(bits, 0));
+    const double v = 2.0 * std::numbers::pi * unit(hash_values(bits, 1));
+    const double w = 2.0 * std::numbers::pi * unit(hash_values(bits, 2));
+    const double a = std::sqrt(1.0 - u);
+    const double b = std::sqrt(u);
+    const double x = a * maths::sin(v);
+    const double y = a * maths::cos(v);
+    const double z = b * maths::sin(w);
+    const double s = b * maths::cos(w);
+    return {DVec3{1.0 - (2.0 * ((y * y) + (z * z))), 2.0 * ((x * y) + (s * z)),
+                  2.0 * ((x * z) - (s * y))},
+            DVec3{2.0 * ((x * y) - (s * z)), 1.0 - (2.0 * ((x * x) + (z * z))),
+                  2.0 * ((y * z) + (s * x))},
+            DVec3{2.0 * ((x * z) + (s * y)), 2.0 * ((y * z) - (s * x)),
+                  1.0 - (2.0 * ((x * x) + (y * y)))}};
+}
+
 } // namespace
 
 double Block::inset(DVec3 point) const noexcept {
-    const DVec3 in = glm::min(point - low, high - point);
+    const DVec3 offset = point - origin;
+    const DVec3 local{glm::dot(offset, sets[0]), glm::dot(offset, sets[1]),
+                      glm::dot(offset, sets[2])};
+    const DVec3 in = glm::min(local - low, high - local);
     return std::min({in.x, in.y, in.z});
 }
 
@@ -51,18 +81,40 @@ double joint_spacing(double strength) noexcept {
            maths::pow(widely_jointed / closest_joints, std::clamp(strength, 0.0, 1.0));
 }
 
-Block block_at(DVec3 point, double strength, std::uint64_t seed) noexcept {
+Block block_at(DVec3 world_point, double strength, std::uint64_t seed) noexcept {
+    // The domain whose middle is nearest.
+    const glm::i64vec3 home{glm::floor(world_point / joint_domain)};
+    glm::i64vec3 nearest = home;
+    double best = 1e300;
+    for (std::int64_t dx = -1; dx <= 1; ++dx) {
+        for (std::int64_t dy = -1; dy <= 1; ++dy) {
+            for (std::int64_t dz = -1; dz <= 1; ++dz) {
+                const glm::i64vec3 cell = home + glm::i64vec3{dx, dy, dz};
+                const DVec3 off = world_point - domain_middle(seed, cell);
+                if (const double apart = glm::dot(off, off); apart < best) {
+                    best = apart;
+                    nearest = cell;
+                }
+            }
+        }
+    }
     Block block;
-    std::uint64_t id = seed;
+    block.origin = domain_middle(seed, nearest);
+    const std::uint64_t domain = hash_values(seed, nearest.x, nearest.y, nearest.z, 1);
+    block.sets = turned(domain);
+    const DVec3 offset = world_point - block.origin;
+    const DVec3 point{glm::dot(offset, block.sets[0]), glm::dot(offset, block.sets[1]),
+                      glm::dot(offset, block.sets[2])};
+    std::uint64_t id = domain;
     for (glm::length_t axis = 0; axis < 3; ++axis) {
         auto k = static_cast<std::int64_t>(std::floor(point[axis] / widest_joints));
-        if (point[axis] < joint(seed, axis, k)) {
+        if (point[axis] < joint(domain, axis, k)) {
             --k;
-        } else if (point[axis] >= joint(seed, axis, k + 1)) {
+        } else if (point[axis] >= joint(domain, axis, k + 1)) {
             ++k;
         }
-        block.low[axis] = joint(seed, axis, k);
-        block.high[axis] = joint(seed, axis, k + 1);
+        block.low[axis] = joint(domain, axis, k);
+        block.high[axis] = joint(domain, axis, k + 1);
         id = hash_values(id, k);
     }
     // Split as often as makes the mean spacing the rock's, each split along each direction drawn
