@@ -39,6 +39,11 @@ public:
 private:
     [[nodiscard]] std::uint32_t start_near(DVec3 direction) const noexcept;
     struct Lake;
+    // The ground's top at `direction`, read from the points weighed for it there: as the points
+    // have it smoothly between them, but nowhere over the walls of the valleys their water runs
+    // down, which rise as steeply as the ground about each stands. Crests stand where walls meet.
+    [[nodiscard]] formation::Smooth::Read carved(DVec3 direction,
+                                                 const formation::Smooth::Weights& weights) const;
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
     // runs out over its rim or stands at the level formed for it.
     void fill_lakes();
@@ -71,6 +76,8 @@ private:
     std::vector<double> lava_;
     std::vector<double> rock_cover_;
     std::vector<double> light_;
+    // How steeply valley walls rise about each point, metres up per metre across.
+    std::vector<double> wall_;
     // A lake's water about its floor, on a grid of cells `step` radians across laid on the plane
     // touching the sphere there.
     struct Lake {

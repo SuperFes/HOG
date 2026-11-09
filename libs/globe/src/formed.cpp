@@ -1,5 +1,7 @@
 #include "formed.hpp"
 
+#include "valleys.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -79,6 +81,25 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         lava_[point] = vertical_ * world.outcrop.lava[point];
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
+    }
+    // Walls as steep as the ground falls to the point's nearest, no steeper than rock stands, or
+    // loose ground where it lies deep.
+    constexpr double rock_steepest = 1.73; // 60 degrees
+    constexpr double loose_steepest = 0.7; // 35 degrees
+    constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
+    wall_.assign(size, 0.0);
+    for (std::uint32_t point = 0; point < size; ++point) {
+        double steepest = 0.0;
+        for (const std::uint32_t next : world.sphere.neighbors(point)) {
+            const double run =
+                std::acos(std::clamp(glm::dot(world.sphere.point(point), world.sphere.point(next)),
+                                     -1.0, 1.0)) *
+                radius_;
+            steepest = std::max(steepest, std::abs(top_[next] - top_[point]) / std::max(run, 1.0));
+        }
+        const double deposits =
+            alluvium_[point] + lake_beds_[point] + till_[point] + sand_[point] + loess_[point];
+        wall_[point] = std::min(steepest, deposits > loose_deep ? loose_steepest : rock_steepest);
     }
     const auto [lowest, highest] = std::ranges::minmax(top_);
     lowest_ = lowest;
@@ -176,9 +197,10 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
         static_cast<int>(std::ceil((reach + (3.0 * sphere.spacing())) / water.step)), 16, 2048);
     std::uint32_t near = floor;
     const auto ground = [&](int x, int y) {
-        smooth_.weigh(water.toward(x, y), weights, near);
+        const DVec3 direction = water.toward(x, y);
+        smooth_.weigh(direction, weights, near);
         near = weights.nearest;
-        return formation::Smooth::read(top_, weights).value;
+        return carved(direction, weights).value;
     };
     water.pool = fill_pool(half, ground, most);
     return water;
@@ -221,13 +243,53 @@ std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
     return starts_[(((face * starts_across) + cell(on.u)) * starts_across) + cell(on.v)];
 }
 
+formation::Smooth::Read Formed::carved(DVec3 direction,
+                                       const formation::Smooth::Weights& weights) const {
+    const formation::World& world = world_;
+    const formation::Sphere& sphere = world.sphere;
+    formation::Smooth::Read ground = formation::Smooth::read(top_, weights);
+    // Walls reach a little way from their valleys, so none is ever missed among those of the
+    // points weighed here, however the points weighed change.
+    const double reach = 0.6 * sphere.spacing() * radius_;
+    const auto valley = [&](std::uint32_t point) {
+        const std::uint32_t down = world.rivers.receiver[point];
+        if (down == point) {
+            return;
+        }
+        // A river's bed meets the sea at its level, not down on the sea floor past its mouth.
+        const bool mouth = world.rivers.receiver[down] == down;
+        const Wall wall = wall_at({.from = sphere.point(point),
+                                   .to = sphere.point(down),
+                                   .floor_from = top_[point],
+                                   .floor_to = mouth ? std::min(top_[point], 0.0) : top_[down],
+                                   .wall = std::max(wall_[point], wall_[down]),
+                                   .reach = reach},
+                                  direction, radius_);
+        if (wall.height < ground.value) {
+            // Read's gradient is per radian.
+            ground = {.value = wall.height, .gradient = wall.gradient * radius_};
+        }
+    };
+    for (const std::uint32_t point : weights.points) {
+        valley(point);
+        // And those running into it from points not weighed.
+        for (const std::uint32_t up : sphere.neighbors(point)) {
+            if (world.rivers.receiver[up] == point &&
+                std::ranges::find(weights.points, up) == weights.points.end()) {
+                valley(up);
+            }
+        }
+    }
+    return ground;
+}
+
 Formed::Here Formed::at(DVec3 direction) const {
     formation::Smooth::Weights weights;
     smooth_.weigh(direction, weights, start_near(direction));
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
-    const formation::Smooth::Read top = formation::Smooth::read(top_, weights);
+    const formation::Smooth::Read top = carved(direction, weights);
 
     Here here;
     here.top = {.value = top.value, .gradient = top.gradient / radius_};
