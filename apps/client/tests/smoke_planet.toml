@@ -1,7 +1,9 @@
-# The development planet, worn coarsely so the smoke test starts in seconds.
+# The development planet, held in a coarse shell and formed coarsely so the smoke test starts in
+# seconds.
 [planet]
 seed = 1
-ocean_fraction = 0.7
-population = 500_000
-day_hours = 4
-axial_tilt = 23.44
+radius = 115000.0
+voxel = 2.5
+floor_depth = 4000.0
+sky_height = 10000.0
+formed_detail = 5

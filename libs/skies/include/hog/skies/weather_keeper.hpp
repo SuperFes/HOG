@@ -41,8 +41,7 @@ public:
     static constexpr save::SectionId section = save::section_id("AIRS");
     static constexpr std::uint16_t section_version = 1;
 
-    WeatherKeeper(const globe::Generator& generator, GameDuration day, double tilt, GameTime start,
-                  WeatherSettings settings = {});
+    WeatherKeeper(const globe::Generator& generator, GameTime start, WeatherSettings settings = {});
     ~WeatherKeeper();
     WeatherKeeper(const WeatherKeeper&) = delete;
     WeatherKeeper& operator=(const WeatherKeeper&) = delete;
@@ -88,9 +87,9 @@ private:
     // How far game time the air has run.
     GameTime reached_;
     std::future<void> job_;
-    GameDuration running_{};         // game time the job in flight runs on
-    GameDuration ran_{};             // game time the air has run since it started or was restored
-    bool live_ = false;              // whether the air is shown
+    GameDuration running_{}; // game time the job in flight runs on
+    GameDuration ran_{};     // game time the air has run since it started or was restored
+    bool live_ = false;      // whether the air is shown
     std::chrono::steady_clock::time_point last_made_{}; // real time of the last weather made
     std::optional<protocol::Weather> latest_;
     std::vector<std::byte> saved_;

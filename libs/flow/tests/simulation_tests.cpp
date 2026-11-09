@@ -66,7 +66,7 @@ hog::globe::BrickSite ground_brick(const hog::globe::Generator& generator, hog::
 // A direction whose ground stands between two heights over the sea's level, the `nth` found.
 hog::DVec3 ground_between(const hog::globe::Generator& generator, double low, double high,
                           int nth = 0) {
-    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     for (std::uint64_t k = 0;; ++k) {
         const hog::DVec3 direction =
             hog::globe::center(hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304));
@@ -247,8 +247,9 @@ TEST_CASE("rain wets ground the flow does not hold, and a film on it wakes the b
     Simulation simulation{block.world()};
     const auto wetted = [&](double rain) {
         const hog::globe::Site at = block.at(12, 12, 0);
-        return Simulation::Wetted{.column = {.face = at.face, .i = at.i, .j = at.j, .layer = at.layer + 2},
-                                  .sky = {.rain = rain}};
+        return Simulation::Wetted{
+            .column = {.face = at.face, .i = at.i, .j = at.j, .layer = at.layer + 2},
+            .sky = {.rain = rain}};
     };
     const hog::globe::Site bed = block.at(12, 12, -1);
 
@@ -271,7 +272,8 @@ TEST_CASE("rain wets ground the flow does not hold, and a film on it wakes the b
     CHECK(simulation.region().size() > 0);
 }
 
-TEST_CASE("a vent gives lava while it erupts and the flow holds its bricks", "[flow][simulation][vent]") {
+TEST_CASE("a vent gives lava while it erupts and the flow holds its bricks",
+          "[flow][simulation][vent]") {
     Block block{floor_above_sea(100.0), false, rimmed};
     Simulation simulation{block.world()};
     simulation.add_vent({.site = block.at(12, 12, 0),
@@ -297,13 +299,15 @@ TEST_CASE("a vent gives lava while it erupts and the flow holds its bricks", "[f
     CHECK(simulation.region().liquid() == before);
 }
 
-TEST_CASE("aging a world's ice grows it in the bricks written to the world", "[flow][simulation][glacier]") {
+TEST_CASE("aging a world's ice grows it in the bricks written to the world",
+          "[flow][simulation][glacier]") {
     Block block{floor_above_sea(100.0), false, rimmed};
     block.region().flush();
     Simulation simulation{block.world()};
     simulation.set_ice_balance([](const hog::globe::Cell&, double) { return 2.0; });
     const hog::globe::BrickSite brick = hog::globe::brick_of(block.at(12, 12, 0));
-    const std::vector<hog::globe::BrickSite> written = simulation.age_ice(std::span{&brick, 1}, 20.0);
+    const std::vector<hog::globe::BrickSite> written =
+        simulation.age_ice(std::span{&brick, 1}, 20.0);
     CHECK_FALSE(written.empty());
     CHECK(block.world().at(block.at(12, 12, 0)).grain == hog::globe::Material::Ice);
     CHECK(block.world().at(block.at(12, 12, 0)).grain_amount > 0);
@@ -334,7 +338,8 @@ TEST_CASE("ice laid over a column lies on its ground and is written to the world
         {.face = cell.face, .i = cell.i, .j = cell.j, .metres = 6.0}};
     const auto written = simulation.lay_ice(laid);
     CHECK_FALSE(written.empty());
-    const auto ground = generator.column(hog::globe::center(cell), generator.layers().thickness).ground();
+    const auto ground =
+        generator.column(hog::globe::center(cell), generator.layers().thickness).ground();
     const auto layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground));
     double ice = 0.0;
     for (std::uint32_t up_by = 0; up_by < 12; ++up_by) {

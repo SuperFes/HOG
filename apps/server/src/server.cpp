@@ -5,7 +5,6 @@
 #include <hog/globe/grip.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/grain_sharing.hpp>
@@ -70,10 +69,11 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       vented_(vent_sites_.size(), false), volumes_(std::move(volumes)),
       held_(volume_, volumes_, globe::origin_of(generator_)), snapshots_(std::move(snapshots)),
       places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
-      nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
+      nearby_(std::min(planet::level_for(config.net.view.radius, globe.body.radius),
+                       planet::max_level)),
       persistence_(entities_),
       tiles_(server::TileSending::reach_for(generator_.layers().thickness)),
-      joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
+      joined_(entities_, globe.body.radius, config.net.view), ground_(space_, globe_),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -109,10 +109,11 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
 Server::~Server() = default;
 
 Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config, GameTime now) {
-    auto planet = planet::load_planet_config(config.planet);
+    auto planet = globe::load_planet(config.planet);
     if (!planet) {
         return std::unexpected(planet.error());
     }
+    const globe::Planet& globe = *planet;
     if (config.world.has_parent_path()) {
         std::error_code error;
         std::filesystem::create_directories(config.world.parent_path(), error);
@@ -134,24 +135,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     auto volumes = store::SqliteVolumeArchive::open(config.world);
     if (!volumes) {
         return context(world_file, volumes.error());
-    }
-    // The voxel world is Earth-like at the planet's seed and size, as the client's is by default.
-    globe::Planet globe;
-    globe.seed = planet->seed;
-    globe.radius = planet->radius;
-    // A [globe] table in the planet's own file sets the rest of the voxel world's knobs, as a
-    // client's planet file does; its radius, if it gives one, is the world's.
-    const auto text = read_text_file(config.planet);
-    if (text && text->contains("[globe]")) {
-        auto described = globe::parse_planet(*text);
-        if (!described) {
-            return context(config.planet.string(), described.error());
-        }
-        described->seed = planet->seed;
-        globe = *described;
-    }
-    if (auto valid = globe::validate(globe); !valid) {
-        return std::unexpected(std::move(valid).error());
     }
     auto loaded = save::load_newest(*snapshots, globe::world_id(globe));
     if (!loaded) {
@@ -184,8 +167,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(first));
     }
     if (config.weather.on) {
-        server->weather_.emplace(server->generator_, planet->day_length, planet->axial_tilt,
-                                 server->time_,
+        server->weather_.emplace(server->generator_, server->time_,
                                  skies::WeatherSettings{.level = config.weather.level,
                                                         .layers = config.weather.layers,
                                                         .spin_up = config.weather.spin_up});

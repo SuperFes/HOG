@@ -82,7 +82,7 @@ public:
 
     void write_planet(std::uint64_t seed) const {
         std::ofstream{directory_.path() / "planet.toml"} << "[planet]\nseed = " << seed
-                                                         << "\nradius_km = 115\n";
+                                                         << "\nradius = 115000.0\n";
     }
 
     [[nodiscard]] hog::server::ServerConfig config() const {
@@ -682,7 +682,7 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         const hog::globe::Layers& layers = generator.layers();
         const double ground =
             hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
-                .value_or(generator.planet().radius);
+                .value_or(generator.planet().body.radius);
         const std::vector<hog::DVec3> here{direction * ground};
         server->hold(here);
         const hog::globe::Cell cell = hog::globe::cell_under(direction, layers.level);
@@ -699,7 +699,7 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
     }
     auto reopened = opened(world.config());
     CHECK(reopened->volume().columns().empty());
-    const std::vector<hog::DVec3> here{direction * reopened->generator().planet().radius};
+    const std::vector<hog::DVec3> here{direction * reopened->generator().planet().body.radius};
     reopened->hold(here);
     CHECK_FALSE(reopened->volume().columns().empty());
     CHECK(reopened->volume().unsaved().empty());
@@ -756,7 +756,7 @@ TEST_CASE("a player's digging has the tiles it touches sent again to everyone",
     const hog::DVec3 direction = hog::planet::start_direction;
     const double ground =
         hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
-            .value_or(generator.planet().radius);
+            .value_or(generator.planet().body.radius);
     auto first = hog::net::Client::connect(address);
     auto second = hog::net::Client::connect(address);
     REQUIRE(first);

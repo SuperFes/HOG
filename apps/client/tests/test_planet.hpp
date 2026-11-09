@@ -3,7 +3,6 @@
 #include <hog/client/globe_view.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/volume_build.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/calendar.hpp>
@@ -14,19 +13,27 @@
 
 namespace hog::client::testing {
 
-// The development planet the client flies over.
-inline const planet::PlanetConfig& planet() {
-    static const planet::PlanetConfig config =
-        planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" / "planet.toml")
-            .value();
-    return config;
+// The development planet the client flies over, held in a coarser shell and formed less finely
+// than the shipped one, so it's quick to make.
+inline const globe::Planet& planet() {
+    static const globe::Planet shipped = [] {
+        globe::Planet planet =
+            globe::load_planet(std::filesystem::path{HOG_SOURCE_DIR} / "config" / "planet.toml")
+                .value();
+        planet.voxel = 2.5;
+        planet.floor_depth = 4'000.0;
+        planet.sky_height = 10'000.0;
+        planet.formed_detail = 5.0;
+        return planet;
+    }();
+    return shipped;
 }
 
 // The voxel world the client draws in place of the planet, as --globe makes it by default, its
 // ground made about the land nearest the start.
 inline const GlobeWorld& globe() {
     static const GlobeWorld& made = [] -> const GlobeWorld& {
-        static GlobeWorld world{globe_planet(std::nullopt, planet().seed, planet().radius).value()};
+        static GlobeWorld world{planet()};
         const DVec3 land = globe::land_near(world.generator, planet::start_direction).value();
         world.volume =
             globe::generate_area(world.generator, globe::around(world.generator, land, 5));
@@ -40,7 +47,7 @@ inline const GlobeWorld& globe() {
 inline DVec3 on_land() {
     static const DVec3 found = [] {
         const globe::Generator& generator = globe().generator;
-        const double radius = generator.planet().radius;
+        const double radius = generator.planet().body.radius;
         const double lod = globe::voxel_lod(generator);
         const DVec3 near = globe::land_near(generator, planet::start_direction).value();
         const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, near));
@@ -75,7 +82,7 @@ inline DVec3 on_land() {
 }
 
 inline sim::Calendar calendar() {
-    return {planet().day_length, planet().axial_tilt};
+    return {globe::day_length(planet()), planet().body.tilt};
 }
 
 } // namespace hog::client::testing

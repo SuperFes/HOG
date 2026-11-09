@@ -29,7 +29,7 @@ Result<Bot> Bot::start(const globe::Generator& generator, std::string address,
 Bot::Bot(std::unique_ptr<Held> held, client::Session session, DVec3 direction, std::uint64_t seed,
          const WanderSettings& settings) noexcept
     : held_(std::move(held)), direction_(direction), session_(std::move(session)), random_(seed),
-      planet_radius_(held_->world.planet().radius), settings_(settings) {}
+      planet_radius_(held_->world.planet().body.radius), settings_(settings) {}
 
 WorldPosition Bot::feet() const {
     if (player_) {

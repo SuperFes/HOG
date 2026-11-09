@@ -11,13 +11,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
-#include <array>
-#include <cstdio>
-#include <string>
 #include <cstdint>
+#include <cstdio>
 #include <span>
+#include <string>
 #include <vector>
 
 using hog::globe::Cube;
@@ -72,7 +72,8 @@ TEST_CASE("a tree built from voxels tells each point as it was", "[globe][voxel_
     }
 }
 
-TEST_CASE("ground and air join into big leaves, and the boundary stays fine", "[globe][voxel_tree]") {
+TEST_CASE("ground and air join into big leaves, and the boundary stays fine",
+          "[globe][voxel_tree]") {
     // Rock under a level surface at layer 21 of 64, water over it up to layer 40, air above.
     const VoxelTree tree = VoxelTree::build(64, [](int, int, int z) {
         if (z < 21) {
@@ -124,9 +125,8 @@ TEST_CASE("the same voxels are the same tree however they were set", "[globe][vo
 
 TEST_CASE("cubes that repeat are stored once", "[globe][voxel_tree]") {
     // A pattern that only changes with the height, in steps of three.
-    const VoxelTree tree = VoxelTree::build(32, [](int, int, int z) {
-        return z % 3 == 0 ? rock() : water();
-    });
+    const VoxelTree tree =
+        VoxelTree::build(32, [](int, int, int z) { return z % 3 == 0 ? rock() : water(); });
     CHECK(tree.at(4, 4, 3) == rock());
     CHECK(tree.at(4, 4, 4) == water());
     CHECK((tree.nodes() * 50) < tree.unshared_nodes());
@@ -164,14 +164,14 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
                 {
                     const hog::globe::Voxel voxel =
                         generated_at(columns[0], layers, static_cast<std::uint32_t>(low + z));
-                    voxels[place(x, y, z, side)] = cube_of(voxel, hog::globe::kelvin(voxel.temperature));
+                    voxels[place(x, y, z, side)] =
+                        cube_of(voxel, hog::globe::kelvin(voxel.temperature));
                 }
             }
         }
     }
-    const VoxelTree tree = VoxelTree::build(side, [&](int x, int y, int z) {
-        return voxels[place(x, y, z, side)];
-    });
+    const VoxelTree tree =
+        VoxelTree::build(side, [&](int x, int y, int z) { return voxels[place(x, y, z, side)]; });
     for (int z = 0; z < side; ++z) {
         for (int y = 0; y < side; ++y) {
             for (int x = 0; x < side; ++x) {
@@ -203,9 +203,8 @@ TEST_CASE("a tree's bytes read back as the same tree, and the same voxels are th
 
     const VoxelTree plain{64, rock()};
     CHECK(plain.encode().size() < 32);
-    const VoxelTree layered = VoxelTree::build(64, [](int, int, int z) {
-        return z < 21 ? rock() : Cube{};
-    });
+    const VoxelTree layered =
+        VoxelTree::build(64, [](int, int, int z) { return z < 21 ? rock() : Cube{}; });
     CHECK(layered.encode().size() < 400);
     CHECK(VoxelTree::decode(layered.encode())->same_as(layered));
 }
@@ -255,7 +254,7 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
     using namespace hog::globe;
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     hog::DVec3 peak{0.0, 0.0, 1.0};
     hog::DVec3 coast{0.0, 0.0, 1.0};
     double highest = 0.0;
@@ -274,8 +273,8 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
             coast = d;
         }
     }
-    constexpr int blocks_across = 4;  // 32-voxel blocks along each side of the patch
-    constexpr int bricks_across = 4;  // bricks across a block
+    constexpr int blocks_across = 4; // 32-voxel blocks along each side of the patch
+    constexpr int bricks_across = 4; // bricks across a block
     constexpr int side = bricks_across * brick_side;
     for (const auto& [label, at] : {std::pair{"mountain", peak}, std::pair{"coast", coast}}) {
         const Cell centre = cell_under(at, layers.level);
@@ -297,17 +296,24 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                             for (int cl = 0; cl < bricks_across; ++cl) {
                                 const BrickSite brick{
                                     .face = centre.face,
-                                    .i = (base_i + static_cast<std::uint32_t>(bi * side)) / brick_side + static_cast<std::uint32_t>(ci),
-                                    .j = (base_j + static_cast<std::uint32_t>(bj * side)) / brick_side + static_cast<std::uint32_t>(cj),
+                                    .i = (base_i + static_cast<std::uint32_t>(bi * side)) /
+                                             brick_side +
+                                         static_cast<std::uint32_t>(ci),
+                                    .j = (base_j + static_cast<std::uint32_t>(bj * side)) /
+                                             brick_side +
+                                         static_cast<std::uint32_t>(cj),
                                     .layer = static_cast<std::uint32_t>(layer0 / brick_side + cl)};
                                 const BrickVoxels held = generated(generator, brick);
                                 packed += Brick::pack(held).bytes();
                                 for (int index = 0; index < brick_voxels; ++index) {
                                     const Site site = site_in(brick, index);
-                                    const auto x = static_cast<int>(site.i - (base_i + static_cast<std::uint32_t>(bi * side)));
-                                    const auto y = static_cast<int>(site.j - (base_j + static_cast<std::uint32_t>(bj * side)));
+                                    const auto x = static_cast<int>(
+                                        site.i - (base_i + static_cast<std::uint32_t>(bi * side)));
+                                    const auto y = static_cast<int>(
+                                        site.j - (base_j + static_cast<std::uint32_t>(bj * side)));
                                     const auto z = static_cast<int>(site.layer) - layer0;
-                                    voxels[place(x, y, z, side)] = held[static_cast<std::size_t>(index)];
+                                    voxels[place(x, y, z, side)] =
+                                        held[static_cast<std::size_t>(index)];
                                 }
                             }
                         }

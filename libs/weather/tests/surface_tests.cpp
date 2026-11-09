@@ -21,8 +21,8 @@ namespace {
 
 Planet small_earth(double tilt = 23.44) {
     Planet planet;
-    planet.radius = 20'000.0;
-    planet.tilt = tilt;
+    planet.body.radius = 20'000.0;
+    planet.body.tilt = tilt;
     return planet;
 }
 
@@ -36,7 +36,7 @@ struct Year {
 // Runs a field three years in six-hour steps, keeping the last year's range and its two
 // solstices' means.
 Year run_years(const Planet& planet, Field& field) {
-    const Calendar calendar{hog::GameDuration{std::chrono::hours{24}}, planet.tilt};
+    const Calendar calendar{hog::GameDuration{std::chrono::hours{24}}, planet.body.tilt};
     const std::size_t columns = field.surface.size();
     Year year{.high = std::vector<float>(columns, 0.0F),
               .low = std::vector<float>(columns, 1e9F),

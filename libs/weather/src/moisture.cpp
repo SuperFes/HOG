@@ -34,21 +34,20 @@ constexpr double evaporation_time = 600.0;
 constexpr double gas_constant = 8.314'462;
 constexpr double air_molar_mass = 0.028'96;
 
-double saturation(globe::Volatile volatiles, double temperature, double pressure) {
-    return saturation_ratio(volatiles, temperature, pressure);
+double saturation(double temperature, double pressure) {
+    return saturation_ratio(temperature, pressure);
 }
 
 } // namespace
 
-void saturate(Parcel& parcel, globe::Volatile volatiles, double latent_heat, double pressure) {
+void saturate(Parcel& parcel, double latent_heat, double pressure) {
     const double warming = latent_heat / air_heat_capacity();
     // Newton's method on the water left as vapour, as condensing warms the air and so raises what
     // it can hold.
     for (int pass = 0; pass < 4; ++pass) {
-        const double held = saturation(volatiles, parcel.temperature, pressure);
+        const double held = saturation(parcel.temperature, pressure);
         const double slope =
-            (saturation(volatiles, parcel.temperature + step_kelvin, pressure) - held) /
-            step_kelvin;
+            (saturation(parcel.temperature + step_kelvin, pressure) - held) / step_kelvin;
         double change = (parcel.vapour - held) / (1.0 + (warming * slope));
         // Cloud to evaporate is limited to what there is.
         change = std::max(change, -parcel.cloud);
@@ -62,10 +61,7 @@ void saturate(Parcel& parcel, globe::Volatile volatiles, double latent_heat, dou
 }
 
 void condense(Field& field, const globe::Planet& planet) {
-    const auto latent = globe::latent_heat(planet.volatiles);
-    if (!latent) {
-        return;
-    }
+    const double latent = globe::latent_heat;
     const auto layers = static_cast<std::size_t>(field.grid.layers);
     for (std::size_t cell = 0; cell < field.air.size(); ++cell) {
         if (field.blocked[cell] != 0) {
@@ -75,11 +71,11 @@ void condense(Field& field, const globe::Planet& planet) {
         const int layer = static_cast<int>(cell % layers);
         Air& air = field.air[cell];
         const double pressure = pressure_at(planet, static_cast<double>(field.surface[column]),
-                                            field.grid.radius_of(layer) - planet.radius);
+                                            field.grid.radius_of(layer) - planet.body.radius);
         Parcel parcel{.temperature = static_cast<double>(air.temperature),
                       .vapour = static_cast<double>(air.vapour),
                       .cloud = static_cast<double>(air.cloud)};
-        saturate(parcel, planet.volatiles, *latent, pressure);
+        saturate(parcel, latent, pressure);
         air.temperature = static_cast<float>(parcel.temperature);
         air.vapour = static_cast<float>(parcel.vapour);
         air.cloud = static_cast<float>(parcel.cloud);
@@ -87,10 +83,7 @@ void condense(Field& field, const globe::Planet& planet) {
 }
 
 void evaporate(Field& field, const globe::Planet& planet, double seconds) {
-    const auto latent = globe::latent_heat(planet.volatiles);
-    if (!latent) {
-        return;
-    }
+    const double latent = globe::latent_heat;
     for (std::size_t column = 0; column < field.grid.columns(); ++column) {
         int layer = 0;
         while (layer < field.grid.layers && field.solid(column, layer)) {
@@ -100,12 +93,11 @@ void evaporate(Field& field, const globe::Planet& planet, double seconds) {
             continue;
         }
         Air& air = field.at(column, layer);
-        const double height = field.grid.radius_of(layer) - planet.radius;
+        const double height = field.grid.radius_of(layer) - planet.body.radius;
         const auto surface = static_cast<double>(field.surface[column]);
         const double pressure = pressure_at(planet, surface, height);
         // The air at the ground holds what the surface could, at the surface's temperature there.
-        const double held =
-            saturation(planet.volatiles, air_temperature(planet, surface, height), pressure);
+        const double held = saturation(air_temperature(planet, surface, height), pressure);
         const double wind = std::max(least_wind, static_cast<double>(glm::length(air.wind)));
         const double rate = transfer * wind * (field.over_sea[column] != 0 ? 1.0 : land_wetness) /
                             field.grid.depth_of(layer);
@@ -117,7 +109,7 @@ void evaporate(Field& field, const globe::Planet& planet, double seconds) {
             const double mass = air_density(static_cast<double>(air.temperature), pressure) *
                                 field.grid.depth_of(layer);
             field.surface[column] -=
-                static_cast<float>(gained * mass * *latent / surface_heat(field, column));
+                static_cast<float>(gained * mass * latent / surface_heat(field, column));
         }
     }
 }
@@ -132,7 +124,7 @@ void exchange_heat(Field& field, const globe::Planet& planet, double seconds) {
             continue;
         }
         Air& air = field.at(column, layer);
-        const double height = field.grid.radius_of(layer) - planet.radius;
+        const double height = field.grid.radius_of(layer) - planet.body.radius;
         const auto surface = static_cast<double>(field.surface[column]);
         const double target = air_temperature(planet, surface, height);
         const double wind = std::max(least_wind, static_cast<double>(glm::length(air.wind)));
@@ -150,12 +142,9 @@ void exchange_heat(Field& field, const globe::Planet& planet, double seconds) {
 }
 
 void precipitate(Field& field, const globe::Planet& planet, double seconds) {
-    const auto latent = globe::latent_heat(planet.volatiles);
+    const double latent = globe::latent_heat;
     std::ranges::fill(field.precipitation, 0.0F);
-    if (!latent) {
-        return;
-    }
-    const double warming = *latent / air_heat_capacity();
+    const double warming = latent / air_heat_capacity();
     const auto layers = static_cast<std::size_t>(field.grid.layers);
     for (std::size_t column = 0; column < field.grid.columns(); ++column) {
         const auto surface = static_cast<double>(field.surface[column]);
@@ -166,13 +155,14 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
                 continue;
             }
             Air& air = field.air[cell];
-            const double height = field.grid.radius_of(layer) - planet.radius;
+            const double height = field.grid.radius_of(layer) - planet.body.radius;
             const double pressure = pressure_at(planet, surface, height);
             const auto temperature = static_cast<double>(air.temperature);
             auto cloud = static_cast<double>(air.cloud);
             auto rain = static_cast<double>(air.rain);
 
-            const double iced = std::clamp((freezing_point - temperature) / (freezing_point - all_ice), 0.0, 1.0);
+            const double iced =
+                std::clamp((freezing_point - temperature) / (freezing_point - all_ice), 0.0, 1.0);
             const double limit = cloud_limit * (1.0 - ((1.0 - ice_limit) * iced));
             const double grown = std::max(0.0, cloud - limit) * conversion * seconds;
             const double swept = collection * cloud * std::pow(rain, 0.875) * seconds;
@@ -180,7 +170,7 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
             cloud -= made;
             rain += made;
 
-            const double held = saturation_ratio(planet.volatiles, temperature, pressure);
+            const double held = saturation_ratio(temperature, pressure);
             const auto vapour = static_cast<double>(air.vapour);
             if (held > vapour && rain > 0.0) {
                 const double lost =
@@ -213,9 +203,9 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
                 // of the smaller cell under it.
                 const double from = field.grid.radius_of(layer);
                 const double to = field.grid.radius_of(layer - 1);
-                below.rain += static_cast<float>(falling * density * field.grid.depth_of(layer) *
-                                                 from * from /
-                                                 (thick * field.grid.depth_of(layer - 1) * to * to));
+                below.rain +=
+                    static_cast<float>(falling * density * field.grid.depth_of(layer) * from *
+                                       from / (thick * field.grid.depth_of(layer - 1) * to * to));
             }
         }
     }

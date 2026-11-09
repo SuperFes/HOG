@@ -34,9 +34,8 @@ Planet wet() {
 // No air or water, under a sixth of the gravity.
 Planet airless() {
     Planet planet = fine(Planet{});
-    planet.gravity = 1.62;
-    planet.pressure = 0.0;
-    planet.volatiles = hog::globe::Volatile::None;
+    planet.body.gravity = 1.62;
+    planet.system.air.pressure = 0.0;
     return planet;
 }
 
@@ -59,11 +58,11 @@ double open_share(const Planet& planet, Material rock, double depth) {
     int open = 0;
     for (std::uint64_t k = 0; k < count; ++k) {
         const double below = depth - static_cast<double>(k % 7);
-        open +=
-            hog::globe::terms::cave_distance(context, all_of(rock), direction(k),
-                                             planet.radius - below, planet.radius, below, 0.5) < 0.0
-                ? 1
-                : 0;
+        open += hog::globe::terms::cave_distance(context, all_of(rock), direction(k),
+                                                 planet.body.radius - below, planet.body.radius,
+                                                 below, 0.5) < 0.0
+                    ? 1
+                    : 0;
     }
     return static_cast<double>(open) / count;
 }
@@ -128,7 +127,8 @@ TEST_CASE("the cost of the caves' distance, and how steep the noise gets",
     for (std::uint64_t k = 0; k < count; ++k) {
         const double below = 10.0 + static_cast<double>(k % 500);
         sum += hog::globe::terms::cave_distance(context, all_of(Material::Limestone), direction(k),
-                                                earth.radius - below, earth.radius, below, 0.5);
+                                                earth.body.radius - below, earth.body.radius, below,
+                                                0.5);
     }
     const auto took = std::chrono::steady_clock::now() - started;
     std::println("cave_distance: {} us a call ({})",
@@ -229,8 +229,8 @@ TEST_CASE("chambers shrink away under thin rock, their roofs fallen in", "[globe
         int open = 0;
         for (std::uint64_t k = 0; k < 40'000; ++k) {
             open += hog::globe::terms::cave_distance(context, all_of(Material::Limestone),
-                                                     direction(k), earth.radius - 60.0,
-                                                     earth.radius, cover, 0.5) < -4.0
+                                                     direction(k), earth.body.radius - 60.0,
+                                                     earth.body.radius, cover, 0.5) < -4.0
                         ? 1
                         : 0;
         }
@@ -252,7 +252,7 @@ TEST_CASE("passages close where the stress round them overcomes the rock, deeper
     CHECK(earth < 1'500.0);
     CHECK(moon > 3.0 * earth);
     Planet heavy = wet();
-    heavy.gravity *= 2.0;
+    heavy.body.gravity *= 2.0;
     CHECK(floor_of(heavy) == Catch::Approx(earth / 2.0).margin(60.0));
     // Nothing is open at the floor, and a cast down a column never reaches below it.
     const Generator generator{wet()};

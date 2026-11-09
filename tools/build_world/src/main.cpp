@@ -77,7 +77,7 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         return false;
     }
     if (name == "--seed") {
-        options.planet.seed = static_cast<std::uint64_t>(*given);
+        options.planet.body.seed = static_cast<std::uint64_t>(*given);
     } else if (name == "--threads") {
         options.threads = static_cast<std::uint32_t>(*given);
     } else if (name == "--across") {

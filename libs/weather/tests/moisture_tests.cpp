@@ -14,7 +14,6 @@
 
 using Catch::Approx;
 using hog::globe::Planet;
-using hog::globe::Volatile;
 using namespace hog::weather;
 
 namespace {
@@ -22,7 +21,7 @@ namespace {
 constexpr double pressure = 90'000.0;
 
 double latent() {
-    return hog::globe::latent_heat(Volatile::Water).value_or(0.0);
+    return hog::globe::latent_heat;
 }
 
 // What heat and water a parcel holds: its dry air's and vapour's warmth, and the heat its
@@ -41,27 +40,26 @@ TEST_CASE("air holding more than it can condenses to cloud, warming", "[weather]
     Parcel parcel{.temperature = 285.0, .vapour = 0.02, .cloud = 0.0};
     const double energy = moist_energy(parcel);
     const double total = water(parcel);
-    saturate(parcel, Volatile::Water, latent(), pressure);
+    saturate(parcel, latent(), pressure);
     CHECK(parcel.cloud > 0.0);
     CHECK(parcel.temperature > 285.0);
     CHECK(water(parcel) == Approx(total));
     CHECK(moist_energy(parcel) == Approx(energy).epsilon(1e-5));
     // Left holding as much as it can at the temperature it came to.
-    CHECK(parcel.vapour ==
-          Approx(saturation_ratio(Volatile::Water, parcel.temperature, pressure)).epsilon(1e-3));
+    CHECK(parcel.vapour == Approx(saturation_ratio(parcel.temperature, pressure)).epsilon(1e-3));
 }
 
 TEST_CASE("cloud in dry air evaporates, cooling it, until the air is full or the cloud gone",
           "[weather][moisture]") {
     Parcel thin{.temperature = 285.0, .vapour = 0.002, .cloud = 0.001};
-    saturate(thin, Volatile::Water, latent(), pressure);
+    saturate(thin, latent(), pressure);
     CHECK(thin.cloud == Approx(0.0).margin(1e-12));
     CHECK(thin.vapour == Approx(0.003).epsilon(1e-6));
     CHECK(thin.temperature < 285.0);
 
     Parcel thick{.temperature = 285.0, .vapour = 0.002, .cloud = 0.05};
     const double energy = moist_energy(thick);
-    saturate(thick, Volatile::Water, latent(), pressure);
+    saturate(thick, latent(), pressure);
     CHECK(thick.cloud > 0.0);
     CHECK(thick.cloud < 0.05);
     CHECK(moist_energy(thick) == Approx(energy).epsilon(1e-5));
@@ -69,7 +67,7 @@ TEST_CASE("cloud in dry air evaporates, cooling it, until the air is full or the
 
 TEST_CASE("air that holds less than it can is left alone", "[weather][moisture]") {
     Parcel parcel{.temperature = 285.0, .vapour = 0.004, .cloud = 0.0};
-    saturate(parcel, Volatile::Water, latent(), pressure);
+    saturate(parcel, latent(), pressure);
     CHECK(parcel.temperature == 285.0);
     CHECK(parcel.vapour == 0.004);
     CHECK(parcel.cloud == 0.0);
@@ -80,13 +78,13 @@ TEST_CASE("a parcel lifted from the ground makes cloud above a base that rises w
     const Planet planet;
     const double surface = 295.0;
     const auto base = [&](double humidity) {
-        const double held0 = saturation_ratio(Volatile::Water, surface, planet.pressure);
+        const double held0 = saturation_ratio(surface, planet.system.air.pressure);
         for (int metres = 0; metres < 8'000; metres += 25) {
             const double height = metres;
             Parcel parcel{.temperature = surface - (dry_lapse_rate(planet) * height),
                           .vapour = humidity * held0,
                           .cloud = 0.0};
-            saturate(parcel, Volatile::Water, latent(), pressure_at(planet, surface, height));
+            saturate(parcel, latent(), pressure_at(planet, surface, height));
             if (parcel.cloud > 1e-6) {
                 return height;
             }
@@ -101,9 +99,8 @@ TEST_CASE("a parcel lifted from the ground makes cloud above a base that rises w
 
 TEST_CASE("a world with no volatile makes no cloud", "[weather][moisture]") {
     Planet moon;
-    moon.pressure = 0.0;
-    moon.volatiles = hog::globe::Volatile::None;
-    moon.radius = 20'000.0;
+    moon.system.air.pressure = 0.0;
+    moon.body.radius = 20'000.0;
     const hog::globe::Generator generator{moon};
     Field field = start_field(generator, 2, 4);
     field.air[0].temperature = 150.0F;
@@ -117,7 +114,7 @@ TEST_CASE("a world with no volatile makes no cloud", "[weather][moisture]") {
 
 TEST_CASE("the sea feeds the air above it more than the land does", "[weather][moisture]") {
     Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
     for (auto& air : field.air) {
@@ -138,11 +135,10 @@ TEST_CASE("the sea feeds the air above it more than the land does", "[weather][m
         }
         const auto gained = static_cast<double>(field.at(column, layer).vapour);
         const double held =
-            saturation_ratio(planet.volatiles,
-                             air_temperature(planet, static_cast<double>(field.surface[column]),
-                                             field.grid.radius_of(layer) - planet.radius),
+            saturation_ratio(air_temperature(planet, static_cast<double>(field.surface[column]),
+                                             field.grid.radius_of(layer) - planet.body.radius),
                              pressure_at(planet, static_cast<double>(field.surface[column]),
-                                         field.grid.radius_of(layer) - planet.radius));
+                                         field.grid.radius_of(layer) - planet.body.radius));
         if (held <= 0.0) {
             continue;
         }
@@ -158,7 +154,7 @@ TEST_CASE("the sea feeds the air above it more than the land does", "[weather][m
 TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
           "[weather][moisture]") {
     Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     const Field start = start_field(generator, 3, 8);
     const Stencil stencil{start.grid};
@@ -174,9 +170,9 @@ TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
             air.temperature += 6.0F;
             const double radius = field.grid.radius_of(layer);
             air.vapour = moist ? static_cast<float>(saturation_ratio(
-                                     planet.volatiles, static_cast<double>(air.temperature),
+                                     static_cast<double>(air.temperature),
                                      pressure_at(planet, static_cast<double>(field.surface[column]),
-                                                 radius - planet.radius)))
+                                                 radius - planet.body.radius)))
                                : 0.0F;
         }
         float best = 0.0F;
@@ -199,7 +195,7 @@ namespace {
 struct Small {
     Planet planet = [] {
         Planet p;
-        p.radius = 20'000.0;
+        p.body.radius = 20'000.0;
         return p;
     }();
     hog::globe::Generator generator{planet};
@@ -249,9 +245,9 @@ TEST_CASE("rain falls to the ground and is recorded, and no water is lost on the
     for (int layer = 0; layer < world.field.grid.layers; ++layer) {
         Air& air = world.field.at(column, layer);
         air.vapour = static_cast<float>(saturation_ratio(
-            world.planet.volatiles, static_cast<double>(air.temperature),
+            static_cast<double>(air.temperature),
             pressure_at(world.planet, static_cast<double>(world.field.surface[column]),
-                        world.field.grid.radius_of(layer) - world.planet.radius)));
+                        world.field.grid.radius_of(layer) - world.planet.body.radius)));
     }
     world.field.at(column, 6).rain = 0.002F;
     double reached = 0.0;
@@ -307,9 +303,9 @@ TEST_CASE("a heated, moist column makes a storm that rains where a dry one barel
             air.temperature += 6.0F;
             air.vapour =
                 moist ? static_cast<float>(saturation_ratio(
-                            world.planet.volatiles, static_cast<double>(air.temperature),
+                            static_cast<double>(air.temperature),
                             pressure_at(world.planet, static_cast<double>(field.surface[column]),
-                                        field.grid.radius_of(layer) - world.planet.radius)))
+                                        field.grid.radius_of(layer) - world.planet.body.radius)))
                       : 0.0F;
         }
         double total = 0.0;
@@ -326,7 +322,7 @@ TEST_CASE("a heated, moist column makes a storm that rains where a dry one barel
 
 TEST_CASE("the sea gives up the heat of the water it evaporates", "[weather][moisture]") {
     Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
     for (auto& air : field.air) {
@@ -344,7 +340,7 @@ TEST_CASE("the sea gives up the heat of the water it evaporates", "[weather][moi
 
 TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moisture]") {
     Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     Field field = start_field(generator, 3, 6);
     // Air a good deal colder than the ground under it.
@@ -363,7 +359,7 @@ TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moi
         if (layer == field.grid.layers) {
             continue;
         }
-        const double height = field.grid.radius_of(layer) - planet.radius;
+        const double height = field.grid.radius_of(layer) - planet.body.radius;
         const double mass =
             air_density(static_cast<double>(field.at(column, layer).temperature),
                         pressure_at(planet, static_cast<double>(field.surface[column]), height)) *
@@ -383,7 +379,7 @@ TEST_CASE("rain keeps its water falling through cells that grow with height", "[
     const std::size_t column = world.sea_column();
     const Field& field = world.field;
     const auto mass = [&](int layer) {
-        const double height = field.grid.radius_of(layer) - world.planet.radius;
+        const double height = field.grid.radius_of(layer) - world.planet.body.radius;
         const auto surface = static_cast<double>(field.surface[column]);
         const double radius = field.grid.radius_of(layer);
         return air_density(air_temperature(world.planet, surface, height),
@@ -393,9 +389,9 @@ TEST_CASE("rain keeps its water falling through cells that grow with height", "[
     for (int layer = 0; layer < field.grid.layers; ++layer) {
         Air& air = world.field.at(column, layer);
         air.vapour = static_cast<float>(
-            saturation_ratio(world.planet.volatiles, static_cast<double>(air.temperature),
+            saturation_ratio(static_cast<double>(air.temperature),
                              pressure_at(world.planet, static_cast<double>(field.surface[column]),
-                                         field.grid.radius_of(layer) - world.planet.radius)));
+                                         field.grid.radius_of(layer) - world.planet.body.radius)));
     }
     world.field.at(column, 6).rain = 0.002F;
     const double start = 0.002 * mass(6);

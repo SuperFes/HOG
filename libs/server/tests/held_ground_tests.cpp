@@ -56,7 +56,7 @@ TEST_CASE("the ground near the players is read as they come near, and saved and 
           "well away",
           "[server][held]") {
     const hog::globe::Layers& layers = earth().layers();
-    const DVec3 here = glm::normalize(DVec3{0.3, 0.4, 0.86}) * earth().planet().radius;
+    const DVec3 here = glm::normalize(DVec3{0.3, 0.4, 0.86}) * earth().planet().body.radius;
     const DVec3 there = east_of(here, 3000.0);
     hog::globe::MemoryVolumeArchive archive = archive_about(here, 6000.0);
     Volume volume;

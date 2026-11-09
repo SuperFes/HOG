@@ -42,7 +42,7 @@ constexpr double mass_strength = 0.2;
 double closure_depth(const Planet& planet, Material rock) {
     const Properties& properties = hog::globe::properties(rock);
     return mass_strength * properties.strength /
-           (wall_stress * properties.density * planet.gravity);
+           (wall_stress * properties.density * planet.body.gravity);
 }
 
 // How readily each rock holds open passages.
@@ -76,7 +76,8 @@ public:
     Fields(const Context& context, DVec3 direction, double radius, double lod)
         : context_{&context}, direction_{direction}, radius_{radius}, lod_{lod},
           // Stretched across the radius, so passages run more along than up.
-          lifted_{context.planet->radius + (stretch * (radius - context.planet->radius))} {}
+          lifted_{context.planet->body.radius +
+                  (stretch * (radius - context.planet->body.radius))} {}
 
     [[nodiscard]] DVec3 direction() const { return direction_; }
     [[nodiscard]] double radius() const { return radius_; }
@@ -145,7 +146,7 @@ private:
 double widest_span(const Planet& planet, Material rock) {
     const Properties& properties = hog::globe::properties(rock);
     return std::sqrt(2.0 * (properties.strength / 10.0) * bed_thickness /
-                     (properties.density * planet.gravity));
+                     (properties.density * planet.body.gravity));
 }
 
 // Metres to the open space of the caves in `rock` as `open` as it is there, were it all that rock.
@@ -186,7 +187,8 @@ double cave_floor(const Context& context) noexcept {
     for (const Material rock : {Material::Granite, Material::Anorthosite}) {
         floor = std::max(floor, 2.0 * closure_depth(planet, rock));
     }
-    if (planet.volatiles != Volatile::None) {
+    // Water opens the soft rocks only where it runs as water.
+    if (context.derived->liquid) {
         for (const Material rock : {Material::Limestone, Material::Shale, Material::Sandstone}) {
             floor = std::max(floor, 2.0 * closure_depth(planet, rock));
         }
@@ -196,7 +198,7 @@ double cave_floor(const Context& context) noexcept {
 
 double cave_district(const Context& context, DVec3 direction) noexcept {
     const Noise field =
-        fbm(direction * context.planet->radius,
+        fbm(direction * context.planet->body.radius,
             {.wavelength = district_wavelength, .gain = 0.5, .finest = district_wavelength / 2.0},
             0.0, context.seed(Term::CaveDistricts));
     return smoothstep((field.value + 0.1) / 0.4);
@@ -207,7 +209,7 @@ namespace {
 double cave_nearest(const Context& context, const Layering& layers, DVec3 direction, double radius,
                     double ground, double cover, double lod, bool bound) noexcept {
     const Planet& planet = *context.planet;
-    const bool watered = planet.volatiles != Volatile::None;
+    const bool watered = context.derived->liquid;
     // Bounded, as open as the rock is a reach higher: it only closes with depth.
     const double depth = ground - radius;
     const double opening = bound ? std::max(0.0, depth - cave_reach) : depth;

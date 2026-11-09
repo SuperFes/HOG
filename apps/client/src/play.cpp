@@ -30,7 +30,6 @@
 #include <hog/login/service.hpp>
 #include <hog/net/client.hpp>
 #include <hog/net/simulation.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/render/billboard.hpp>
@@ -220,7 +219,7 @@ DVec3 movement(const Controls& controls) {
 }
 
 client::Flight start(const client::Options& options, const globe::World& world) {
-    const double radius = world.planet().radius;
+    const double radius = world.planet().body.radius;
     client::Flight flight;
     if (options.start) {
         constexpr double degree = std::numbers::pi / 180.0;
@@ -906,7 +905,7 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
     if (!player) {
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
-            world.planet().radius, drawn_ground(world, flight.eye),
+            world.planet().body.radius, drawn_ground(world, flight.eye),
             {.speed = controls.speed * (faster ? fast : 1.0),
              .through = controls.through,
              .underground = client::FlySettings{}.underground * (faster ? fast : 1.0)});
@@ -1006,16 +1005,15 @@ void change_clouds(Controls& controls, client::Scene& scene, const render::Devic
 // No weather comes until it's made; a viewer closed first leaves it to finish unheard.
 class OwnWeather {
 public:
-    OwnWeather(const globe::Planet& planet, GameDuration day, double tilt)
-        : day_{day}, tilt_{tilt} {
+    explicit OwnWeather(const globe::Planet& planet) {
         std::promise<std::unique_ptr<const globe::Generator>> made;
         made_ = made.get_future();
         std::thread{[made = std::move(made), planet] mutable {
             made.set_value(std::make_unique<const globe::Generator>(planet));
         }}.detach();
     }
-    OwnWeather(std::unique_ptr<const globe::Generator> generator, GameDuration day, double tilt)
-        : day_{day}, tilt_{tilt}, generator_{std::move(generator)} {}
+    explicit OwnWeather(std::unique_ptr<const globe::Generator> generator)
+        : generator_{std::move(generator)} {}
 
     // The weather just made, if any, as WeatherKeeper::poll.
     [[nodiscard]] std::optional<protocol::Weather> poll(GameTime now,
@@ -1024,14 +1022,12 @@ public:
             generator_ = made_.get();
         }
         if (!keeper_ && generator_) {
-            keeper_.emplace(*generator_, day_, tilt_, now);
+            keeper_.emplace(*generator_, now);
         }
         return keeper_ ? keeper_->poll(now, fade) : std::nullopt;
     }
 
 private:
-    GameDuration day_;
-    double tilt_;
     std::future<std::unique_ptr<const globe::Generator>> made_;
     std::unique_ptr<const globe::Generator> generator_;
     std::optional<skies::WeatherKeeper> keeper_;
@@ -1045,7 +1041,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, globe::World&
                  client::ColumnMeshes& meshes, client::Flight flight, Connection& connection,
                  OwnWeather& weather, const client::Options& options, const render::Device& device,
                  render::Presenter& presenter, SDL_Window* window) {
-    const double radius = world.planet().radius;
+    const double radius = world.planet().body.radius;
     Controls controls;
     controls.timings = options.timings;
     controls.through = options.through;
@@ -1120,8 +1116,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, globe::World&
             session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
         std::vector<render::Capsule> avatars = client::avatars(others);
         if (session != nullptr) {
-            const std::vector<render::Capsule> grains =
-                session->grains().capsules(now, world.layers().thickness, world.planet().gravity);
+            const std::vector<render::Capsule> grains = session->grains().capsules(
+                now, world.layers().thickness, world.planet().body.gravity);
             avatars.insert(avatars.end(), grains.begin(), grains.end());
         }
         if (player) {
@@ -1242,7 +1238,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                           const client::Options& options, const render::Device& device,
                           render::Presenter& presenter, SDL_Window* window) {
     const globe::Planet& planet = ground.planet;
-    const double radius = planet.radius;
+    const double radius = planet.body.radius;
     Controls controls;
     controls.timings = options.timings;
     controls.through = options.through;
@@ -1315,7 +1311,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
         std::vector<render::Capsule> avatars = client::avatars(others);
         if (session != nullptr) {
             const std::vector<render::Capsule> grains =
-                session->grains().capsules(now, planet.voxel, planet.gravity);
+                session->grains().capsules(now, planet.voxel, planet.body.gravity);
             avatars.insert(avatars.end(), grains.begin(), grains.end());
         }
         const client::Shot shot{.camera = camera,
@@ -1410,25 +1406,20 @@ Result<globe::VolumeOrigin> origin_in(const globe::VolumeArchive& archive,
     if (!*origin) {
         return make_error(ErrorCode::NotFound, "holds no ground; hog-build-world makes it");
     }
-    if ((*origin)->seed != planet.seed) {
-        return make_error(ErrorCode::InvalidArgument, std::format("made for planet seed {}, not {}",
-                                                                  (*origin)->seed, planet.seed));
+    if ((*origin)->seed != planet.body.seed) {
+        return make_error(
+            ErrorCode::InvalidArgument,
+            std::format("made for planet seed {}, not {}", (*origin)->seed, planet.body.seed));
     }
     return **origin;
 }
 
-int show(const client::Options& options, const planet::PlanetConfig& planet, render::Device& device,
+int show(const client::Options& options, globe::Planet planet, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     startup("starting");
-    // Before the scene, which draws it.
-    auto described = client::globe_planet_in(options.planet, planet.seed, planet.radius);
-    if (!described) {
-        std::cerr << std::format("{}: {}\n", program, described.error());
-        return EXIT_FAILURE;
-    }
     if (options.voxel) {
-        described->voxel = *options.voxel;
-        if (auto valid = globe::validate(*described); !valid) {
+        planet.voxel = *options.voxel;
+        if (auto valid = globe::validate(planet); !valid) {
             std::cerr << std::format("{}: --voxel {}: {}\n", program, *options.voxel,
                                      valid.error());
             return EXIT_FAILURE;
@@ -1440,7 +1431,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     std::optional<OwnWeather> own;
     if (options.world) {
         auto archive = store::SqliteVolumeArchive::open(*options.world);
-        auto origin = archive ? origin_in(*archive, *described)
+        auto origin = archive ? origin_in(*archive, planet)
                               : Result<globe::VolumeOrigin>{std::unexpected(archive.error())};
         auto volume = origin ? globe::load_volume(*archive, *origin)
                              : Result<globe::Volume>{std::unexpected(origin.error())};
@@ -1449,19 +1440,19 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                      volume.error());
             return EXIT_FAILURE;
         }
-        ground.emplace(*described, origin->layers, std::move(*volume));
-        own.emplace(*described, planet.day_length, planet.axial_tilt);
+        ground.emplace(planet, origin->layers, std::move(*volume));
+        own.emplace(planet);
         startup(std::format("{} tiles of ground", ground->volume.tiles()));
     } else {
-        startup(std::format("making planet {:016x}", globe::world_id(*described)));
+        startup(std::format("making planet {:016x}", globe::world_id(planet)));
         auto generator = std::make_unique<const globe::Generator>(
-            *described, [](std::string_view stage) { startup(stage); });
-        ground.emplace(*described, generator->layers(), globe::Volume{});
-        own.emplace(std::move(generator), planet.day_length, planet.axial_tilt);
+            planet, [](std::string_view stage) { startup(stage); });
+        ground.emplace(planet, generator->layers(), globe::Volume{});
+        own.emplace(std::move(generator));
         startup("planet made");
     }
     const client::Flight flight = start(options, ground->world);
-    const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
+    const sim::Calendar calendar{globe::day_length(planet), planet.body.tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
                                                  glm::normalize(flight.eye.metres()),
                                                  options.time_of_day)};
@@ -1542,8 +1533,8 @@ Result<globe::Planet> welcomed_to(Connection& connection) {
 
 // The client: connects, is told the planet, and draws the surfaces the server streams, with none
 // of its own and nothing made of the planet here.
-int show_streamed_world(const client::Options& options, const planet::PlanetConfig& config,
-                        render::Device& device, render::Presenter& presenter, SDL_Window* window) {
+int show_streamed_world(const client::Options& options, render::Device& device,
+                        render::Presenter& presenter, SDL_Window* window) {
     startup("starting");
     auto connection = Connection::open(options, std::nullopt);
     if (!connection) {
@@ -1557,15 +1548,15 @@ int show_streamed_world(const client::Options& options, const planet::PlanetConf
         return EXIT_FAILURE;
     }
     startup(std::format("welcomed to planet {:016x}", globe::world_id(*planet)));
-    const sim::Calendar calendar{config.day_length, config.axial_tilt};
+    const sim::Calendar calendar{globe::day_length(*planet), planet->body.tilt};
     constexpr double start_height = 2'000.0;
     client::Flight flight =
         options.start
             ? client::start_flight(
                   planet::direction_at(options.start->latitude * (std::numbers::pi / 180.0),
                                        options.start->longitude * (std::numbers::pi / 180.0)),
-                  planet->radius, options.start->altitude, planet::north_pole)
-            : client::start_flight(planet::start_direction, planet->radius, start_height,
+                  planet->body.radius, options.start->altitude, planet::north_pole)
+            : client::start_flight(planet::start_direction, planet->body.radius, start_height,
                                    planet::north_pole);
     flight.pitch = start_pitch;
     if (options.start && options.start->heading && options.start->pitch) {
@@ -1596,7 +1587,7 @@ int show_streamed_world(const client::Options& options, const planet::PlanetConf
         std::cerr << std::format("{}: {}\n", program, set.error());
         return EXIT_FAILURE;
     }
-    scene->set_system(config.system);
+    scene->set_system(planet->system);
     // The planet only as it's laid out in voxel layers; its ground is the server's to send.
     const client::Session* session = connection->session();
     const auto origin = session != nullptr ? globe::origin_from(session->ground_origin())
@@ -1648,10 +1639,15 @@ int run(std::span<const std::string_view> arguments) {
             options->companion = client::locate(*options->companion, base);
         }
     }
-    auto planet = planet::load_planet_config(options->planet);
-    if (!planet) {
-        std::cerr << std::format("{}: {}\n", program, planet.error());
-        return EXIT_FAILURE;
+    // Drawn alone, the planet is the file's; connected, it's the server's.
+    std::optional<globe::Planet> planet;
+    if (viewing) {
+        auto loaded = globe::load_planet(options->planet);
+        if (!loaded) {
+            std::cerr << std::format("{}: {}\n", program, loaded.error());
+            return EXIT_FAILURE;
+        }
+        planet = std::move(*loaded);
     }
 
     // Declared in the order they're made, so each goes before what it was made with.
@@ -1688,10 +1684,10 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("{}: can't show frames: {}\n", program, presenter.error());
         return EXIT_FAILURE;
     }
-    if (viewing) {
+    if (planet) {
         return show(*options, *planet, **device, **presenter, window.get());
     }
-    return show_streamed_world(*options, *planet, **device, **presenter, window.get());
+    return show_streamed_world(*options, **device, **presenter, window.get());
 }
 
 } // namespace

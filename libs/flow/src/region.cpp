@@ -83,10 +83,7 @@ void set_grain(Voxel& voxel, std::int64_t amount) noexcept {
 
 } // namespace
 
-Region::Region(globe::World& world, bool hold_sea)
-    : world_{&world}, hold_sea_{hold_sea},
-      liquid_{world.planet().volatiles == globe::Volatile::Water ? Material::Water
-                                                                 : Material::Air} {}
+Region::Region(globe::World& world, bool hold_sea) : world_{&world}, hold_sea_{hold_sea} {}
 
 void Region::load(BrickSite site) {
     const auto [found, added] = held_.try_emplace(globe::brick_key(site));
@@ -171,7 +168,7 @@ Voxel Region::at(Site site) const {
 void Region::pour(Site site, std::uint16_t amount) {
     Voxel* at = voxel(site);
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
-    at->liquid = amount > 0 ? liquid_ : Material::Air;
+    at->liquid = amount > 0 ? Material::Water : Material::Air;
     at->liquid_amount = amount;
     held(globe::brick_of(site))->dirty = true;
 }
@@ -209,13 +206,12 @@ std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, doub
 bool Region::red_hot(const Voxel& voxel) const {
     // Not where the whole planet is hotter than that: its rock has no cooling to do.
     return voxel.solid != Material::Air && globe::kelvin(voxel.temperature) > red_hot_kelvin &&
-           world_->planet().equator_temperature < red_hot_kelvin - 100.0;
+           globe::temperature_at(world_->planet(), 0.0) < red_hot_kelvin - 100.0;
 }
 
 bool Region::hot(BrickSite site) const {
     const Held* brick = held(site);
-    return brick != nullptr &&
-           std::ranges::any_of(brick->voxels, [this](const Voxel& voxel) {
+    return brick != nullptr && std::ranges::any_of(brick->voxels, [this](const Voxel& voxel) {
                return (voxel.liquid_amount > 0 && molten(voxel.liquid)) || red_hot(voxel);
            });
 }
@@ -391,7 +387,7 @@ void Region::hold_sea(const std::vector<Column>& columns, Stepped& stepped) {
                     return;
                 }
                 stepped.from_sea += room - here.liquid_amount;
-                here.liquid = liquid_;
+                here.liquid = Material::Water;
                 here.liquid_amount = static_cast<std::uint16_t>(room);
                 brick.dirty = true;
             },
@@ -569,10 +565,10 @@ std::vector<Region::Transfer> Region::transfers(const std::vector<Column>& colum
         std::int64_t amount = std::min(fall / closing, above_sill);
         // Lava thickens as it cools and runs the slower for it.
         if (molten(sections_[from].liquid) && sections_[from].amount > 0) {
-            const double kelvin = globe::kelvin(static_cast<std::uint16_t>(
-                sections_[from].heat / sections_[from].amount));
-            amount = static_cast<std::int64_t>(
-                static_cast<double>(amount) * lava_mobility(sections_[from].liquid, kelvin));
+            const double kelvin = globe::kelvin(
+                static_cast<std::uint16_t>(sections_[from].heat / sections_[from].amount));
+            amount = static_cast<std::int64_t>(static_cast<double>(amount) *
+                                               lava_mobility(sections_[from].liquid, kelvin));
         }
         if (amount > 0) {
             transfers.push_back({.from = from,
@@ -692,12 +688,12 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
                     const std::int64_t before = voxel->liquid_amount;
                     stepped.changed += std::abs(amount - before);
                     if (amount > 0 && molten(liquid)) {
-                        hot.push_back({.site = site,
-                                       .brick = brick,
-                                       .voxel = voxel,
-                                       .kelvin = before > 0 ? globe::kelvin(voxel->temperature)
-                                                            : mean,
-                                       .amount = amount});
+                        hot.push_back(
+                            {.site = site,
+                             .brick = brick,
+                             .voxel = voxel,
+                             .kelvin = before > 0 ? globe::kelvin(voxel->temperature) : mean,
+                             .amount = amount});
                     }
                     if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
                         voxel->liquid_amount = held_amount;
@@ -728,8 +724,8 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
                         }
                         // Rounded by chance, since a step's cooling is far under a step of the
                         // stored temperature.
-                        const auto temperature = static_cast<std::uint16_t>(
-                            dithered(each.kelvin * 8.0, each.site, 2));
+                        const auto temperature =
+                            static_cast<std::uint16_t>(dithered(each.kelvin * 8.0, each.site, 2));
                         if (each.voxel->temperature != temperature) {
                             each.voxel->temperature = temperature;
                             each.brick->dirty = true;
@@ -880,12 +876,10 @@ Stepped Region::step(double seconds) {
         glaciate(stepped, ice_years_ * seconds);
     }
     fly(seconds, stepped);
-    std::ranges::sort(stepped.wanted, {}, [](const globe::BrickSite& site) {
-        return globe::brick_key(site);
-    });
-    const auto same = std::ranges::unique(stepped.wanted, {}, [](const globe::BrickSite& site) {
-        return globe::brick_key(site);
-    });
+    std::ranges::sort(stepped.wanted, {},
+                      [](const globe::BrickSite& site) { return globe::brick_key(site); });
+    const auto same = std::ranges::unique(
+        stepped.wanted, {}, [](const globe::BrickSite& site) { return globe::brick_key(site); });
     stepped.wanted.erase(same.begin(), same.end());
     // What settling and seeping took from the edge, the sea gives back before anyone sees it
     // short.
@@ -895,7 +889,7 @@ Stepped Region::step(double seconds) {
 
 void Region::carry(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
     const double thickness = world_->layers().thickness;
-    const double gravity = world_->planet().gravity;
+    const double gravity = world_->planet().body.gravity;
     for (const Column& column : columns) {
         std::size_t next = column.first;
         std::optional<Bed> bed;

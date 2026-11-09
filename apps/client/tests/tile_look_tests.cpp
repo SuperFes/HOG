@@ -37,7 +37,7 @@ TEST_CASE("the land as the server cuts it and the client draws it, to look at", 
     const auto planet = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(planet);
     const hog::globe::Generator generator{*planet};
-    const double radius = planet->radius;
+    const double radius = planet->body.radius;
     const auto device = test_device();
     hog::jobs::JobSystem jobs;
     const hog::globe::EachOf each = [&](std::size_t count,

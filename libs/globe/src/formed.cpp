@@ -25,13 +25,6 @@ constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose
 // Rip currents cut crescent bars about this many times the surf zone's width apart.
 constexpr double rip_spacing = 4.0;
 
-formation::Body body_for(const Planet& planet) {
-    formation::Body body;
-    body.seed = planet.seed;
-    body.tilt = planet.tilt;
-    return body;
-}
-
 // The cube face a direction falls on, and where on it, -1 to 1 both ways.
 struct OnCube {
     std::size_t axis = 0;
@@ -57,18 +50,18 @@ OnCube on_cube(DVec3 direction) noexcept {
 
 } // namespace
 
-Formed::Formed(const Planet& planet, const Derived& derived)
-    : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)},
-      smooth_{world_.sphere, 2.0}, radius_{planet.radius}, vertical_{derived.vertical},
+Formed::Formed(const Planet& planet)
+    : world_{formation_body(planet), 5, static_cast<int>(planet.formed_detail)},
+      smooth_{world_.sphere, 2.0}, radius_{planet.body.radius},
       // The widest gullies half the points' spacing apart, the finest down to a few voxels.
-      gullies_{.longest = world_.sphere.spacing() * planet.radius / 2.0,
-               .octaves =
-                   1 + static_cast<int>(std::floor(std::log2(
-                           world_.sphere.spacing() * planet.radius / 2.0 / (3.0 * planet.voxel)))),
-               .seed = hash_values(planet.seed, 0x6775'6c6c'6965'73ULL)},
+      gullies_{.longest = world_.sphere.spacing() * planet.body.radius / 2.0,
+               .octaves = 1 + static_cast<int>(std::floor(
+                                  std::log2(world_.sphere.spacing() * planet.body.radius / 2.0 /
+                                            (3.0 * planet.voxel)))),
+               .seed = hash_values(planet.body.seed, 0x6775'6c6c'6965'73ULL)},
       // As far apart as the widest gullies cut deep, so they fade over their own width at least.
       fall_blend_{gullies_.longest * rock_steepest / 2.0},
-      bars_seed_{hash_values(planet.seed, 0x6261'7273ULL)} {
+      bars_seed_{hash_values(planet.body.seed, 0x6261'7273ULL)} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field :
@@ -79,8 +72,6 @@ Formed::Formed(const Planet& planet, const Derived& derived)
     for (std::uint32_t point = 0; point < size; ++point) {
         const bool land = world.rivers.receiver[point] != point;
         has_sea_ = has_sea_ || !land;
-        // The ice, rock and deposits stand as tall against the planet as its relief does; the
-        // soil and what lies on it keep their true depths.
         // The wind took off what rivers and ice laid, and laid sand and loess over it all.
         const double taken = std::min(world.drifts.deflated[point],
                                       world.sediment.alluvium[point] + world.ice.till[point]);
@@ -89,19 +80,19 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         const double ground =
             land ? world.rivers.ground[point] + world.sediment.alluvium[point] - taken + blown
                  : world.rivers.height[point] + world.sediment.delta[point];
-        top_[point] = (vertical_ * ground) + (land ? world.soil.organic[point] : 0.0);
+        top_[point] = ground + (land ? world.soil.organic[point] : 0.0);
         organic_[point] = world.soil.organic[point];
         topsoil_[point] = world.soil.topsoil[point];
         subsoil_[point] = std::max(0.0, world.soil.depth[point] - world.soil.topsoil[point]);
-        loess_[point] = vertical_ * world.soil.loess[point];
-        sand_[point] = vertical_ * world.soil.sand[point];
-        alluvium_[point] = vertical_ * world.soil.alluvium[point];
-        lake_beds_[point] = vertical_ * world.soil.lake_beds[point];
-        till_[point] = vertical_ * world.soil.till[point];
-        saprolite_[point] = vertical_ * world.soil.saprolite[point];
-        ice_[point] = land ? vertical_ * world.ice.thickness[point] : 0.0;
-        lava_[point] = vertical_ * world.outcrop.lava[point];
-        rock_cover_[point] = vertical_ * world.outcrop.cover[point];
+        loess_[point] = world.soil.loess[point];
+        sand_[point] = world.soil.sand[point];
+        alluvium_[point] = world.soil.alluvium[point];
+        lake_beds_[point] = world.soil.lake_beds[point];
+        till_[point] = world.soil.till[point];
+        saprolite_[point] = world.soil.saprolite[point];
+        ice_[point] = land ? world.ice.thickness[point] : 0.0;
+        lava_[point] = world.outcrop.lava[point];
+        rock_cover_[point] = world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
         // Soaked through, soil slides on gentler slopes than dry.
         const Properties& soil = properties(Material::Soil);
@@ -178,7 +169,7 @@ void Formed::fill_lakes() {
             const double dot = glm::dot(sphere.point(point), sphere.point(floor[lake]));
             reach[lake] = std::max(reach[lake], std::acos(std::clamp(dot, -1.0, 1.0)));
             lake_share_[point] = 1.0;
-            lake_cap_[point] = vertical_ * world.lakes.lakes[lake].level;
+            lake_cap_[point] = world.lakes.lakes[lake].level;
         }
     }
 
@@ -188,8 +179,8 @@ void Formed::fill_lakes() {
         formation::Smooth::Weights weights;
         for (std::size_t lake = next++; lake < floor.size(); lake = next++) {
             if (floor[lake] != none) {
-                lakes_[lake] = fill_lake(floor[lake], reach[lake],
-                                         vertical_ * world.lakes.lakes[lake].level, weights);
+                lakes_[lake] =
+                    fill_lake(floor[lake], reach[lake], world.lakes.lakes[lake].level, weights);
             }
         }
     };

@@ -14,7 +14,7 @@ namespace {
 
 Field small_field(int layers = 6) {
     hog::globe::Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     return start_field(generator, 2, layers);
 }

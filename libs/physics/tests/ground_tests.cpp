@@ -34,7 +34,7 @@ namespace {
 const globe::Generator& earth() {
     static const globe::Generator generator{[] {
         globe::Planet planet;
-        planet.seed = 1;
+        planet.body.seed = 1;
         return planet;
     }()};
     return generator;
@@ -136,7 +136,7 @@ TEST_CASE("the ground is kept near the points, and let go far from them", "[phys
 
     const DVec3 up = glm::normalize(here.metres());
     const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
-    const DVec3 there = glm::normalize(up + (east * (1'000.0 / earth().planet().radius)));
+    const DVec3 there = glm::normalize(up + (east * (1'000.0 / earth().planet().body.radius)));
     made.cover(there);
     const std::array away{over(there)};
     REQUIRE(ground.keep(away));
@@ -228,7 +228,7 @@ TEST_CASE("there is ground under and round a walker, whatever the cell size", "[
     // Chunks wider than the reach: the walker's own chunk can have its middle farther than that.
     for (const double voxel : {5.0, 2.5, 1.0}) {
         globe::Planet planet;
-        planet.seed = 1;
+        planet.body.seed = 1;
         planet.voxel = voxel;
         const globe::Generator generator{planet};
         const double fine = globe::voxel_lod(generator);
@@ -255,7 +255,7 @@ TEST_CASE("there is ground under and round a walker, whatever the cell size", "[
                         continue;
                     }
                     const DVec3 at =
-                        glm::normalize(up + (((east * a) + (north * b)) / planet.radius));
+                        glm::normalize(up + (((east * a) + (north * b)) / planet.body.radius));
                     const double surface = globe::ground_below(generator, at, fine).value_or(0.0);
                     ++tried;
                     missed += space.cast_ray(WorldPosition{at * (surface + 20.0)}, at * -60.0,

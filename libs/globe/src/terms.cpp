@@ -8,7 +8,7 @@
 namespace hog::globe::terms {
 
 std::uint64_t Context::seed(Term term) const noexcept {
-    return hash_values(planet->seed, static_cast<std::uint64_t>(term));
+    return hash_values(planet->body.seed, static_cast<std::uint64_t>(term));
 }
 
 DVec3 tangential(DVec3 gradient, DVec3 direction) noexcept {

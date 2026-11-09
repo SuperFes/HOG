@@ -43,7 +43,7 @@ double place_temperature(const Planet& planet, const Layers& layers, Site site) 
 double place_temperature(const Planet& planet, DVec3 up, double radius) {
     const double latitude = maths::atan2(up.z, std::sqrt((up.x * up.x) + (up.y * up.y)));
     return temperature_at(planet, latitude) -
-           (climate_lapse_rate(planet) * std::max(0.0, radius - planet.radius));
+           (climate_lapse_rate(planet) * std::max(0.0, radius - planet.body.radius));
 }
 
 } // namespace hog::globe

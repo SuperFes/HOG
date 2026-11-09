@@ -66,9 +66,9 @@ TEST_CASE("a formed planet stands on the land that formed it, its sea at the rad
         const DVec3 direction = somewhere(n);
         const Generator::Column column = generator.column(direction, planet.voxel);
         const Formed::Here here = formed.at(direction, planet.voxel);
-        CHECK_THAT(column.ground(), WithinAbs(planet.radius + here.top.value, 1e-6));
+        CHECK_THAT(column.ground(), WithinAbs(planet.body.radius + here.top.value, 1e-6));
         if (here.top.value < -100.0) {
-            CHECK(column.water() >= planet.radius);
+            CHECK(column.water() >= planet.body.radius);
             ++under_sea;
         }
     }
@@ -156,7 +156,7 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
                         near = half;
                     }
                 }
-                const double metres = (far - near) * generator.planet().radius;
+                const double metres = (far - near) * generator.planet().body.radius;
                 CHECK(std::abs(along(far) - along(near)) <
                       std::abs(under(far) - under(near)) + 1.0 + metres);
             }
@@ -171,7 +171,6 @@ TEST_CASE("a formed lake stands level, no higher than formed, over lower ground 
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const hog::formation::World& world = formed.world();
-    const double vertical = generator.derived().vertical;
     int paired = 0;
     for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
         const std::uint32_t lake = world.lakes.lake[point];
@@ -183,7 +182,7 @@ TEST_CASE("a formed lake stands level, no higher than formed, over lower ground 
             continue;
         }
         CHECK(*here.lake > here.top.value);
-        CHECK(*here.lake <= (vertical * world.lakes.lakes[lake].level) + 1e-9);
+        CHECK(*here.lake <= world.lakes.lakes[lake].level + 1e-9);
         for (const std::uint32_t beside : world.sphere.neighbors(point)) {
             if (world.lakes.lake[beside] != lake) {
                 continue;
@@ -201,7 +200,7 @@ TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too"
           "[globe][formed]") {
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     for (const double pole : {1.0, -1.0}) {
         for (int ring = 0; ring < 40; ++ring) {
             const double from_pole = 0.002 * (ring + 1);
@@ -307,7 +306,7 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
-    const double planet_radius = generator.planet().radius;
+    const double planet_radius = generator.planet().body.radius;
     // Storms' waves run up no higher than about twice the tallest fully grown sea's, near 10 m,
     // even on shingle.
     constexpr double tallest = 10.0;
@@ -363,8 +362,8 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
 TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
     // The working world's shell.
     Planet planet;
-    planet.seed = 1;
-    planet.radius = 30'000.0;
+    planet.body.seed = 1;
+    planet.body.radius = 30'000.0;
     planet.formed_detail = 7;
     const auto seconds = [](auto from) {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
@@ -423,7 +422,7 @@ void across_waterline(const Formed& formed, const Planet& planet, const DVec3& f
     double dry = 0.0;
     for (int at = 0; at < steps; ++at) {
         const double metres = crossing - (0.5 * survey.spacing) + (at * step);
-        const DVec3 direction = glm::normalize(from + (way * (metres / planet.radius)));
+        const DVec3 direction = glm::normalize(from + (way * (metres / planet.body.radius)));
         const Formed::Here here = formed.at(direction, planet.voxel);
         const double slope =
             glm::length(here.top.gradient - (glm::dot(here.top.gradient, direction) * direction));
@@ -459,7 +458,7 @@ Survey survey_shores(const Planet& planet) {
     const auto& world = formed.world();
     const auto& sphere = world.sphere;
     Survey survey;
-    survey.spacing = sphere.spacing() * planet.radius;
+    survey.spacing = sphere.spacing() * planet.body.radius;
     const auto in_sea = [&](std::uint32_t point) { return world.rivers.receiver[point] == point; };
     for (std::uint32_t point = 0; point < sphere.size() && survey.transects < 300; point += 7) {
         const auto neighbors = sphere.neighbors(point);
@@ -471,7 +470,7 @@ Survey survey_shores(const Planet& planet) {
         const DVec3 from = sphere.point(point);
         const DVec3 way = glm::normalize(sphere.point(*land) - from);
         const std::optional<double> crossing =
-            waterline_from(formed, from, way, planet.radius, 6.0 * survey.spacing);
+            waterline_from(formed, from, way, planet.body.radius, 6.0 * survey.spacing);
         if (!crossing) {
             continue;
         }
@@ -510,8 +509,8 @@ TEST_CASE("beaches across the shores of a few worlds", "[.bench][globe][formed]"
     for (const Shell shell : {Shell{.seed = 1}, Shell{.seed = 2}, Shell{.seed = 3},
                               Shell{.radius = 135'000.0, .detail = 7.0, .voxel = 1.0 / 3.0}}) {
         Planet planet;
-        planet.seed = shell.seed;
-        planet.radius = shell.radius;
+        planet.body.seed = shell.seed;
+        planet.body.radius = shell.radius;
         planet.formed_detail = shell.detail;
         planet.voxel = shell.voxel;
         const Survey survey = survey_shores(planet);
@@ -539,7 +538,7 @@ TEST_CASE("beaches meet the ground and the sea without walls or steps", "[globe]
     const Planet& planet = generator.planet();
     const auto& world = formed.world();
     const auto& sphere = world.sphere;
-    const double spacing = sphere.spacing() * planet.radius;
+    const double spacing = sphere.spacing() * planet.body.radius;
     const auto in_sea = [&](std::uint32_t point) { return world.rivers.receiver[point] == point; };
     int transects = 0;
     int with_beach = 0;
@@ -553,7 +552,7 @@ TEST_CASE("beaches meet the ground and the sea without walls or steps", "[globe]
         const DVec3 from = sphere.point(point);
         const DVec3 way = glm::normalize(sphere.point(*land) - from);
         const std::optional<double> crossing =
-            waterline_from(formed, from, way, planet.radius, 6.0 * spacing);
+            waterline_from(formed, from, way, planet.body.radius, 6.0 * spacing);
         if (!crossing) {
             continue;
         }
@@ -569,7 +568,7 @@ TEST_CASE("beaches meet the ground and the sea without walls or steps", "[globe]
         bool beach = false;
         for (int at = 0; at < steps; ++at) {
             const double metres = *crossing - (0.5 * spacing) + (at * step);
-            const DVec3 direction = glm::normalize(from + (way * (metres / planet.radius)));
+            const DVec3 direction = glm::normalize(from + (way * (metres / planet.body.radius)));
             const Formed::Here here = formed.at(direction, planet.voxel);
             const double ground = here.top.value - here.layers.beach;
             beach = beach || here.layers.beach > 0.0;

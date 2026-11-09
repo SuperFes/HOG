@@ -1,7 +1,11 @@
 #pragma once
 
+#include <hog/core/bytes.hpp>
+#include <hog/core/result.hpp>
+
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace hog::planet {
@@ -128,16 +132,65 @@ struct System {
     std::vector<Moon> moons{Moon{}};
     std::optional<Rings> rings;
     std::vector<Wanderer> planets = earths_planets();
-    // Set, not worked out from the size, so everything on the small planet behaves as on Earth.
-    double gravity = 9.81; // metres a second squared
     Air air{};
-    // The world's water as an even layer over the whole planet, as Earth's would stand.
-    double water_depth = 2'620.0; // metres
 
     bool operator==(const System&) const = default;
 };
 
 // Changes whenever anything in the system does.
 [[nodiscard]] std::uint64_t system_id(const System& system) noexcept;
+
+// The system as a TOML text's [planet] table sets it, over Earth's; the table's other keys are
+// left to whoever reads them:
+//
+//     [planet.air]
+//     pressure_kpa = 101.325
+//     oxygen = 0.2095            # share by volume
+//     carbon_dioxide_ppm = 280
+//
+//     [planet.orbit]             # degrees, and Earth's years
+//     distance_au = 1.0
+//     eccentricity = 0.0167
+//     inclination = 0.0
+//     node = 0.0
+//     periapsis = 102.94
+//     longitude = 100.46
+//     period_years = 1.0
+//
+//     [planet.cycles]            # each list replaces Earth's
+//     tilt = [{ size = 0.68, period_years = 41_000, phase = 72 }]      # degrees
+//     eccentricity = [{ size = 0.011, period_years = 405_000, phase = 180 }]
+//     precession_years = 21_000
+//
+//     [[planet.stars]]           # replaces the Sun; each orbit as the planet's
+//     luminosity = 1.0
+//     temperature = 5_772
+//     radius_km = 695_700
+//     tide = 0.28
+//     orbit = { distance_au = 0.0 }
+//
+//     [[planet.moons]]           # replaces the Moon; moons = [] for none
+//     radius_km = 1_737.4
+//     albedo = 0.12
+//     tide = 0.6
+//     orbit = { distance_km = 384_400, period_days = 29.53 }
+//
+//     [planet.rings]             # none unless given
+//     inner = 1.5                # planet radii
+//     outer = 2.3
+//     opacity = 0.5
+//     albedo = 0.5
+//
+//     [[planet.planets]]         # replaces Earth's neighbours; planets = [] for none
+//     radius_km = 6_051.8
+//     albedo = 0.69
+//     orbit = { distance_au = 0.723, period_years = 0.615 }
+[[nodiscard]] Result<System> parse_system(std::string_view text);
+// Whether `key` in [planet] is one of the system's.
+[[nodiscard]] bool system_key(std::string_view key) noexcept;
+
+// The system as bytes, and back; false where they're cut short or make no system.
+void write_system(ByteWriter& out, const System& system);
+[[nodiscard]] bool read_system(ByteReader& in, System& system);
 
 } // namespace hog::planet

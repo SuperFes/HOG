@@ -176,7 +176,7 @@ Scene::Scene(const render::Device& device, const globe::Planet& planet,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : ocean_{std::move(ocean)}, blocks_{std::move(blocks)},
-      wave_trains_{waves::planet_trains(hash_combine(planet.seed, waves_salt))},
+      wave_trains_{waves::planet_trains(hash_combine(planet.body.seed, waves_salt))},
       transients_{device, frames}, others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
       clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
@@ -302,14 +302,14 @@ void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, c
             if (!deep) {
                 return deep;
             }
-            blocks_.draw_prepared(commands, frame.extent,
-                                  {.camera = shot.camera,
-                                   .sun = sea.sun,
-                                   .bend = shot.bend,
-                                   .cutaway = shot.cutaway,
-                                   .environment = probing_ ? probes_.at(frame.slot).cube().view()
-                                                           : VK_NULL_HANDLE},
-                                  frame.slot);
+            blocks_.draw_prepared(
+                commands, frame.extent,
+                {.camera = shot.camera,
+                 .sun = sea.sun,
+                 .bend = shot.bend,
+                 .cutaway = shot.cutaway,
+                 .environment = probing_ ? probes_.at(frame.slot).cube().view() : VK_NULL_HANDLE},
+                frame.slot);
             return Result<>{};
         });
 }
@@ -394,10 +394,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_, sky.cloud_shadow);
     const auto clouds_view = [&] {
-        return render::CloudsView{.camera = shot.camera,
-                                  .bend = shot.bend,
-                                  .air = through,
-                                  .weather = weather()};
+        return render::CloudsView{
+            .camera = shot.camera, .bend = shot.bend, .air = through, .weather = weather()};
     };
 
     render::RenderGraph graph;

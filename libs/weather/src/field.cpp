@@ -43,24 +43,23 @@ double air_heat_capacity() {
 }
 
 double dry_lapse_rate(const globe::Planet& planet) {
-    return planet.gravity / heat_capacity;
+    return planet.body.gravity / heat_capacity;
 }
 
 double lapse_rate(const globe::Planet& planet) {
     return moist_share * dry_lapse_rate(planet);
 }
 
-double saturation_ratio(globe::Volatile volatiles, double temperature, double pressure) {
-    const auto held = globe::saturation_pressure(volatiles, temperature);
-    const auto mass = globe::molar_mass(volatiles);
-    if (!held || !mass || pressure <= *held) {
+double saturation_ratio(double temperature, double pressure) {
+    const auto held = globe::saturation_pressure(temperature);
+    if (!held || pressure <= *held) {
         return 0.0;
     }
-    return *mass / air_molar_mass * *held / (pressure - *held);
+    return globe::molar_mass / air_molar_mass * *held / (pressure - *held);
 }
 
 double scale_height(const globe::Planet& planet, double temperature) {
-    return gas_constant / air_molar_mass * temperature / planet.gravity;
+    return gas_constant / air_molar_mass * temperature / planet.body.gravity;
 }
 
 double air_temperature(const globe::Planet& planet, double surface, double height) {
@@ -71,8 +70,8 @@ double pressure_at(const globe::Planet& planet, double surface_temperature, doub
     const double lapse = lapse_rate(planet);
     const double temperature = std::max(surface_temperature - (lapse * height), 1.0);
     const double specific = gas_constant / air_molar_mass;
-    return planet.pressure *
-           std::pow(temperature / surface_temperature, planet.gravity / (lapse * specific));
+    return planet.system.air.pressure *
+           std::pow(temperature / surface_temperature, planet.body.gravity / (lapse * specific));
 }
 
 double air_density(double temperature, double pressure) {
@@ -83,15 +82,15 @@ void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
     const Grid& grid = field.grid;
     const auto surface = static_cast<double>(field.surface[column]);
     const double humidity = field.over_sea[column] != 0 ? sea_humidity : land_humidity;
-    const double held_below = saturation_ratio(planet.volatiles, surface, planet.pressure);
+    const double held_below = saturation_ratio(surface, planet.system.air.pressure);
     for (int layer = 0; layer < grid.layers; ++layer) {
-        const double height = grid.radius_of(layer) - planet.radius;
+        const double height = grid.radius_of(layer) - planet.body.radius;
         const double temperature = air_temperature(planet, surface, height);
         const double pressure = pressure_at(planet, surface, height);
         Air& air = field.at(column, layer);
         air.temperature = static_cast<float>(temperature);
         air.vapour = static_cast<float>(
-            std::min(humidity * saturation_ratio(planet.volatiles, temperature, pressure),
+            std::min(humidity * saturation_ratio(temperature, pressure),
                      humidity * held_below * std::exp(-height / vapour_scale_height)));
     }
 }
@@ -126,10 +125,11 @@ Grid stretched_grid(int level, int layers, double bottom, double depth) {
 Field start_field(const globe::Generator& generator, int level, int layers) {
     const globe::Planet& planet = generator.planet();
     const auto sea = generator.sea_level();
-    const double bottom = sea.value_or(planet.radius + generator.shape().lowest);
+    const double bottom = sea.value_or(planet.body.radius + generator.shape().lowest);
 
     Field field;
-    field.grid = stretched_grid(level, layers, bottom, planet.radius + planet.sky_height - bottom);
+    field.grid =
+        stretched_grid(level, layers, bottom, planet.body.radius + planet.sky_height - bottom);
     const Grid& grid = field.grid;
     field.air.resize(grid.size());
     field.ground.resize(grid.columns());
@@ -139,7 +139,8 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
     field.precipitation.assign(grid.columns(), 0.0F);
 
     // About a cell across, for the ground to be smoothed to.
-    const double width = std::numbers::pi * 0.5 * planet.radius / static_cast<double>(1 << level);
+    const double width =
+        std::numbers::pi * 0.5 * planet.body.radius / static_cast<double>(1 << level);
     for (std::size_t column = 0; column < grid.columns(); ++column) {
         const DVec3 up = globe::center(globe::cell_at_index(level, column));
         const double ground = generator.column(up, width).ground();

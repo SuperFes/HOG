@@ -1,7 +1,6 @@
 #include <hog/client/globe_view.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/core/log.hpp>
-#include <hog/core/text_file.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,38 +17,6 @@
 #include <vector>
 
 namespace hog::client {
-
-Result<globe::Planet> globe_planet(std::optional<std::string_view> named, std::uint64_t seed,
-                                   double radius) {
-    globe::Planet planet;
-    if (named) {
-        // A planet file sets its own size.
-        auto loaded = globe::load_planet(std::string{*named});
-        if (loaded) {
-            loaded->seed = seed;
-        }
-        return loaded;
-    }
-    planet.seed = seed;
-    planet.radius = radius;
-    if (auto valid = globe::validate(planet); !valid) {
-        return std::unexpected(std::move(valid).error());
-    }
-    return planet;
-}
-
-Result<globe::Planet> globe_planet_in(const std::filesystem::path& file, std::uint64_t seed,
-                                      double radius) {
-    const auto text = read_text_file(file);
-    if (!text || !text->contains("[globe]")) {
-        return globe_planet(std::nullopt, seed, radius);
-    }
-    auto described = globe::parse_planet(*text);
-    if (described) {
-        described->seed = seed;
-    }
-    return described;
-}
 
 Vec3 surface_colour(globe::Material material) {
     using globe::Material;

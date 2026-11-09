@@ -2,8 +2,8 @@
 
 #include <hog/flow/flight.hpp>
 #include <hog/flow/runoff.hpp>
-#include <hog/flow/wash.hpp>
 #include <hog/flow/slump.hpp>
+#include <hog/flow/wash.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
@@ -162,7 +162,8 @@ public:
     void pour_lava(globe::Site site, globe::Material rock, std::uint16_t amount, double kelvin);
     // Adds up to `units` of `rock` molten at `kelvin` to the voxel, as much as fits; how much
     // went in.
-    std::int64_t add_lava(globe::Site site, globe::Material rock, std::int64_t units, double kelvin);
+    std::int64_t add_lava(globe::Site site, globe::Material rock, std::int64_t units,
+                          double kelvin);
     // Whether the brick has lava in it, which keeps cooling for as long as it does.
     [[nodiscard]] bool hot(globe::BrickSite site) const;
     // Sets the voxel's liquid to `amount` of the world's own.
@@ -236,7 +237,7 @@ private:
         std::int64_t amount = 0;
         globe::Material liquid = globe::Material::Air;
         std::int64_t heat = 0; // of a molten liquid: its amount times its temperature, in eighths
-        bool moving = false; // liquid ran in or out of it this step
+        bool moving = false;   // liquid ran in or out of it this step
         std::int64_t bed = 0;
         std::int64_t load = 0;
         globe::Material carried = globe::Material::Air;
@@ -448,7 +449,6 @@ private:
     double ice_years_ = 0.0;
     IceBalance ice_balance_;
     double cooling_ = 0.0; // seconds of rock's cooling not yet taken
-    globe::Material liquid_;
     std::unordered_map<std::uint64_t, Held> held_;
     // The brick layers held up each column of bricks, in order.
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> stacks_;

@@ -24,12 +24,10 @@ enum class World : std::uint8_t { Wet, Frozen, Airless };
 hog::globe::Planet planet_of(World world) {
     hog::globe::Planet planet = fine(hog::globe::Planet{});
     if (world == World::Frozen) {
-        planet.pressure = 636.0;
-        planet.equator_temperature = 224.0;
-        planet.pole_temperature = 150.0;
+        planet.system.air.pressure = 636.0;
+        planet.system.stars.front().luminosity = 0.3;
     } else if (world == World::Airless) {
-        planet.pressure = 0.0;
-        planet.volatiles = hog::globe::Volatile::None;
+        planet.system.air.pressure = 0.0;
     }
     return planet;
 }
@@ -57,7 +55,7 @@ Census census(const Generator& generator, int count) {
     for (int k = 0; k < count; ++k) {
         const DVec3 down = direction(static_cast<std::uint64_t>(k));
         const double ground = hog::globe::ground_below(generator, down, 1.0).value_or(0.0);
-        const double height = ground - planet.radius;
+        const double height = ground - planet.body.radius;
         found.lowest = std::min(found.lowest, height);
         found.highest = std::max(found.highest, height);
         found.sea += height < 0.0 && generator.sea_level() ? 1.0 / count : 0.0;
@@ -72,13 +70,13 @@ TEST_CASE("a wet world's sea stands at its radius and its ground inside its shel
     const Generator earth = generator_for(World::Wet);
     const Census found = census(earth, 1500);
     REQUIRE(earth.sea_level().has_value());
-    CHECK(earth.sea_level().value_or(0.0) == earth.planet().radius);
+    CHECK(earth.sea_level().value_or(0.0) == earth.planet().body.radius);
     CHECK(found.sea > 0.3);
     CHECK(found.sea < 0.95);
     // A shell from the floor under the deepest sea to the sky.
-    CHECK(earth.layers().ceiling() - earth.planet().radius == earth.planet().sky_height);
+    CHECK(earth.layers().ceiling() - earth.planet().body.radius == earth.planet().sky_height);
     UNSCOPED_INFO("ground " << found.lowest << " to " << found.highest);
-    CHECK(found.lowest - earth.layers().floor + earth.planet().radius >
+    CHECK(found.lowest - earth.layers().floor + earth.planet().body.radius >
           0.75 * earth.planet().floor_depth);
     CHECK(found.highest < earth.planet().sky_height);
 }
@@ -89,7 +87,7 @@ TEST_CASE("a world where nothing lies liquid has no sea", "[globe][generator]") 
         CHECK_FALSE(world.sea_level().has_value());
         const Census found = census(world, 500);
         CHECK(found.sea == 0.0);
-        CHECK(found.lowest - world.layers().floor + world.planet().radius >
+        CHECK(found.lowest - world.layers().floor + world.planet().body.radius >
               0.75 * world.planet().floor_depth);
         CHECK(found.highest < world.planet().sky_height);
     }
@@ -137,11 +135,11 @@ TEST_CASE("rock warms with depth and air cools with height", "[globe][generator]
     const double surface = earth.sample(down * (ground + 0.1), 1.0).temperature;
     const double deep = earth.sample(down * (ground - 1000.0), 1.0).temperature;
     CHECK(std::abs(deep - surface - (1000.0 * earth.derived().geotherm)) < 1.0);
-    CHECK(earth.sample(down * (earth.planet().radius + 3000.0), 1.0).temperature <
-          earth.sample(down * (earth.planet().radius + 1000.0), 1.0).temperature - 10.0);
+    CHECK(earth.sample(down * (earth.planet().body.radius + 3000.0), 1.0).temperature <
+          earth.sample(down * (earth.planet().body.radius + 1000.0), 1.0).temperature - 10.0);
     const Generator airless = generator_for(World::Airless);
-    CHECK(airless.sample(down * (airless.planet().radius + 3000.0), 1.0).temperature ==
-          airless.sample(down * (airless.planet().radius + 1000.0), 1.0).temperature);
+    CHECK(airless.sample(down * (airless.planet().body.radius + 3000.0), 1.0).temperature ==
+          airless.sample(down * (airless.planet().body.radius + 1000.0), 1.0).temperature);
 }
 
 TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generator]") {
@@ -150,7 +148,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         const Generator world = generator_for(kind);
         for (std::uint64_t k = 0; k < 400; ++k) {
             const double radius =
-                world.planet().radius + (static_cast<double>(k % 40) * 250.0) - 5'000.0;
+                world.planet().body.radius + (static_cast<double>(k % 40) * 250.0) - 5'000.0;
             const hog::globe::Sample sample = world.sample(direction(k) * radius, 0.5);
             digest = hog::hash_values(digest, std::bit_cast<std::uint64_t>(sample.distance),
                                       static_cast<int>(sample.material),
@@ -159,7 +157,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x7095'e16e'2163'2372ULL);
+    CHECK(digest == 0x78f3'cd54'41a4'7b8bULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {
@@ -167,7 +165,7 @@ TEST_CASE("generator throughput", "[.bench]") {
     // layers, as meshing will.
     for (const World kind : worlds) {
         const Generator world = generator_for(kind);
-        const double radius = world.planet().radius;
+        const double radius = world.planet().body.radius;
         constexpr std::uint64_t columns = 2'000;
         constexpr int layers = 64;
         const auto started = std::chrono::steady_clock::now();
@@ -202,7 +200,7 @@ TEST_CASE("land is found near a direction, over the sea, and anywhere on a dry w
     CHECK(hog::globe::ground_below(earth, land, hog::globe::voxel_lod(earth)).value_or(0.0) >
           earth.sea_level().value_or(0.0));
     // Nearer than a few rings, or it would have been found sooner.
-    CHECK(glm::length(land - start) * earth.planet().radius < 100'000.0);
+    CHECK(glm::length(land - start) * earth.planet().body.radius < 100'000.0);
     // Within nothing, only the direction itself can be it.
     const bool start_is_land =
         hog::globe::ground_below(earth, start, hog::globe::voxel_lod(earth) * 16.0).value_or(0.0) >
@@ -218,7 +216,7 @@ TEST_CASE("the highest ground formed bounds the ground", "[globe][generator]") {
     CHECK(world.shape().highest > world.shape().lowest);
     for (std::uint64_t k = 0; k < 300; ++k) {
         const double ground = hog::globe::ground_below(world, direction(k), 0.5).value_or(0.0) -
-                              world.planet().radius;
+                              world.planet().body.radius;
         CHECK(ground < (world.shape().highest * 1.25) + 50.0);
     }
 }

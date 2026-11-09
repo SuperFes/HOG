@@ -30,9 +30,9 @@ using namespace hog::globe;
 // The air's temperature over a column, brought down to the reference level at the lapse rate.
 double reference_temperature(const Generator& generator, const Generator::Column& column) {
     const Planet& planet = generator.planet();
-    const double height = std::max(column.ground(), planet.radius) + 20.0;
+    const double height = std::max(column.ground(), planet.body.radius) + 20.0;
     return column.sample(height).temperature +
-           (hog::weather::lapse_rate(planet) * (height - planet.radius));
+           (hog::weather::lapse_rate(planet) * (height - planet.body.radius));
 }
 
 // Bakes ice onto the highest mountain of the default planet and writes a top-down picture of it
@@ -60,10 +60,12 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
         }
     }
     std::printf("peak %.0f m over the reference, direction %.3f %.3f %.3f\n",
-                highest - planet.radius, peak.x, peak.y, peak.z);
+                highest - planet.body.radius, peak.x, peak.y, peak.z);
 
     constexpr std::uint32_t side = 320;
-    const auto at = [](std::uint32_t x, std::uint32_t y) { return static_cast<std::size_t>((y * side) + x); };
+    const auto at = [](std::uint32_t x, std::uint32_t y) {
+        return static_cast<std::size_t>((y * side) + x);
+    };
     const Cell centre = cell_under(peak, layers.level);
     const std::uint32_t i0 = centre.i - (side / 2);
     const std::uint32_t j0 = centre.j - (side / 2);
@@ -79,10 +81,12 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
             ground[at(x, y)] = column.ground();
             const int low = std::max(layers.layer_at(column.ground()) - 1, 0);
             const int high = layers.layer_at(column.ground() + 250.0);
-            for (auto layer = static_cast<std::uint32_t>(low); layer <= static_cast<std::uint32_t>(high); layer += brick_side) {
+            for (auto layer = static_cast<std::uint32_t>(low);
+                 layer <= static_cast<std::uint32_t>(high); layer += brick_side) {
                 bricks.insert(brick_of({centre.face, i0 + x, j0 + y, layer}));
             }
-            bricks.insert(brick_of({centre.face, i0 + x, j0 + y, static_cast<std::uint32_t>(high)}));
+            bricks.insert(
+                brick_of({centre.face, i0 + x, j0 + y, static_cast<std::uint32_t>(high)}));
         }
     }
     std::printf("%zu bricks\n", bricks.size());
@@ -94,7 +98,7 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
         const auto line = hog::weather::snowline(planet, here, 9000.0);
         std::printf("surface %.1f K, snowline %.0f m, balance at peak %.2f m/yr\n", here.surface,
                     line.value_or(-1.0),
-                    hog::weather::ice_balance(planet, here, highest - planet.radius).net());
+                    hog::weather::ice_balance(planet, here, highest - planet.body.radius).net());
     }
 
     hog::globe::MadeWorld made{generator};
@@ -119,7 +123,8 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
     for (std::uint32_t y = 0; y < side; ++y) {
         for (std::uint32_t x = 0; x < side; ++x) {
             double ice = 0.0;
-            const std::uint32_t base = static_cast<std::uint32_t>(std::max(layers.layer_at(ground[at(x, y)]) - 4, 0));
+            const std::uint32_t base =
+                static_cast<std::uint32_t>(std::max(layers.layer_at(ground[at(x, y)]) - 4, 0));
             for (std::uint32_t layer = base; layer < base + 140; ++layer) {
                 const Site site{centre.face, i0 + x, j0 + y, layer};
                 if (!hog::globe::in_layers(layers, brick_of(site))) {
@@ -132,7 +137,8 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
             }
             most_ice = std::max(most_ice, ice);
             total += ice;
-            const double shade = std::clamp(0.4 + ((ground[at(x, y)] - highest) / 2500.0 + 0.6), 0.1, 1.0);
+            const double shade =
+                std::clamp(0.4 + ((ground[at(x, y)] - highest) / 2500.0 + 0.6), 0.1, 1.0);
             const double t = std::clamp(ice / 40.0, 0.0, 1.0);
             const std::size_t p = at(x, y) * 3;
             pixels[p] = static_cast<std::uint8_t>(255 * shade * (1.0 - (0.6 * t)));
@@ -140,7 +146,8 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
             pixels[p + 2] = static_cast<std::uint8_t>(255 * shade);
         }
     }
-    std::printf("ice: most %.1f m, mean %.2f m\n", most_ice, total / (static_cast<double>(side) * side));
+    std::printf("ice: most %.1f m, mean %.2f m\n", most_ice,
+                total / (static_cast<double>(side) * side));
     const std::string path = std::string{dir} + "/glacier.png";
     std::vector<unsigned char> encoded;
     stbi_write_png_to_func(

@@ -50,10 +50,11 @@ constexpr float most_sea_height = 20.0F;
 
 } // namespace
 
-WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameDuration day, double tilt,
-                             GameTime start, WeatherSettings settings)
-    : settings_(settings), calendar_(day, tilt), grid_(settings.level),
-      air_(generator, seconds(day), settings.level, settings.layers),
+WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameTime start,
+                             WeatherSettings settings)
+    : settings_(settings),
+      calendar_(globe::day_length(generator.planet()), generator.planet().body.tilt),
+      grid_(settings.level), air_(generator, settings.level, settings.layers),
       reached_(start - settings.spin_up) {
     placed_.resize(air_.field().grid.columns());
     for (std::size_t column = 0; column < placed_.size(); ++column) {

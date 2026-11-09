@@ -50,16 +50,16 @@ inline DVec3 ground_between(const Generator& generator, double low, double high)
     for (std::uint64_t k = 0;; ++k) {
         const DVec3 direction = somewhere(k);
         const double ground = hog::globe::ground_below(generator, direction, 0.5).value_or(0.0) -
-                              generator.planet().radius;
+                              generator.planet().body.radius;
         const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, direction));
         const DVec3 north = glm::cross(direction, east);
         bool gentle = true;
         for (const DVec3 side : {east, -east, north, -north}) {
             const DVec3 across =
-                glm::normalize(direction + (side * 24.0 / generator.planet().radius));
+                glm::normalize(direction + (side * 24.0 / generator.planet().body.radius));
             gentle =
                 gentle && std::abs(hog::globe::ground_below(generator, across, 0.5).value_or(0.0) -
-                                   generator.planet().radius - ground) < 8.0;
+                                   generator.planet().body.radius - ground) < 8.0;
         }
         if (gentle && ground > low && ground < high &&
             generator.column(direction, 0.5)
@@ -110,6 +110,5 @@ inline void fill_hollow(World& world, DVec3 centre, double radius, const auto& c
         world.write(brick, voxels);
     }
 }
-
 
 } // namespace hog::globe::bed

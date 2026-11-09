@@ -34,7 +34,7 @@ constexpr double reach = 700.0;
 const hog::globe::Generator& small() {
     static const hog::globe::Generator generator{[] {
         hog::globe::Planet planet;
-        planet.radius = 4'000.0;
+        planet.body.radius = 4'000.0;
         planet.voxel = 10.0;
         planet.floor_depth = 200.0;
         planet.sky_height = 1'000.0;
@@ -44,7 +44,7 @@ const hog::globe::Generator& small() {
 }
 
 DVec3 on_ground(DVec3 direction) {
-    return glm::normalize(direction) * (small().planet().radius + 100.0);
+    return glm::normalize(direction) * (small().planet().body.radius + 100.0);
 }
 
 DVec3 east_of(DVec3 centre, double metres) {
@@ -188,7 +188,7 @@ TEST_CASE("first view cost", "[.bench][server][tiles]") {
     const DVec3 up = glm::normalize(DVec3{0.3, 0.4, 0.86});
     const DVec3 here =
         up * (hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator))
-                  .value_or(generator.planet().radius) +
+                  .value_or(generator.planet().body.radius) +
               2.0);
     auto at = std::chrono::steady_clock::now();
     const std::vector<TileKey> keys = sending.wanted(here, land, each);

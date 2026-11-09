@@ -1,7 +1,7 @@
-#include "system_config.hpp"
-
 #include <hog/core/hash.hpp>
 #include <hog/planet/system.hpp>
+
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,8 +20,8 @@ namespace {
 
 using namespace std::string_view_literals;
 
-constexpr std::array system_keys{"gravity"sv, "water_depth"sv, "air"sv,   "orbit"sv,  "cycles"sv,
-                                 "stars"sv,   "moons"sv,       "rings"sv, "planets"sv};
+constexpr std::array system_keys{"air"sv,   "orbit"sv, "cycles"sv, "stars"sv,
+                                 "moons"sv, "rings"sv, "planets"sv};
 
 constexpr double above_zero = std::numeric_limits<double>::min();
 constexpr double most_degrees = 360.0;
@@ -323,8 +323,7 @@ std::uint64_t system_id(const System& system) noexcept {
         add(id, planet.albedo);
         add(id, planet.orbit);
     }
-    for (const double value : {system.gravity, system.air.pressure, system.air.oxygen,
-                               system.air.carbon_dioxide, system.water_depth}) {
+    for (const double value : {system.air.pressure, system.air.oxygen, system.air.carbon_dioxide}) {
         add(id, value);
     }
     id = hash_values(id, system.cycles.tilt.size(), system.cycles.eccentricity.size());
@@ -339,17 +338,24 @@ std::uint64_t system_id(const System& system) noexcept {
     return id;
 }
 
-namespace detail {
-
 bool system_key(std::string_view key) noexcept {
     return std::ranges::find(system_keys, key) != system_keys.end();
 }
 
-Result<void> parse_system(const toml::table& planet, System& system) {
+Result<System> parse_system(std::string_view text) {
+    const toml::parse_result parsed = toml::parse(text);
+    if (!parsed) {
+        const toml::parse_error& failed = parsed.error();
+        return make_error(ErrorCode::Parse, std::format("line {}: {}", failed.source().begin.line,
+                                                        failed.description()));
+    }
+    const toml::table* planet = parsed.table()["planet"].as_table();
+    if (planet == nullptr) {
+        return make_error(ErrorCode::InvalidArgument, "missing [planet] table");
+    }
+    System system;
     std::optional<Error> error;
-    Reader top{&planet, "planet", &error};
-    top.number("gravity", 0.01, 100.0, system.gravity);
-    top.number("water_depth", 0.0, 100'000.0, system.water_depth);
+    Reader top{planet, "planet", &error};
 
     Reader air = top.child("air");
     read_air(air, system.air);
@@ -373,9 +379,138 @@ Result<void> parse_system(const toml::table& planet, System& system) {
     if (error) {
         return std::unexpected(*error);
     }
-    return {};
+    return system;
 }
 
-} // namespace detail
+namespace {
+
+void write_double(ByteWriter& out, double value) {
+    out.write(std::bit_cast<std::uint64_t>(value));
+}
+
+bool read_double(ByteReader& in, double& into) {
+    const auto bits = in.read<std::uint64_t>();
+    if (!bits) {
+        return false;
+    }
+    into = std::bit_cast<double>(*bits);
+    return true;
+}
+
+void write_orbit(ByteWriter& out, const Orbit& orbit) {
+    for (const double value : {orbit.distance, orbit.eccentricity, orbit.inclination, orbit.node,
+                               orbit.periapsis, orbit.longitude, orbit.period}) {
+        write_double(out, value);
+    }
+}
+
+bool read_orbit(ByteReader& in, Orbit& orbit) {
+    return read_double(in, orbit.distance) && read_double(in, orbit.eccentricity) &&
+           read_double(in, orbit.inclination) && read_double(in, orbit.node) &&
+           read_double(in, orbit.periapsis) && read_double(in, orbit.longitude) &&
+           read_double(in, orbit.period);
+}
+
+// Lists are kept short: no system has more bodies than this.
+constexpr std::uint64_t most_listed = 1'000;
+
+template <typename Item, typename Write>
+void write_list(ByteWriter& out, const std::vector<Item>& items, Write write) {
+    out.write_varint(items.size());
+    for (const Item& item : items) {
+        write(item);
+    }
+}
+
+template <typename Item, typename Read>
+bool read_list(ByteReader& in, std::vector<Item>& items, Read read) {
+    const auto count = in.read_varint();
+    if (!count || *count > most_listed) {
+        return false;
+    }
+    items.assign(static_cast<std::size_t>(*count), Item{});
+    return std::ranges::all_of(items, read);
+}
+
+} // namespace
+
+void write_system(ByteWriter& out, const System& system) {
+    write_list(out, system.stars, [&](const Star& star) {
+        for (const double value : {star.luminosity, star.temperature, star.radius, star.tide}) {
+            write_double(out, value);
+        }
+        write_orbit(out, star.orbit);
+    });
+    write_orbit(out, system.orbit);
+    const auto cycle = [&](const Cycle& swing) {
+        for (const double value : {swing.size, swing.period, swing.phase}) {
+            write_double(out, value);
+        }
+    };
+    write_list(out, system.cycles.tilt, cycle);
+    write_list(out, system.cycles.eccentricity, cycle);
+    write_double(out, system.cycles.precession);
+    write_list(out, system.moons, [&](const Moon& moon) {
+        for (const double value : {moon.radius, moon.albedo, moon.tide}) {
+            write_double(out, value);
+        }
+        write_orbit(out, moon.orbit);
+    });
+    out.write(static_cast<std::uint8_t>(system.rings.has_value() ? 1 : 0));
+    if (system.rings) {
+        for (const double value : {system.rings->inner, system.rings->outer, system.rings->opacity,
+                                   system.rings->albedo}) {
+            write_double(out, value);
+        }
+    }
+    write_list(out, system.planets, [&](const Wanderer& planet) {
+        write_double(out, planet.radius);
+        write_double(out, planet.albedo);
+        write_orbit(out, planet.orbit);
+    });
+    for (const double value : {system.air.pressure, system.air.oxygen, system.air.carbon_dioxide}) {
+        write_double(out, value);
+    }
+}
+
+bool read_system(ByteReader& in, System& system) {
+    const auto cycle = [&](Cycle& swing) {
+        return read_double(in, swing.size) && read_double(in, swing.period) &&
+               read_double(in, swing.phase);
+    };
+    const bool listed =
+        read_list(in, system.stars,
+                  [&](Star& star) {
+                      return read_double(in, star.luminosity) &&
+                             read_double(in, star.temperature) && read_double(in, star.radius) &&
+                             read_double(in, star.tide) && read_orbit(in, star.orbit);
+                  }) &&
+        read_orbit(in, system.orbit) && read_list(in, system.cycles.tilt, cycle) &&
+        read_list(in, system.cycles.eccentricity, cycle) &&
+        read_double(in, system.cycles.precession) && read_list(in, system.moons, [&](Moon& moon) {
+            return read_double(in, moon.radius) && read_double(in, moon.albedo) &&
+                   read_double(in, moon.tide) && read_orbit(in, moon.orbit);
+        });
+    const auto ringed = in.read<std::uint8_t>();
+    if (!listed || !ringed || *ringed > 1) {
+        return false;
+    }
+    system.rings.reset();
+    if (*ringed == 1) {
+        Rings rings;
+        if (!read_double(in, rings.inner) || !read_double(in, rings.outer) ||
+            !read_double(in, rings.opacity) || !read_double(in, rings.albedo)) {
+            return false;
+        }
+        system.rings = rings;
+    }
+    return read_list(in, system.planets,
+                     [&](Wanderer& planet) {
+                         return read_double(in, planet.radius) && read_double(in, planet.albedo) &&
+                                read_orbit(in, planet.orbit);
+                     }) &&
+           read_double(in, system.air.pressure) && read_double(in, system.air.oxygen) &&
+           read_double(in, system.air.carbon_dioxide);
+}
 
 } // namespace hog::planet

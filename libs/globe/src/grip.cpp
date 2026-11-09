@@ -39,7 +39,7 @@ std::optional<double> grip_at(const World& world, DVec3 feet) {
     if (!surface) {
         return std::nullopt;
     }
-    return std::atan(surface->holds(layers.thickness, world.planet().gravity));
+    return std::atan(surface->holds(layers.thickness, world.planet().body.gravity));
 }
 
 } // namespace hog::globe

@@ -34,13 +34,13 @@ constexpr double widest_cave = 7.0;
 
 // A voxel deep in the ground, clear of its surface, caves and fallen rock: the bed it shows, and
 // the water in its pores under open water, as made() has it.
-Cube deep(const Generator::Column& column, const Planet& planet, const Layers& layers, int layer) {
+Cube deep(const Generator::Column& column, const Layers& layers, int layer) {
     const double radius = layers.middle(layer);
     Sample sample;
     sample.distance = radius - column.ground();
     sample.material = column.inside(radius);
     if (column.water() > 0.0 && radius < column.water()) {
-        sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
+        sample.liquid = Material::Water;
         sample.water = properties(sample.material).porosity;
     }
     const Voxel voxel = voxel_from(sample, layers.thickness);
@@ -50,8 +50,8 @@ Cube deep(const Generator::Column& column, const Planet& planet, const Layers& l
 // The column's voxels from `bottom` to `top` as runs: one sample for each stretch between the
 // generator's boundaries, and one for each voxel within them; in the ground between them, each
 // voxel's bed.
-std::vector<Run> runs_of(const Generator::Column& column, const Planet& planet,
-                         const Layers& layers, int bottom, int top, bool caves) {
+std::vector<Run> runs_of(const Generator::Column& column, const Layers& layers, int bottom, int top,
+                         bool caves) {
     // Layers a boundary passes through, with whether a cave may be in them.
     struct Changing {
         int low = 0;
@@ -92,7 +92,7 @@ std::vector<Run> runs_of(const Generator::Column& column, const Planet& planet,
             return;
         }
         for (int layer = low; layer <= high; ++layer) {
-            add(layer, layer, deep(column, planet, layers, layer));
+            add(layer, layer, deep(column, layers, layer));
         }
     };
     int next = bottom;
@@ -183,12 +183,12 @@ VoxelTree tile_of(const TileSource& source) {
 
 // Each column's runs from `bottom` to `top`, of `layers`.
 std::vector<std::vector<Run>> runs_up(const std::vector<Generator::Column>& columns,
-                                      const Planet& planet, const Layers& layers, int bottom,
-                                      int top, bool caves = true) {
+                                      const Layers& layers, int bottom, int top,
+                                      bool caves = true) {
     std::vector<std::vector<Run>> runs;
     runs.reserve(columns.size());
     for (const Generator::Column& each : columns) {
-        runs.push_back(runs_of(each, planet, layers, bottom, top, caves));
+        runs.push_back(runs_of(each, layers, bottom, top, caves));
     }
     return runs;
 }
@@ -201,7 +201,7 @@ void build(Volume& volume, const Generator& generator,
            std::uint32_t j, int bottom, int top, int keep) {
     constexpr int side = Volume::tile_side;
     const std::vector<std::vector<Run>> runs =
-        runs_up(columns, generator.planet(), generator.layers(), bottom, std::min(top, keep - 1));
+        runs_up(columns, generator.layers(), bottom, std::min(top, keep - 1));
     for (int k = bottom / side; k <= top / side; ++k) {
         const Site place{.face = face,
                          .i = i * side,
@@ -276,8 +276,8 @@ std::vector<MadeTile> generate_stack(const Generator& generator, std::span<const
                            .i = first.i * static_cast<std::uint32_t>(side),
                            .j = first.j * static_cast<std::uint32_t>(side)},
                           side, voxel_lod(generator) * (1 << first.level));
-    const std::vector<std::vector<Run>> runs = runs_up(columns, generator.planet(), layers, lowest,
-                                                       highest, layers.thickness <= widest_cave);
+    const std::vector<std::vector<Run>> runs =
+        runs_up(columns, layers, lowest, highest, layers.thickness <= widest_cave);
     // The lowest the ground over the footprint comes, and beside it as steep as it slopes; and
     // where any surface, the ground's or open water's top, may come finer than the columns show.
     double ground = std::numeric_limits<double>::max();

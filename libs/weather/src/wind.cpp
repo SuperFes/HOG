@@ -22,7 +22,8 @@ constexpr double free_relaxation = 1.0 / (40.0 * 86'400.0);
 constexpr double ground_relaxation = 1.0 / (4.0 * 86'400.0);
 constexpr double drag = 1.0 / 86'400.0;
 constexpr double boundary_pressure = 0.7;
-// Cells across the eddies too small for the grid, whose shedding of the wind's energy is u³ over it.
+// Cells across the eddies too small for the grid, whose shedding of the wind's energy is u³ over
+// it.
 constexpr double eddy_cells = 4.0;
 
 // The temperature the air at a cell would have brought down to the reference level without
@@ -30,7 +31,7 @@ constexpr double eddy_cells = 4.0;
 double potential(const Field& field, const globe::Planet& planet, std::size_t cell) {
     const int layer = static_cast<int>(cell % static_cast<std::size_t>(field.grid.layers));
     return static_cast<double>(field.air[cell].temperature) +
-           (dry_lapse_rate(planet) * (field.grid.radius_of(layer) - planet.radius));
+           (dry_lapse_rate(planet) * (field.grid.radius_of(layer) - planet.body.radius));
 }
 
 // How much lighter than dry air at its temperature the air is: vapour is lighter, drops and cloud
@@ -133,7 +134,8 @@ std::vector<double> densities(const Field& field, const globe::Planet& planet) {
     const auto layers = static_cast<std::size_t>(field.grid.layers);
     for (std::size_t cell = 0; cell < found.size(); ++cell) {
         const std::size_t column = cell / layers;
-        const double height = field.grid.radius_of(static_cast<int>(cell % layers)) - planet.radius;
+        const double height =
+            field.grid.radius_of(static_cast<int>(cell % layers)) - planet.body.radius;
         const auto surface = static_cast<double>(field.surface[column]);
         found[cell] = air_density(air_temperature(planet, surface, height),
                                   pressure_at(planet, surface, height));
@@ -331,7 +333,7 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
         light[layer] = count[layer] > 0.0 ? light[layer] / count[layer] : 0.0;
     }
 
-    const double spin = 2.0 * std::numbers::pi / planet.day;
+    const double spin = 2.0 * std::numbers::pi / (planet.body.day * 3'600.0);
     const double scale = scale_height(planet, globe::mean_temperature(planet));
     for (std::size_t cell = 0; cell < grid.size(); ++cell) {
         if (field.blocked[cell] != 0) {
@@ -344,7 +346,7 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
 
         const double reference = mean[cell % layers];
         const double buoyancy =
-            planet.gravity *
+            planet.body.gravity *
             (((potential(field, planet, cell) - reference) / warmth[cell % layers]) +
              (lightness(air) - light[cell % layers]));
         air.wind += stencil.up(column) * static_cast<float>(buoyancy * seconds);
@@ -362,7 +364,7 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
         air.wind /= static_cast<float>(1.0 + eddy);
 
         const double target = air_temperature(planet, static_cast<double>(field.surface[column]),
-                                              grid.radius_of(layer) - planet.radius);
+                                              grid.radius_of(layer) - planet.body.radius);
         const double rate = free_relaxation + ((ground_relaxation - free_relaxation) * near);
         air.temperature += static_cast<float>((target - static_cast<double>(air.temperature)) *
                                               (1.0 - std::exp(-rate * seconds)));
@@ -471,7 +473,7 @@ void advect(Field& field, const Stencil& stencil, const globe::Planet& planet, d
         const int layer = static_cast<int>(cell % layers);
         air.temperature =
             warmth - static_cast<float>(dry_lapse_rate(planet) *
-                                        (field.grid.radius_of(layer) - planet.radius));
+                                        (field.grid.radius_of(layer) - planet.body.radius));
         air.vapour = scalar(&Air::vapour);
         air.cloud = scalar(&Air::cloud);
         air.rain = scalar(&Air::rain);
@@ -493,7 +495,8 @@ void advect(Field& field, const Stencil& stencil, const globe::Planet& planet, d
             continue;
         }
         warmth_before += potential(field, planet, cell) * mass[cell];
-        const double height = field.grid.radius_of(static_cast<int>(cell % layers)) - planet.radius;
+        const double height =
+            field.grid.radius_of(static_cast<int>(cell % layers)) - planet.body.radius;
         warmth_after +=
             (static_cast<double>(next[cell].temperature) + (dry_lapse_rate(planet) * height)) *
             mass[cell];

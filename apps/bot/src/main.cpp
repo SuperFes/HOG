@@ -7,7 +7,6 @@
 #include <hog/globe/generator.hpp>
 #include <hog/login/service.hpp>
 #include <hog/net/client.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
 #include <chrono>
@@ -86,18 +85,13 @@ int run(std::span<const std::string_view> arguments) {
         return EXIT_SUCCESS;
     }
     options->planet = client::locate(options->planet, std::filesystem::current_path());
-    const auto planet = planet::load_planet_config(options->planet);
+    // The planet the server serves, from the same file.
+    const auto planet = globe::load_planet(options->planet);
     if (!planet) {
         std::cerr << std::format("hog-bot: {}\n", planet.error());
         return EXIT_FAILURE;
     }
-    // The voxel world, as the server and the client have it by default.
-    auto described = client::globe_planet(std::nullopt, planet->seed, planet->radius);
-    if (!described) {
-        std::cerr << std::format("hog-bot: {}\n", described.error());
-        return EXIT_FAILURE;
-    }
-    const client::GlobeWorld globe{*described};
+    const client::GlobeWorld globe{*planet};
     const std::optional<DVec3> land = globe::land_near(globe.generator, planet::start_direction);
     if (!land) {
         std::cerr << "hog-bot: no land near the start\n";
@@ -120,7 +114,7 @@ int run(std::span<const std::string_view> arguments) {
         }
         // Scattered around the land nearest the start, so they don't stand in one spot.
         const bot::Wander spot =
-            bot::pick(start, planet->radius, scatter, {.furthest = 500.0, .nearest = 10.0});
+            bot::pick(start, planet->body.radius, scatter, {.furthest = 500.0, .nearest = 10.0});
         auto started = bot::Bot::start(globe.generator, options->connect, std::move(token),
                                        spot.target, options->seed + which);
         if (!started) {

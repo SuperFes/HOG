@@ -93,7 +93,7 @@ std::uint8_t level_at(double metres) noexcept {
 }
 
 VolumeOrigin origin_of(const Generator& generator) {
-    return {.seed = generator.planet().seed, .layers = generator.layers()};
+    return {.seed = generator.planet().body.seed, .layers = generator.layers()};
 }
 
 std::vector<std::byte> volume_header(const VolumeOrigin& origin) {

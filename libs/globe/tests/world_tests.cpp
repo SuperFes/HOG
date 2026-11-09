@@ -473,7 +473,7 @@ TEST_CASE("the ground's top is read from the voxels, as generated, dug or built"
 TEST_CASE("the tile columns near a place are all those with ground in reach, across a face's edge",
           "[globe][world]") {
     const hog::globe::Layers& layers = earth().layers();
-    const double radius = earth().planet().radius;
+    const double radius = earth().planet().body.radius;
     const double tile = hog::globe::Volume::tile_side * layers.thickness;
     constexpr double reach = 1000.0;
     const auto check = [&](DVec3 direction) {

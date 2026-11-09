@@ -23,9 +23,8 @@ Generator wet() {
 // Too cold and thin-aired for seas.
 Generator frozen() {
     hog::globe::Planet planet;
-    planet.pressure = 636.0;
-    planet.equator_temperature = 224.0;
-    planet.pole_temperature = 150.0;
+    planet.system.air.pressure = 636.0;
+    planet.system.stars.front().luminosity = 0.3;
     return Generator{planet};
 }
 

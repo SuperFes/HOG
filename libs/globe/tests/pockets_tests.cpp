@@ -34,7 +34,7 @@ const Generator& planet_of(double voxel) {
         }
     }
     hog::globe::Planet planet;
-    planet.radius = 4'000.0;
+    planet.body.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
     planet.voxel = voxel;
@@ -56,7 +56,7 @@ TEST_CASE("the pockets found under the ground are the hollows in it, near to far
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
     const DVec3 pole = std::abs(up.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(pole, up));
-    const double radius = generator.planet().radius;
+    const double radius = generator.planet().body.radius;
     // Tile columns enough to hold the range about the eye, made down past its reach.
     const auto across = static_cast<std::uint32_t>(
         std::ceil((2.0 * range) / (hog::globe::Volume::tile_side * voxel)) + 1.0);

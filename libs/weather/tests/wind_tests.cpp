@@ -24,7 +24,7 @@ constexpr int layers = 8;
 
 Planet small_earth() {
     Planet planet;
-    planet.radius = 20'000.0;
+    planet.body.radius = 20'000.0;
     return planet;
 }
 
@@ -208,8 +208,8 @@ TEST_CASE("a patch of the air is carried along by the wind", "[weather][wind]") 
         const std::size_t cell = world.field.grid.index(column, layer);
         const Vec3 up = world.stencil.up(column);
         world.field.air[cell].wind =
-            Vec3{-up.y, up.x, 0.0F} *
-            static_cast<float>(speed * world.field.grid.radius_of(layer) / world.planet.radius);
+            Vec3{-up.y, up.x, 0.0F} * static_cast<float>(speed * world.field.grid.radius_of(layer) /
+                                                         world.planet.body.radius);
         world.field.air[cell].cloud = 0.0F;
     }
     const std::size_t start = column_at(0.0);
@@ -235,7 +235,7 @@ TEST_CASE("a patch of the air is carried along by the wind", "[weather][wind]") 
     const auto [after, mass] = centroid();
     const double angle = std::atan2(after.y, after.x);
     CHECK(mass > 0.2);
-    CHECK(angle * world.planet.radius == Approx(distance).epsilon(0.35));
+    CHECK(angle * world.planet.body.radius == Approx(distance).epsilon(0.35));
 }
 
 TEST_CASE("steps from rest stay finite and the wind stays within bounds", "[weather][wind]") {
@@ -308,7 +308,7 @@ TEST_CASE("carrying keeps the water and the warmth it carries, however unevenly 
         const std::size_t column = cell / layer_count;
         const int layer = static_cast<int>(cell % layer_count);
         const double radius = field.grid.radius_of(layer);
-        const double height = radius - world.planet.radius;
+        const double height = radius - world.planet.body.radius;
         const auto surface = static_cast<double>(field.surface[column]);
         return air_density(air_temperature(world.planet, surface, height),
                            pressure_at(world.planet, surface, height)) *
@@ -329,8 +329,8 @@ TEST_CASE("carrying keeps the water and the warmth it carries, however unevenly 
             }
             const double mass = weight(cell);
             const Air& air = field.air[cell];
-            const double height =
-                field.grid.radius_of(static_cast<int>(cell % layer_count)) - world.planet.radius;
+            const double height = field.grid.radius_of(static_cast<int>(cell % layer_count)) -
+                                  world.planet.body.radius;
             sum.vapour += static_cast<double>(air.vapour) * mass;
             sum.cloud += static_cast<double>(air.cloud) * mass;
             sum.rain += static_cast<double>(air.rain) * mass;

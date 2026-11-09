@@ -69,7 +69,7 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     const globe::World* world = world_;
     // A formed world's sea stands at the radius wherever its volatile can lie liquid.
     const std::optional<double> sea = globe::derive(world->planet()).liquid
-                                          ? std::optional{world->planet().radius}
+                                          ? std::optional{world->planet().body.radius}
                                           : std::nullopt;
     const double voxel = world->layers().thickness;
     // Those beside each, meshed, show their sides against it as it was.

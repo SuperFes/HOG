@@ -19,7 +19,7 @@ using hog::server::GroundWetting;
 
 // A direction whose ground stands well over the sea.
 DVec3 land_of(const hog::globe::Generator& generator) {
-    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     for (std::uint64_t k = 0;; ++k) {
         const DVec3 direction =
             hog::globe::center(hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304));
