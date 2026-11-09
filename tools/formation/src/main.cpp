@@ -637,8 +637,8 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
     using hog::formation::Parent;
     double land = 0.0;
     double soiled = 0.0;
-    std::array<double, 5> area{};
-    std::array<double, 5> depth{};
+    std::array<double, 7> area{};
+    std::array<double, 7> depth{};
     double young = 0.0;
     double young_depth = 0.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
@@ -665,12 +665,13 @@ void report_soil(const Sphere& sphere, const hog::formation::Crust& crust,
     };
     std::cout << std::format(
         "soil on {:.0f}% of the land, deepest {:.2f} m; on rock {:.0f}% ({:.2f} m), till {:.1f}% "
-        "({:.2f} m), alluvium {:.0f}% ({:.2f} m), lake beds {:.1f}% ({:.2f} m); where ice left "
-        "{:.0f}% ({:.2f} m)\n",
+        "({:.2f} m), alluvium {:.0f}% ({:.2f} m), lake beds {:.1f}% ({:.2f} m), loess {:.1f}% "
+        "({:.2f} m), sand {:.1f}% ({:.2f} m); where ice left {:.0f}% ({:.2f} m)\n",
         100.0 * soiled / std::max(land, 1e-12), *std::ranges::max_element(soil.depth),
         share(Parent::Rock), mean(Parent::Rock), share(Parent::Till), mean(Parent::Till),
         share(Parent::Alluvium), mean(Parent::Alluvium), share(Parent::LakeBed),
-        mean(Parent::LakeBed), 100.0 * young / std::max(land, 1e-12),
+        mean(Parent::LakeBed), share(Parent::Loess), mean(Parent::Loess), share(Parent::Sand),
+        mean(Parent::Sand), 100.0 * young / std::max(land, 1e-12),
         young_depth / std::max(young, 1e-12));
     std::cout << std::format("under the soil, deepest alluvium {:.0f} m, lake beds {:.0f} m, "
                              "till {:.0f} m\n",
@@ -876,7 +877,7 @@ int run(const Options& options) {
     ok = draw_drifts(canvas, rivers, ice, lakes, sediment, drifts) && ok;
 
     const hog::formation::Soil soil =
-        hog::formation::soil_on(sphere, rivers, climate, ice, lakes, sediment, body);
+        hog::formation::soil_on(sphere, rivers, climate, ice, lakes, sediment, drifts, body);
     report_soil(sphere, crust, soil);
     ok = draw_soil(canvas, rivers, ice, lakes, sediment, soil) && ok;
     ok = draw_topsoil(canvas, rivers, ice, lakes, sediment, soil) && ok;

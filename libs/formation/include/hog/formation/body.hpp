@@ -155,6 +155,8 @@ struct Body {
     double climb_stop = 0.003;       // rise over run of the ground ahead that stops sand going on
     double silt_reach = 800'000.0;   // metres silt goes before most has settled, in open air
     double silt_trapped = 0.6;       // share less far it goes over ground plants wholly cover
+    double thinnest_drift = 0.5;     // metres of wind-laid ground under which plants and burrows
+                                     // mix it into the soil rather than it lying as a layer
 };
 
 } // namespace hog::formation

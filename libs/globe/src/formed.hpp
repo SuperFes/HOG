@@ -49,6 +49,8 @@ private:
     std::vector<double> organic_;
     std::vector<double> topsoil_;
     std::vector<double> subsoil_;
+    std::vector<double> loess_;
+    std::vector<double> sand_;
     std::vector<double> alluvium_;
     std::vector<double> lake_beds_;
     std::vector<double> till_;

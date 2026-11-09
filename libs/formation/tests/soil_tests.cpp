@@ -1,9 +1,11 @@
 #include <hog/formation/plates.hpp>
 #include <hog/formation/soil.hpp>
+#include <hog/formation/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -307,4 +309,39 @@ TEST_CASE("plants darken the soil's top, and peat gathers where the ground is wa
     }
     CHECK(dark > 0);
     CHECK(drowned > 10.0 * in_air);
+}
+
+TEST_CASE("soil grows down through what the wind laid first, loess over sand",
+          "[formation][soil]") {
+    const hog::formation::World world{Body{}, 4, 6};
+    const Soil& soil = world.soil;
+    const double thinnest = world.body.thinnest_drift;
+    int on_wind = 0;
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        if (soil.parent[point] == Parent::None) {
+            continue;
+        }
+        const double loess =
+            world.drifts.loess[point] >= thinnest ? world.drifts.loess[point] : 0.0;
+        const double sand = world.drifts.sand[point] >= thinnest ? world.drifts.sand[point] : 0.0;
+        const double depth = soil.depth[point];
+        // The soil takes the loess first, then the sand, leaving the rest under it.
+        CHECK_THAT(soil.loess[point], WithinAbs(std::max(loess - depth, 0.0), 1e-9));
+        CHECK_THAT(soil.sand[point],
+                   WithinAbs(std::max(sand - std::max(depth - loess, 0.0), 0.0), 1e-9));
+        if (soil.parent[point] == Parent::Loess || soil.parent[point] == Parent::Sand) {
+            ++on_wind;
+        }
+        // Down through the profile: the wind's layers lie under the soil, over what water laid.
+        const Profile profile =
+            profile_at(world.sphere, soil, world.sphere.locate(world.sphere.point(point), point));
+        const double top = profile.organic + profile.topsoil + profile.subsoil;
+        if (profile.loess > 1e-6) {
+            CHECK(layer_at(profile, top + (profile.loess / 2.0)) == Layer::Loess);
+        }
+        if (profile.sand > 1e-6) {
+            CHECK(layer_at(profile, top + profile.loess + (profile.sand / 2.0)) == Layer::Sand);
+        }
+    }
+    CHECK(on_wind > 0);
 }
