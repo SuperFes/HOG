@@ -49,13 +49,13 @@ struct Made {
 
 TEST_CASE("every bit of rock worn off settles somewhere", "[formation][sediment]") {
     const Made made;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     double worn = 0.0;
     double settled = 0.0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         const bool land = made.rivers.receiver[point] != point;
         if (land && made.lakes.basin[point] == Lakes::none) {
-            worn += made.rivers.wear[point] * made.sphere.area(point) * earth_radius * earth_radius;
+            worn += made.rivers.wear[point] * made.sphere.area(point) * radius * radius;
         }
         settled += made.sediment.settling[point];
         CHECK(made.sediment.settling[point] >= 0.0);
@@ -68,7 +68,7 @@ TEST_CASE("every bit of rock worn off settles somewhere", "[formation][sediment]
 
 TEST_CASE("rock handed to the rivers settles somewhere too", "[formation][sediment]") {
     const Made made;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     const std::vector<double> brought(made.sphere.size(), 1.0e9);
     const Sediment sediment = sediment_on(made.sphere, made.rivers, made.lakes, brought, made.body);
     double arriving = 0.0;
@@ -76,8 +76,7 @@ TEST_CASE("rock handed to the rivers settles somewhere too", "[formation][sedime
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         const bool land = made.rivers.receiver[point] != point;
         if (land && made.lakes.basin[point] == Lakes::none) {
-            arriving +=
-                made.rivers.wear[point] * made.sphere.area(point) * earth_radius * earth_radius;
+            arriving += made.rivers.wear[point] * made.sphere.area(point) * radius * radius;
         }
         arriving += brought[point] / made.body.sediment_age;
         settled += sediment.settling[point];
@@ -107,7 +106,7 @@ TEST_CASE("deltas build out over the sea floor no higher than the waterline",
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (made.rivers.receiver[point] == point) {
             settled += made.sediment.settling[point] * made.body.sediment_age /
-                       (6'371'000.0 * 6'371'000.0);
+                       (made.body.radius * made.body.radius);
         }
     }
     CHECK_THAT(laid, WithinRel(settled, 1e-9));
@@ -117,12 +116,12 @@ TEST_CASE("deltas build out over the sea floor no higher than the waterline",
 TEST_CASE("hollows keep what runs in up to their brim, and only then pass it on",
           "[formation][sediment]") {
     const Made made;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     std::vector<double> kept(made.lakes.basins.size(), 0.0);
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (made.lakes.basin[point] != Lakes::none) {
-            kept[made.lakes.basin[point]] += made.sediment.alluvium[point] *
-                                             made.sphere.area(point) * earth_radius * earth_radius;
+            kept[made.lakes.basin[point]] +=
+                made.sediment.alluvium[point] * made.sphere.area(point) * radius * radius;
         }
     }
     for (std::size_t basin = 0; basin < kept.size(); ++basin) {

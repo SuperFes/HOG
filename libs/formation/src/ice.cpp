@@ -18,8 +18,6 @@ namespace hog::formation {
 
 namespace {
 
-// Lengths and areas are reckoned at Earth's scale, as the rivers' are.
-constexpr double earth_radius = 6'371'000.0;
 constexpr double days_a_year = 365.25;
 constexpr double water_density = 1'000.0;
 constexpr int most_rounds = 8;
@@ -138,7 +136,7 @@ void share_down(const Land& land, const Cover& cover, std::uint32_t point, doubl
 // what its snow adds, less what melts. What reaches the sea breaks off.
 void gather(const Land& land, Cover& cover) {
     const Rivers& rivers = *land.rivers;
-    const double cell_area = earth_radius * earth_radius;
+    const double cell_area = land.body->radius * land.body->radius;
     std::ranges::fill(cover.reaching, 0.0);
     cover.calving = 0.0;
     const auto pass = [&](std::uint32_t to, double amount) {
@@ -206,7 +204,8 @@ void stand(const Land& land, std::span<const double> rock, Cover& cover) {
             if (fixed[next] != 0 || !iced(next)) {
                 continue;
             }
-            const double length = angle(sphere.point(point), sphere.point(next)) * earth_radius;
+            const double length =
+                angle(sphere.point(point), sphere.point(next)) * land.body->radius;
             const double surface = bed(next) + ice_thickness(bed(next), level, length, *land.body);
             if (surface < best[next]) {
                 best[next] = surface;
@@ -254,7 +253,7 @@ std::vector<double> carve(const Land& land, const Cover& cold) {
     const Body& body = *land.body;
     const Rivers& rivers = *land.rivers;
     const double power = body.glacial_erosion_power + 1.0;
-    const double across = land.sphere->spacing() * earth_radius;
+    const double across = land.sphere->spacing() * body.radius;
     std::vector<double> rock = rivers.ground;
     std::vector<double> carved(rock.size(), 0.0);
     for (const std::uint32_t point : cold.order) {
@@ -276,7 +275,7 @@ std::vector<double> carve(const Land& land, const Cover& cold) {
         const double sill = sea ? 0.0 : rock[down];
         const double ice_below = sea ? 0.0 : std::max(0.0, cold.surface[down] - rock[down]);
         const double length =
-            angle(land.sphere->point(point), land.sphere->point(down)) * earth_radius;
+            angle(land.sphere->point(point), land.sphere->point(down)) * body.radius;
         const double lowest = sill - deepest_dip(ice_below, length, body);
         const double ground = rivers.ground[point];
         rock[point] = std::max(ground - cut, std::min(ground, lowest));
@@ -293,7 +292,7 @@ std::vector<double> carve(const Land& land, const Cover& cold) {
 void lay(const Land& land, const Cover& cold, Ice& ice) {
     const Sphere& sphere = *land.sphere;
     const Rivers& rivers = *land.rivers;
-    const double cell_area = earth_radius * earth_radius;
+    const double cell_area = land.body->radius * land.body->radius;
     const double years = std::max(land.body->glaciated_years, 1.0);
     const std::uint32_t size = sphere.size();
     std::vector<double> carrying(size, 0.0); // cubic metres of rock a year arriving in the ice
@@ -314,7 +313,7 @@ void lay(const Land& land, const Cover& cold, Ice& ice) {
         const std::uint32_t down = rivers.receiver[point];
         const double below = in_sea(rivers, down) ? 0.0 : rivers.height[down];
         const double slope = std::max(0.0, rivers.height[point] - below) /
-                             (angle(sphere.point(point), sphere.point(down)) * earth_radius);
+                             (angle(sphere.point(point), sphere.point(down)) * land.body->radius);
         // Meltwater runs under the ice in a few channels and sweeps up what melts out only where it
         // comes out from under the ice, at its edge.
         const bool edge = cold.flux[point] <= 0.0;
@@ -522,8 +521,8 @@ Rivers ice_shaped(const Sphere& sphere, const Rivers& rivers, const Ice& ice) {
                 open.emplace(0.0, next);
                 continue;
             }
-            const double length = angle(sphere.point(point), sphere.point(next)) * earth_radius;
-            shaped.height[next] = std::max(ground, level + (1e-6 * length));
+            const double arc = angle(sphere.point(point), sphere.point(next));
+            shaped.height[next] = std::max(ground, level + (1e-3 * arc));
             open.emplace(shaped.height[next], next);
         }
     }
@@ -535,8 +534,8 @@ Rivers ice_shaped(const Sphere& sphere, const Rivers& rivers, const Ice& ice) {
         double steepest = 0.0;
         for (const std::uint32_t next : sphere.neighbors(point)) {
             const double below = in_sea(shaped, next) ? 0.0 : shaped.height[next];
-            const double length = angle(sphere.point(point), sphere.point(next)) * earth_radius;
-            const double fall = (shaped.height[point] - below) / length;
+            const double fall =
+                (shaped.height[point] - below) / angle(sphere.point(point), sphere.point(next));
             if (fall > steepest) {
                 steepest = fall;
                 shaped.receiver[point] = next;

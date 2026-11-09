@@ -5,13 +5,12 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <numbers>
 
 namespace hog::formation {
 
 namespace {
 
-// Lengths are reckoned at Earth's scale, as the rivers' are.
-constexpr double earth_radius = 6'371'000.0;
 // Reaches past which what's still carried is followed no further, laid where it's got to.
 constexpr double reaches_followed = 4.0;
 
@@ -181,9 +180,11 @@ Drifts drifts_on(const Sphere& sphere, const Climate& climate, const Rivers& riv
 
     const std::vector<std::uint32_t> down = downwind(sphere, climate);
     const Spread spread = spread_downwind(sphere, climate);
-    const double step = sphere.spacing() * earth_radius;
+    const double step = sphere.spacing() * body.radius;
+    // Nothing goes further than halfway round the planet.
+    const double furthest = std::numbers::pi / sphere.spacing();
     const auto steps = [&](double reach) {
-        return static_cast<int>(std::ceil(reaches_followed * reach / step));
+        return static_cast<int>(std::ceil(std::min(reaches_followed * reach / step, furthest)));
     };
     // Sand goes on over bare, dry ground and ice, banking against ground rising ahead; it sinks
     // in water.

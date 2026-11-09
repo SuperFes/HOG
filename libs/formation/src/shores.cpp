@@ -13,8 +13,6 @@ namespace hog::formation {
 
 namespace {
 
-// Lengths are reckoned at Earth's scale, as the rivers' are.
-constexpr double earth_radius = 6'371'000.0;
 // A storm's sea grows with its fetch until it's fully grown, against its wind's speed
 // (Hasselmann et al. 1973; Pierson and Moskowitz 1964).
 constexpr double growth = 0.0016;
@@ -51,11 +49,11 @@ DVec3 along_surface(const DVec3& vector, const DVec3& here) {
 
 // Metres of open water from a coast point the way `way` goes, until land or a fully grown sea.
 double fetch_toward(const Sphere& sphere, const Rivers& rivers, std::uint32_t from,
-                    const DVec3& way, double longest) {
+                    const DVec3& way, double longest, double radius) {
     const DVec3 here = sphere.point(from);
     std::uint32_t near = from;
     double arc = 0.0;
-    while (arc * earth_radius < longest) {
+    while (arc * radius < longest) {
         const double ahead = arc + sphere.spacing();
         near = sphere.nearest((here * maths::cos(ahead)) + (way * maths::sin(ahead)), near);
         if (!in_sea(rivers, near)) {
@@ -63,7 +61,7 @@ double fetch_toward(const Sphere& sphere, const Rivers& rivers, std::uint32_t fr
         }
         arc = ahead;
     }
-    return std::min(arc * earth_radius, longest);
+    return std::min(arc * radius, longest);
 }
 
 struct Waves {
@@ -87,7 +85,7 @@ Waves waves_at(const Sphere& sphere, const Climate& climate, const Rivers& river
     for (int at = 0; at < ways; ++at) {
         const double round = 2.0 * std::numbers::pi * at / ways;
         const DVec3 way = (east * maths::cos(round)) + (north * maths::sin(round));
-        const double fetch = fetch_toward(sphere, rivers, point, way, longest);
+        const double fetch = fetch_toward(sphere, rivers, point, way, longest, body.radius);
         if (fetch <= 0.0) {
             continue;
         }
@@ -153,7 +151,7 @@ RiverSand river_sand(const Sphere& sphere, const Rivers& rivers, const Bedrock& 
         const bool lava = rock == Rock::Lava || rock == Rock::SeaFloor;
         // Layered rock's soluble share goes off in the water, not as grains.
         const bool beds = rock == Rock::Layered || rock == Rock::Folded;
-        const double worn = rivers.wear[point] * sphere.area(point) * earth_radius * earth_radius;
+        const double worn = rivers.wear[point] * sphere.area(point) * body.radius * body.radius;
         const double grain = worn * (beds ? 1.0 - bedrock.soluble[point] : 1.0);
         grains[point] += grain;
         worn_all[point] += worn;
@@ -163,7 +161,7 @@ RiverSand river_sand(const Sphere& sphere, const Rivers& rivers, const Bedrock& 
         // Glassy grains break down to mud as they go.
         const double hop =
             std::acos(std::clamp(glm::dot(sphere.point(point), sphere.point(down)), -1.0, 1.0)) *
-            earth_radius;
+            body.radius;
         const double broken = volcanic[point] * (1.0 - lasting(hop, body.volcanic_reach));
         grains[down] += grains[point] - broken;
         worn_all[down] += worn_all[point];
@@ -220,10 +218,10 @@ struct Shore {
     double length = 0.0;      // metres of coast each point holds
 };
 
-Shore shore_of(const Sphere& sphere, const Rivers& rivers) {
+Shore shore_of(const Sphere& sphere, const Rivers& rivers, double radius) {
     Shore shore;
     shore.index.assign(sphere.size(), none);
-    shore.length = sphere.spacing() * earth_radius;
+    shore.length = sphere.spacing() * radius;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
         const bool coast = in_sea(rivers, point) &&
                            std::ranges::any_of(sphere.neighbors(point), [&](std::uint32_t near) {
@@ -529,7 +527,7 @@ Shores shores_on(const Sphere& sphere, const Climate& climate, const Rivers& riv
           &shores.carbonate, &shores.shingle, &shores.mud, &shores.reef, &shores.retreat}) {
         field->assign(sphere.size(), 0.0);
     }
-    Shore shore = shore_of(sphere, rivers);
+    Shore shore = shore_of(sphere, rivers, body.radius);
     const std::size_t count = shore.points.size();
     for (std::size_t at = 0; at < count; ++at) {
         const std::uint32_t point = shore.points[at];

@@ -8,9 +8,6 @@ namespace hog::formation {
 
 namespace {
 
-// Areas are reckoned at Earth's scale, as the rivers' discharge is.
-constexpr double earth_radius = 6'371'000.0;
-
 double smoothstep(double from, double to, double x) noexcept {
     const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
     return t * t * (3.0 - (2.0 * t));
@@ -114,7 +111,7 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
             const std::uint32_t point = hollow.points[at];
             ground[at] = rivers.ground[point];
             loss[at] = open_water_loss(climate.temperature[point], body) * sphere.area(point) *
-                       earth_radius * earth_radius;
+                       body.radius * body.radius;
         }
         const double inflow = lakes.discharge[hollow.outlet];
         const Filling filling = fill_hollow(ground, loss, inflow, hollow.spill);
@@ -123,7 +120,7 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
         for (const std::uint32_t point : hollow.points) {
             lakes.basin[point] = basin;
             lakes.basins.back().room += std::max(0.0, hollow.spill - rivers.ground[point]) *
-                                        sphere.area(point) * earth_radius * earth_radius;
+                                        sphere.area(point) * body.radius * body.radius;
         }
         if (filling.covered == 0) {
             lakes.salt_flat[hollow.points.front()] = 1;
@@ -140,7 +137,7 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
             const std::uint32_t point = hollow.points[at];
             lakes.depth[point] = std::max(0.0, filling.level - rivers.ground[point]);
             lakes.lake[point] = id;
-            lake.area += sphere.area(point) * earth_radius * earth_radius;
+            lake.area += sphere.area(point) * body.radius * body.radius;
             lake.loss += loss[at];
         }
         lakes.basins.back().lake = id;

@@ -10,8 +10,6 @@ namespace hog::formation {
 
 namespace {
 
-constexpr double earth_radius = 6'371'000.0;
-
 double angle(const DVec3& a, const DVec3& b) noexcept {
     return maths::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
@@ -40,11 +38,12 @@ struct Around {
 };
 
 // Whether the sea is next to a point, and the steepest rise or fall of rock to a neighbour.
-Around around(const Sphere& sphere, const Rivers& rivers, const Ice& ice, std::uint32_t point) {
+Around around(const Sphere& sphere, const Rivers& rivers, const Ice& ice, std::uint32_t point,
+              double radius) {
     Around here;
     for (const std::uint32_t next : sphere.neighbors(point)) {
         here.coast = here.coast || in_sea(rivers, next);
-        const double run = angle(sphere.point(point), sphere.point(next)) * earth_radius;
+        const double run = angle(sphere.point(point), sphere.point(next)) * radius;
         here.slope = std::max(
             here.slope, std::abs(surface(rivers, ice, point) - surface(rivers, ice, next)) / run);
     }
@@ -102,7 +101,7 @@ Landforms landforms_on(const Sphere& sphere, const Crust& crust, const Bedrock& 
         if (in_sea(rivers, point)) {
             continue;
         }
-        const auto [coast, slope] = around(sphere, rivers, ice, point);
+        const auto [coast, slope] = around(sphere, rivers, ice, point, body.radius);
         const Rock rock = outcrop.rock[point];
         const double layering = bedrock.layering[point];
         const double soluble = bedrock.soluble[point];

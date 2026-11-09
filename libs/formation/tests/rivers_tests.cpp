@@ -65,11 +65,10 @@ TEST_CASE("all the rain on land comes out at the coasts", "[formation][rivers]")
     const Made made;
     double fallen = 0.0;
     double out = 0.0;
-    constexpr double earth_radius = 6'371'000.0;
+    const double radius = made.body.radius;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         if (on_land(made, point)) {
-            fallen +=
-                made.climate.rain[point] * made.sphere.area(point) * earth_radius * earth_radius;
+            fallen += made.climate.rain[point] * made.sphere.area(point) * radius * radius;
             if (!on_land(made, made.rivers.receiver[point])) {
                 out += made.rivers.discharge[point];
             }
