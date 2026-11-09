@@ -278,10 +278,19 @@ std::vector<MadeTile> generate_stack(const Generator& generator, std::span<const
                           side, voxel_lod(generator) * (1 << first.level));
     const std::vector<std::vector<Run>> runs = runs_up(columns, generator.planet(), layers, lowest,
                                                        highest, layers.thickness <= widest_cave);
-    // The lowest the ground over the footprint comes, and beside it as steep as it slopes.
+    // The lowest the ground over the footprint comes, and beside it as steep as it slopes; and
+    // where any surface, the ground's or open water's top, may come finer than the columns show.
     double ground = std::numeric_limits<double>::max();
+    std::vector<std::pair<double, double>> surfaces;
+    surfaces.reserve(columns.size() * 2);
     for (const Generator::Column& column : columns) {
         ground = std::min(ground, column.ground() - (column.slope() * layers.thickness));
+        const double near = (column.slope() * layers.thickness) + layers.thickness;
+        surfaces.emplace_back(column.ground() - near, column.ground() + near);
+        if (column.water() > column.ground()) {
+            surfaces.emplace_back(column.water() - layers.thickness,
+                                  column.water() + layers.thickness);
+        }
     }
     for (const TileKey key : keys) {
         const int bottom = static_cast<int>(key.k) * side;
@@ -297,14 +306,20 @@ std::vector<MadeTile> generate_stack(const Generator& generator, std::span<const
                                   run.voxel.solid_amount >= Voxel::full);
             }
         }
-        made.push_back({.key = key,
-                        .tree = tile_of({.runs = &runs,
-                                         .kept = nullptr,
-                                         .base = bottom,
-                                         .bottom = bottom,
-                                         .top = top,
-                                         .keep = top + 1}),
-                        .buried = solid});
+        VoxelTree tree = tile_of({.runs = &runs,
+                                  .kept = nullptr,
+                                  .base = bottom,
+                                  .bottom = bottom,
+                                  .top = top,
+                                  .keep = top + 1});
+        const double low = layers.bottom(bottom);
+        const double high = layers.top(top);
+        const bool surfaced = std::ranges::any_of(surfaces, [&](const auto& surface) {
+            return surface.second >= low && surface.first <= high;
+        });
+        const bool one = tree.leaf_side(0, 0, 0) >= side;
+        made.push_back(
+            {.key = key, .tree = std::move(tree), .hidden = solid || (one && !surfaced)});
     }
     return made;
 }

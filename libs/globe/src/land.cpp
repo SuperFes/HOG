@@ -90,8 +90,8 @@ void Land::make(std::span<const TileKey> keys, const EachOf& each) {
     for (const std::vector<MadeTile>& stack : stacked) {
         for (const MadeTile& tile : stack) {
             put(tile.key, tile.tree);
-            if (tile.buried) {
-                buried_.insert(tile.key);
+            if (tile.hidden) {
+                hidden_.insert(tile.key);
             }
         }
     }
@@ -114,7 +114,10 @@ VoxelTree Land::made(TileKey key) const {
 }
 
 bool Land::hidden(TileKey key) {
-    return all_one(key) || buried_.contains(key);
+    if (!known(key)) {
+        make(std::span{&key, 1});
+    }
+    return hidden_.contains(key);
 }
 
 bool Land::all_one(TileKey key) {
@@ -157,7 +160,7 @@ void Land::set(Site site, const Cube& voxel) {
              place.z + static_cast<int>(site.layer % side), voxel);
     // What's changed may show now.
     for (TileKey over = key; over.level <= top_; over = over.parent()) {
-        buried_.erase(over);
+        hidden_.erase(over);
     }
 }
 
