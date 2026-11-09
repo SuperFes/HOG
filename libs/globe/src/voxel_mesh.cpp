@@ -528,6 +528,9 @@ public:
         }
         const Found& found = find(dx, dy, dz);
         if (found.tree == nullptr) {
+            if (const std::optional<Cube> finer = finer_at(x, y, z, dx, dy, dz)) {
+                return *finer;
+            }
             return tile_->at(std::clamp(x, 0, across - 1), std::clamp(y, 0, across - 1),
                              std::clamp(z, 0, across - 1));
         }
@@ -541,6 +544,42 @@ public:
     }
 
 private:
+    // The voxel at `x`, `y`, `z` of the key's level past its side `dx`, `dy`, `dz`, as the finest
+    // tile there has it right where it meets the tile; none where none's held.
+    [[nodiscard]] std::optional<Cube> finer_at(int x, int y, int z, int dx, int dy, int dz) const {
+        constexpr int across = Volume::tile_side;
+        if (!*beside_) {
+            return std::nullopt;
+        }
+        for (int down = 1; std::cmp_less_equal(down, key_.level); ++down) {
+            const int size = 1 << down;
+            // Along each axis, the finer voxel against the tile, or across the middle.
+            const auto fine = [&](std::uint32_t tile, int at, int by) -> std::int64_t {
+                const std::int64_t whole = (std::int64_t{tile} * across) + at;
+                if (by < 0) {
+                    return ((whole + 1) * size) - 1;
+                }
+                return (whole * size) + (by > 0 ? 0 : size / 2);
+            };
+            const std::int64_t fx = fine(key_.i, x, dx);
+            const std::int64_t fy = fine(key_.j, y, dy);
+            const std::int64_t fz = fine(key_.k, z, dz);
+            if (fx < 0 || fy < 0 || fz < 0) {
+                return std::nullopt;
+            }
+            const TileKey key{.level = static_cast<std::uint8_t>(key_.level - down),
+                              .face = key_.face,
+                              .i = static_cast<std::uint32_t>(fx / across),
+                              .j = static_cast<std::uint32_t>(fy / across),
+                              .k = static_cast<std::uint32_t>(fz / across)};
+            if (const VoxelTree* tree = (*beside_)(key); tree != nullptr) {
+                return tree->at(static_cast<int>(fx % across), static_cast<int>(fy % across),
+                                static_cast<int>(fz % across));
+            }
+        }
+        return std::nullopt;
+    }
+
     struct Found {
         bool looked = false;
         const VoxelTree* tree = nullptr;

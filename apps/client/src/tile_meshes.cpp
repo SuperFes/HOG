@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <utility>
 
@@ -35,6 +36,15 @@ std::vector<globe::TileKey> beside(globe::TileKey key) {
 }
 
 // The bits of `value`, 21 of them, spread to every third bit.
+// Whether the tile at `key` lies within the one at `over`, or is it.
+bool within(globe::TileKey key, globe::TileKey over) noexcept {
+    if (key.face != over.face || key.level > over.level) {
+        return false;
+    }
+    const int up = over.level - key.level;
+    return (key.i >> up) == over.i && (key.j >> up) == over.j && (key.k >> up) == over.k;
+}
+
 std::uint64_t spread(std::uint32_t value) noexcept {
     std::uint64_t bits = value & 0x1F'FFFFU;
     bits = (bits | (bits << 32U)) & 0x1F'0000'0000'FFFFULL;
@@ -127,7 +137,8 @@ void TileMeshes::take(const SentTree& sent) {
     }
     touched_.insert(key);
     waiting_.insert(key);
-    // Those beside it read it at their edges, and so do the finer ones held against it.
+    // Those beside it read it at their edges, and so do the finer ones held against it, and the
+    // coarser ones beside it with nothing of their level or coarser there.
     for (const globe::TileKey next : beside(key)) {
         if (held_.contains(next)) {
             waiting_.insert(next);
@@ -137,18 +148,37 @@ void TileMeshes::take(const SentTree& sent) {
                 waiting_.insert(finer);
             }
         }
+        for (globe::TileKey over = next.parent(); over.level < by_level_.size();
+             over = over.parent()) {
+            if (held_.contains(over)) {
+                if (!within(key, over)) {
+                    waiting_.insert(over);
+                }
+                break;
+            }
+        }
     }
 }
 
 void TileMeshes::mesh(globe::TileKey key) {
     const Held& held = held_.at(key);
-    std::vector<std::pair<globe::TileKey, std::shared_ptr<const globe::VoxelTree>>> near;
-    // Beside it where held at its level, else as the finest coarser tile held there has it.
+    std::map<globe::TileKey, std::shared_ptr<const globe::VoxelTree>> near;
+    // Beside it where held at its level, else as the finest coarser tile held there has it, else
+    // as the finer ones held against it do.
     for (const globe::TileKey next : beside(key)) {
-        for (globe::TileKey over = next; over.level < by_level_.size(); over = over.parent()) {
-            if (const auto found = held_.find(over); found != held_.end()) {
-                near.emplace_back(over, found->second.tree);
-                break;
+        bool found = false;
+        for (globe::TileKey over = next; over.level < by_level_.size() && !found;
+             over = over.parent()) {
+            if (const auto at = held_.find(over); at != held_.end()) {
+                near.emplace(over, at->second.tree);
+                found = true;
+            }
+        }
+        if (!found) {
+            for (const globe::TileKey finer : under(next)) {
+                if (globe::meets(finer, key)) {
+                    near.emplace(finer, held_.at(finer).tree);
+                }
             }
         }
     }
@@ -166,12 +196,8 @@ void TileMeshes::mesh(globe::TileKey key) {
              *jobs_, [layers = layers_, sea = sea_, key, tree = held.tree, near = std::move(near),
                       thickness] {
                  const globe::TileAt at = [&](globe::TileKey wanted) -> const globe::VoxelTree* {
-                     for (const auto& [next, tile] : near) {
-                         if (next == wanted) {
-                             return tile.get();
-                         }
-                     }
-                     return nullptr;
+                     const auto found = near.find(wanted);
+                     return found == near.end() ? nullptr : found->second.get();
                  };
                  return drawn_of(globe::mesh_tile(layers, key, *tree, at), sea, thickness);
              })});

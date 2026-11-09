@@ -40,7 +40,8 @@ using TileAt = std::function<const VoxelTree*(TileKey)>;
 
 // The faces of the tile at `key`, its voxels `tile`, drawn as mesh_tile_column draws a column's.
 // Past its sides the tiles on its face are read from `beside`, of its level or the finest coarser
-// it has there; elsewhere the tile is taken to go on as its edge does.
+// it has there; else finer, a voxel each read where it meets the tile; elsewhere the tile is taken
+// to go on as its edge does.
 [[nodiscard]] VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
                                   const TileAt& beside = {});
 
