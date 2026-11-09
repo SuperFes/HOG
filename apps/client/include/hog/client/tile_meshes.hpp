@@ -25,6 +25,15 @@ namespace hog::client {
 // The key a tile's meshes are drawn under.
 [[nodiscard]] std::uint64_t tile_key(globe::TileKey key) noexcept;
 
+// A tile as sent: where it stands, and its voxels.
+struct SentTree {
+    globe::TileKey key;
+    std::shared_ptr<const globe::VoxelTree> tree;
+};
+// Fails on bytes that aren't a tile, or a tile off the planet's layers.
+[[nodiscard]] Result<SentTree> sent_tree(const protocol::SentTile& sent,
+                                         const globe::Layers& layers);
+
 // The tiles the server sends, held as they come and meshed on the jobs, for the scene to draw.
 // A tile is drawn until the finer tiles sent after it are meshed all through it, and finer tiles
 // until one sent over them is meshed, so the ground never shows a hole between levels. What's
@@ -41,6 +50,8 @@ public:
 
     // Holds the tile, to be meshed at the next collect; fails on bytes that aren't a tile.
     Result<void> take(const protocol::SentTile& sent);
+    // Precondition: from sent_tree, for these layers.
+    void take(const SentTree& sent);
     // Waits for the meshing in flight.
     void finish();
     // What's to be drawn since last asked, and what's gone.

@@ -179,14 +179,32 @@ const VoxelTree* World::tile(TileKey key) const {
     if (const VoxelTree* found = volume_->tile(key)) {
         return found;
     }
+    // In a column made, what isn't held is air over its floor and rock under it.
+    if (key.level == 0) {
+        const Site site{.face = key.face,
+                        .i = key.i * Volume::tile_side,
+                        .j = key.j * Volume::tile_side,
+                        .layer = key.k * Volume::tile_side};
+        if (const std::optional<std::uint32_t> floor = volume_->floor(site)) {
+            static const VoxelTree air{Volume::tile_side};
+            static const VoxelTree rock{Volume::tile_side,
+                                        {.solid = Material::Granite, .solid_amount = Voxel::full}};
+            return site.layer >= *floor ? &air : &rock;
+        }
+    }
     return tiles_ != nullptr ? tiles_->tile(key) : nullptr;
 }
 
 std::optional<HeldTile> World::tile_over(TileKey key) const {
     const auto corner = [&](std::uint32_t at) { return (at << key.level) * Volume::tile_side; };
-    if (const auto over = volume_->finest_over(
-            {.face = key.face, .i = corner(key.i), .j = corner(key.j), .layer = corner(key.k)},
-            key.level)) {
+    const Site site{
+        .face = key.face, .i = corner(key.i), .j = corner(key.j), .layer = corner(key.k)};
+    // In a column made, nothing coarser stands for what isn't held: it's open air, or deep rock.
+    if (key.level == 0 && volume_->floor(site)) {
+        const VoxelTree* found = volume_->tile(key);
+        return found != nullptr ? std::optional{HeldTile{.key = key, .tree = found}} : std::nullopt;
+    }
+    if (const auto over = volume_->finest_over(site, key.level)) {
         TileKey found = key;
         for (std::uint8_t level = key.level; level < over->first; ++level) {
             found = found.parent();

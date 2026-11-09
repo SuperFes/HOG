@@ -3,6 +3,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/globe/held_tiles.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/physics/character.hpp>
 #include <hog/physics/ground.hpp>
@@ -34,6 +35,8 @@ public:
     void place(WorldPosition feet);
     // The world's ground changed in the brick: walked on as it is now.
     void changed(globe::BrickSite brick) { ground_.changed(brick); }
+    // A tile of the world's ground was sent: walked on as sent.
+    void changed(globe::TileKey key) { ground_.changed(key); }
 
     [[nodiscard]] WorldPosition feet() const { return character_.feet(); }
     [[nodiscard]] bool standing() const { return character_.standing(); }
@@ -62,6 +65,11 @@ struct Placing {
 };
 [[nodiscard]] Result<Placing> placing(const globe::World& world, const protocol::Placed& placed,
                                       const PlaySettings& settings = {});
+
+// Whether the ground under `at` is held as finely as it'll be sent: the tile at its top at the
+// finest, and the one over that too, unless it's open air sent whole.
+[[nodiscard]] bool ground_settled(const globe::World& world, const globe::HeldTiles& tiles,
+                                  DVec3 at);
 
 // What the keys held ask of the character: `move` is right, up and forwards, each from -1 to 1,
 // facing the way `aim` does along the ground; up jumps.

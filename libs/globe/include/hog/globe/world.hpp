@@ -63,9 +63,11 @@ public:
     [[nodiscard]] const HeldTiles* tiles() const noexcept { return tiles_; }
 
     // The tile at `key`, at any level, from the volume or else the tiles held; none where neither
-    // holds it.
+    // holds it. In a tile column the volume makes, one it doesn't hold is all air over its floor
+    // and all rock under it.
     [[nodiscard]] const VoxelTree* tile(TileKey key) const;
-    // The finest tile over `key` the same way: itself, or coarser.
+    // The finest tile over `key` the same way: itself, or coarser; in a tile column the volume
+    // makes, only itself.
     [[nodiscard]] std::optional<HeldTile> tile_over(TileKey key) const;
 
     // Air where nothing is made; solid rock under a made column's floor.

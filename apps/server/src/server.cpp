@@ -682,9 +682,15 @@ void Server::hold(std::span<const DVec3> places) {
         log::warn(server_log, "couldn't hold the ground near players: {}", changed.error());
         return;
     }
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    const auto tiles_up = static_cast<std::uint32_t>((generator_.layers().count + side - 1) / side);
     for (const globe::Site corner : changed->loaded) {
-        for (const globe::BrickSite brick : globe::brick_footprint(corner)) {
-            ground_.changed(brick);
+        for (std::uint32_t k = 0; k < tiles_up; ++k) {
+            ground_.changed(globe::TileKey{.level = 0,
+                                           .face = corner.face,
+                                           .i = corner.i / side,
+                                           .j = corner.j / side,
+                                           .k = k});
         }
     }
     // The flow held air where nothing was read in yet.

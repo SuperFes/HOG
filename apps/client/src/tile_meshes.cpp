@@ -79,7 +79,7 @@ bool TileMeshes::in_shell(globe::TileKey key) const noexcept {
     return static_cast<std::int64_t>(key.k) * (std::int64_t{side} << key.level) < layers_.count;
 }
 
-Result<void> TileMeshes::take(const protocol::SentTile& sent) {
+Result<SentTree> sent_tree(const protocol::SentTile& sent, const globe::Layers& layers) {
     auto tree = globe::VoxelTree::decode(sent.bytes);
     if (!tree) {
         return std::unexpected(std::move(tree).error());
@@ -89,16 +89,32 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
     }
     const globe::TileKey key{
         .level = sent.level, .face = sent.face, .i = sent.i, .j = sent.j, .k = sent.k};
-    if (key.face >= 6 || key.level >= by_level_.size() || !in_shell(key)) {
+    const int top = std::max(layers.level - coarser, 0);
+    if (key.face >= 6 || std::cmp_greater(key.level, top) ||
+        static_cast<std::int64_t>(key.k) * (std::int64_t{side} << key.level) >= layers.count) {
         return make_error(ErrorCode::OutOfRange, "a tile sent off the planet");
     }
+    return SentTree{.key = key, .tree = std::make_shared<const globe::VoxelTree>(std::move(*tree))};
+}
+
+Result<void> TileMeshes::take(const protocol::SentTile& sent) {
+    auto tree = sent_tree(sent, layers_);
+    if (!tree) {
+        return std::unexpected(std::move(tree).error());
+    }
+    take(*tree);
+    return {};
+}
+
+void TileMeshes::take(const SentTree& sent) {
+    const globe::TileKey key = sent.key;
     const auto [found, added] = held_.try_emplace(key);
     Held& held = found->second;
     if (added) {
         by_level_[key.level].emplace(code(key), key);
     }
     // Sent again, it's drawn as it was till meshed anew.
-    held.tree = std::make_shared<const globe::VoxelTree>(std::move(*tree));
+    held.tree = sent.tree;
     held.arrived = ++taken_;
     held.stale = false;
     for (const globe::TileKey finer : under(key)) {
@@ -122,7 +138,6 @@ Result<void> TileMeshes::take(const protocol::SentTile& sent) {
             }
         }
     }
-    return {};
 }
 
 void TileMeshes::mesh(globe::TileKey key) {

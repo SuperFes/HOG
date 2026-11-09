@@ -1,6 +1,6 @@
 #include <hog/bot/bot.hpp>
+#include <hog/client/tile_meshes.hpp>
 #include <hog/core/log.hpp>
-#include <hog/globe/cell.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -35,36 +35,30 @@ WorldPosition Bot::feet() const {
 }
 
 void Bot::take_ground() {
-    for (const protocol::SentColumn& column : session_.take_columns()) {
-        if (auto taken =
-                held_->cache.take(column.face, column.i, column.j, column.level, column.bytes);
-            !taken) {
-            log::warn(bot_log, "can't hold a tile column sent: {}", taken.error());
-        }
-    }
     const globe::Layers& layers = held_->world.layers();
-    const globe::Cell cell = globe::cell_under(glm::normalize(feet().metres()), layers.level);
-    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
-    const globe::Site over{.face = cell.face, .i = cell.i / side * side, .j = cell.j / side * side};
-    if (held_->over != over) {
-        held_->over = over;
-        held_->cache.keep_near(layers, feet().metres(), keeps);
+    for (const protocol::SentTile& sent : session_.take_tiles()) {
+        auto tile = client::sent_tree(sent, layers);
+        if (!tile) {
+            log::warn(bot_log, "can't hold a tile sent: {}", tile.error());
+            continue;
+        }
+        held_->tiles.put(tile->key, tile->tree);
+        if (player_) {
+            player_->changed(tile->key);
+        }
     }
-    const std::vector<globe::Site> changed = held_->cache.take_changed();
     if (player_) {
-        for (const globe::Site corner : changed) {
-            for (const globe::BrickSite brick : globe::brick_footprint(corner)) {
-                player_->changed(brick);
-            }
-        }
-    } else if (held_->volume.floor(over)) {
-        auto player = client::Player::create(held_->world, direction_);
-        if (!player) {
-            log::warn(bot_log, "can't stand on the ground sent: {}", player.error());
-            return;
-        }
-        player_ = std::move(*player);
+        return;
     }
+    if (!client::ground_settled(held_->world, held_->tiles, feet().metres())) {
+        return;
+    }
+    auto player = client::Player::create(held_->world, direction_);
+    if (!player) {
+        log::warn(bot_log, "can't stand on the ground sent: {}", player.error());
+        return;
+    }
+    player_ = std::move(*player);
 }
 
 void Bot::update(MonotonicClock::time_point now, double seconds) {

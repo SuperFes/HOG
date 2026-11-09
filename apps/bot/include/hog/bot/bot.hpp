@@ -6,8 +6,8 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
-#include <hog/globe/column_cache.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/held_tiles.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
 
@@ -25,9 +25,6 @@ namespace hog::bot {
 // ground the server sends it like one, and wanders between spots near where it started.
 class Bot {
 public:
-    // Metres from the bot it keeps the ground it's sent.
-    static constexpr double keeps = 9000.0;
-
     // To stand on the ground under a unit `direction` once it's sent, connecting to `address`
     // with `token` from the login service, or none. The generator must outlive the bot.
     [[nodiscard]] static Result<Bot> start(const globe::Generator& generator, std::string address,
@@ -47,22 +44,23 @@ public:
 private:
     // On the heap, where the player's ground can keep hold of it.
     struct Held {
-        explicit Held(const globe::Generator& generator) : world{generator, volume} {}
+        explicit Held(const globe::Generator& generator) : world{generator, volume} {
+            world.read_tiles(&tiles);
+        }
         Held(const Held&) = delete;
         Held& operator=(const Held&) = delete;
         Held(Held&&) = delete;
         Held& operator=(Held&&) = delete;
         ~Held() = default;
 
-        globe::Volume volume;
+        globe::Volume volume; // none: the ground is the tiles sent
+        globe::HeldTiles tiles;
         globe::World world;
-        globe::ColumnCache cache{volume};
-        std::optional<globe::Site> over; // the tile column last kept about
     };
 
     Bot(std::unique_ptr<Held> held, client::Session session, DVec3 direction, std::uint64_t seed,
         const WanderSettings& settings) noexcept;
-    // Takes in the tile columns sent, standing the player on the ground once it's there.
+    // Takes in the tiles sent, standing the player on the ground once its finest is there.
     void take_ground();
 
     std::unique_ptr<Held> held_;

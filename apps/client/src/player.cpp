@@ -1,5 +1,6 @@
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grip.hpp>
 
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -108,6 +110,34 @@ Result<Placing> placing(const globe::World& world, const protocol::Placed& place
         placing.player.emplace(std::move(player).value());
     }
     return placing;
+}
+
+bool ground_settled(const globe::World& world, const globe::HeldTiles& tiles, DVec3 at) {
+    const globe::Layers& layers = world.layers();
+    const DVec3 up = glm::normalize(at);
+    const std::optional<double> top = globe::top_of(world, up);
+    if (!top) {
+        return false;
+    }
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    const globe::Cell cell = globe::cell_under(up, layers.level);
+    const auto layer = static_cast<std::uint32_t>(std::max(layers.layer_at(*top) - 1, 0));
+    const globe::TileKey under{
+        .level = 0, .face = cell.face, .i = cell.i / side, .j = cell.j / side, .k = layer / side};
+    const auto settled = [&](globe::TileKey key, bool air_whole) {
+        const std::optional<globe::HeldTile> held = tiles.finest_over(key);
+        if (!held) {
+            return false;
+        }
+        const globe::VoxelTree& tree = *held->tree;
+        return held->key.level == 0 ||
+               (air_whole && tree.leaf_side(0, 0, 0) == globe::Volume::tile_side &&
+                tree.at(0, 0, 0) == globe::Cube{});
+    };
+    globe::TileKey over = under;
+    ++over.k;
+    return settled(under, false) &&
+           (std::cmp_greater_equal(over.k * side, layers.count) || settled(over, true));
 }
 
 physics::Stride stride(const Flight& aim, DVec3 move, bool running) {

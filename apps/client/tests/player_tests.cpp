@@ -3,13 +3,18 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/held_tiles.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
 
+#include <cstdint>
+#include <memory>
 #include <utility>
 
 using Catch::Approx;
@@ -162,4 +167,45 @@ TEST_CASE("a player placed by the server flies there, or stands on the ground un
         CHECK(height_of(feet) == Approx(ground).margin(2.0));
         CHECK(apart(feet, WorldPosition{on_land() * radius()}) < 0.01);
     }
+}
+
+TEST_CASE("the ground is settled under a place once its tiles are as fine as they'll be sent",
+          "[client][player]") {
+    const globe::Generator& generator = client::testing::globe().generator;
+    const globe::Layers& layers = generator.layers();
+    constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
+    // An odd tile up, so the one over it is the first of a coarser pair.
+    const auto up = static_cast<std::uint32_t>(layers.count) / side / 2;
+    const std::uint32_t k = up % 2 == 1 ? up : up - 1;
+    const globe::TileKey ground{.level = 0, .face = 2, .i = 10, .j = 10, .k = k};
+    const DVec3 at = globe::center(globe::Cell{.level = static_cast<std::uint8_t>(layers.level),
+                                               .face = 2,
+                                               .i = (10 * side) + 5,
+                                               .j = (10 * side) + 5}) *
+                     layers.bottom(static_cast<int>((k + 1) * side));
+    const auto filled_to = [](int height) {
+        return std::make_shared<const globe::VoxelTree>(
+            globe::VoxelTree::build(globe::Volume::tile_side, [&](int, int, int z) {
+                return z < height ? globe::Cube{.solid = globe::Material::Granite,
+                                                .solid_amount = globe::Voxel::full}
+                                  : globe::Cube{};
+            }));
+    };
+    globe::HeldTiles tiles;
+    globe::Volume none;
+    globe::World world{generator.planet(), layers, none};
+    world.read_tiles(&tiles);
+    CHECK_FALSE(ground_settled(world, tiles, at));
+    tiles.put(ground, filled_to(20));
+    CHECK_FALSE(ground_settled(world, tiles, at));
+    // Over it, ground still to come finer; then open air, sent whole.
+    const globe::TileKey over =
+        globe::TileKey{.level = 0, .face = 2, .i = 10, .j = 10, .k = k + 1}.parent();
+    tiles.put(over, filled_to(1));
+    CHECK_FALSE(ground_settled(world, tiles, at));
+    tiles.put(over, filled_to(0));
+    CHECK(ground_settled(world, tiles, at));
+    // Its own tile held only coarser, finer is still to come.
+    tiles.put(ground.parent(), filled_to(20));
+    CHECK_FALSE(ground_settled(world, tiles, at));
 }
