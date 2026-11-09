@@ -18,10 +18,17 @@ struct Valley {
 
 // How high the ground beside a valley may stand at `direction`, on a planet `radius` metres
 // round: the valley's floor where nearest, rising up its walls with the distance from it; and
-// which way it rises, per metre along the sphere.
+// which way it rises, per metre along the sphere; and the floor's height there. And the way water
+// runs down it, which is up the wall itself, never up its rise out of the way; and how much of
+// the wall's own is here, 1 within half its reach falling to nothing at it, and its height as it
+// would stand there without rising away.
 struct Wall {
     double height = 0.0;
     DVec3 gradient{0.0};
+    double floor = 0.0;
+    DVec3 fall{0.0};
+    double reaching = 1.0;
+    double standing = 0.0;
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
 

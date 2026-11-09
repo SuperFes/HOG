@@ -4,6 +4,7 @@ add_library(hog_globe
     src/cell.cpp
     src/craters.cpp
     src/crust.cpp
+    src/dissection.cpp
     src/drainage.cpp
     src/erosion.cpp
     src/formed.cpp
@@ -47,6 +48,7 @@ hog_add_tests(hog_globe
     tests/cave_bed_tests.cpp
     tests/cell_tests.cpp
     tests/craters_tests.cpp
+    tests/dissection_tests.cpp
     tests/drainage_tests.cpp
     tests/formed_tests.cpp
     tests/lake_fill_tests.cpp
