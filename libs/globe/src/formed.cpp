@@ -2,6 +2,8 @@
 
 #include "valleys.hpp"
 
+#include <hog/core/hash.hpp>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -12,6 +14,11 @@
 namespace hog::globe {
 
 namespace {
+
+// Walls stand no steeper than rock does, or loose ground where it lies deep.
+constexpr double rock_steepest = 1.73; // 60 degrees
+constexpr double loose_steepest = 0.7; // 35 degrees
+constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
 
 formation::Body body_for(const Planet& planet) {
     formation::Body body;
@@ -47,7 +54,15 @@ OnCube on_cube(DVec3 direction) noexcept {
 
 Formed::Formed(const Planet& planet, const Derived& derived)
     : world_{body_for(planet), 5, static_cast<int>(planet.formed_detail)},
-      smooth_{world_.sphere, 2.0}, radius_{planet.radius}, vertical_{derived.vertical} {
+      smooth_{world_.sphere, 2.0}, radius_{planet.radius}, vertical_{derived.vertical},
+      // The widest gullies half the points' spacing apart, the finest down to a few voxels.
+      gullies_{.longest = world_.sphere.spacing() * planet.radius / 2.0,
+               .octaves =
+                   1 + static_cast<int>(std::floor(std::log2(
+                           world_.sphere.spacing() * planet.radius / 2.0 / (3.0 * planet.voxel)))),
+               .seed = hash_values(planet.seed, 0x6775'6c6c'6965'73ULL)},
+      // As far apart as the widest gullies cut deep, so they fade over their own width at least.
+      fall_blend_{gullies_.longest * rock_steepest / 2.0} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
@@ -82,11 +97,7 @@ Formed::Formed(const Planet& planet, const Derived& derived)
         rock_cover_[point] = vertical_ * world.outcrop.cover[point];
         light_[point] = world.crust.light[point];
     }
-    // Walls as steep as the ground falls to the point's nearest, no steeper than rock stands, or
-    // loose ground where it lies deep.
-    constexpr double rock_steepest = 1.73; // 60 degrees
-    constexpr double loose_steepest = 0.7; // 35 degrees
-    constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose ground
+    // Walls as steep as the ground falls to the point's nearest, no steeper than they stand.
     wall_.assign(size, 0.0);
     for (std::uint32_t point = 0; point < size; ++point) {
         double steepest = 0.0;
@@ -146,10 +157,14 @@ void Formed::fill_lakes() {
             floor[lake] = point;
         }
     }
+    lake_share_.assign(size, 0.0);
+    lake_cap_.assign(size, 0.0);
     for (std::uint32_t point = 0; point < size; ++point) {
         if (const std::uint32_t lake = lake_at(point); lake != none) {
             const double dot = glm::dot(sphere.point(point), sphere.point(floor[lake]));
             reach[lake] = std::max(reach[lake], std::acos(std::clamp(dot, -1.0, 1.0)));
+            lake_share_[point] = 1.0;
+            lake_cap_[point] = vertical_ * world.lakes.lakes[lake].level;
         }
     }
 
@@ -200,10 +215,10 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
         const DVec3 direction = water.toward(x, y);
         smooth_.weigh(direction, weights, near);
         near = weights.nearest;
-        return carved(direction, weights).value;
+        return surface(direction, weights, 0.0).top.value;
     };
     // A cell's middle may stand over the water while ground in it lies under: as much as its
-    // own width up, on all but cliffs.
+    // own width up, on all but cliffs, gullies finer than it among them.
     water.pool = fill_pool(half, ground, most, water.step * radius_);
     return water;
 }
@@ -245,11 +260,20 @@ std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
     return starts_[(((face * starts_across) + cell(on.u)) * starts_across) + cell(on.v)];
 }
 
-formation::Smooth::Read Formed::carved(DVec3 direction,
-                                       const formation::Smooth::Weights& weights) const {
+Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights& weights) const {
     const formation::World& world = world_;
     const formation::Sphere& sphere = world.sphere;
-    formation::Smooth::Read ground = formation::Smooth::read(top_, weights);
+    const formation::Smooth::Read smooth = formation::Smooth::read(top_, weights);
+    Carved carved{.top = smooth, .fall = smooth.gradient, .above_floor = 1e30};
+    // The ways the ground could stand here, the lowest of which it does, and how each falls.
+    struct Way {
+        double height = 0.0;
+        DVec3 fall{0.0};
+        double counts = 1.0;
+    };
+    thread_local std::vector<Way> ways;
+    ways.clear();
+    ways.push_back({.height = smooth.value, .fall = smooth.gradient, .counts = 1.0});
     // Walls reach a little way from their valleys, so none is ever missed among those of the
     // points weighed here, however the points weighed change.
     const double reach = 0.6 * sphere.spacing() * radius_;
@@ -267,10 +291,15 @@ formation::Smooth::Read Formed::carved(DVec3 direction,
                                    .wall = std::max(wall_[point], wall_[down]),
                                    .reach = reach},
                                   direction, radius_);
-        if (wall.height < ground.value) {
-            // Read's gradient is per radian.
-            ground = {.value = wall.height, .gradient = wall.gradient * radius_};
+        // Read's gradient is per radian.
+        if (wall.height < carved.top.value) {
+            carved.top = {.value = wall.height, .gradient = wall.gradient * radius_};
         }
+        if (wall.reaching > 0.0) {
+            ways.push_back(
+                {.height = wall.standing, .fall = wall.fall * radius_, .counts = wall.reaching});
+        }
+        carved.above_floor = std::min(carved.above_floor, wall.height - wall.floor);
     };
     for (const std::uint32_t point : weights.points) {
         valley(point);
@@ -282,19 +311,63 @@ formation::Smooth::Read Formed::carved(DVec3 direction,
             }
         }
     }
-    return ground;
+    // Water runs off the lowest, blended with those near as low by how near, so where the ground
+    // turns sharply, over crests and where walls meet, the way it runs turns smoothly.
+    double blended = 0.0;
+    carved.fall = DVec3{0.0};
+    for (const Way& way : ways) {
+        // A wall rising out of the way may stand under the ground as it is here, fading out.
+        const double apart = std::max(0.0, (way.height - carved.top.value) / fall_blend_);
+        if (apart < 1.0) {
+            const double weight = way.counts * (1.0 - apart) * (1.0 - apart) * (1.0 - apart);
+            blended += weight;
+            carved.fall += way.fall * weight;
+        }
+    }
+    carved.fall /= blended;
+    return carved;
 }
 
-Formed::Here Formed::at(DVec3 direction) const {
+Dissected Formed::surface(DVec3 direction, const formation::Smooth::Weights& weights,
+                          double lod) const {
+    const Carved ground = carved(direction, weights);
+    const auto value = [&](const std::vector<double>& field) {
+        return formation::Smooth::read(field, weights).value;
+    };
+
+    const double deposits =
+        value(alluvium_) + value(lake_beds_) + value(till_) + value(sand_) + value(loess_);
+    const double loose = std::clamp(deposits / loose_deep, 0.0, 1.0);
+    // A lake is what the ground about it drains to: gullies run down to its level, and under it
+    // its beds fill them. Its pull fades out with the share of its points about.
+    double above_floor = ground.above_floor;
+    if (const double share = value(lake_share_); share > 0.0) {
+        constexpr double any = 0.05;
+        const double near = std::min(1.0, share / any);
+        const double out_of_reach = gullies_.longest * rock_steepest;
+        above_floor = std::min(above_floor,
+                               ground.top.value - (value(lake_cap_) / share) +
+                                   ((1.0 - (near * near * (3.0 - (2.0 * near)))) * out_of_reach));
+    }
+    return dissect(direction, radius_,
+                   {.top = {.value = ground.top.value, .gradient = ground.top.gradient / radius_},
+                    .fall = ground.fall / radius_,
+                    .above_floor = std::max(0.0, above_floor),
+                    .steepest = rock_steepest + ((loose_steepest - rock_steepest) * loose),
+                    .ice = value(ice_)},
+                   gullies_, lod);
+}
+
+Formed::Here Formed::at(DVec3 direction, double lod) const {
     formation::Smooth::Weights weights;
     smooth_.weigh(direction, weights, start_near(direction));
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
-    const formation::Smooth::Read top = carved(direction, weights);
+    const Dissected top = surface(direction, weights, lod);
 
     Here here;
-    here.top = {.value = top.value, .gradient = top.gradient / radius_};
+    here.top = top.top;
     const formation::World& world = world_;
     // A lake's water stands level over what of its cells lies lower.
     for (const std::uint32_t lake : lakes_near_[weights.nearest]) {
@@ -307,7 +380,7 @@ Formed::Here Formed::at(DVec3 direction) const {
             return static_cast<int>(std::lround(glm::dot(direction, axis) / toward / water.step));
         };
         if (water.pool.at(cell(water.east), cell(water.north)) != Pool::Cell::Dry &&
-            water.pool.level > top.value + 0.01) {
+            water.pool.level > top.top.value + 0.01) {
             here.lake = water.pool.level;
             break;
         }
@@ -315,7 +388,7 @@ Formed::Here Formed::at(DVec3 direction) const {
     here.light = value(light_);
     here.folding = value(world.bedrock.folding);
     Strata& layers = here.layers;
-    layers.ice = value(ice_);
+    layers.ice = top.ice;
     layers.organic = value(organic_);
     layers.topsoil = value(topsoil_);
     layers.subsoil = value(subsoil_);

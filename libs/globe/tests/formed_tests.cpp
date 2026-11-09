@@ -8,6 +8,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -57,7 +58,7 @@ TEST_CASE("a formed planet stands on the land that formed it, its sea at the rad
     for (std::uint64_t n = 0; n < 300; ++n) {
         const DVec3 direction = somewhere(n);
         const Generator::Column column = generator.column(direction, planet.voxel);
-        const Formed::Here here = formed.at(direction);
+        const Formed::Here here = formed.at(direction, planet.voxel);
         CHECK_THAT(column.ground(), WithinAbs(planet.radius + here.top.value, 1e-6));
         if (here.top.value < -100.0) {
             CHECK(column.water() >= planet.radius);
@@ -210,7 +211,7 @@ TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too"
                 REQUIRE(std::isfinite(top(near)));
                 // However steep, narrowing in on the steepest stretch shrinks the change; a
                 // break in the ground would keep it.
-                for (int halving = 0; halving < 12; ++halving) {
+                for (int halving = 0; halving < 20; ++halving) {
                     const double half = 0.5 * (near + far);
                     if (std::abs(top(half) - top(near)) >= std::abs(top(far) - top(half))) {
                         far = half;
@@ -236,4 +237,29 @@ TEST_CASE("how finely a planet's land is formed is one of its knobs", "[globe][f
     CHECK_FALSE(validate(planet).has_value());
     planet.formed_detail = 10.0;
     CHECK_FALSE(validate(planet).has_value());
+}
+
+TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
+    // The working world's shell.
+    Planet planet;
+    planet.seed = 1;
+    planet.radius = 30'000.0;
+    planet.formed_detail = 7;
+    const auto seconds = [](auto from) {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
+    };
+    auto started = std::chrono::steady_clock::now();
+    const Generator generator{planet};
+    WARN("made in " << seconds(started) << " s");
+    const Formed& formed = *generator.shape().formed;
+    for (const double lod : {1e9, 40.0, 2.5}) {
+        double sink = 0.0;
+        started = std::chrono::steady_clock::now();
+        constexpr int reads = 20'000;
+        for (int n = 0; n < reads; ++n) {
+            sink += formed.at(somewhere(static_cast<std::uint64_t>(n)), lod).top.value;
+        }
+        WARN("lod " << lod << ": " << seconds(started) / reads * 1e6 << " us a read (" << sink
+                    << ")");
+    }
 }

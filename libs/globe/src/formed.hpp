@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dissection.hpp"
 #include "lake_fill.hpp"
 
 #include <hog/formation/smooth.hpp>
@@ -29,7 +30,8 @@ public:
         double light = 0.0;   // share of light crust
         double folding = 0.0; // how folded the beds are, 0 to 1
     };
-    [[nodiscard]] Here at(DVec3 direction) const;
+    // Gullies narrower than twice `lod` are left out.
+    [[nodiscard]] Here at(DVec3 direction, double lod = 0.0) const;
 
     [[nodiscard]] bool has_sea() const noexcept { return has_sea_; }
     [[nodiscard]] double lowest() const noexcept { return lowest_; }
@@ -42,8 +44,16 @@ private:
     // The ground's top at `direction`, read from the points weighed for it there: as the points
     // have it smoothly between them, but nowhere over the walls of the valleys their water runs
     // down, which rise as steeply as the ground about each stands. Crests stand where walls meet.
-    [[nodiscard]] formation::Smooth::Read carved(DVec3 direction,
-                                                 const formation::Smooth::Weights& weights) const;
+    // With it, which way water runs off it, and how far over the valley floor nearest it stands.
+    struct Carved {
+        formation::Smooth::Read top;
+        DVec3 fall{0.0}; // per radian, as the top's gradient
+        double above_floor = 1e30;
+    };
+    [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights) const;
+    // The ground carved, then cut by gullies no narrower than twice `lod`.
+    [[nodiscard]] Dissected surface(DVec3 direction, const formation::Smooth::Weights& weights,
+                                    double lod) const;
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
     // runs out over its rim or stands at the level formed for it.
     void fill_lakes();
@@ -58,6 +68,9 @@ private:
     formation::Smooth smooth_;
     double radius_;
     double vertical_;
+    Gullies gullies_;
+    // How far apart in height the ground's ways down may be and still blend into where it runs.
+    double fall_blend_ = 0.0;
     bool has_sea_ = false;
     double lowest_ = 0.0;
     double highest_ = 0.0;
@@ -78,6 +91,9 @@ private:
     std::vector<double> light_;
     // How steeply valley walls rise about each point, metres up per metre across.
     std::vector<double> wall_;
+    // At each point a lake was formed over, 1 and the level formed for it; elsewhere nothing.
+    std::vector<double> lake_share_;
+    std::vector<double> lake_cap_;
     // A lake's water about its floor, on a grid of cells `step` radians across laid on the plane
     // touching the sphere there.
     struct Lake {

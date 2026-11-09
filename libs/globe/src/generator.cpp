@@ -987,8 +987,8 @@ namespace terms {
 namespace {
 
 // A formed world's ground: its heights, layers and lakes all read from what formed it.
-Ground formed_ground(const Context& context, DVec3 direction) {
-    const Formed::Here here = context.shape->formed->at(direction);
+Ground formed_ground(const Context& context, DVec3 direction, double lod) {
+    const Formed::Here here = context.shape->formed->at(direction, lod);
     Ground made;
     made.rock = {.height = here.top, .high = here.light, .built = here.folding};
     const double latitude = maths::atan2(
@@ -1004,7 +1004,7 @@ Ground formed_ground(const Context& context, DVec3 direction) {
 
 Column column(const Context& context, DVec3 direction, double lod) noexcept {
     if (context.shape->formed) {
-        return formed_ground(context, direction).rock;
+        return formed_ground(context, direction, lod).rock;
     }
     return column(context, direction, lod, craters(context, direction, lod));
 }
@@ -1042,7 +1042,7 @@ Ground ground_on(const Context& context, DVec3 direction, Column rock) noexcept 
 
 Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
     if (context.shape->formed) {
-        return formed_ground(context, direction);
+        return formed_ground(context, direction, lod);
     }
     return ground_on(context, direction, column(context, direction, lod));
 }
@@ -1052,7 +1052,7 @@ std::vector<Ground> ground(const Context& context, std::span<const Cell> cells, 
         std::vector<Ground> made;
         made.reserve(cells.size());
         for (const Cell& cell : cells) {
-            made.push_back(formed_ground(context, center(cell)));
+            made.push_back(formed_ground(context, center(cell), lod));
         }
         return made;
     }

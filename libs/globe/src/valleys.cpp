@@ -24,18 +24,29 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
     const double rise = out_of_the_way * past * past * (3.0 - (2.0 * past));
     const double steepening = out_of_the_way * 6.0 * past * (1.0 - past) / half;
 
-    Wall wall{.height = floor + (away * valley.wall) + rise, .gradient = DVec3{0.0}};
+    const double standing = floor + (away * valley.wall);
+    Wall wall{.height = standing + rise,
+              .gradient = DVec3{0.0},
+              .floor = floor,
+              .fall = DVec3{0.0},
+              .reaching = 1.0 - (past * past * (3.0 - (2.0 * past))),
+              .standing = standing};
     // Up the walls away from the line, and along its floor between its ends.
     const DVec3 outward = direction - (nearest * cosine);
     if (const double size = glm::length(outward); size > 0.0) {
+        wall.fall += outward / size * valley.wall;
         wall.gradient += outward / size * (valley.wall + steepening);
     }
-    if (t > 0.0 && t < 1.0) {
-        const DVec3 ahead = along - (direction * glm::dot(along, direction));
-        if (const double size = glm::length(ahead); size > 0.0) {
-            const double run = std::sqrt(length) * radius;
-            wall.gradient += ahead / size * ((valley.floor_to - valley.floor_from) / run);
-        }
+    const DVec3 ahead = along - (direction * glm::dot(along, direction));
+    if (const double size = glm::length(ahead); size > 0.0 && t > 0.0 && t < 1.0) {
+        const double run = std::sqrt(length) * radius;
+        const DVec3 falling = ahead / size * ((valley.floor_to - valley.floor_from) / run);
+        wall.gradient += falling;
+        // The floor stops falling past its ends; water running off turns there smoothly.
+        constexpr double turning = 0.1;
+        const double end = std::min(t, 1.0 - t) / turning;
+        const double kept = end >= 1.0 ? 1.0 : end * end * (3.0 - (2.0 * end));
+        wall.fall += falling * kept;
     }
     return wall;
 }
