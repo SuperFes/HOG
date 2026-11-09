@@ -20,7 +20,7 @@ using std::chrono::hours;
 namespace {
 
 Planet small_earth(double tilt = 23.44) {
-    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    Planet planet;
     planet.radius = 20'000.0;
     planet.tilt = tilt;
     return planet;

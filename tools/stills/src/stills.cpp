@@ -164,7 +164,7 @@ Rgb ground_colour(const Generator& generator, double height, double low, double 
                                                                      {0.35, {150, 118, 80}},
                                                                      {0.6, {125, 112, 102}},
                                                                      {0.85, {242, 242, 242}}}};
-        return ramp(land, height / std::max(generator.derived().tallest, 1.0));
+        return ramp(land, height / std::max(generator.shape().highest, 1.0));
     }
     static constexpr std::array<std::pair<double, Rgb>, 3> dry{
         {{0.0, {55, 48, 44}}, {0.5, {150, 132, 112}}, {1.0, {236, 228, 210}}}};
@@ -312,7 +312,7 @@ Image drainage(const Generator& generator, int width, int level, int threads,
                 .height = height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(width) *
                                                     static_cast<std::size_t>(height))};
-    const double tallest = std::max(generator.derived().tallest, 1.0);
+    const double tallest = std::max(generator.shape().highest, 1.0);
     each_row(height, threads, [&](int y) {
         for (int x = 0; x < width; ++x) {
             const DVec3 up = Place{.latitude = 90.0 - ((y + 0.5) * 180.0 / height),

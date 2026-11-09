@@ -13,7 +13,7 @@ using namespace hog::weather;
 namespace {
 
 Field small_field(int layers = 6) {
-    hog::globe::Planet planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     planet.radius = 20'000.0;
     const hog::globe::Generator generator{planet};
     return start_field(generator, 2, layers);

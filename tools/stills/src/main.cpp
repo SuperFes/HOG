@@ -22,7 +22,7 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
+    "usage: hog-stills [--planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
     "                  [--bottom M] [--top M] [--depth M] [--dig M] [--drainage LEVEL]\n"
     "                  [--erode STEPS] [--rate K]\n"
@@ -71,11 +71,6 @@ std::optional<double> number(std::string_view text) {
 
 // Each option and its value; false on anything it doesn't know.
 bool apply(Options& options, std::string_view name, std::string_view value) {
-    if (name == "--preset") {
-        const auto planet = hog::globe::preset(value);
-        options.planet = planet.value_or(options.planet);
-        return planet.has_value();
-    }
     if (name == "--planet") {
         const auto loaded = hog::globe::load_planet(value);
         if (!loaded) {
@@ -141,7 +136,6 @@ int write(const std::filesystem::path& path, const hog::stills::Image& image) {
 
 int run(std::span<const std::string_view> arguments) {
     Options options;
-    options.planet = hog::globe::preset("earth").value_or(options.planet);
     if (arguments.size() % 2 != 0) {
         std::cerr << usage;
         return EXIT_FAILURE;
@@ -159,10 +153,10 @@ int run(std::span<const std::string_view> arguments) {
         return failed;
     }
     if (options.drainage) {
-        if (const int failed = write(options.out / "drainage.png",
-                                     hog::stills::drainage(generator, options.width,
-                                                           *options.drainage, options.threads,
-                                                           {.rate = options.rate, .steps = options.erode}))) {
+        if (const int failed = write(
+                options.out / "drainage.png",
+                hog::stills::drainage(generator, options.width, *options.drainage, options.threads,
+                                      {.rate = options.rate, .steps = options.erode}))) {
             return failed;
         }
     }

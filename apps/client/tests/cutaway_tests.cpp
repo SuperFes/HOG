@@ -25,7 +25,7 @@ namespace {
 constexpr std::array voxels{0.5, 2.5};
 
 hog::globe::Generator world(double voxel) {
-    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    hog::globe::Planet planet;
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;

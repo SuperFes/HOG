@@ -73,8 +73,8 @@ std::uint64_t TileMeshes::code(globe::TileKey key) noexcept {
 TileMeshes::TileMeshes(const globe::Planet& planet, const globe::Layers& layers,
                        jobs::JobSystem& jobs)
     : layers_{layers},
-      sea_{planet.sea_fraction > 0.0 ? std::optional{planet.radius} : std::nullopt}, jobs_{&jobs},
-      by_level_(static_cast<std::size_t>(std::max(layers.level - coarser, 0) + 1)) {
+      sea_{globe::derive(planet).liquid ? std::optional{planet.radius} : std::nullopt},
+      jobs_{&jobs}, by_level_(static_cast<std::size_t>(std::max(layers.level - coarser, 0) + 1)) {
     const auto top = static_cast<std::uint8_t>(by_level_.size() - 1);
     for (std::uint8_t face = 0; face < 6; ++face) {
         for (globe::TileKey root{.level = top, .face = face}; in_shell(root); ++root.k) {

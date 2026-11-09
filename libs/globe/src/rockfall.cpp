@@ -123,7 +123,7 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     const DVec3 level_east = glm::normalize(glm::cross(side, at));
     const DVec3 level_north = glm::cross(at, level_east);
     rock.across = (std::cos(turn) * level_east) + (std::sin(turn) * level_north);
-    const double radius = planet.radius + found.height - context.shape->datum;
+    const double radius = planet.radius + found.height;
     rock.middle = at * (radius + ((1.0 - (2.0 * sunk)) * rock.axes.z));
     constexpr double depth = 4.0;
     rock.material = material_at(context, found.layers, depth, radius - depth);

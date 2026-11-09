@@ -23,42 +23,20 @@ constexpr std::array numbers{
     std::pair{"gravity"sv, &Planet::gravity},
     std::pair{"day"sv, &Planet::day},
     std::pair{"tilt"sv, &Planet::tilt},
-    std::pair{"lateral_scale"sv, &Planet::lateral_scale},
     std::pair{"voxel"sv, &Planet::voxel},
     std::pair{"floor_depth"sv, &Planet::floor_depth},
     std::pair{"sky_height"sv, &Planet::sky_height},
-    std::pair{"high_fraction"sv, &Planet::high_fraction},
-    std::pair{"mantle_density"sv, &Planet::mantle_density},
     std::pair{"heat_flow"sv, &Planet::heat_flow},
-    std::pair{"surface_age"sv, &Planet::surface_age},
-    std::pair{"impact_flux"sv, &Planet::impact_flux},
     std::pair{"pressure"sv, &Planet::pressure},
     std::pair{"equator_temperature"sv, &Planet::equator_temperature},
     std::pair{"pole_temperature"sv, &Planet::pole_temperature},
-    std::pair{"sea_fraction"sv, &Planet::sea_fraction},
-    std::pair{"wear"sv, &Planet::wear},
-    std::pair{"weathering"sv, &Planet::weathering},
     std::pair{"formed_detail"sv, &Planet::formed_detail},
 };
 
-constexpr std::array regimes{std::pair{"plates"sv, Regime::Plates},
-                             std::pair{"stagnant_lid"sv, Regime::StagnantLid},
-                             std::pair{"episodic"sv, Regime::Episodic}};
-constexpr std::array layouts{std::pair{"scattered"sv, Layout::Scattered},
-                             std::pair{"one_side"sv, Layout::OneSide}};
 constexpr std::array volatiles{std::pair{"none"sv, Volatile::None},
                                std::pair{"water"sv, Volatile::Water},
                                std::pair{"methane"sv, Volatile::Methane}};
-// Only rock that can make a crust.
-constexpr std::array rocks{std::pair{"granite"sv, Material::Granite},
-                           std::pair{"basalt"sv, Material::Basalt},
-                           std::pair{"anorthosite"sv, Material::Anorthosite},
-                           std::pair{"limestone"sv, Material::Limestone},
-                           std::pair{"sandstone"sv, Material::Sandstone},
-                           std::pair{"shale"sv, Material::Shale}};
-
-constexpr std::array other_keys{"preset"sv,    "seed"sv, "regime"sv, "layout"sv,
-                                "volatiles"sv, "high"sv, "low"sv};
+constexpr std::array other_keys{"seed"sv, "volatiles"sv};
 
 Result<void> read_number(const toml::node_view<const toml::node> node, std::string_view key,
                          double& into) {
@@ -93,27 +71,6 @@ Result<void> read_name(const toml::node_view<const toml::node> node, std::string
     return {};
 }
 
-Result<void> read_crust(const toml::node_view<const toml::node> node, std::string_view key,
-                        Crust& into) {
-    if (!node) {
-        return {};
-    }
-    const auto* table = node.as_table();
-    if (table == nullptr) {
-        return invalid(std::format("{} must be a table", key));
-    }
-    for (const auto& [name, value] : *table) {
-        if (name.str() != "rock" && name.str() != "thickness") {
-            return invalid(std::format("unknown key {}.{}", key, name.str()));
-        }
-    }
-    if (auto read = read_name((*table)["rock"], std::format("{}.rock", key), rocks, into.rock);
-        !read) {
-        return read;
-    }
-    return read_number((*table)["thickness"], std::format("{}.thickness", key), into.thickness);
-}
-
 } // namespace
 
 Result<Planet> parse_planet(std::string_view text) {
@@ -138,14 +95,6 @@ Result<Planet> parse_planet(std::string_view text) {
     }
 
     Planet planet;
-    if (const auto node = (*globe)["preset"]) {
-        const auto* name = node.as_string();
-        const auto chosen = name == nullptr ? std::nullopt : preset(name->get());
-        if (!chosen) {
-            return invalid("globe.preset must be earth, mars, venus or moon");
-        }
-        planet = *chosen;
-    }
     if (const auto node = (*globe)["seed"]) {
         const auto* seed = node.as_integer();
         if (seed == nullptr || seed->get() < 0) {
@@ -159,15 +108,10 @@ Result<Planet> parse_planet(std::string_view text) {
             return std::unexpected(read.error());
         }
     }
-    for (auto read :
-         {read_name((*globe)["regime"], "globe.regime", regimes, planet.regime),
-          read_name((*globe)["layout"], "globe.layout", layouts, planet.layout),
-          read_name((*globe)["volatiles"], "globe.volatiles", volatiles, planet.volatiles),
-          read_crust((*globe)["high"], "globe.high", planet.high),
-          read_crust((*globe)["low"], "globe.low", planet.low)}) {
-        if (!read) {
-            return std::unexpected(read.error());
-        }
+    if (auto read =
+            read_name((*globe)["volatiles"], "globe.volatiles", volatiles, planet.volatiles);
+        !read) {
+        return std::unexpected(read.error());
     }
     if (auto valid = validate(planet); !valid) {
         return std::unexpected(valid.error());

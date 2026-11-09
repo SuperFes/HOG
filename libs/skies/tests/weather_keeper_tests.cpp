@@ -2,8 +2,8 @@
 #include <hog/globe/planet.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/protocol/messages.hpp>
-#include <hog/skies/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/skies/weather_keeper.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -21,7 +21,7 @@ using namespace std::chrono_literals;
 namespace {
 
 globe::Planet small_earth() {
-    globe::Planet planet = globe::preset("earth").value_or(globe::Planet{});
+    globe::Planet planet;
     planet.radius = 20'000.0;
     return planet;
 }
@@ -171,7 +171,7 @@ TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_WEATHER");
     REQUIRE(where != nullptr);
-    globe::Planet planet = globe::preset("earth").value_or(globe::Planet{});
+    globe::Planet planet;
     planet.radius = 115'000.0;
     const globe::Generator generator{planet};
     skies::WeatherSettings settings{};

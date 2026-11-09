@@ -10,7 +10,7 @@ using namespace hog::weather;
 namespace {
 
 Planet earth() {
-    return hog::globe::preset("earth").value_or(Planet{});
+    return Planet{};
 }
 
 } // namespace

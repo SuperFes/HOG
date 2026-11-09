@@ -12,7 +12,7 @@ The research behind this is in `reports/Editable voxel planet architecture.md`, 
 - **Bit-identical everywhere.** The server and every client get the same bits from the generator, on every platform, checked in CI.
 - **No stored heights.** A planet-scale reference level may exist only as physics computed inside the generator: crust, isostasy, basins. It is never saved, it never defines the surface on its own, and nothing outside the generator reads it.
 - **Amounts, counted.** Voxels hold how much of each thing they contain. Water, rock, sand and heat are counted, and every step keeps the counts, in tests.
-- **Many worlds.** A planet is a description made of physical knobs. Earth, Mars, Venus and the Moon are the first presets, and alien worlds are other settings.
+- **Many worlds.** A planet is a description made of physical knobs; alien worlds are other settings.
 - **Every landform has a home.** Each feature class gets a term in the generator, the store or the simulation, judged by stills of a fixed suite of spots, one per class.
 - **Things fall apart when they ought.** Unlike Enshrouded, builds need support and wear out, so keeping a city standing is real, ongoing work for players, bots and NPCs. Building must not become a chore: sensible builds stand with room to spare, failure shows warning signs first, and repair is easy.
 - **Beauty from life.** Enshrouded's beauty is placed by hand; ours grows. Plants spread and die back, animals graze and wear trails, and people build, farm and neglect, all by simulated rules, so the world is shaped by what lives in it rather than by a designer.
@@ -30,22 +30,13 @@ A cell is addressed by level, face and `(i, j)`. A level has `6 · 4^level` cell
 
 `sample(point, lod)` returns the distance to the nearest solid surface, the material makeup, any loose amounts and the temperature. It is built from the planet's knobs:
 
-- **Planet-scale fields,** computed on demand per column and never saved: crustal provinces, the reference level from isostasy, climate, and dichotomies like Mars's.
-- **3D terms:** strata, eroded relief, karst and caves in depth bands, arches and overhangs, craters by size and age, volcanoes and magma bodies, dunes, glacial forms, soils and regolith.
-- **One coarse drainage solve per seed:** stream-power erosion to steady state over the whole planet, because a river depends on everything upstream. It sets where rivers, lakes and deltas lie. Detail is added on top.
-- **Wear (`Planet::wear`, off at 0):** at construction the generator samples the un-cut ground at about 180 m cells, fills its hollows to their rims (priority flood), finds the area draining through each cell, and wears the ground by implicit stream-power erosion (`P = rate * catchment^0.5 / distance`, lowering only). The per-cell cut is applied in `terms::ground`, so slope, mantle and strata follow it. Wear is part of `world_id`; the bake runs once per generator and takes seconds.
-- **Lakes:** a hollow the worn ground holds more than 0.1 m of water in is a lake at its filled level. Each lake is then flooded over the fine terrain (64 columns across each 180 m cell): a column is wet if its ground is below the lake's level and it joins the lake's cells through wet columns, so shores follow the ground and nothing floods downstream of a rim. The result is stored per cell as a bitmask and read back by `Generator::pond_at`; the column's open space under that level is water, as the sea's is, and the mesher snaps it to a flat level and shelves the bed under it as it does the sea.
-
-Terms blend by smooth union and subtraction, weighted by physical fields, not by hand.
+- **The formed land (`libs/formation`):** the planet is formed stage by stage on a sphere split `formed_detail` times: plates and crust, climate, rivers wearing the land, ice, lakes, sediment, soil and shores, each a result rather than a history. `Formed` reads its heights, lakes, ice and laid layers at any point, and adds the detail finer than its points (gullies, valleys, beaches). This is the only way a world is made.
 
 Each material counts only through its properties: density, melting point, strength and heat capacity, and for water its porosity, hydraulic conductivity, the slopes a loose heap of it holds dry and soaked, the drag a flow needs to carry it and how fast it goes once carried. Under the sea the ground is soaked to its pores; above, the generator leaves it dry for rain to wet and the air to dry.
 
-What v1 builds, all from the knobs:
-- **Reference level:** a province field split at the high crust's share, the provinces floating apart by the isostatic step across margins as wide as that step's slope allows. The radius stands at the sea, filling its share, or at the mean ground on dry worlds. The shell's floor lies `floor_depth` under the lowest ground surveyed.
-- **Relief:** mountain belts on long sinuous lines, set by the regime; peaks within them; rolling hills everywhere; ridges down plate worlds' ocean floors. Where water runs, gullies are cut from coarse to fine. Each width runs down the ground coarser than itself, so valleys branch as drainage does, without a simulation.
-- **Craters:** counts from Neukum's lunar chronology by age and impact flux, capped at equilibrium. Thick air filters out the small ones. Bowls sit below the gravity-set transition, flat floors and central peaks above it, and creep wears each crater by its age.
-- **Strata and soils:** sedimentary beds where a volatile has run, folded where mountains rose and stripped from them; soil, mud, beach sand and snow where water cycles; regolith that thickens with age where it doesn't. The loose cover creeps: rock is generated rough, and the cover's surface is the rock's smoothed over the creep length (16 m, the detail soils take their slope at) and lifted by the depth the cover is made at, so it fills the hollows under that surface and leaves the knobs above it bare. Steeper ground keeps less of it, from about 27° to none by 45°, and colluvium is what has pooled deeper than the soil, not a depth by slope. Every depth shapes the ground, so each grades smoothly: the shore from soil to mud, the beach in by height and slope, snow by temperature. A crater's crest is rounded as far as creep has worn it, and never sharper than the detail asked for, as a kink in the slope would otherwise step the cover. On Earth the cover cuts the ground's relief under 32 m to about a quarter of the rock's. Coarser detail than 16 m lays the cover on its own ground as made, which stands where the fine ground does on average to a centimetre.
-- **Caves:** passages along limestone beds and chambers in them, and lava tubes under basalt flows, carved out of the rock. Each keeps to the bed or basement it formed in, as the shape both share, so its walls run on smoothly across the beds' faces. A chamber needs about as much rock over it as the widest span a bed of its rock holds as a beam, about 60 m on Earth and more under weaker gravity; under thinner rock its roof has fallen in and it shrinks away.
+What the generator adds over the formed land:
+- **Strata:** sedimentary beds under the laid layers, down to the crust's basement, limestone among them only where there are seas.
+- **Caves:** chance passages in districts, chambers in watered limestone, and lava tubes under basalt flows, carved out of the rock. Each keeps to the bed or basement it formed in, as the shape both share, so its walls run on smoothly across the beds' faces. A chamber needs about as much rock over it as the widest span a bed of its rock holds as a beam, about 60 m on Earth and more under weaker gravity; under thinner rock its roof has fallen in and it shrinks away.
 
 A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. The ground's slope, which the distance needs, is measured by central differences, four extra columns each. Voxels are filled through `Generator::columns`, for any cells of one level, which takes the slope from neighbouring cells instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
 
@@ -118,7 +109,7 @@ Seasons and weather emerge from the computation; nothing is scripted.
 ## Build order
 
 1. **Cells:** cube-sphere addresses, the tangent mapping and its inverse, exact neighbours across edges and corners, cell areas and volumes, levels; the sparse tree and windows ported from diamonds to faces.
-2. **The planet's description:** physical knobs, derived values and the four presets.
+2. **The planet's description:** physical knobs and derived values.
 3. **Generator v1:** reference level, strata, eroded relief, caves, craters, soils; golden hashes on every platform.
 4. **Store:** face trees, tiles, bricks, both kinds of matter, saving and loading.
 5. **Mesher v1:** surface nets; the client's `--globe` draws the new world, and the hexel code is removed.

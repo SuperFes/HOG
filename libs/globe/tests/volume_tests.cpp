@@ -477,7 +477,8 @@ TEST_CASE("the generator's voxels are made into the volume once, its air left ou
         REQUIRE(built != nullptr);
         const VoxelTree expected = every(bottom, floor);
         CHECK(built->same_as(expected));
-        CHECK(built->leaves() < expected.unshared_nodes());
+        // Shared where it can be: fewer leaves than nodes, or one for a tile all alike.
+        CHECK((built->leaves() < expected.unshared_nodes() || built->leaves() == 1));
     }
 
     const auto matches_world = [&](const Volume& made_volume) {
