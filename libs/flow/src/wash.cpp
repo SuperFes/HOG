@@ -17,8 +17,11 @@ constexpr std::array<Material, 3> dropped_as{Material::Sediment, Material::Sand,
 std::size_t kind_of(Material material) {
     switch (material) {
     case Material::Sand:
+    case Material::VolcanicSand:
+    case Material::ShellSand:
         return sand;
     case Material::Gravel:
+    case Material::Shingle:
         return stones;
     default:
         return fines;

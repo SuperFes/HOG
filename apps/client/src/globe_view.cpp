@@ -96,6 +96,12 @@ Vec3 surface_colour(globe::Material material) {
         return {0.52F, 0.36F, 0.24F};
     case Material::Gravel:
         return {0.44F, 0.4F, 0.35F};
+    case Material::VolcanicSand:
+        return {0.13F, 0.13F, 0.14F};
+    case Material::ShellSand:
+        return {0.9F, 0.87F, 0.78F};
+    case Material::Shingle:
+        return {0.5F, 0.48F, 0.45F};
     }
     return {1.0F, 0.0F, 1.0F};
 }
@@ -147,7 +153,13 @@ std::array<terrain::Look, globe::material_count> globe_looks() {
                                     // Ochre streaks, greyer where it's gleyed.
                                     vary(Material::Clay, {1.2, 1.05, 0.8}, 0.3, 0.15, 0.3),
                                     // Pale stones in darker earth.
-                                    vary(Material::Gravel, {1.5, 1.45, 1.4}, 0.4, 0.6, 0.2)};
+                                    vary(Material::Gravel, {1.5, 1.45, 1.4}, 0.4, 0.6, 0.2),
+                                    // Glinting where olivine and glass catch the light.
+                                    vary(Material::VolcanicSand, {1.5, 1.6, 1.3}, 0.15, 0.25, 0.1),
+                                    // Pinker where red shells are broken in.
+                                    vary(Material::ShellSand, {1.05, 0.95, 0.92}, 0.25, 0.2, 0.1),
+                                    // Stones of every rock the coast is made of.
+                                    vary(Material::Shingle, {1.4, 1.3, 1.25}, 0.45, 0.8, 0.15)};
     static_assert(variations.size() == globe::material_count);
 
     std::array<terrain::Look, globe::material_count> looks{};

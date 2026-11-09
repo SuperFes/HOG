@@ -18,7 +18,9 @@ const Properties& properties(Material material) {
     // ages: its erodibility is stream-power incision, a millimetre a thousand years. Carried, mud
     // settles out at a tenth of a millimetre a second, sand in centimetres, rubble at once. Clay
     // stands steep dry and runs soaked, and water barely gets through it; rocky dirt drains like
-    // gravel, holds near its dry slope wet, and only a flood moves its stones.
+    // gravel, holds near its dry slope wet, and only a flood moves its stones. Sand of basalt is
+    // heavier than quartz sand and settles faster; sand of shells lighter, more porous, and its
+    // flat bits lock steeper; shingle drains at once and only storm waves move it.
     constexpr double degree = std::numbers::pi / 180.0;
     static constexpr std::array<Properties, material_count> all{{
         {.density = 1.2, .melts = 0.0, .strength = 0.0, .heat_capacity = 1005.0},       // air
@@ -226,6 +228,45 @@ const Properties& properties(Material material) {
          .cohesion = 500.0,
          .bed_friction = 35.0 * degree,
          .bounce = 0.2}, // gravel
+        {.density = 1800.0,
+         .melts = 1400.0,
+         .strength = 0.0,
+         .heat_capacity = 840.0,
+         .porosity = 0.38,
+         .conductivity = 3e-4,
+         .repose = 34.0 * degree,
+         .saturated_repose = 26.0 * degree,
+         .critical_shear = 0.3,
+         .erodibility = 8e-6,
+         .settling = 4e-2,
+         .bed_friction = 30.0 * degree,
+         .bounce = 0.1}, // volcanic sand
+        {.density = 1300.0,
+         .melts = 1100.0,
+         .strength = 0.0,
+         .heat_capacity = 820.0,
+         .porosity = 0.5,
+         .conductivity = 5e-4,
+         .repose = 38.0 * degree,
+         .saturated_repose = 28.0 * degree,
+         .critical_shear = 0.2,
+         .erodibility = 1.2e-5,
+         .settling = 1.5e-2,
+         .bed_friction = 32.0 * degree,
+         .bounce = 0.1}, // shell sand
+        {.density = 1700.0,
+         .melts = 1500.0,
+         .strength = 0.0,
+         .heat_capacity = 850.0,
+         .porosity = 0.38,
+         .conductivity = 1e-1,
+         .repose = 38.0 * degree,
+         .saturated_repose = 37.0 * degree,
+         .critical_shear = 40.0,
+         .erodibility = 1e-6,
+         .settling = 1.0,
+         .bed_friction = 35.0 * degree,
+         .bounce = 0.4}, // shingle
     }};
     return all[static_cast<std::size_t>(material)];
 }

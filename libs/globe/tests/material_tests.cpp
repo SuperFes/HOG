@@ -7,15 +7,15 @@
 #include <cmath>
 #include <numbers>
 
-using hog::globe::Material;
 using hog::globe::footing;
 using hog::globe::holding_slope;
+using hog::globe::Material;
 using hog::globe::properties;
 
 TEST_CASE("loose ground has pores and a slope it holds, rock hardly any", "[globe][material]") {
     for (const Material loose :
          {Material::Soil, Material::Sand, Material::Sediment, Material::Regolith, Material::Snow,
-          Material::Clay}) {
+          Material::Clay, Material::VolcanicSand, Material::ShellSand, Material::Shingle}) {
         CAPTURE(loose);
         CHECK(properties(loose).porosity > 0.3);
         CHECK(properties(loose).porosity < 1.0);
@@ -34,6 +34,26 @@ TEST_CASE("loose ground has pores and a slope it holds, rock hardly any", "[glob
     }
     CHECK(properties(Material::Air).porosity == 0.0);
     CHECK(properties(Material::Water).porosity == 0.0);
+}
+
+TEST_CASE("beaches' sands differ by what they're made of, shingle by its stones",
+          "[globe][material]") {
+    const auto& sand = properties(Material::Sand);
+    const auto& volcanic = properties(Material::VolcanicSand);
+    const auto& shells = properties(Material::ShellSand);
+    const auto& shingle = properties(Material::Shingle);
+    // Basalt is heavier than quartz, so its sand settles faster and takes more drag to move.
+    CHECK(volcanic.density > sand.density);
+    CHECK(volcanic.settling > sand.settling);
+    CHECK(volcanic.critical_shear > sand.critical_shear);
+    // Shells are lighter and full of pores, and their flat bits lock steeper.
+    CHECK(shells.density < sand.density);
+    CHECK(shells.porosity > sand.porosity);
+    CHECK(shells.repose > sand.repose);
+    // Stones with nothing fine between them drain at once, and only storms move them.
+    CHECK(shingle.conductivity > 100.0 * sand.conductivity);
+    CHECK(shingle.critical_shear > 100.0 * sand.critical_shear);
+    CHECK(shingle.saturated_repose > sand.saturated_repose);
 }
 
 TEST_CASE("firn is porous and ice is not, both lighter than water and melting with it",

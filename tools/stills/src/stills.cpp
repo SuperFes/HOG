@@ -114,6 +114,12 @@ Rgb material_colour(Material material) {
         return {150, 102, 70};
     case Material::Gravel:
         return {120, 110, 98};
+    case Material::VolcanicSand:
+        return {34, 34, 36};
+    case Material::ShellSand:
+        return {230, 222, 200};
+    case Material::Shingle:
+        return {128, 122, 115};
     }
     return {255, 0, 255};
 }
