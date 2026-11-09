@@ -7,6 +7,7 @@
 #include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -49,12 +50,14 @@ public:
                                                          VkFormat depth_format,
                                                          std::uint32_t size = default_size);
 
-    // Records drawing every face but the one looking down: the sky through the air as seen that
-    // way, and what stands round the eye. `frame`'s sky tables must have been recorded. Leaves
-    // the cube to be sampled.
+    // Records drawing faces but the one looking down: the sky through the air as seen that way,
+    // and what stands round the eye. Every face the first time, then one a time in turn, the
+    // others kept as last drawn: what's round the eye changes slowly next to how often it's
+    // drawn, and blurred as it's read. `frame`'s sky tables must have been recorded. Leaves the
+    // cube to be sampled.
     [[nodiscard]] Result<> record(VkCommandBuffer commands, std::uint32_t frame,
                                   const Atmosphere& atmosphere, const Sky& sky,
-                                  const ProbeView& view) const;
+                                  const ProbeView& view);
 
     // A cube, laid out as probe_direction() has it, with mips each blurred from the one before,
     // for what's mirrored rough or far to be read soft.
@@ -64,6 +67,10 @@ public:
 
 private:
     EnvironmentProbe() = default;
+    // The air between the eye and what's seen each way, for the faces `drawn`.
+    void record_air(VkCommandBuffer commands, std::uint32_t frame, const Atmosphere& atmosphere,
+                    const Sky& sky, const std::array<SkyView, probe_faces>& skies,
+                    const std::array<bool, probe_faces>& drawn) const;
     // Blurs each mip from the one before, and leaves the cube to be sampled.
     void shrink(VkCommandBuffer commands) const;
 
@@ -72,6 +79,8 @@ private:
     std::vector<Image> aerial_; // a face each
     std::uint32_t size_ = 0;
     std::uint32_t levels_ = 1;
+    bool whole_ = false;                  // every face drawn once
+    std::uint32_t next_ = 0;              // the face drawn last, or next once all are
     VkFilter shrink_ = VK_FILTER_NEAREST; // linear where the format blits so
 };
 
