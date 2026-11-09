@@ -3,14 +3,14 @@
 [planet]
 seed = 1 # 812080951
 ocean_fraction = 0.7
-radius_km = 135
+radius_km = 115
 # Locked to real time: four hours of day and night, through Earth's year and seasons.
 day_hours = 4
 axial_tilt = 23.44
 
 [globe]
 preset = "earth"
-radius = 135000.0
+radius = 115000.0
 floor_depth = 2500.0
 sky_height = 12000.0
 wear = 0.08
