@@ -28,6 +28,8 @@ constexpr double loose_deep = 2.0;     // metres of deposits that slope as loose
 constexpr double creeping_depth = 0.5; // metres of soil that move as it creeps
 // Cells a lake may fill out to from its floor, either way.
 constexpr int farthest_fill = 4096;
+// The most parts a lake's cells split into across, about its edge.
+constexpr int most_fine = 16;
 // Rip currents cut crescent bars about this many times the surf zone's width apart.
 constexpr double rip_spacing = 4.0;
 
@@ -658,15 +660,18 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
     const int half = std::clamp(
         static_cast<int>(std::ceil((reach + (3.0 * sphere.spacing())) / water.step)), 16, 2048);
     std::uint32_t near = floor;
-    const auto ground = [&](int x, int y) {
+    const auto ground = [&](double x, double y) {
         const DVec3 direction = water.toward(x, y);
         smooth_.weigh(direction, weights, near);
         near = weights.nearest;
         return surface(direction, weights, 0.0).top.value;
     };
     // A cell's middle may stand over the water while ground in it lies under: as much as its
-    // own width up, on all but cliffs, gullies finer than it among them.
-    water.pool = fill_pool(half, ground, most, water.step * radius_, farthest_fill);
+    // own width up, on all but cliffs, gullies finer than it among them. About its edge, cells
+    // split as fine as the finest gullies, so it finds its way through rims as narrow.
+    const double cell = water.step * radius_;
+    const int fine = std::clamp(static_cast<int>(std::ceil(cell / (3.0 * voxel_))), 1, most_fine);
+    water.pool = fill_pool(half, ground, most, cell, farthest_fill, fine);
     return water;
 }
 
@@ -1072,7 +1077,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
             continue;
         }
         const auto cell = [&](const DVec3& axis) {
-            return static_cast<int>(std::lround(glm::dot(direction, axis) / toward / water.step));
+            return glm::dot(direction, axis) / toward / water.step;
         };
         if (water.pool.at(cell(water.east), cell(water.north)) != Pool::Cell::Dry &&
             water.pool.level > top.top.value + 0.01) {
