@@ -89,6 +89,7 @@ inline constexpr std::array body_numbers{
     std::pair{"weathering_warmth"sv, &formation::Body::weathering_warmth},
     std::pair{"frost_weathering"sv, &formation::Body::frost_weathering},
     std::pair{"slowest_wear"sv, &formation::Body::slowest_wear},
+    std::pair{"soil_creep"sv, &formation::Body::soil_creep},
     std::pair{"loose_weathering"sv, &formation::Body::loose_weathering},
     std::pair{"soil_years"sv, &formation::Body::soil_years},
     std::pair{"ice_left_years"sv, &formation::Body::ice_left_years},

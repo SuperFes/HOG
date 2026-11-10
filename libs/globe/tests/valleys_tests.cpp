@@ -67,3 +67,17 @@ TEST_CASE("a valley's walls rise away from it, and its floor falls along it", "[
     const DVec3 south = wall_at(falling(), at(500.0, -100.0), radius).gradient;
     CHECK_THAT(south.z, WithinRel(-0.5, 1e-3));
 }
+
+TEST_CASE("a valley's floor lies level across its middle, however narrow beside its channel",
+          "[globe][valleys]") {
+    // A channel wider than the floor it wanders across.
+    Valley narrow = falling();
+    narrow.belt = 2.0;
+    narrow.channel_width = 6.0;
+    for (const double north : {-0.01, 0.01}) {
+        const auto wall = wall_at(narrow, at(500.0, north), radius);
+        // Neither the ground nor the way water runs off it turns about sharply across the middle.
+        CHECK(std::abs(wall.fall.z) < 0.01);
+        CHECK(std::abs(wall.gradient.z) < 0.01);
+    }
+}

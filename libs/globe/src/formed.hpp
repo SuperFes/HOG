@@ -3,6 +3,7 @@
 #include "dissection.hpp"
 #include "lake_fill.hpp"
 #include "shoreface.hpp"
+#include "valleys.hpp"
 
 #include <hog/formation/smooth.hpp>
 #include <hog/formation/world.hpp>
@@ -73,14 +74,21 @@ private:
         formation::Smooth::Read top;
         DVec3 fall{0.0}; // per radian, as the top's gradient
         double above_floor = 1e30;
+        DVec3 above_floor_gradient{0.0}; // per metre, the floor's own fall left out
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights) const;
+    // The walls of the valley the river from `point` cuts, as they stand at `direction`, reaching
+    // `reach` metres from it; none off the sea's own points or out of its reach.
+    [[nodiscard]] std::optional<Wall> valley_wall(std::uint32_t point, DVec3 direction,
+                                                  double reach) const;
     // The course the river from `point` cuts down to the point it runs to, worked out the first
     // time it's read: directions from one to the other.
     [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const;
     // The ground carved, then cut by gullies no narrower than twice `lod`.
     [[nodiscard]] Dissected surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                     double lod) const;
+    // Each point's walls, as steep as the ground falls to its nearest and its cover holds.
+    void fill_walls();
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
     // runs out over its rim or stands at the level formed for it.
     void fill_lakes();
@@ -111,6 +119,10 @@ private:
     formation::World world_;
     formation::Smooth smooth_;
     double radius_;
+    double voxel_ = 1.0; // metres across the finest voxels
+    [[nodiscard]] double sphere_spacing_metres() const noexcept {
+        return world_.sphere.spacing() * radius_;
+    }
     Gullies gullies_;
     // How far apart in height the ground's ways down may be and still blend into where it runs.
     double fall_blend_ = 0.0;
@@ -141,7 +153,7 @@ private:
     std::uint64_t joints_seed_ = 0;
     // Rivers' courses, each made once, and the seeds of the rock they cut through.
     mutable std::vector<std::vector<DVec3>> courses_;
-    std::unique_ptr<std::once_flag[]> course_made_;
+    mutable std::vector<std::once_flag> course_made_;
     std::uint64_t rock_seed_ = 0;
     std::uint64_t faults_seed_ = 0;
     // How steeply valley walls rise about each point, metres up per metre across.

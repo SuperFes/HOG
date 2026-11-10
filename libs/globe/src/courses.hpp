@@ -104,7 +104,7 @@ template <class Effort>
     }
     line.front() = corridor.from;
     line.back() = corridor.to;
-    return detail::cut_corners(detail::cut_corners(line));
+    return detail::cut_corners(line);
 }
 
 } // namespace hog::globe

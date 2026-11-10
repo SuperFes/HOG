@@ -15,6 +15,7 @@ struct Undissected {
     DVec3 fall{0.0};
     // How far it stands over the floor of the valley it drains to, below which nothing cuts.
     double above_floor = 1e30;
+    DVec3 above_floor_gradient{0.0}; // per metre
     double steepest = 0.0; // the steepest its walls stand, metres up per metre across
     double ice = 0.0;      // metres of ice the top includes
 };
