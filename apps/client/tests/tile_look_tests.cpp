@@ -26,6 +26,8 @@
 #include <functional>
 #include <numbers>
 #include <set>
+#include <sstream>
+#include <vector>
 
 using hog::client::testing::calendar;
 using hog::render::testing::test_device;
@@ -62,24 +64,41 @@ TEST_CASE("the land as the server cuts it and the client draws it, to look at", 
         double heading;
         double pitch;
     };
-    for (const Spot& spot : {Spot{.name = "coast",
-                                  .latitude = -20.041310,
-                                  .longitude = -95.410009,
-                                  .up = 1'741.0,
-                                  .heading = -25.9,
-                                  .pitch = -32.0},
-                             Spot{.name = "mountain",
-                                  .latitude = 22.239458,
-                                  .longitude = -144.433720,
-                                  .up = 46.0,
-                                  .heading = 19.3,
-                                  .pitch = 15.7},
-                             Spot{.name = "orbit",
-                                  .latitude = -19.536924,
-                                  .longitude = -85.287495,
-                                  .up = 45'329.0,
-                                  .heading = -37.4,
-                                  .pitch = -85.9}}) {
+    std::vector<Spot> spots{Spot{.name = "coast",
+                                 .latitude = -20.041310,
+                                 .longitude = -95.410009,
+                                 .up = 1'741.0,
+                                 .heading = -25.9,
+                                 .pitch = -32.0},
+                            Spot{.name = "mountain",
+                                 .latitude = 22.239458,
+                                 .longitude = -144.433720,
+                                 .up = 46.0,
+                                 .heading = 19.3,
+                                 .pitch = 15.7},
+                            Spot{.name = "orbit",
+                                 .latitude = -19.536924,
+                                 .longitude = -85.287495,
+                                 .up = 45'329.0,
+                                 .heading = -37.4,
+                                 .pitch = -85.9}};
+    // A spot copied from the window's title, "latitude,longitude,up,heading,pitch", in their stead.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    if (const char* at = std::getenv("HOG_LOOK_AT")) {
+        Spot spot{.name = "at",
+                  .latitude = 0.0,
+                  .longitude = 0.0,
+                  .up = 0.0,
+                  .heading = 0.0,
+                  .pitch = 0.0};
+        std::istringstream read{at};
+        char comma = 0;
+        read >> spot.latitude >> comma >> spot.longitude >> comma >> spot.up >> comma >>
+            spot.heading >> comma >> spot.pitch;
+        REQUIRE(read);
+        spots = {spot};
+    }
+    for (const Spot& spot : spots) {
         const hog::DVec3 up =
             hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
         const double ground =
