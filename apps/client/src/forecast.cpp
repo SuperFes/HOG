@@ -258,6 +258,9 @@ void Forecast::update(MonotonicClock::time_point now) {
 }
 
 void Forecast::take_maps() {
+    if (!grid_) {
+        return;
+    }
     ++received_;
     Maps before = maps_of(*grid_, from_);
     Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_) : before;

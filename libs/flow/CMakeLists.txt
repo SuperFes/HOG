@@ -44,3 +44,7 @@ hog_add_tests(hog_flow
     tests/wear_tests.cpp
     tests/wetting_tests.cpp
     tests/simulation_tests.cpp)
+# Probes read their options from the environment before any thread starts.
+if(MSVC AND TARGET hog_flow_tests)
+    target_compile_definitions(hog_flow_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()

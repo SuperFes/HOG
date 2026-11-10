@@ -15,27 +15,27 @@
 namespace hog::client::lab {
 
 struct Climate {
-    double snowline = 380.0;      // metres: balance is zero here
-    double gain = 0.006;          // metres of ice a year per metre above the snowline
-    double loss = 0.010;          // metres of ice a year per metre below it
-    double most_gain = 2.0;       // snowfall caps out
-    double most_loss = 8.0;       // melt caps out
-    double flow = 2.2e-5;         // Glen's law, temperate ice: 2A (rho g)^3 / 5 in m^-3 per year
-    double wear = 1.0e-5;         // metres of bed worn per metre of ice moved
-    double sea = -1.0e9;          // sea level, metres: ice over deeper water floats off
-    double calving = 0.5;         // share of floating ice lost to the sea a year
-    double rockfall = 0.002;      // metres of debris a year per metre of wall above the ice
-    double englacial = 0.02;      // share of melted ice that leaves its rock on the surface
-    double insulation = 1.0;      // debris depth, metres, that cuts melt by 1/e
+    double snowline = 380.0; // metres: balance is zero here
+    double gain = 0.006;     // metres of ice a year per metre above the snowline
+    double loss = 0.010;     // metres of ice a year per metre below it
+    double most_gain = 2.0;  // snowfall caps out
+    double most_loss = 8.0;  // melt caps out
+    double flow = 2.2e-5;    // Glen's law, temperate ice: 2A (rho g)^3 / 5 in m^-3 per year
+    double wear = 1.0e-5;    // metres of bed worn per metre of ice moved
+    double sea = -1.0e9;     // sea level, metres: ice over deeper water floats off
+    double calving = 0.5;    // share of floating ice lost to the sea a year
+    double rockfall = 0.002; // metres of debris a year per metre of wall above the ice
+    double englacial = 0.02; // share of melted ice that leaves its rock on the surface
+    double insulation = 1.0; // debris depth, metres, that cuts melt by 1/e
 };
 
 struct Bed {
-    int size = 0;                 // cells along each side
-    double cell = 10.0;           // metres per cell
-    std::vector<double> rock;     // bed height, metres
-    std::vector<double> ice;      // ice thickness over the bed, metres
-    std::vector<double> debris;   // rock lying on the ice, metres deep
-    std::vector<double> floe;     // sea-ice thickness over open water, metres
+    int size = 0;               // cells along each side
+    double cell = 10.0;         // metres per cell
+    std::vector<double> rock;   // bed height, metres
+    std::vector<double> ice;    // ice thickness over the bed, metres
+    std::vector<double> debris; // rock lying on the ice, metres deep
+    std::vector<double> floe;   // sea-ice thickness over open water, metres
 
     [[nodiscard]] std::size_t index(int x, int y) const noexcept {
         return (static_cast<std::size_t>(y) * static_cast<std::size_t>(size)) +
@@ -47,8 +47,8 @@ struct Bed {
 };
 
 [[nodiscard]] inline double hashed(int x, int y, unsigned seed) noexcept {
-    auto h = static_cast<std::uint32_t>(x) * 374761393U + static_cast<std::uint32_t>(y) * 668265263U +
-             seed * 2246822519U;
+    auto h = static_cast<std::uint32_t>(x) * 374761393U +
+             static_cast<std::uint32_t>(y) * 668265263U + seed * 2246822519U;
     h = (h ^ (h >> 13U)) * 1274126177U;
     return static_cast<double>(h ^ (h >> 16U)) / 4294967295.0;
 }
@@ -63,7 +63,6 @@ struct Bed {
     return std::lerp(std::lerp(hashed(ix, iy, seed), hashed(ix + 1, iy, seed), sx),
                      std::lerp(hashed(ix, iy + 1, seed), hashed(ix + 1, iy + 1, seed), sx), sy);
 }
-
 
 // Feature builders: each shapes the bed in place, so a test bed is a few calls. Positions are in
 // cells; heights and sizes in metres.
@@ -170,8 +169,11 @@ inline void add_basin(Bed& bed, double cx, double cy, double radius, double dept
             double amplitude = 0.5;
             for (int octave = 0; octave < 4; ++octave) {
                 const double f = 4.0 * std::pow(2.0, octave);
-                ridges += amplitude * (1.0 - std::abs((2.0 * value_noise(x * f / size, y * f / size,
-                                                                          seed + static_cast<unsigned>(octave))) - 1.0));
+                ridges +=
+                    amplitude *
+                    (1.0 - std::abs((2.0 * value_noise(x * f / size, y * f / size,
+                                                       seed + static_cast<unsigned>(octave))) -
+                                    1.0));
                 amplitude *= 0.5;
             }
             bed.rock[bed.index(x, y)] = peak * dome * (0.7 + (0.5 * ridges));
@@ -213,10 +215,12 @@ inline double flow_step(Bed& bed, const Climate& climate, double years) {
             }
         }
     }
-    // Explicit diffusion is stable while a cell gives away less than a quarter of its neighbour gap.
-    // Thick ice would force ever finer steps, so the step has a floor and each face's flux is capped
-    // at a fifth of what its donor cell holds: still conservative and never negative, just damped.
-    const double dt = std::min(years, std::max(stiffest > 0.0 ? 0.2 * bed.cell / stiffest : years, 0.05));
+    // Explicit diffusion is stable while a cell gives away less than a quarter of its neighbour
+    // gap. Thick ice would force ever finer steps, so the step has a floor and each face's flux is
+    // capped at a fifth of what its donor cell holds: still conservative and never negative, just
+    // damped.
+    const double dt =
+        std::min(years, std::max(stiffest > 0.0 ? 0.2 * bed.cell / stiffest : years, 0.05));
     const auto cap = [&](std::vector<double>& flux, int dx, int dy) {
         for (int y = 0; y < bed.size - dy; ++y) {
             for (int x = 0; x < bed.size - dx; ++x) {
@@ -276,7 +280,8 @@ inline void add_balance(Bed& bed, const Climate& climate, double years) {
             const double change = balance(climate, bed.surface(x, y));
             if (change < 0.0) {
                 // Debris insulates what it covers, and melting leaves the ice's own rock behind.
-                const double melt = std::min(-change * std::exp(-bed.debris[i] / climate.insulation) * years, ice);
+                const double melt =
+                    std::min(-change * std::exp(-bed.debris[i] / climate.insulation) * years, ice);
                 ice -= melt;
                 bed.debris[i] += climate.englacial * melt;
                 if (ice <= 0.0) {
@@ -320,8 +325,8 @@ inline void rockfall(Bed& bed, const Climate& climate, double years) {
             if (bed.ice[i] <= 0.5) {
                 continue;
             }
-            for (const std::size_t j : {bed.index(x - 1, y), bed.index(x + 1, y), bed.index(x, y - 1),
-                                        bed.index(x, y + 1)}) {
+            for (const std::size_t j : {bed.index(x - 1, y), bed.index(x + 1, y),
+                                        bed.index(x, y - 1), bed.index(x, y + 1)}) {
                 if (bed.ice[j] <= 0.5) {
                     fall[i] += std::max(bed.rock[j] - (bed.rock[i] + bed.ice[i]), 0.0);
                 }
@@ -370,8 +375,8 @@ inline void run_drifting(Bed& bed, Climate climate, int years, double rise) {
 struct Cold {
     double base = -10.0;
     double per_row = 0.0;
-    double patchy = 6.0;          // degrees of local noise (currents, shelter) either way
-    double freezing = -1.8;       // sea water freezes here
+    double patchy = 6.0;    // degrees of local noise (currents, shelter) either way
+    double freezing = -1.8; // sea water freezes here
 };
 
 // One winter of sea ice: open water freezes next to ice or when it is far below freezing, ice
@@ -386,16 +391,19 @@ inline void sea_ice_year(Bed& bed, const Climate& climate, const Cold& cold, uns
                 next[i] = 0.0;
                 continue;
             }
-            const double local = cold.base - (cold.per_row * y) +
-                                 (cold.patchy * ((2.0 * value_noise(x * 0.25, y * 0.25, seed)) - 1.0));
+            const double local =
+                cold.base - (cold.per_row * y) +
+                (cold.patchy * ((2.0 * value_noise(x * 0.25, y * 0.25, seed)) - 1.0));
             const double degrees = cold.freezing - local;
             double h = bed.floe[i];
             if (degrees > 0.0) {
                 bool touching = false;
-                for (const auto [dx, dy] : {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
+                for (const auto [dx, dy] :
+                     {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
                     const int nx = std::clamp(x + dx, 0, bed.size - 1);
                     const int ny = std::clamp(y + dy, 0, bed.size - 1);
-                    touching = touching || bed.floe[bed.index(nx, ny)] > 0.1 || bed.ice[bed.index(nx, ny)] > 0.5;
+                    touching = touching || bed.floe[bed.index(nx, ny)] > 0.1 ||
+                               bed.ice[bed.index(nx, ny)] > 0.5;
                 }
                 if (h > 0.1 || touching || degrees > 6.0) {
                     h = std::sqrt((h * h) + (0.04 * degrees));
@@ -448,7 +456,6 @@ inline void sea_ice_year(Bed& bed, const Climate& climate, const Cold& cold, uns
     return lowest;
 }
 
-
 // A top-down picture of the bed as binary PPM: rock and ice hill-shaded from the north-west, ice
 // tinted blue and deepening with its thickness.
 inline void write_ppm(const Bed& bed, const std::string& path, int scale = 8,
@@ -492,7 +499,8 @@ inline void write_ppm(const Bed& bed, const std::string& path, int scale = 8,
                 b = std::lerp(b, 0.20, cover);
             }
             const auto byte = [&](double v) {
-                return static_cast<char>(static_cast<unsigned char>(std::clamp(v * light, 0.0, 1.0) * 255.0));
+                return static_cast<char>(
+                    static_cast<unsigned char>(std::clamp(v * light, 0.0, 1.0) * 255.0));
             };
             const char rgb[3] = {byte(r), byte(g), byte(b)};
             out.write(static_cast<const char*>(rgb), 3);

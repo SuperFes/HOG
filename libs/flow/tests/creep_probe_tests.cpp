@@ -50,9 +50,11 @@ TEST_CASE("probe: cover on a mountain after creep", "[.creep_probe]") {
             const int ground = layers.layer_at(generator.column(center(cell), 1.0).ground());
             grounds.push_back(ground);
             for (int layer = std::max(ground - 10, 0); layer <= ground + 8; layer += brick_side) {
-                bricks.insert(brick_of({cell.face, cell.i, cell.j, static_cast<std::uint32_t>(layer)}));
+                bricks.insert(
+                    brick_of({cell.face, cell.i, cell.j, static_cast<std::uint32_t>(layer)}));
             }
-            bricks.insert(brick_of({cell.face, cell.i, cell.j, static_cast<std::uint32_t>(ground + 8)}));
+            bricks.insert(
+                brick_of({cell.face, cell.i, cell.j, static_cast<std::uint32_t>(ground + 8)}));
         }
     }
     hog::globe::MadeWorld made{generator};
@@ -68,12 +70,15 @@ TEST_CASE("probe: cover on a mountain after creep", "[.creep_probe]") {
                 double metres = 0.0;
                 const int ground = grounds[(y * side) + x];
                 for (int layer = std::max(ground - 10, 0); layer <= ground + 8; ++layer) {
-                    const auto voxel = world.at({centre.face, i0 + x, j0 + y, static_cast<std::uint32_t>(layer)});
+                    const auto voxel =
+                        world.at({centre.face, i0 + x, j0 + y, static_cast<std::uint32_t>(layer)});
                     if (voxel.solid != Material::Air && properties(voxel.solid).repose > 0.0) {
-                        metres += static_cast<double>(voxel.solid_amount) / Voxel::full * layers.thickness;
+                        metres += static_cast<double>(voxel.solid_amount) / Voxel::full *
+                                  layers.thickness;
                     }
                     if (voxel.grain != Material::Air && properties(voxel.grain).repose > 0.0) {
-                        metres += static_cast<double>(voxel.grain_amount) / Voxel::full * layers.thickness;
+                        metres += static_cast<double>(voxel.grain_amount) / Voxel::full *
+                                  layers.thickness;
                     }
                 }
                 cover.push_back(metres);
@@ -87,14 +92,18 @@ TEST_CASE("probe: cover on a mountain after creep", "[.creep_probe]") {
             }
         }
         std::ranges::sort(cover);
-        const auto pick = [&](double q) { return cover[static_cast<std::size_t>(q * static_cast<double>(cover.size() - 1))]; };
+        const auto pick = [&](double q) {
+            return cover[static_cast<std::size_t>(q * static_cast<double>(cover.size() - 1))];
+        };
         std::printf("%s: cover p10 %.2f p50 %.2f p90 %.2f p99 %.2f max %.2f m\n", label, pick(0.1),
                     pick(0.5), pick(0.9), pick(0.99), cover.back());
     };
     measure("before");
-    const int rounds = std::getenv("HOG_ROUNDS") != nullptr ? std::atoi(std::getenv("HOG_ROUNDS")) : 10;
+    const int rounds =
+        std::getenv("HOG_ROUNDS") != nullptr ? std::atoi(std::getenv("HOG_ROUNDS")) : 10;
     for (int round = 0; round < rounds; ++round) {
-        simulation.age_cover(list, std::getenv("HOG_YEARS") != nullptr ? std::atof(std::getenv("HOG_YEARS")) : 50.0);
+        simulation.age_cover(
+            list, std::getenv("HOG_YEARS") != nullptr ? std::atof(std::getenv("HOG_YEARS")) : 50.0);
     }
     measure("after");
 }

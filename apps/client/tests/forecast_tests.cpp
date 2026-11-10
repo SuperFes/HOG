@@ -94,7 +94,8 @@ TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][fore
 
 TEST_CASE("the weather reads as a line", "[client][forecast]") {
     CHECK(hog::client::describe({}) == "0% cloud, 0% humid, drifting 0 m/s");
-    CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F,
+    CHECK(hog::client::describe({.cloud = 16.0F,
+                                 .cover = 1.0F,
                                  .falling = 2.5F,
                                  .drift = {3.0F, -4.0F},
                                  .humidity = 0.92F,
@@ -312,8 +313,7 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.before()[(((face * weather_map_size) + y) * weather_map_size) + x];
                 const CellWeather here =
                     forecast.at(cube_direction(face, x, y, weather_map_size), start);
-                CHECK(std::abs(texel[0] - (here.cover * 255.0F)) <=
-                      0.51F);
+                CHECK(std::abs(texel[0] - (here.cover * 255.0F)) <= 0.51F);
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
                 const auto& sky =
                     forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
