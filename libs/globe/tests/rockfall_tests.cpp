@@ -1,3 +1,4 @@
+#include "../src/joints.hpp"
 #include "../src/terms.hpp"
 
 #include <hog/globe/cell.hpp>
@@ -6,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -170,6 +172,41 @@ TEST_CASE("coarser detail leaves out the rocks it can't resolve", "[globe][rockf
     for (const auto& [cell, rock] : coarse) {
         CHECK(2.0 * rock.axes.x >= 3.0);
     }
+}
+
+TEST_CASE("blocks too small for the detail read lie spread over the ground as rubble",
+          "[globe][rockfall]") {
+    const Setup setup;
+    const auto found = rocks_on(setup, 1'500, 0.5);
+    REQUIRE_FALSE(found.empty());
+    const Rock& rock = found.front().rock;
+    const DVec3 down = glm::normalize(rock.middle);
+    const Cell coarsest =
+        hog::globe::cell_under(down, hog::globe::terms::rock_level(setup.generator.planet()));
+    const double cover = hog::globe::terms::fallen_cover(setup.context, coarsest);
+    // Read finely enough for every block, none is rubble.
+    CHECK(hog::globe::terms::fallen(setup.context, down, 0.01).rubble.depth == 0.0);
+    // The coarser, the more of them rubble, all of them at last, of the rock they fell from, no
+    // deeper than the tallest block standing over all the ground.
+    REQUIRE(cover > 0.0);
+    double last = 0.0;
+    for (const double lod : {0.5, 1.0, 2.0, 4.0, 8.0, 1e9}) {
+        const hog::globe::terms::Rubble rubble =
+            hog::globe::terms::fallen(setup.context, down, lod).rubble;
+        CHECK(rubble.depth >= last);
+        CHECK(rubble.depth <= hog::globe::widest_joints);
+        if (rubble.depth > 0.0) {
+            CHECK(rubble.of == rock.material);
+        }
+        last = rubble.depth;
+    }
+    CHECK(last > 0.0);
+    // A column read coarsely rises by its rubble, which lies at its top.
+    const auto column = setup.generator.column(down, 1e9);
+    const auto bare = hog::globe::terms::ground(setup.context, down, 1e9);
+    CHECK(std::abs(column.ground() - (setup.generator.planet().body.radius + bare.height + last)) <
+          1e-6);
+    CHECK(column.sample(column.ground() - (0.5 * last)).material == rock.material);
 }
 
 TEST_CASE("a rock stands out of the ground its column is cut in", "[globe][rockfall]") {

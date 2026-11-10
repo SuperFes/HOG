@@ -33,8 +33,7 @@ public:
         Strata layers;
         double light = 0.0;   // share of light crust
         double folding = 0.0; // how folded the beds are, 0 to 1
-        // Metres a block of rock stands out of the ground about it as a crag, or under it where
-        // the hollows between blocks aren't filled.
+        // Metres the rotted core of a block of rock stands out of the ground about it as a crag.
         double crag = 0.0;
         // How the rock at the top weathers where it stands bare, which crags and the rock that
         // falls off them come of.

@@ -50,13 +50,22 @@ inline constexpr double fault_blocks = 800.0;
 // The block of rock standing `strength` that holds `point`, metres from the planet's centre.
 [[nodiscard]] Block block_at(DVec3 point, double strength, std::uint64_t seed) noexcept;
 
-// Metres `block` stands over the ground about it, or sinks under it, once `weathered` metres of
-// bare rock jointed `spacing` apart on the whole have broken up and fallen away, on ground rising
-// `slope` in one. Each block wears down as fast as frost and water get into it, by how much face
-// it shows for its volume, so the widest stand as crags and the narrowest are worn into hollows
-// between them. A crag stands no higher than it can before it topples off its sloping foot, and a
-// hollow no deeper than the rubble falling into it from its sides leaves it.
-[[nodiscard]] double crag_relief(const Block& block, double spacing, double weathered,
-                                 double slope) noexcept;
+// Metres water getting in along the joints has rotted rock from them by the time the ground,
+// wearing down `worn` metres a year, brings it to the top: rotting `making` metres a year there,
+// slower by `falloff` a metre the deeper it lay, for `years` at most.
+[[nodiscard]] double rotted_by(double making, double worn, double falloff, double years) noexcept;
+
+// What's left of a block of rock rotted `rotted` metres in from its joints, which water gets into
+// from every face (Linton's tors): a core rounded where its faces meet, or nothing of the narrowest
+// blocks. With the rotted rock about it stripped no deeper than it rotted, it stands over the
+// ground no higher than that.
+struct Core {
+    double height = 0.0;  // metres over the ground
+    DVec3 rise{0.0};      // which way its top climbs along the ground, metres per metre
+    double breadth = 0.0; // metres across its thinnest way
+};
+// The core of `block` over the ground at `ground`, metres from the planet's centre, straight up
+// along `up`; one standing clear of the ground there settled onto it.
+[[nodiscard]] Core core_over(const Block& block, double rotted, DVec3 ground, DVec3 up) noexcept;
 
 } // namespace hog::globe

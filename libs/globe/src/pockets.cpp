@@ -84,7 +84,7 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
     std::vector<std::vector<Run>> rows(static_cast<std::size_t>(side));
     {
         const unsigned workers = std::max(1U, std::thread::hardware_concurrency());
-        std::vector<std::jthread> threads;
+        std::vector<std::thread> threads;
         threads.reserve(workers);
         for (unsigned worker = 0; worker < workers; ++worker) {
             threads.emplace_back([&, worker] {
@@ -112,6 +112,9 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
                     }
                 }
             });
+        }
+        for (std::thread& thread : threads) {
+            thread.join();
         }
     }
 

@@ -175,6 +175,66 @@ Fallen fallen_about(const Context& context, Cell coarsest) noexcept {
     return fallen;
 }
 
+double across(const std::array<double, 3>& sides) noexcept {
+    return std::hypot(sides[0], sides[1]);
+}
+
+// The sides, longest first, of a block drawn by `seed` from somewhere along the joints of the
+// rock `fallen` came from, broken across its long side until it's no wider than `widest`.
+std::array<double, 3> sides_of(const Context& context, const Fallen& fallen, double widest,
+                               std::uint64_t seed) noexcept {
+    const DVec3 east = glm::normalize(glm::cross(
+        std::abs(fallen.from.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0}, fallen.from));
+    const DVec3 north = glm::cross(fallen.from, east);
+    const DVec3 somewhere = (fallen.from * (context.planet->body.radius + fallen.source.height)) +
+                            (east * ((unit(seed, 1) - 0.5) * 100.0)) +
+                            (north * ((unit(seed, 2) - 0.5) * 100.0));
+    const Block block = block_at(somewhere, fallen.source.strength, seed);
+    std::array<double, 3> sides{block.size().x, block.size().y, block.size().z};
+    std::ranges::sort(sides, std::greater{});
+    while (across(sides) > widest) {
+        sides[0] /= 2.0;
+        std::ranges::sort(sides, std::greater{});
+    }
+    return sides;
+}
+
+// The rock blocks fell from, from under what was rotted or laid over it.
+Material material_of(const Context& context, const Fallen& fallen) noexcept {
+    constexpr double depth = 4.0;
+    const Material rock = material_at(context, fallen.source.layers, depth,
+                                      context.planet->body.radius + fallen.source.height - depth);
+    return properties(rock).strength < 1.0e6 ? fallen.source.layers.basement : rock;
+}
+
+// How many blocks are drawn about a coarsest cell to find the rubble the smallest make there.
+constexpr int rubble_draws = 8;
+
+// The rubble the blocks about `coarsest` too small for `lod` make, spread over the ground: each
+// covers the same share of the ground whatever its size, so as deep as the share of it standing
+// over the ground on the whole, over the share of the ground they cover.
+Rubble rubble_in(const Context& context, Cell coarsest, const Fallen& fallen, double lod) noexcept {
+    if (fallen.cover <= 0.0 || lod <= 0.0) {
+        return {};
+    }
+    const double widest = fits * width_of(*context.planet, coarsest);
+    double deep = 0.0;
+    for (int draw = 0; draw < rubble_draws; ++draw) {
+        const std::array<double, 3> sides =
+            sides_of(context, fallen, widest,
+                     hash_values(context.seed(Term::Rockfall), coarsest.level, index_of(coarsest),
+                                 draw, 0x7275'6262'6c65ULL));
+        if (sides[0] < lod) {
+            deep += sides[2] * (1.0 - sunk);
+        }
+    }
+    if (deep <= 0.0) {
+        return {};
+    }
+    return {.depth = std::min(fallen.cover, 1.0) * deep / rubble_draws,
+            .of = material_of(context, fallen)};
+}
+
 // The block in `cell` if its draw places one, ignoring the cells about it; `fallen` is what lies
 // about its coarsest cell.
 std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fallen,
@@ -185,23 +245,10 @@ std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fa
     }
     const std::uint64_t seed =
         hash_values(context.seed(Term::Rockfall), cell.level, index_of(cell));
-    // A block of the rock it fell from, from somewhere along that rock's joints.
-    const DVec3 east = glm::normalize(glm::cross(
-        std::abs(fallen.from.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0}, fallen.from));
-    const DVec3 north = glm::cross(fallen.from, east);
-    const DVec3 somewhere = (fallen.from * (planet.body.radius + fallen.source.height)) +
-                            (east * ((unit(seed, 1) - 0.5) * 100.0)) +
-                            (north * ((unit(seed, 2) - 0.5) * 100.0));
-    const Block block = block_at(somewhere, fallen.source.strength, seed);
-    std::array<double, 3> sides{block.size().x, block.size().y, block.size().z};
-    std::ranges::sort(sides, std::greater{});
-    const auto across = [&] { return std::hypot(sides[0], sides[1]); };
     // Too wide for the coarsest cells, it breaks across its long side.
-    const double widest = fits * width_of(planet, coarsest_of(planet, cell));
-    while (across() > widest) {
-        sides[0] /= 2.0;
-        std::ranges::sort(sides, std::greater{});
-    }
+    std::array<double, 3> sides =
+        sides_of(context, fallen, fits * width_of(planet, coarsest_of(planet, cell)), seed);
+    const auto across = [&] { return std::hypot(sides[0], sides[1]); };
     // It lies in the finest cells it fits.
     const double room = fits * width_of(planet, cell);
     const bool finest = cell.level == rock_level(planet) + rock_sizes - 1;
@@ -238,12 +285,7 @@ std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fa
     rock.across = (maths::cos(turn) * level_east) + (maths::sin(turn) * level_north);
     const double radius = planet.body.radius + found.height;
     rock.middle = (at * radius) + (rock.up * ((1.0 - (2.0 * sunk)) * rock.axes.z));
-    constexpr double depth = 4.0;
-    rock.material = material_at(context, fallen.source.layers, depth,
-                                planet.body.radius + fallen.source.height - depth);
-    if (properties(rock.material).strength < 1.0e6) {
-        rock.material = fallen.source.layers.basement;
-    }
+    rock.material = material_of(context, fallen);
     return rock;
 }
 
@@ -307,7 +349,43 @@ public:
         return std::nullopt;
     }
 
+    // The rubble of the blocks too small to resolve under `direction`, blended between the
+    // middles of the coarsest cells about it so it runs on unbroken from one to the next.
+    Rubble rubble(DVec3 direction) {
+        const int level = rock_level(*context_->planet);
+        const Cell coarsest = cell_under(direction, level);
+        constexpr int finer = 6;
+        const Cell fine = cell_under(direction, level + finer);
+        const auto off = [&](std::uint32_t along, std::uint32_t whole) {
+            return ((static_cast<double>(along - (whole << finer)) + 0.5) / (1U << finer)) - 0.5;
+        };
+        const double off_i = off(fine.i, coarsest.i);
+        const double off_j = off(fine.j, coarsest.j);
+        const int di = off_i < 0.0 ? -1 : 1;
+        const int dj = off_j < 0.0 ? -1 : 1;
+        const auto depth_at = [&](int i, int j) {
+            const std::optional<Cell> cell = next_to(coarsest, i, j);
+            return rubble_of(cell.value_or(coarsest)).depth;
+        };
+        const double across_i = std::abs(off_i);
+        const double across_j = std::abs(off_j);
+        Rubble blended = rubble_of(coarsest);
+        blended.depth =
+            ((1.0 - across_j) *
+             (((1.0 - across_i) * blended.depth) + (across_i * depth_at(di, 0)))) +
+            (across_j * (((1.0 - across_i) * depth_at(0, dj)) + (across_i * depth_at(di, dj))));
+        return blended;
+    }
+
 private:
+    const Rubble& rubble_of(Cell coarsest) {
+        const auto [kept, added] = rubble_.try_emplace(index_of(coarsest));
+        if (added) {
+            kept->second = rubble_in(*context_, coarsest, fallen(coarsest), lod_);
+        }
+        return kept->second;
+    }
+
     // The block `cell`'s draw places in it, whatever lies about it.
     const std::optional<Rock>& drawn(Cell cell) {
         const auto [kept, added] = rocks_.try_emplace(hash_values(cell.level, index_of(cell)));
@@ -330,6 +408,7 @@ private:
     double lod_;
     std::unordered_map<std::uint64_t, std::optional<Rock>> rocks_;
     std::unordered_map<std::uint64_t, Fallen> fallen_;
+    std::unordered_map<std::uint64_t, Rubble> rubble_;
 };
 
 } // namespace
@@ -358,6 +437,22 @@ std::vector<std::optional<Rock>> rockfall(const Context& context, std::span<cons
     found.reserve(cells.size());
     for (const Cell cell : cells) {
         found.push_back(rocks.under(center(cell)));
+    }
+    return found;
+}
+
+Fall fallen(const Context& context, DVec3 direction, double lod) {
+    Rocks rocks{context, lod};
+    return {.rock = rocks.under(direction), .rubble = rocks.rubble(direction)};
+}
+
+std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells, double lod) {
+    Rocks rocks{context, lod};
+    std::vector<Fall> found;
+    found.reserve(cells.size());
+    for (const Cell cell : cells) {
+        const DVec3 direction = center(cell);
+        found.push_back({.rock = rocks.under(direction), .rubble = rocks.rubble(direction)});
     }
     return found;
 }

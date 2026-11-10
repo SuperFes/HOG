@@ -21,6 +21,7 @@ class Formed;
 
 namespace terms {
 struct Ground;
+struct Fall;
 } // namespace terms
 
 // What the world holds at a point before anything has changed it.
@@ -42,6 +43,8 @@ struct Strata {
     double fold = 0.0;  // metres the beds are lifted here
     Material basement = Material::Basalt;
     // What a formed world laid over its beds, metres each, from the top down; within `cover`.
+    double rubble = 0.0; // blocks of `rubble_of` too small for the detail read, spread out
+    Material rubble_of = Material::Gravel;
     double ice = 0.0;
     double beach = 0.0; // what the sea's waves laid along the shore, of `beach_of`
     Material beach_of = Material::Sand;
@@ -182,7 +185,7 @@ public:
 
 private:
     [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made, double slope,
-                                const std::optional<Rock>& rock) const noexcept;
+                                const terms::Fall& fall) const noexcept;
 
     Planet planet_;
     Derived derived_;

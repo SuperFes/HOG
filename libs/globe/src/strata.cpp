@@ -20,7 +20,8 @@ double unit(std::uint64_t value) {
 Material material_at(const Context& context, const Layering& layers, double depth,
                      double radius) noexcept {
     // What a formed world laid over its beds, from the top down.
-    const std::array<std::pair<double, Material>, 12> laid{{
+    const std::array<std::pair<double, Material>, 13> laid{{
+        {layers.rubble, layers.rubble_of},
         {layers.ice, Material::Ice},
         {layers.beach, layers.beach_of},
         {layers.organic, Material::Soil},
