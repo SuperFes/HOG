@@ -25,7 +25,11 @@ TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vent
 }
 
 TEST_CASE("some vents are pools on cave floors under the ground", "[globe][vents]") {
-    const Generator generator{Planet{}};
+    // Pools are rare, a few in a thousand tries finding a cave open near the ground; a hotter
+    // planet tries more often.
+    Planet hot;
+    hot.heat_flow = 0.2;
+    const Generator generator{hot};
     int pools = 0;
     for (const auto& vent : hog::globe::vent_sites(generator)) {
         if (!vent.pool) {
@@ -39,6 +43,7 @@ TEST_CASE("some vents are pools on cave floors under the ground", "[globe][vents
         CHECK(generator.column(vent.direction, 0.5).sample(vent.ground - 0.5).distance < 0.0);
         (void)ground;
     }
+    UNSCOPED_INFO(pools << " pools");
     CHECK(pools > 0);
 }
 

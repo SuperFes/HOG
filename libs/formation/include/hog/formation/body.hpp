@@ -135,6 +135,7 @@ struct Body {
     double weathering_warmth = 0.065; // per °C faster as it warms
     double frost_weathering = 0.5; // frost shattering at its peak near -5 °C, against soil_making
     double slowest_wear = 5.0e-6;  // metres a year even the stillest land wears down
+    double soil_creep = 0.005;     // m² a year soil creeps downhill per unit of slope (Roering's D)
     double loose_weathering = 5.0; // how much faster loose till and alluvium turn to soil than rock
     double soil_years = 1'000'000.0;  // years soil has had where the coldest times' ice never lay
     double ice_left_years = 12'000.0; // years since the coldest times' ice melted back

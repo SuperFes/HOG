@@ -184,3 +184,30 @@ TEST_CASE("ice fills gullies, as deep as it lay, its crests standing out where i
         CHECK_THAT(ice / count, WithinAbs(5.0, 2.0));
     }
 }
+
+TEST_CASE("the slope through the gullies is told", "[globe][dissection]") {
+    constexpr double h = 0.05;
+    const auto top = [](double east, double north) {
+        return cut(east, north, sloping(east, 0.4, 1.0)).top.value;
+    };
+    double worst = 0.0;
+    double total = 0.0;
+    int count = 0;
+    for (int east_at = 0; east_at < 16; ++east_at) {
+        const double east = east_at * 37.1;
+        for (int north_at = 0; north_at < 400; ++north_at) {
+            const double north = north_at * 1.3;
+            const DVec3 told = cut(east, north, sloping(east, 0.4, 1.0)).top.gradient;
+            const double rising_east = (top(east + h, north) - top(east - h, north)) / (2.0 * h);
+            const double rising_north = (top(east, north + h) - top(east, north - h)) / (2.0 * h);
+            const double error = std::hypot(told.y - rising_east, told.z - rising_north);
+            worst = std::max(worst, error);
+            total += error;
+            ++count;
+        }
+    }
+    UNSCOPED_INFO("told slope off by " << total / count << " on average, " << worst << " at worst");
+    // Left untold: how a finer gully's way turns with the walls it runs down, and how fast the
+    // stripes turn where they hold its walls back, both rare and local.
+    CHECK(total / count < 0.06);
+}
