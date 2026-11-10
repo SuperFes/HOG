@@ -303,14 +303,18 @@ TEST_CASE("formed rock stands out as crags only where it stands taller than its 
         land += here.top.value > 0.0 ? 1 : 0;
         CHECK(rock.bare >= 0.0);
         CHECK(rock.bare <= 1.0);
-        // Standing no higher than the ground about it has been worn down.
         CHECK(rock.loosening <= rock.worn);
-        CHECK(here.crag <= (rock.loosening * rock.years) + 1e-9);
+        // Standing no higher than the rock about it rotted and was stripped.
+        const hog::formation::Body& body = formed.world().body;
+        CHECK(here.crag <= hog::globe::rotted_by(rock.rate, std::max(rock.worn, body.slowest_wear),
+                                                 body.soil_falloff, rock.years) +
+                               1e-9);
+        tallest = std::max(tallest, here.crag);
         if (here.crag <= 0.0) {
             continue;
         }
-        ++crags;
-        tallest = std::max(tallest, here.crag);
+        // Joints grooved finer than a voxel don't stand out as crags.
+        crags += here.crag >= voxel ? 1 : 0;
         // Bare rock: nothing laid, rotted or grown on it.
         CHECK(here.layers.ice == 0.0);
         CHECK(here.layers.loess + here.layers.sand + here.layers.alluvium + here.layers.lake_beds +
@@ -321,9 +325,9 @@ TEST_CASE("formed rock stands out as crags only where it stands taller than its 
         CHECK(formed.at(direction, 1e9).crag == 0.0);
     }
     WARN("crags at " << crags << " of " << land << " on land, the tallest " << tallest << " m");
-    CHECK(crags > 10);
-    // Most land keeps a cover over its rock.
-    CHECK(crags < land / 2);
+    CHECK(crags > 5);
+    // Only the widest blocks' cores stand out, and only where rock rotted and was stripped.
+    CHECK(crags < land / 10);
 }
 
 TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][formed]") {

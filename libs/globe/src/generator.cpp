@@ -80,7 +80,7 @@ Generator::Column Generator::column(DVec3 direction, double lod) const noexcept 
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const DVec3 down = glm::normalize(direction);
     return finish(down, lod, terms::ground(context, down, lod), ground_slope(context, down, lod),
-                  terms::rockfall(context, down, lod));
+                  terms::fallen(context, down, lod));
 }
 
 std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
@@ -159,7 +159,7 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
     }
     const auto height_at = [&](Cell cell) { return heights.at(index_of(cell)); };
 
-    const std::vector<std::optional<Rock>> rocks = terms::rockfall(context, cells, lod);
+    const std::vector<terms::Fall> falls = terms::fallen(context, cells, lod);
     std::vector<Column> made;
     made.reserve(count);
     for (std::size_t k = 0; k < count; ++k) {
@@ -191,18 +191,19 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
         made.push_back(finish(
             down, lod, found[k],
-            std::sqrt((across_east * across_east) + (across_north * across_north)), rocks[k]));
+            std::sqrt((across_east * across_east) + (across_north * across_north)), falls[k]));
     }
     return made;
 }
 
 Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made, double slope,
-                                    const std::optional<Rock>& rock) const noexcept {
+                                    const terms::Fall& fall) const noexcept {
     Column column;
     column.generator_ = this;
     column.direction_ = down;
     column.lod_ = lod;
-    column.ground_ = planet_.body.radius + made.height;
+    // Blocks too small to show lie spread over the ground as rubble.
+    column.ground_ = planet_.body.radius + made.height + fall.rubble.depth;
     if (shape_.sea) {
         column.water_ = planet_.body.radius;
     }
@@ -212,7 +213,10 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.slope_ = slope;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
-    column.rock_ = rock;
+    column.strata_.rubble = fall.rubble.depth;
+    column.strata_.rubble_of = fall.rubble.of;
+    column.strata_.cover += fall.rubble.depth;
+    column.rock_ = fall.rock;
     return column;
 }
 

@@ -10,8 +10,10 @@ using hog::DVec3;
 using hog::globe::Block;
 using hog::globe::block_at;
 using hog::globe::closest_joints;
-using hog::globe::crag_relief;
+using hog::globe::Core;
+using hog::globe::core_over;
 using hog::globe::joint_spacing;
+using hog::globe::rotted_by;
 using hog::globe::widely_jointed;
 using hog::globe::widest_joints;
 
@@ -138,24 +140,85 @@ TEST_CASE("a block's inset is the way to its nearest joint", "[globe][joints]") 
     CHECK(block.inset({2.0, 1.0, 5.9}) < 0.1 + 1e-12);
 }
 
-TEST_CASE("widely jointed blocks stand as crags over closely jointed rock worn into hollows",
-          "[globe][joints]") {
-    const Block wide{.low = {0.0, 0.0, 0.0}, .high = {6.0, 6.0, 6.0}, .id = 1};
-    const Block narrow{.low = {0.0, 0.0, 0.0}, .high = {1.0, 1.0, 1.0}, .id = 2};
-    const Block even{.low = {0.0, 0.0, 0.0}, .high = {3.0, 3.0, 3.0}, .id = 3};
-    CHECK(wide.breadth() == 6.0);
-    CHECK(crag_relief(wide, 3.0, 0.0, 0.0) == 0.0);
-    CHECK(crag_relief(wide, 3.0, 4.0, 0.0) == 2.0);
-    CHECK(crag_relief(even, 3.0, 4.0, 0.0) == 0.0);
-    CHECK(crag_relief(narrow, 3.0, 4.0, 0.0) < 0.0);
-    // A crag topples off a slope once it stands taller than its foot is wide across the rise.
-    CHECK(crag_relief(wide, 3.0, 40.0, 0.5) == 12.0);
-    CHECK(crag_relief(wide, 3.0, 40.0, 2.0) == 3.0);
-    // A hollow fills with rubble from its sides, the narrower the shallower.
-    const double hollow = crag_relief(narrow, 3.0, 1'000.0, 0.0);
-    CHECK(hollow > -1.0);
-    CHECK(hollow < -0.2);
-    // A slab weathers as its thin side has it.
+TEST_CASE("a slab weathers as its thin side has it", "[globe][joints]") {
+    const Block cube{.low = {0.0, 0.0, 0.0}, .high = {6.0, 6.0, 6.0}, .id = 1};
     const Block slab{.low = {0.0, 0.0, 0.0}, .high = {6.0, 6.0, 1.0}, .id = 4};
+    CHECK(cube.breadth() == 6.0);
     CHECK(slab.breadth() < 2.5);
+}
+
+TEST_CASE("rock rots in from its joints the less the faster the ground brings it up",
+          "[globe][joints]") {
+    // Never worn, it rots as fast as it's made for as long as it's had.
+    CHECK(std::abs(rotted_by(1e-5, 0.0, 2.0, 1e5) - 1.0) < 1e-9);
+    // Brought up fast, it reaches the top having rotted only while it lay shallow.
+    CHECK(std::abs(rotted_by(1e-5, 1e-3, 2.0, 1e7) - 0.005) < 1e-9);
+    // Rotting more the longer it's had, never more than as fast as it's made.
+    double last = 0.0;
+    for (const double years : {1e3, 1e4, 1e5, 1e6, 1e7}) {
+        const double rotted = rotted_by(1e-5, 1e-5, 2.0, years);
+        CHECK(rotted > last);
+        CHECK(rotted <= 1e-5 * years);
+        last = rotted;
+    }
+    CHECK(rotted_by(0.0, 1e-5, 2.0, 1e6) == 0.0);
+}
+
+TEST_CASE("only blocks wider than twice their rotting leave cores, no higher than they rotted",
+          "[globe][joints]") {
+    const Block block{.low = {0.0, 0.0, 0.0},
+                      .high = {6.0, 6.0, 6.0},
+                      .id = 1,
+                      .sets = {DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0}, DVec3{0.0, 0.0, 1.0}}};
+    const DVec3 up{0.0, 0.0, 1.0};
+    CHECK(core_over(block, 0.0, {3.0, 3.0, 2.0}, up).height == 0.0);
+    CHECK(core_over(block, 3.5, {3.0, 3.0, 2.0}, up).height == 0.0);
+    // Rotted a metre in, its core runs from 1 to 5 up, standing over ground at 2 by no more than
+    // the metre stripped about it.
+    const Core held = core_over(block, 1.0, {3.0, 3.0, 2.0}, up);
+    CHECK(held.height == 1.0);
+    CHECK(glm::length(held.rise) == 0.0);
+    CHECK(held.breadth == 4.0);
+    CHECK(std::abs(core_over(block, 1.0, {3.0, 3.0, 4.9}, up).height - 0.1) < 1e-6);
+    CHECK(core_over(block, 1.0, {3.0, 3.0, 5.5}, up).height == 0.0);
+}
+
+TEST_CASE("a core rounds off toward its edges", "[globe][joints]") {
+    const Block block{.low = {0.0, 0.0, 0.0},
+                      .high = {12.0, 12.0, 12.0},
+                      .id = 1,
+                      .sets = {DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0}, DVec3{0.0, 0.0, 1.0}}};
+    const DVec3 up{0.0, 0.0, 1.0};
+    // Rotted 2 in, its top is flat 4 across and rounds off over 2 either side, from 10 up.
+    CHECK(std::abs(core_over(block, 2.0, {6.0, 6.0, 9.0}, up).height - 1.0) < 1e-6);
+    const Core edge = core_over(block, 2.0, {9.5, 6.0, 9.0}, up);
+    CHECK(std::abs(edge.height - (std::sqrt(4.0 - (1.5 * 1.5)) - 1.0)) < 1e-6);
+    const double step = 1e-4;
+    const double slope = (core_over(block, 2.0, {9.5 + step, 6.0, 9.0}, up).height -
+                          core_over(block, 2.0, {9.5 - step, 6.0, 9.0}, up).height) /
+                         (2.0 * step);
+    CHECK(std::abs(edge.rise.x - slope) < 1e-3);
+    CHECK(std::abs(edge.rise.y) < 1e-9);
+    CHECK(core_over(block, 2.0, {10.1, 6.0, 9.0}, up).height == 0.0);
+}
+
+TEST_CASE("a core standing clear of the ground settles onto it", "[globe][joints]") {
+    const Block block{.low = {0.0, 0.0, 0.0},
+                      .high = {12.0, 12.0, 12.0},
+                      .id = 1,
+                      .sets = {DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0}, DVec3{0.0, 0.0, 1.0}}};
+    // Its core runs from 2 to 10 up; over ground at 1 it stands as high as it was stripped.
+    const Core settled = core_over(block, 2.0, {6.0, 6.0, 1.0}, {0.0, 0.0, 1.0});
+    CHECK(settled.height > 1.5);
+    CHECK(settled.height <= 2.0);
+}
+
+TEST_CASE("turned blocks' cores stand no higher than they rotted", "[globe][joints]") {
+    for (const DVec3& point : scattered(200)) {
+        const Block block = block_at(point, 1.0, 7);
+        const Core core = core_over(block, 0.8, point, glm::normalize(point));
+        CHECK(core.height >= 0.0);
+        CHECK(core.height <= 0.8);
+        CHECK(std::isfinite(glm::length(core.rise)));
+    }
 }

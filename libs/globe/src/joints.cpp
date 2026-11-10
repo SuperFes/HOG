@@ -2,7 +2,6 @@
 
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
-#include <hog/globe/material.hpp>
 #include <hog/globe/noise.hpp>
 
 #include <algorithm>
@@ -196,16 +195,129 @@ Block block_at(DVec3 world_point, double strength, std::uint64_t seed) noexcept 
     return block;
 }
 
-double crag_relief(const Block& block, double spacing, double weathered, double slope) noexcept {
-    const double breadth = block.breadth();
-    const double relief = weathered * (1.0 - (spacing / breadth));
-    if (relief >= 0.0) {
-        // A block topples once its middle stands out past its downhill foot.
-        return slope > 0.0 ? std::min(relief, breadth / slope) : relief;
+double rotted_by(double making, double worn, double falloff, double years) noexcept {
+    if (making <= 0.0 || years <= 0.0) {
+        return 0.0;
     }
-    // Rubble from the walls either side fills a hollow to a cone at its repose.
-    const double filled = 0.5 * breadth * maths::tan(properties(Material::Gravel).repose);
-    return std::max(relief, -filled);
+    // Rock at the top now lay worn·t deep t years ago, rotting at making·exp(-falloff·worn·t).
+    const double slowing = falloff * worn;
+    if (slowing * years < 1e-9) {
+        return making * years;
+    }
+    return making / slowing * (1.0 - maths::exp(-slowing * years));
+}
+
+namespace {
+
+// A box `inner` from its middle each way, grown `rounding` all round, as seen from `point`.
+struct RoundedBox {
+    DVec3 inner{0.0};
+    double rounding = 0.0;
+
+    [[nodiscard]] double distance(DVec3 point) const noexcept {
+        const DVec3 out = glm::abs(point) - inner;
+        return glm::length(glm::max(out, 0.0)) + std::min(std::max({out.x, out.y, out.z}), 0.0) -
+               rounding;
+    }
+    // Unit, outward, at a point on its surface.
+    [[nodiscard]] DVec3 normal(DVec3 point) const noexcept {
+        const DVec3 out = glm::abs(point) - inner;
+        const DVec3 past = glm::max(out, 0.0);
+        const DVec3 side{point.x < 0.0 ? -1.0 : 1.0, point.y < 0.0 ? -1.0 : 1.0,
+                         point.z < 0.0 ? -1.0 : 1.0};
+        if (const double length = glm::length(past); length > 0.0) {
+            return past / length * side;
+        }
+        glm::length_t axis = out.x >= out.y ? 0 : 1;
+        if (out.z > out[axis]) {
+            axis = 2;
+        }
+        DVec3 normal{0.0};
+        normal[axis] = side[axis];
+        return normal;
+    }
+};
+
+// Where along a line a distance convex along it is least, between `low` and `high`.
+template <typename Distance>
+double least_along(const Distance& distance, double low, double high) noexcept {
+    constexpr double golden = 0.6180339887498949;
+    for (int step = 0; step < 64 && high - low > 1e-6; ++step) {
+        const double left = high - (golden * (high - low));
+        const double right = low + (golden * (high - low));
+        if (distance(left) < distance(right)) {
+            high = right;
+        } else {
+            low = left;
+        }
+    }
+    return 0.5 * (low + high);
+}
+
+// Where along a line a distance crosses nothing, between a point inside and one outside.
+template <typename Distance>
+double crossing(const Distance& distance, double inside, double outside) noexcept {
+    for (int step = 0; step < 64 && std::abs(outside - inside) > 1e-6; ++step) {
+        const double middle = 0.5 * (inside + outside);
+        (distance(middle) < 0.0 ? inside : outside) = middle;
+    }
+    return 0.5 * (inside + outside);
+}
+
+} // namespace
+
+Core core_over(const Block& block, double rotted, DVec3 ground, DVec3 up) noexcept {
+    const DVec3 half = block.size() / 2.0;
+    const double thinnest = std::min({half.x, half.y, half.z});
+    if (rotted <= 0.0 || rotted >= thinnest) {
+        return {};
+    }
+    // Corners rot from three faces at once and edges from two, so the core comes out rounded.
+    const double rounding = std::min(rotted, thinnest - rotted);
+    const RoundedBox core{.inner = half - rotted - rounding, .rounding = rounding};
+    const auto local = [&](DVec3 along) {
+        return DVec3{glm::dot(along, block.sets[0]), glm::dot(along, block.sets[1]),
+                     glm::dot(along, block.sets[2])};
+    };
+    const DVec3 from = local(ground - block.origin) - ((block.low + block.high) / 2.0);
+    const DVec3 upward = local(up);
+    const auto distance = [&](double t) { return core.distance(from + (upward * t)); };
+    const double reach = glm::length(block.size()) + glm::length(from);
+    const double nearest = least_along(distance, -reach, reach);
+    if (distance(nearest) >= 0.0) {
+        return {};
+    }
+    const double top = crossing(distance, nearest, reach);
+    if (top <= 0.0) {
+        return {};
+    }
+    // Which way a crossing climbs along the ground, from the surface's normal there.
+    const auto climbing = [&](double t) {
+        const DVec3 normal = core.normal(from + (upward * t));
+        const DVec3 world =
+            (normal.x * block.sets[0]) + (normal.y * block.sets[1]) + (normal.z * block.sets[2]);
+        const double facing = glm::dot(world, up);
+        // Its sides stand sheer where they turn straight down.
+        constexpr double sheer = 1e-3;
+        return -(world - (facing * up)) / std::copysign(std::max(std::abs(facing), sheer), facing);
+    };
+    const double bottom = crossing(distance, nearest, -reach);
+    // Standing clear of the ground, the rotted rock under it gone, it settles onto it.
+    const bool settled = bottom > 0.0;
+    double height = settled ? top - bottom : top;
+    DVec3 rise = settled ? climbing(top) - climbing(bottom) : climbing(top);
+    // Stripped no deeper than it rotted, merged smoothly into that.
+    const double blend = 0.25 * rotted;
+    if (const double near = blend - std::abs(height - rotted); near > 0.0) {
+        const double share = near / blend;
+        const bool lower = height < rotted;
+        rise *= lower ? 1.0 - (0.5 * share) : 0.5 * share;
+        height = std::min(height, rotted) - (share * share * blend / 4.0);
+    } else if (height > rotted) {
+        height = rotted;
+        rise = DVec3{0.0};
+    }
+    return {.height = height, .rise = rise, .breadth = 2.0 * (thinnest - rotted)};
 }
 
 } // namespace hog::globe

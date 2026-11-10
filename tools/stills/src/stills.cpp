@@ -29,7 +29,7 @@ constexpr double degrees = std::numbers::pi / 180.0;
 
 // Splits the rows among threads; each row is written by one only.
 void each_row(int rows, int threads, const auto& body) {
-    std::vector<std::jthread> workers;
+    std::vector<std::thread> workers;
     const int count = std::clamp(threads, 1, std::max(rows, 1));
     workers.reserve(static_cast<std::size_t>(count));
     for (int worker = 0; worker < count; ++worker) {
@@ -38,6 +38,9 @@ void each_row(int rows, int threads, const auto& body) {
                 body(row);
             }
         });
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
     }
 }
 

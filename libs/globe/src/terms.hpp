@@ -98,6 +98,20 @@ inline constexpr int rock_sizes = 4;
 // The rock in one cell of any of those levels, wherever its columns stand.
 [[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod);
 [[nodiscard]] std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod);
+// What the blocks too small for `lod` to resolve make of the ground they lie on, spread evenly
+// over it as every level coarser holds them: metres of rubble of their rock.
+struct Rubble {
+    double depth = 0.0;
+    Material of = Material::Gravel;
+};
+// The block lying across a column, with the rubble of those too small to show.
+struct Fall {
+    std::optional<Rock> rock;
+    Rubble rubble;
+};
+[[nodiscard]] Fall fallen(const Context& context, DVec3 direction, double lod);
+[[nodiscard]] std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells,
+                                       double lod);
 // The same at the middle of each of `cells`, all of one level, each rock made once.
 [[nodiscard]] std::vector<std::optional<Rock>> rockfall(const Context& context,
                                                         std::span<const Cell> cells, double lod);
