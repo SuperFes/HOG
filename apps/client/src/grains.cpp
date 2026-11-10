@@ -1,5 +1,5 @@
-#include <hog/client/grains.hpp>
 #include <hog/client/globe_view.hpp>
+#include <hog/client/grains.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -29,8 +29,8 @@ void GrainField::receive(const protocol::Grains& grains, MonotonicClock::time_po
     flying_ = grains.flying;
 }
 
-std::vector<render::Capsule> GrainField::capsules(MonotonicClock::time_point now,
-                                                  double thickness, double gravity) const {
+std::vector<render::Capsule> GrainField::capsules(MonotonicClock::time_point now, double thickness,
+                                                  double gravity) const {
     const double carried = std::min(
         std::chrono::duration<double>(std::max(now - told_, MonotonicClock::duration::zero()))
             .count(),
@@ -43,13 +43,13 @@ std::vector<render::Capsule> GrainField::capsules(MonotonicClock::time_point now
                              one.velocity[2] / 100.0};
         const DVec3 at = protocol::to_world(one.at).metres() + (velocity * carried) -
                          (up * (0.5 * gravity * carried * carried));
-        const double volume =
-            static_cast<double>(one.amount) / globe::Voxel::full * thickness * thickness * thickness;
-        const double radius = std::clamp(std::cbrt(0.75 * volume / std::numbers::pi),
-                                         least_radius, most_radius);
-        const auto material =
-            one.material < globe::material_count ? static_cast<globe::Material>(one.material)
-                                                  : globe::Material::Sand;
+        const double volume = static_cast<double>(one.amount) / globe::Voxel::full * thickness *
+                              thickness * thickness;
+        const double radius =
+            std::clamp(std::cbrt(0.75 * volume / std::numbers::pi), least_radius, most_radius);
+        const auto material = one.material < globe::material_count
+                                  ? static_cast<globe::Material>(one.material)
+                                  : globe::Material::Sand;
         found.push_back({.feet = WorldPosition{at - (up * radius)},
                          .up = glm::normalize(at),
                          .height = 2.0 * radius,
