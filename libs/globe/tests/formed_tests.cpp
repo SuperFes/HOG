@@ -53,6 +53,59 @@ const Generator& formed_generator() {
     return generator;
 }
 
+// What was carried onto the ground and settled where it lies.
+double settled_on(const Formed::Here& here) {
+    return here.layers.sand + here.layers.alluvium + here.layers.lake_beds + here.layers.till;
+}
+
+// How what was carried settled over places read beside each other.
+struct Settling {
+    // Read finely, and too coarsely for any hollow, as the points have it.
+    struct Read {
+        Formed::Here here;
+        Formed::Here uncut;
+        // How far the bed under what settled stands over, and the top over, the uncut ones.
+        [[nodiscard]] double bed() const {
+            return here.top.value - settled_on(here) - (uncut.top.value - settled_on(uncut));
+        }
+        [[nodiscard]] double top() const { return here.top.value - uncut.top.value; }
+        [[nodiscard]] bool covered() const { return settled_on(here) > 0.0; }
+        [[nodiscard]] bool plain() const {
+            return here.crag == 0.0 && here.layers.beach == 0.0 && uncut.layers.beach == 0.0 &&
+                   uncut.layers.ice == 0.0;
+        }
+    };
+    int edges = 0;
+    int lower = 0;
+    int deep = 0;
+    int level = 0;
+    int offshore = 0;
+    int draped = 0;
+    double carried = 0.0;
+    double settled = 0.0;
+
+    // Where it lies thin, it lies in the hollows, the crests between them bare.
+    void across_edge(const Read& here, const Read& apart) {
+        if (!apart.plain() || here.covered() == apart.covered()) {
+            return;
+        }
+        ++edges;
+        const Read& covered = here.covered() ? here : apart;
+        const Read& bare = here.covered() ? apart : here;
+        lower += covered.bed() < bare.bed() ? 1 : 0;
+    }
+    // Where it lies deep, its top runs smoother than the bed under it.
+    void deep_over(const Read& here, const Read& next) {
+        const double bed = std::abs(here.bed() - next.bed());
+        if (!next.plain() || settled_on(here.here) <= 1.0 || settled_on(next.here) <= 1.0 ||
+            bed <= 0.1) {
+            return;
+        }
+        ++deep;
+        level += std::abs(here.top() - next.top()) < bed ? 1 : 0;
+    }
+};
+
 } // namespace
 
 TEST_CASE("a formed planet stands on the land that formed it, its sea at the radius",
@@ -330,13 +383,14 @@ TEST_CASE("formed rock stands out as crags only where it stands taller than its 
     CHECK(crags < land / 10);
 }
 
-TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][formed]") {
+TEST_CASE("gullies cut down through what lies draped on formed ground, what was carried settling "
+          "into them",
+          "[globe][formed]") {
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
-    const auto laid = [](const Formed::Here& here) {
-        return here.layers.loess + here.layers.sand + here.layers.alluvium + here.layers.lake_beds +
-               here.layers.till + here.layers.lava;
+    const auto draped = [](const Formed::Here& here) {
+        return here.layers.loess + here.layers.lava;
     };
     int cut_into = 0;
     for (std::uint64_t n = 0; n < 4'000; ++n) {
@@ -348,17 +402,73 @@ TEST_CASE("gullies cut down through what was laid on formed ground", "[globe][fo
         if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0 || here.crag != 0.0) {
             continue;
         }
-        // Under the beach the waves build up on it.
-        const double cut = std::max(0.0, (uncut.top.value - uncut.layers.beach) -
-                                             (here.top.value - here.layers.beach));
-        CHECK_THAT(laid(here), WithinAbs(std::max(0.0, laid(uncut) - cut), 1e-6));
+        // The bed under the beach the waves build up on it and what settled over it.
+        const auto bed = [](const Formed::Here& at) {
+            return at.top.value - at.layers.beach - settled_on(at);
+        };
+        const double cut = std::max(0.0, bed(uncut) - bed(here));
+        CHECK_THAT(draped(here), WithinAbs(std::max(0.0, draped(uncut) - cut), 1e-6));
         // Less soil and beach, which form again on what's left.
-        CHECK(here.layers.cover <= std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
-                                       (here.layers.organic + here.layers.topsoil +
-                                        here.layers.subsoil + here.layers.beach));
-        cut_into += cut > 0.0 && laid(uncut) > 0.0 ? 1 : 0;
+        CHECK(here.layers.cover <=
+              std::max(0.0, uncut.layers.cover - cut) + 1e-6 +
+                  (here.layers.organic + here.layers.topsoil + here.layers.subsoil +
+                   here.layers.beach + settled_on(here)));
+        cut_into += cut > 0.0 && draped(uncut) > 0.0 ? 1 : 0;
     }
     CHECK(cut_into > 100);
+}
+
+TEST_CASE("what was carried onto formed ground lies in its hollows, filling them level where deep, "
+          "draping the deep sea's bed",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double voxel = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    const auto read = [&](DVec3 direction) {
+        return Settling::Read{.here = formed.at(direction, voxel),
+                              .uncut = formed.at(direction, 1e9)};
+    };
+    Settling settling;
+    for (std::uint64_t n = 0; n < 100'000; ++n) {
+        const DVec3 direction = somewhere(n);
+        const Formed::Here uncut = formed.at(direction, 1e9);
+        if (uncut.layers.ice > 0.0 || settled_on(uncut) <= 0.0) {
+            continue;
+        }
+        // Far under the sea, below where storms stir the bed, it drapes the bed as it falls.
+        if (uncut.top.value < -500.0) {
+            ++settling.offshore;
+            settling.draped += settled_on(formed.at(direction, voxel)) > 0.0 ? 1 : 0;
+            continue;
+        }
+        const Settling::Read here = read(direction);
+        if (uncut.top.value < 0.0 || !here.plain()) {
+            continue;
+        }
+        settling.settled += settled_on(here.here);
+        settling.carried += settled_on(uncut);
+        const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, direction));
+        const auto beside = [&](double metres) {
+            return read(glm::normalize(direction + (east * (metres / radius))));
+        };
+        settling.across_edge(here, beside(20.0));
+        settling.deep_over(here, beside(6.0 * voxel));
+    }
+    UNSCOPED_INFO(settling.edges << " edges, the bed lower under it at " << settling.lower << "; "
+                                 << settling.deep << " deep, its top smoother at " << settling.level
+                                 << "; settled " << settling.settled << " of " << settling.carried
+                                 << "; draped " << settling.draped << " of " << settling.offshore
+                                 << " offshore");
+    CHECK(settling.offshore > 20);
+    CHECK(settling.draped > 9 * settling.offshore / 10);
+    CHECK(settling.edges > 20);
+    // The level it fills to changes a little across the gap, now and then past the bed.
+    CHECK(settling.lower * 100 > 85 * settling.edges);
+    CHECK(settling.deep > 20);
+    CHECK(settling.level > 9 * settling.deep / 10);
+    // As much over the ground as was carried to it, the bed spread about as evenly as not.
+    CHECK(std::abs(settling.settled - settling.carried) < 0.25 * settling.carried);
 }
 
 TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare of soil",

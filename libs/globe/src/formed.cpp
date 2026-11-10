@@ -32,6 +32,21 @@ constexpr int farthest_fill = 4096;
 constexpr int most_fine = 16;
 // Rip currents cut crescent bars about this many times the surf zone's width apart.
 constexpr double rip_spacing = 4.0;
+// Metres the bars, levees and hummocks of what was carried stand on flats.
+constexpr double bedforms_stand = 1.0;
+
+// The top of what lies `laid` deep on the whole over a bed spread `spread` either side of its
+// mean, over that mean: settled into the bed's hollows, standing in bedforms as high as half of
+// it, no higher than they stand on flats and a quarter of the bed's spread.
+Noise laid_top(const Noise& laid, const Noise& spread, const Noise& bedforms) noexcept {
+    const Settled level = settled(laid.value, spread.value);
+    const bool thin = laid.value < 2.0 * (bedforms_stand + (0.25 * spread.value));
+    const double high = thin ? 0.5 * laid.value : bedforms_stand + (0.25 * spread.value);
+    const DVec3 high_gradient = thin ? laid.gradient * 0.5 : spread.gradient * 0.25;
+    return {.value = level.level + (high * bedforms.value),
+            .gradient = (laid.gradient * level.per_thick) + (spread.gradient * level.per_spread) +
+                        (bedforms.gradient * high) + (high_gradient * bedforms.value)};
+}
 
 // The cube face a direction falls on, and where on it, -1 to 1 both ways.
 struct OnCube {
@@ -213,8 +228,9 @@ Formed::Formed(const Planet& planet)
     }
     courses_.resize(size);
     course_made_ = std::vector<std::once_flag>(size);
-    fill_lakes();
+    // Lakes below the sea fill on what the sea laid there, under its waves.
     fill_shores();
+    fill_lakes();
 }
 
 void Formed::fill_walls() {
@@ -584,8 +600,8 @@ std::optional<Formed::Beach> Formed::beach_from(const Value& value) const {
     return beach;
 }
 
-void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, Noise& top,
-                       Strata& layers) const {
+void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weights,
+                       const Surface& under, Noise& top, Strata& layers) const {
     // As thick over the ground as the points' beaches lie over ground as high, blended.
     const formation::Smooth::Read plane = formation::Smooth::read(top_, weights);
     const DVec3 rise =
@@ -616,16 +632,19 @@ void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weight
         return;
     }
     const DVec3 thickening = (weighed / radius_) + (rate * rise);
-    // Hollows cut below the points' ground it fills up to its top, as deep again as it lies thick
-    // and no deeper, there being no more of it; over deeper ones it lies that thick, following them
-    // down. Ground standing over theirs it fills only up to its top, and none stands higher.
-    const double over = plane.value + thick - top.value;
+    // The waves spread it along the shore they build rather than into the hollows under it: it
+    // fills them up to its top, standing in bars and hummocks over it, as deep again as it lies
+    // thick and no deeper, there being no more of it; over deeper ones it lies that thick,
+    // following them down. Ground standing over its top it leaves bare.
+    const Noise settled_top =
+        laid_top({.value = thick, .gradient = thickening}, Noise{}, under.bedforms);
+    const double over = plane.value + settled_top.value - top.value;
     if (over <= 0.0) {
         return;
     }
     const bool draping = over >= 2.0 * thick;
     const double fill = draping ? 2.0 * thick : over;
-    top.gradient = (draping ? top.gradient : rise) + ((draping ? 2.0 : 1.0) * thickening);
+    top.gradient = draping ? top.gradient + (2.0 * thickening) : rise + settled_top.gradient;
     top.value += fill;
     layers.beach = fill;
     layers.organic = 0.0;
@@ -670,7 +689,7 @@ Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
         const DVec3 direction = water.toward(x, y);
         smooth_.weigh(direction, weights, near);
         near = weights.nearest;
-        return surface(direction, weights, 0.0).top.value;
+        return surface(direction, weights, 0.0).ground.top.value;
     };
     // A cell's middle may stand over the water while ground in it lies under: as much as its
     // own width up, on all but cliffs, gullies finer than it among them. About its edge, cells
@@ -966,8 +985,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     return wall;
 }
 
-Dissected Formed::surface(DVec3 direction, const formation::Smooth::Weights& weights,
-                          double lod) const {
+Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weights& weights,
+                                double lod) const {
     const Carved ground = carved(direction, weights);
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
@@ -1049,10 +1068,11 @@ Dissected Formed::surface(DVec3 direction, const formation::Smooth::Weights& wei
     const double raised_wide = wide.value * standing;
     const double raised = raised_wide + (narrow.value * standing);
     const DVec3 tilt_wide = tilt(wide);
+    const DVec3 tilt_narrow = tilt(narrow);
     Dissected dissected = dissect(
         direction, radius_,
         {.top = {.value = ground.top.value + raised,
-                 .gradient = (ground.top.gradient / radius_) + tilt_wide + tilt(narrow)},
+                 .gradient = (ground.top.gradient / radius_) + tilt_wide + tilt_narrow},
          .fall = (ground.fall / radius_) + tilt_wide,
          .above_floor = std::max(0.0, above_floor + raised_wide),
          .above_floor_gradient =
@@ -1062,7 +1082,81 @@ Dissected Formed::surface(DVec3 direction, const formation::Smooth::Weights& wei
         gullies_, lod);
     // Its hollows were worn out of the bed as the gullies were; its spurs stand over it.
     dissected.cut -= raised;
-    return dissected;
+    dissected.cut_gradient -= tilt_wide + tilt_narrow;
+    dissected.spread.value += standing;
+    dissected.spread.gradient += standing_gradient;
+    Surface cut{.ground = dissected, .settled = 1.0, .bedforms = Noise{}};
+    // Ice fills the gullies itself, what it carried lying under it.
+    if (dissected.ice <= 0.0) {
+        settle(direction, weights, lod, cut);
+    }
+    return cut;
+}
+
+void Formed::settle(DVec3 direction, const formation::Smooth::Weights& weights, double lod,
+                    Surface& surface) const {
+    const Octaves forms{.wavelength = gullies_.longest / 4.0, .gain = 0.5, .finest = 3.0 * voxel_};
+    const Noise bedforms = fbm(direction * radius_, forms, lod, hash_values(rock_seed_, 5));
+    surface.bedforms = {.value = bedforms.value,
+                        .gradient = bedforms.gradient -
+                                    (glm::dot(bedforms.gradient, direction) * direction)};
+    Noise laid;
+    for (const std::vector<double>* field : {&sand_, &alluvium_, &lake_beds_, &till_}) {
+        const formation::Smooth::Read read = formation::Smooth::read(*field, weights);
+        laid.value += read.value;
+        laid.gradient += read.gradient;
+    }
+    if (laid.value <= 0.0) {
+        return;
+    }
+    laid.gradient = (laid.gradient - (glm::dot(laid.gradient, direction) * direction)) / radius_;
+    Dissected& ground = surface.ground;
+    // Some of it drapes the bed as it lies, the rest settles into its hollows.
+    const Noise share = draping(direction, weights, lod, ground);
+    const Noise drape{.value = laid.value * share.value,
+                      .gradient = (laid.gradient * share.value) + (share.gradient * laid.value)};
+    const Noise settling{.value = laid.value - drape.value,
+                         .gradient = laid.gradient - drape.gradient};
+    const Noise top = laid_top(settling, ground.spread, surface.bedforms);
+    // The bed stands its cut under its uncut height; it was laid as deep as it stood thick over
+    // that, so all of what was laid is taken off the top, and what lies here put back.
+    const double over = top.value + ground.cut;
+    surface.settled = (std::max(0.0, over) + drape.value) / laid.value;
+    ground.top.value += std::max(0.0, over) + drape.value - laid.value;
+    ground.top.gradient += drape.gradient - laid.gradient;
+    if (over > 0.0) {
+        ground.top.gradient += top.gradient + ground.cut_gradient;
+    }
+}
+
+Noise Formed::draping(DVec3 direction, const formation::Smooth::Weights& weights, double lod,
+                      const Dissected& ground) const {
+    // Under the sea what's carried hangs in the water, and below where storms' waves stir the bed
+    // (half their length down) it settles where it falls: the deeper under that, the more of it,
+    // as patchily as the currents carry it.
+    const double deep = -(ground.top.value + ground.cut);
+    if (deep <= 0.0) {
+        return {};
+    }
+    const double storm = std::max(0.0, formation::Smooth::read(waves_, weights).value);
+    const double period = formation::wave_period(storm, world_.body);
+    const double base = world_.body.gravity * period * period / (4.0 * std::numbers::pi);
+    const double share = deep / (deep + base);
+    const DVec3 sharing =
+        (ground.top.gradient + ground.cut_gradient) * (-base / ((deep + base) * (deep + base)));
+    const Octaves currents{
+        .wavelength = gullies_.longest, .gain = 0.5, .finest = gullies_.longest / 8.0};
+    const Noise patches = fbm(direction * radius_, currents, lod, hash_values(rock_seed_, 6));
+    const double patchy = share * (1.0 + (0.5 * patches.value));
+    if (patchy <= 0.0) {
+        return {};
+    }
+    if (patchy >= 1.0) {
+        return {.value = 1.0, .gradient = DVec3{0.0}};
+    }
+    const DVec3 patching = patches.gradient - (glm::dot(patches.gradient, direction) * direction);
+    return {.value = patchy,
+            .gradient = (sharing * (1.0 + (0.5 * patches.value))) + (patching * (0.5 * share))};
 }
 
 Formed::Here Formed::at(DVec3 direction, double lod) const {
@@ -1071,7 +1165,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
-    Dissected top = surface(direction, weights, lod);
+    const Surface under = surface(direction, weights, lod);
+    Dissected top = under.ground;
 
     Here here;
     const formation::World& world = world_;
@@ -1099,17 +1194,20 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.topsoil = value(topsoil_);
     layers.subsoil = value(subsoil_);
     layers.loess = value(loess_);
-    layers.sand = value(sand_);
-    layers.alluvium = value(alluvium_);
-    layers.lake_beds = value(lake_beds_);
-    layers.till = value(till_);
+    layers.sand = value(sand_) * under.settled;
+    layers.alluvium = value(alluvium_) * under.settled;
+    layers.lake_beds = value(lake_beds_) * under.settled;
+    layers.till = value(till_) * under.settled;
     layers.saprolite = value(saprolite_);
     layers.lava = value(lava_);
-    // Gullies cut down through what was laid and into the rock under it, the top of which is
-    // what's rotted.
+    // Gullies cut down through what lies draped over the ground and into the rock under it, the
+    // top of which is what's rotted; under ice, which nothing settled under, through all of it.
     double cut = std::max(0.0, top.cut);
-    for (double* laid : {&layers.loess, &layers.sand, &layers.alluvium, &layers.lake_beds,
-                         &layers.till, &layers.lava}) {
+    const std::array all{&layers.loess,     &layers.sand, &layers.alluvium,
+                         &layers.lake_beds, &layers.till, &layers.lava};
+    const std::array draped{&layers.loess, &layers.lava};
+    for (double* laid :
+         top.ice > 0.0 ? std::span<double* const>{all} : std::span<double* const>{draped}) {
         const double taken = std::min(*laid, cut);
         *laid -= taken;
         cut -= taken;
@@ -1174,7 +1272,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
         }
     }
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);
-    lay_beach(direction, weights, top.top, layers);
+    lay_beach(direction, weights, under, top.top, layers);
     here.top = top.top;
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.

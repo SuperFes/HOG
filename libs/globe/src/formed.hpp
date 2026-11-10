@@ -83,9 +83,26 @@ private:
     // The course the river from `point` cuts down to the point it runs to, worked out the first
     // time it's read: directions from one to the other.
     [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const;
-    // The ground carved, then cut by gullies no narrower than twice `lod`.
-    [[nodiscard]] Dissected surface(DVec3 direction, const formation::Smooth::Weights& weights,
-                                    double lod) const;
+    // The ground carved, then cut by gullies no narrower than twice `lod`, what was carried onto
+    // it settled into its hollows.
+    struct Surface {
+        Dissected ground;
+        // The share of the points' sand, alluvium, lake beds and till that settled here.
+        double settled = 1.0;
+        // The bars, levees and hummocks laid ground stands in, about -1 to 1 of their height;
+        // gradient per metre along the ground.
+        Noise bedforms;
+    };
+    [[nodiscard]] Surface surface(DVec3 direction, const formation::Smooth::Weights& weights,
+                                  double lod) const;
+    // Settles what the rivers, lakes, wind and ice carried to the points about `direction` into
+    // the hollows of the ground cut there, the crests left bare.
+    void settle(DVec3 direction, const formation::Smooth::Weights& weights, double lod,
+                Surface& surface) const;
+    // The share of what was carried there that drapes `ground` as it lies rather than settling
+    // into its hollows; gradient per metre.
+    [[nodiscard]] Noise draping(DVec3 direction, const formation::Smooth::Weights& weights,
+                                double lod, const Dissected& ground) const;
     // Each point's walls, as steep as the ground falls to its nearest and its cover holds.
     void fill_walls();
     // Fills each lake on the ground as it's read here, lowest first from its floor, until it
@@ -106,8 +123,8 @@ private:
     template <typename Value>
     [[nodiscard]] std::optional<Beach> beach_from(const Value& value) const;
     // Builds the beach the waves laid up on the ground `top` at `direction`, the beach its top.
-    void lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, Noise& top,
-                   Strata& layers) const;
+    void lay_beach(DVec3 direction, const formation::Smooth::Weights& weights, const Surface& under,
+                   Noise& top, Strata& layers) const;
     // The lake with its floor at the point `floor`, its points `reach` radians round it, standing
     // at `most` at the highest.
     [[nodiscard]] Lake fill_lake(std::uint32_t floor, double reach, double most,
