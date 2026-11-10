@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <utility>
@@ -23,6 +24,29 @@ double bowl(double x, double y, double notch) {
         return std::min(rise, notch - (0.01 * (x - 15)));
     }
     return rise;
+}
+
+// Parts `fine` to a cell, east of the middle by 7 to 20 cells and 3 either side, under the level
+// and showing water beside dry parts under it too: walls of water.
+template <class Ground>
+int standing_walls(const Pool& pool, const Ground& ground, int fine) {
+    const auto showing = [&](int x, int y) {
+        const auto [at_x, at_y] = middle_of(Spot{.x = x, .y = y, .part = true}, fine);
+        return std::pair{pool.at(at_x, at_y) != Pool::Cell::Dry, ground(at_x, at_y) < pool.level};
+    };
+    int found = 0;
+    for (int y = -3 * fine; y <= 3 * fine; ++y) {
+        for (int x = 7 * fine; x <= 20 * fine; ++x) {
+            if (showing(x, y) != std::pair{true, true}) {
+                continue;
+            }
+            const auto beside_dry = [&](const std::pair<int, int>& next) {
+                return showing(next.first, next.second) == std::pair{false, true};
+            };
+            found += std::ranges::any_of(beside(x, y), beside_dry) ? 1 : 0;
+        }
+    }
+    return found;
 }
 
 } // namespace
@@ -233,4 +257,29 @@ TEST_CASE("water split about its edge leaves no ground under its level dry besid
     CHECK(split.level == 6.0);
     CHECK(walls(coarse) > 0);
     CHECK(walls(split) == 0);
+}
+
+TEST_CASE("water split about its edge stands in no hollow cut off from it beside its shore",
+          "[globe][lake]") {
+    // A hollow filled to 5, a shelf east of it standing just over the water so its cells are
+    // shore, and cut in the shelf along the edge between two rows a trough under the water,
+    // widening to a pond over the middle of a cell. Nothing joins it to the water.
+    const auto ground = [](double x, double y) {
+        const double hollow = ((x * x) + (y * y)) / 10.0;
+        if (x <= 7 || x >= 20 || std::abs(y) >= 3) {
+            return hollow;
+        }
+        const bool trough = x > 11 && x < 16 && y > -0.55 && y < -0.35;
+        const bool pond = std::hypot(x - 14.0, y + 1.0) < 0.7;
+        return std::min(hollow, trough || pond ? 4.6 : 5.2);
+    };
+    constexpr int fine = 8;
+    const Pool coarse = fill_pool(40, ground, 5.0, 2.0);
+    const Pool split = fill_pool(40, ground, 5.0, 2.0, 0, fine);
+    CHECK(split.level == 5.0);
+    CHECK(standing_walls(coarse, ground, fine) > 0);
+    CHECK(standing_walls(split, ground, fine) == 0);
+    // The shelf is shore still, and the pond dry.
+    CHECK(split.at(10.0, 1.0) == Pool::Cell::Shore);
+    CHECK(split.at(14.0, -1.0) == Pool::Cell::Dry);
 }

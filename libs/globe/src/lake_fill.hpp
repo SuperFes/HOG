@@ -240,9 +240,9 @@ public:
     }
 
     // Splits the cells on either side of where water meets what it doesn't cover, or its shore
-    // meets dry ground under its level, where it could stand as a wall, so the next fill finds
-    // its edge finer. A shore running out over ground over the level is no wall, and is left.
-    // Returns whether any were.
+    // meets dry ground under its level, or kept dry only for lying beside such ground, where it
+    // could stand as a wall, so the next fill finds its edge finer. A shore running out over
+    // ground over the level is no wall, and is left. Returns whether any were.
     bool split_edges() {
         if (fine_ <= 1) {
             return false;
@@ -264,7 +264,8 @@ public:
                     const int here = state(spot);
                     const int there = state(next);
                     if (here != there &&
-                        (here == 2 || (there == 0 && read(next) < reached_.level))) {
+                        (here == 2 ||
+                         (there == 0 && (read(next) < reached_.level || bordered(next))))) {
                         splitting.push_back(cell_of(spot, fine_));
                         splitting.push_back(cell_of(next, fine_));
                     }
