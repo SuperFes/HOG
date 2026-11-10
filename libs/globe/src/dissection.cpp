@@ -113,7 +113,40 @@ std::pair<double, double> smoothstep(double edge, double x) noexcept {
     return {t * t * (3.0 - (2.0 * t)), 6.0 * t * (1.0 - t) / edge};
 }
 
+// How far either side of the uncut bed the gullies about cut it on the whole: half as deep as the
+// widest of them cut, as the ground falls over its width, its walls let it stand and its floor
+// lets it reach, however it winds and wherever along it; the finer ones, held by its floors and
+// crests, cut within that. Left untold: how that changes with the ground's own fall.
+Noise spread_about(const Undissected& ground, const Gullies& gullies, double lod) noexcept {
+    const double slope = glm::length(ground.fall);
+    // Walls as steep as what's left across, the phase turning once a gully's width.
+    const double walls = std::max(0.0, ground.steepest - slope) * (1.0 - rounding) / 2.0;
+    if (gullies.octaves <= 0 || gullies.longest < 2.0 * lod) {
+        return {};
+    }
+    const double fade = std::min(1.0, (gullies.longest / (2.0 * lod)) - 1.0);
+    const double falls = std::min(slope, walls) * gullies.longest;
+    if (2.0 * ground.above_floor < falls) {
+        return {.value = ground.above_floor * fade, .gradient = ground.above_floor_gradient * fade};
+    }
+    return {.value = falls * fade / 2.0, .gradient = DVec3{0.0}};
+}
+
 } // namespace
+
+Settled settled(double thick, double spread) noexcept {
+    if (thick >= spread) {
+        return {.level = thick, .per_thick = 1.0, .per_spread = 0.0};
+    }
+    if (thick <= 0.0) {
+        return {.level = -spread, .per_thick = 0.0, .per_spread = -1.0};
+    }
+    // Over the lowest of the evenly spread bed it lies as a wedge: (level + spread)² / 4 spread.
+    const double share = std::sqrt(thick / spread);
+    return {.level = (2.0 * std::sqrt(thick * spread)) - spread,
+            .per_thick = 1.0 / share,
+            .per_spread = share - 1.0};
+}
 
 Dissected dissect(DVec3 direction, double radius, const Undissected& ground, const Gullies& gullies,
                   double lod) noexcept {
@@ -205,13 +238,13 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
 
     Dissected dissected{.top = {.value = height + ground.ice, .gradient = gradient},
                         .ice = ground.ice,
-                        .cut = bed - height};
+                        .cut = bed - height,
+                        .cut_gradient = ground.top.gradient - gradient,
+                        .spread = spread_about(ground, gullies, lod)};
     if (ground.ice > 0.0) {
         // Ice as deep as it lay over the uncut bed settles into what's cut, its top level: over
         // all of it if as deep as the cut, else to where it fills the gullies, crests out of it.
-        const double settled =
-            ground.ice >= cut ? ground.ice : (2.0 * std::sqrt(cut * ground.ice)) - cut;
-        const double surface = bed + settled;
+        const double surface = bed + settled(ground.ice, cut).level;
         dissected.top = height < surface ? Noise{.value = surface, .gradient = ground.top.gradient}
                                          : Noise{.value = height, .gradient = gradient};
         dissected.ice = std::max(0.0, surface - height);

@@ -24,7 +24,21 @@ struct Dissected {
     Noise top;
     double ice = 0.0;
     double cut = 0.0; // metres of the bed the gullies took off, negative where crests stand over it
+    DVec3 cut_gradient{0.0}; // per metre
+    // How far the bed about stands either side of its uncut height, by its gullies' floors and the
+    // crests between, its gradient per metre: what's laid over it settles into that.
+    Noise spread;
 };
+
+// How high over its bed's mean what lies `thick` deep over it on the whole stands, settled into the
+// bed's hollows first, the bed's heights spread evenly `spread` either side of their mean: level
+// over all of it once as deep as they spread. With how that changes as each does.
+struct Settled {
+    double level = 0.0;
+    double per_thick = 1.0;
+    double per_spread = 0.0;
+};
+[[nodiscard]] Settled settled(double thick, double spread) noexcept;
 
 // Gullies `longest` metres apart and finer ones down their walls, each `octaves` half the last.
 struct Gullies {

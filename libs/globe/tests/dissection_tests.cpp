@@ -211,3 +211,82 @@ TEST_CASE("the slope through the gullies is told", "[globe][dissection]") {
     // stripes turn where they hold its walls back, both rare and local.
     CHECK(total / count < 0.06);
 }
+
+TEST_CASE("the bed's heights stand about within the spread told, which is told as it changes, "
+          "as the cut is",
+          "[globe][dissection]") {
+    constexpr double h = 0.05;
+    int spread = 0;
+    int within = 0;
+    double share = 0.0;
+    double spread_off = 0.0;
+    double cut_off = 0.0;
+    int count = 0;
+    for (int east_at = 0; east_at < 16; ++east_at) {
+        const double east = east_at * 37.1;
+        for (int north_at = 0; north_at < 200; ++north_at) {
+            const double north = north_at * 2.3;
+            const auto made = [](double e, double n) { return cut(e, n, sloping(e, 0.4, 1.0)); };
+            const Dissected here = made(east, north);
+            within += std::abs(here.cut) <= 1.5 * here.spread.value ? 1 : 0;
+            share += std::abs(here.cut) / here.spread.value;
+            spread += here.spread.value > 0.0 ? 1 : 0;
+            const auto rate = [&](auto of) {
+                return DVec3{0.0,
+                             (of(made(east + h, north)) - of(made(east - h, north))) / (2.0 * h),
+                             (of(made(east, north + h)) - of(made(east, north - h))) / (2.0 * h)};
+            };
+            spread_off += glm::length(here.spread.gradient -
+                                      rate([](const Dissected& d) { return d.spread.value; }));
+            cut_off +=
+                glm::length(here.cut_gradient - rate([](const Dissected& d) { return d.cut; }));
+            ++count;
+        }
+    }
+    CHECK(spread == count);
+    UNSCOPED_INFO("within the spread at " << within << " of " << count << ", " << share / count
+                                          << " of it on average; spread off by "
+                                          << spread_off / count << ", cut by " << cut_off / count);
+    // Most of the bed stands about its floors and crests; finer gullies cut a little past them
+    // down the steeper walls of those before, now and then.
+    CHECK(share / count > 0.4);
+    CHECK(share / count < 0.9);
+    CHECK(within > 99 * count / 100);
+    CHECK(spread_off / count < 1e-9);
+    CHECK(cut_off / count < 0.06);
+}
+
+TEST_CASE("what's laid settles into the bed's hollows first, level over it once as deep as they "
+          "spread",
+          "[globe][dissection]") {
+    using hog::globe::settled;
+    for (const double spread : {0.5, 2.0, 7.0}) {
+        for (const double thick : {0.01, 0.1, 0.4, 1.0, 1.9, 2.0, 5.0, 9.0}) {
+            const hog::globe::Settled level = settled(thick, spread);
+            CHECK(level.level >= -spread);
+            if (thick >= spread) {
+                CHECK(level.level == thick);
+            }
+            // As much over the evenly spread bed as was laid.
+            double laid = 0.0;
+            constexpr int steps = 100'000;
+            for (int step = 0; step < steps; ++step) {
+                const double bed = spread * ((2.0 * (step + 0.5) / steps) - 1.0);
+                laid += std::max(0.0, level.level - bed);
+            }
+            CHECK_THAT(laid / steps, WithinAbs(thick, 1e-4 * thick));
+            // How it changes as each does, as told.
+            constexpr double h = 1e-6;
+            CHECK_THAT(level.per_thick, WithinAbs((settled(thick + h, spread).level -
+                                                   settled(thick - h, spread).level) /
+                                                      (2.0 * h),
+                                                  1e-4));
+            CHECK_THAT(level.per_spread, WithinAbs((settled(thick, spread + h).level -
+                                                    settled(thick, spread - h).level) /
+                                                       (2.0 * h),
+                                                   1e-4));
+        }
+    }
+    // Nothing laid lies nowhere, under the lowest of it.
+    CHECK(settled(0.0, 3.0).level == -3.0);
+}
