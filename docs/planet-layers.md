@@ -153,9 +153,8 @@ ice form in `libs/formation` and never reach the voxels. Nothing builds deltas, 
 terraces, floodplains, wetlands, springs, calderas or reefs.
 
 1. **Bake the formation** (13), and cache coarse tiles as the disposable tile cache keyed by world
-   and generator revision. `Formed` costs ~172 s every start, but the formation stages are ~5 s:
-   166 s is one lake's fill, a single-point lake at 352 m spreading over 1878×2224 cells. Fix that
-   runaway first. Tiles of levels 7–13 cost ~66 s of a first view.
+   and generator revision. `Formed` costs ~13 s every start (it was 172 s while
+   one lake's shore chained over a plateau, fixed in 793df087). Tiles of levels 7–13 cost ~66 s of a first view.
 2. **World census.** One tool printing, over several seeds: lakes by size and level, wet river
    length, wetland share, salt flats, dunes, beach kinds, caves. Regressions show as numbers.
 3. **Finish what's open:** courses, coast cliffs and shore platforms, lake shore fill.
