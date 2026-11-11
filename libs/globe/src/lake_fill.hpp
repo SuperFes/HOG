@@ -215,8 +215,10 @@ public:
         return shoreline;
     }
 
-    // The shore: out from `shoreline` through spots standing over the level by less than `room`
-    // a cell, never beside ground under it the water doesn't cover, where it would end in a wall.
+    // The shore: out from `shoreline` through spots whose ground may dip under the level, never
+    // beside ground under it the water doesn't cover, where it would end in a wall. A spot's
+    // ground dips under its middle as far as it stands from the dry spots beside it, and no
+    // further than `room` a cell; ground finer than that is found splitting.
     void shore(std::vector<Spot> shoreline, double room) {
         while (!shoreline.empty()) {
             const Spot spot = shoreline.back();
@@ -226,7 +228,8 @@ public:
             }
             reached_.shore.push_back(spot);
             shore_.insert(key_of(spot));
-            if (read(spot) >= reached_.level + (spot.part ? room / fine_ : room)) {
+            const double dips = std::min(spot.part ? room / fine_ : room, relief(spot));
+            if (read(spot) >= reached_.level + dips) {
                 continue;
             }
             each_beside(spot, [&](Spot next) {
@@ -303,6 +306,17 @@ private:
             height->second = (*ground_)(x, y);
         }
         return height->second;
+    }
+    // How far the ground in a spot stands from that in the spots beside it over the level.
+    double relief(Spot spot) {
+        const double here = read(spot);
+        double most = 0.0;
+        each_beside(spot, [&](Spot next) {
+            if (reached_.inside(next) && read(next) >= reached_.level) {
+                most = std::max(most, std::abs(read(next) - here));
+            }
+        });
+        return most;
     }
     bool bordered(Spot spot) {
         bool found = false;

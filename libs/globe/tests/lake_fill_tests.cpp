@@ -176,12 +176,12 @@ TEST_CASE("a fill reads only the ground near the water", "[globe][lake]") {
 
 TEST_CASE("a lake's shore runs on over ground its cells' middles stand over but dips under",
           "[globe][lake]") {
-    // A hollow filled to 5, with a shelf east of it whose cells' middles stand a little over the
-    // water but which dips under it here and there all the way out.
+    // A hollow filled to 5, with a shelf east of it: a trough whose cells' middles stand a little
+    // over the water between banks higher, uneven enough to dip under it all the way out.
     const auto ground = [](double x, double y) {
         const double hollow = ((x * x) + (y * y)) / 10.0;
         if (x > 7 && x < 20 && std::abs(y) < 3) {
-            return std::min(hollow, 5.2);
+            return std::min(hollow, std::abs(y) < 0.5 ? 5.2 : 5.5);
         }
         return hollow;
     };
@@ -197,6 +197,20 @@ TEST_CASE("a lake's shore runs on over ground its cells' middles stand over but 
     const Pool tight = fill_pool(40, ground, 5.0, 0.0);
     CHECK(tight.at(8, 0) == Pool::Cell::Shore);
     CHECK(tight.at(12, 0) == Pool::Cell::Dry);
+}
+
+TEST_CASE("a lake's shore stops on even ground standing over its level", "[globe][lake]") {
+    // A hollow filled to 5 in a wide plain rising gently from just over the water, with room
+    // enough for ground as steep as a cell a cell.
+    const auto ground = [](double x, double y) {
+        const double r = std::hypot(x, y);
+        return std::min((r * r) / 10.0, 5.1 + (0.01 * r));
+    };
+    const Pool pool = fill_pool(40, ground, 5.0, 1.0, 2'000);
+    CHECK(pool.level == 5.0);
+    CHECK(pool.at(8, 0) == Pool::Cell::Shore);
+    CHECK(pool.at(12, 0) == Pool::Cell::Dry);
+    CHECK(pool.width < 25);
 }
 
 TEST_CASE("water split about its edge runs out through a gap in its rim narrower than a cell",
@@ -261,8 +275,8 @@ TEST_CASE("water split about its edge leaves no ground under its level dry besid
 
 TEST_CASE("water split about its edge stands in no hollow cut off from it beside its shore",
           "[globe][lake]") {
-    // A hollow filled to 5, a shelf east of it standing just over the water so its cells are
-    // shore, and cut in the shelf along the edge between two rows a trough under the water,
+    // A hollow filled to 5, a shelf east of it uneven enough just over the water that its cells
+    // are shore, and cut in the shelf along the edge between two rows a trough under the water,
     // widening to a pond over the middle of a cell. Nothing joins it to the water.
     const auto ground = [](double x, double y) {
         const double hollow = ((x * x) + (y * y)) / 10.0;
@@ -271,7 +285,7 @@ TEST_CASE("water split about its edge stands in no hollow cut off from it beside
         }
         const bool trough = x > 11 && x < 16 && y > -0.55 && y < -0.35;
         const bool pond = std::hypot(x - 14.0, y + 1.0) < 0.7;
-        return std::min(hollow, trough || pond ? 4.6 : 5.2);
+        return std::min(hollow, trough || pond ? 4.6 : std::abs(y) < 0.5 ? 5.2 : 5.5);
     };
     constexpr int fine = 8;
     const Pool coarse = fill_pool(40, ground, 5.0, 2.0);
@@ -279,7 +293,6 @@ TEST_CASE("water split about its edge stands in no hollow cut off from it beside
     CHECK(split.level == 5.0);
     CHECK(standing_walls(coarse, ground, fine) > 0);
     CHECK(standing_walls(split, ground, fine) == 0);
-    // The shelf is shore still, and the pond dry.
-    CHECK(split.at(10.0, 1.0) == Pool::Cell::Shore);
+    // The pond stays dry.
     CHECK(split.at(14.0, -1.0) == Pool::Cell::Dry);
 }
