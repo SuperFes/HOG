@@ -148,15 +148,18 @@ tiles holding the right average of the finer ones. No side strips, meshes, maps 
 passes beside the tree. The formation bake is an input to that maths, not a second world.
 
 Found missing on 2026-11-10: the default planet forms only 14 lakes, most a point or two across,
-and three of them are 1–3 km deep basins standing 26–64 m above the sea. Salt flats, dunes and sea
+and three of them were 1–3 km deep pits of sea-floor crust left inside continents (fixed in
+62c2af86: the lid holds up patches narrower than it bends). Salt flats, dunes and sea
 ice form in `libs/formation` and never reach the voxels. Nothing builds deltas, estuaries, fans,
 terraces, floodplains, wetlands, springs, calderas or reefs.
 
 1. **Bake the formation** (13), and cache coarse tiles as the disposable tile cache keyed by world
-   and generator revision. `Formed` costs ~13 s every start (it was 172 s while
-   one lake's shore chained over a plateau, fixed in 793df087). Tiles of levels 7–13 cost ~66 s of a first view.
-2. **World census.** One tool printing, over several seeds: lakes by size and level, wet river
-   length, wetland share, salt flats, dunes, beach kinds, caves. Regressions show as numbers.
+   and generator revision. Deferred until generation settles: `Formed` costs ~13 s every start
+   (it was 172 s while one lake's shore chained over a plateau, fixed in 793df087). Tiles of
+   levels 7–13 cost ~66 s of a first view.
+2. **World census.** `hog-census --seeds 1,2,3 --level 8`: land and sea, inland water still and
+   running, what tops the land. Grow it with each step below (wetlands, salt flats, dunes,
+   caves). Seed 1 now: 8 lakes, 62 km², no running water.
 3. **Finish what's open:** courses, coast cliffs and shore platforms, lake shore fill.
 4. **River water** (1): channels at the depth their discharge gives, waterfalls over crags, rivers
    sinking into soluble rock or failing in deserts, mouths, deltas and estuaries.
