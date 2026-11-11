@@ -467,9 +467,10 @@ Across lying_over(const Laid& laid, double height, double shift) {
     const Across placed = out_at(laid.section, height);
     const double out = placed.height;
     Across surface = top_along(laid.profile, laid.section, laid.built, out);
-    const Profile profile = as_built(laid.profile, laid.built);
+    // Each bar runs out to nothing either side, the outermost on past where the waves stop
+    // stirring the bed by as far as it reaches.
     const double offshore = out - laid.built.ahead;
-    if (offshore > 0.0 && offshore < out_to(profile, profile.closure)) {
+    if (offshore > 0.0) {
         const Across bar = bars_at(laid.bars, offshore, shift);
         surface.height += bar.height;
         surface.slope += bar.slope;
