@@ -430,7 +430,7 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
                               .uncut = formed.at(direction, 1e9)};
     };
     Settling settling;
-    for (std::uint64_t n = 0; n < 100'000; ++n) {
+    for (std::uint64_t n = 0; n < 200'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here uncut = formed.at(direction, 1e9);
         if (uncut.layers.ice > 0.0 || settled_on(uncut) <= 0.0) {

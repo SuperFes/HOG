@@ -37,11 +37,6 @@ double angle(const DVec3& a, const DVec3& b) noexcept {
     return maths::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
 
-double smoothstep(double from, double to, double x) noexcept {
-    const double t = std::clamp((x - from) / (to - from), 0.0, 1.0);
-    return t * t * (3.0 - (2.0 * t));
-}
-
 double bell(double x) noexcept {
     return maths::exp(-(x * x));
 }
@@ -261,30 +256,61 @@ void read_layout(const Sphere& sphere, const Plates& plates, const Body& body, C
         crust.plate[point] = plate_most_held(plates, spot);
         lightness[point] = layout.sample(light_at_layout, spot) + (0.3 * wiggle[point]) - 0.5;
     }
-    // Light crust thins to the sea floor across its margin, as wide as the lid bends.
-    std::vector<Source> edge;
+    // Light crust thins to the sea floor across its margin, as wide as the lid bends: the lid
+    // stands on the light crust about each point, weighed by a bell nearly all of which lies
+    // within half that, so a patch narrower than the margin barely lifts or sinks it.
+    const double spread = 0.86 * 0.5 * belt_width(body);
+    // 1 - cos of the angle from a point, about half its square.
+    const double farthest = 0.5 * (2.5 * spread) * (2.5 * spread);
+    const double scale = 0.5 * spread * spread;
+    constexpr std::uint32_t unseen = std::numeric_limits<std::uint32_t>::max();
+    std::vector<std::uint32_t> seen_from(sphere.size(), unseen);
+    std::vector<std::uint32_t> waiting;
+    std::vector<double> held(sphere.size());
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        for (const std::uint32_t other : sphere.neighbors(point)) {
-            const double a = lightness[point];
-            const double b = lightness[other];
-            if (other < point || (a > 0.0) == (b > 0.0)) {
-                continue;
+        const DVec3& here = sphere.point(point);
+        double light = 0.0;
+        double all = 0.0;
+        seen_from[point] = point;
+        waiting.assign(1, point);
+        while (!waiting.empty()) {
+            const std::uint32_t near = waiting.back();
+            waiting.pop_back();
+            const double away = (1.0 - glm::dot(here, sphere.point(near))) / scale;
+            const double weight = sphere.area(near) * maths::exp(-away);
+            all += weight;
+            light += lightness[near] > 0.0 ? weight : 0.0;
+            for (const std::uint32_t next : sphere.neighbors(near)) {
+                if (seen_from[next] != point &&
+                    1.0 - glm::dot(here, sphere.point(next)) < farthest) {
+                    seen_from[next] = point;
+                    waiting.push_back(next);
+                }
             }
-            const double t = a / (a - b);
-            edge.push_back(
-                {.where = glm::normalize(sphere.point(point) +
-                                         (t * (sphere.point(other) - sphere.point(point)))),
-                 .point = point});
         }
+        held[point] = light / all;
     }
-    const Nearest from_edge = nearest_sources(sphere, edge);
-    const double half = 0.5 * belt_width(body);
+    // Coasts wander finer than the margin as where each point reads it does, so they wiggle
+    // without sinking anywhere deeper than the margin lets them: from splits about as far apart
+    // as the margin is wide, each finer one moving half as far, the widest no further than keeps
+    // it from folding over.
+    const double splits_finer = maths::log(belt_width(body) / sphere.spacing()) / std::numbers::ln2;
+    const int wander_from =
+        std::clamp(sphere.subdivisions() - static_cast<int>(std::lround(splits_finer)), 0, fine);
+    const std::vector<double> wander_east =
+        sphere_noise(sphere, hash_values(body.seed, 14), wander_from, fine);
+    const std::vector<double> wander_north =
+        sphere_noise(sphere, hash_values(body.seed, 15), wander_from, fine);
+    const double wander = belt_width(body) / (2.0 * std::numbers::pi);
+    start = 0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
-        const double inside = lightness[point] > 0.0 ? 1.0 : -1.0;
-        // With no edge anywhere, every point is as far from one as can be.
-        const double away =
-            from_edge.source[point] == Nearest::none ? std::numbers::pi : from_edge.distance[point];
-        crust.light[point] = smoothstep(-half, half, inside * away);
+        const DVec3& here = sphere.point(point);
+        const auto [east, north] = tangents(here);
+        const DVec3 wandered = glm::normalize(
+            here + (wander * ((wander_east[point] * east) + (wander_north[point] * north))));
+        const Sphere::Spot spot = sphere.locate(wandered, start);
+        start = spot.corners[0];
+        crust.light[point] = std::clamp(sphere.sample(held, spot), 0.0, 1.0);
     }
 }
 

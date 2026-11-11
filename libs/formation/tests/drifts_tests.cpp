@@ -96,24 +96,27 @@ TEST_CASE("what the wind lays is what it took, none in the sea, dunes on bare dr
     CHECK(std::ranges::any_of(drifts.dunes, [](double dunes) { return dunes > 0.5; }));
 }
 
-TEST_CASE("loess thins away downwind of where it was lifted", "[formation][drifts]") {
+TEST_CASE("loess settles where plants catch it, thicker than on bare ground it blows over",
+          "[formation][drifts]") {
     const World& made = world();
-    const std::vector<std::uint32_t> down = downwind(made.sphere, made.climate);
-    // Following the wind on from the point where most silt was lifted, over land, it lies thinner
-    // further on.
-    std::uint32_t source = 0;
+    // Of the land the silt reaches, ground plants hold against bare ground.
+    double held = 0.0;
+    double bare = 0.0;
+    int helds = 0;
+    int bares = 0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
-        if (made.drifts.deflated[point] > made.drifts.deflated[source]) {
-            source = point;
+        if (made.drifts.loess[point] <= 0.0 || made.rivers.receiver[point] == point) {
+            continue;
+        }
+        if (made.rivers.cover[point] >= 0.7) {
+            held += made.drifts.loess[point];
+            ++helds;
+        } else if (made.rivers.cover[point] <= 0.3) {
+            bare += made.drifts.loess[point];
+            ++bares;
         }
     }
-    REQUIRE(made.drifts.deflated[source] > 0.0);
-    double near = 0.0;
-    double far = 0.0;
-    std::uint32_t at = source;
-    for (int step = 0; step < 12; ++step) {
-        (step < 3 ? near : far) += made.drifts.loess[at] / (step < 3 ? 3.0 : 9.0);
-        at = down[at];
-    }
-    CHECK(near > far);
+    REQUIRE(helds > 0);
+    REQUIRE(bares > 0);
+    CHECK(held / helds > bare / bares);
 }
