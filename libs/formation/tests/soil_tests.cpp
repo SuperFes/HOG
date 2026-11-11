@@ -120,7 +120,7 @@ namespace {
 // insides and edges.
 Body glaciated() {
     Body body;
-    body.star_flux = 1'300.0;
+    body.star_flux = 1'250.0;
     return body;
 }
 
@@ -157,7 +157,7 @@ TEST_CASE("no soil forms under ice, standing water or salt", "[formation][soil]"
 }
 
 TEST_CASE("soil grows down through what was laid, faster than into rock", "[formation][soil]") {
-    const Made made;
+    const Made made{glaciated()};
     int on_till = 0;
     int on_alluvium = 0;
     int on_lake_beds = 0;
@@ -242,7 +242,7 @@ TEST_CASE("anywhere under the ground, layers lie in the order they were laid",
 }
 
 TEST_CASE("where the coldest times' ice lay, soil is young and thin on rock", "[formation][soil]") {
-    const Made made;
+    const Made made{glaciated()};
     int young = 0;
     int thinner = 0;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {

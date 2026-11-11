@@ -11,6 +11,7 @@
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+using hog::formation::bending_reach;
 using hog::formation::Body;
 using hog::formation::Crust;
 using hog::formation::crust_on;
@@ -130,6 +131,27 @@ TEST_CASE("sea floor is young at the ridges", "[formation][plates]") {
             CHECK(crust.floor_age[point] < 20.0);
         }
     }
+}
+
+TEST_CASE("light crust thins across its whole margin, holding up patches narrower",
+          "[formation][plates]") {
+    Body body;
+    const Sphere layout{5, body.seed};
+    const Sphere sphere{6, body.seed + 1};
+    // Sized so the margin spans several points, and the coasts' wiggles finer than it.
+    body.radius = std::numbers::pi * bending_reach(body) / (6.0 * sphere.spacing());
+    const Plates plates{body, layout};
+    const Crust crust = crust_on(sphere, plates, body);
+    double most = 0.0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        double around = 0.0;
+        for (const std::uint32_t next : sphere.neighbors(point)) {
+            around += crust.light[next];
+        }
+        around /= static_cast<double>(sphere.neighbors(point).size());
+        most = std::max(most, std::abs(crust.light[point] - around));
+    }
+    CHECK(most < 0.1);
 }
 
 TEST_CASE("the same body makes the same crust", "[formation][plates]") {
