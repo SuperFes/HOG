@@ -140,6 +140,42 @@ Finish what's open: courses, lake shore fill, coast cliffs. Then:
 
 Tier 3 follows; history waits on settlements.
 
+## Finishing generation
+
+Agreed 2026-11-10, ahead of any client/server platform change. Every feature here is generator
+maths that reads at any tile level and lands in the octree's voxels, water included, with coarse
+tiles holding the right average of the finer ones. No side strips, meshes, maps or per-feature
+passes beside the tree. The formation bake is an input to that maths, not a second world.
+
+Found missing on 2026-11-10: the default planet forms only 14 lakes, most a point or two across,
+and three of them are 1–3 km deep basins standing 26–64 m above the sea. Salt flats, dunes and sea
+ice form in `libs/formation` and never reach the voxels. Nothing builds deltas, estuaries, fans,
+terraces, floodplains, wetlands, springs, calderas or reefs.
+
+1. **Bake the formation** (13), and cache coarse tiles as the disposable tile cache keyed by world
+   and generator revision. Formation costs 175 s every start; tiles of levels 7–13 cost ~66 s of a
+   first view.
+2. **World census.** One tool printing, over several seeds: lakes by size and level, wet river
+   length, wetland share, salt flats, dunes, beach kinds, caves. Regressions show as numbers.
+3. **Finish what's open:** courses, coast cliffs and shore platforms, lake shore fill.
+4. **River water** (1): channels at the depth their discharge gives, waterfalls over crags, rivers
+   sinking into soluble rock or failing in deserts, mouths, deltas and estuaries.
+5. **Lakes from their processes:** glacial scour basins and kettles, oxbows and floodplain ponds,
+   dolines and cenotes, crater lakes, fault sag ponds, landslide dams, thaw lakes. Closed basins
+   stand where evaporation balances inflow, below the sea if that's where it falls.
+6. **Formed results into the voxels:** salt flats, dunes, sea ice, landform likelihoods (karst,
+   mesas, scree), ores (6).
+7. **Wet and flat ground:** marshes, bogs and fens where flat ground drains poorly; floodplains,
+   terraces and alluvial fans; tidal flats and salt marsh on low coasts; snowfields that outlast
+   the summer apart from glaciers; permafrost.
+8. **Groundwater** (14): a water table giving springs and losing streams, and what caves formed by
+   water (15) grow from.
+9. **Volcanic and geothermal:** cones, calderas, crater lakes, hot springs and geysers from vents.
+   Reefs and atolls on warm shallow shelves.
+10. **Plant habitats** (3), where generation hands over to life.
+11. **Fidelity at every level:** each term gives the right average when coarse, so LOD changes
+    don't show, and coarse tiles cost less than fine ones rather than more.
+
 ## References
 
 - Ores by host rock, climate bands, seasons: Vintage Story wiki,
