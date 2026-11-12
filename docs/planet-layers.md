@@ -153,16 +153,19 @@ and three of them were 1–3 km deep pits of sea-floor crust left inside contine
 ice form in `libs/formation` and never reach the voxels. Nothing builds deltas, estuaries, fans,
 terraces, floodplains, wetlands, springs, calderas or reefs.
 
-1. **Bake the formation** (13), and cache coarse tiles as the disposable tile cache keyed by world
-   and generator revision. Deferred until generation settles: `Formed` costs ~13 s every start
-   (it was 172 s while one lake's shore chained over a plateau, fixed in 793df087). Tiles of
-   levels 7–13 cost ~66 s of a first view.
+1. **Generation in the octree** (13): forming leaves feature, water and make-up trees that tile
+   maths reads, and game time never forms (docs/octree-generation.md). No tiles are stored.
 2. **World census.** `hog-census --seeds 1,2,3 --level 8`: land and sea, inland water still and
    running, what tops the land. Grow it with each step below (wetlands, salt flats, dunes,
    caves). Seed 1 now: 8 lakes, 62 km², no running water.
 3. **Finish what's open:** courses, coast cliffs and shore platforms, lake shore fill.
-4. **River water** (1): channels at the depth their discharge gives, waterfalls over crags, rivers
-   sinking into soluble rock or failing in deserts, mouths, deltas and estuaries.
+4. **River water** (1): channels are cut to hold the flood flow (bankfull 4× the mean), and water
+   stands in them at the passing flow, reaching sea level at mouths and lake level where a river
+   runs into a lake. Each spot keeps its year-round level and its flood level (`Here::River`), the
+   limits game time plays between. The low-water limit waits on climate seasons. Still to do:
+   waterfalls and rapids where the floor steps over hard beds, faults or hanging valleys (floors
+   fall evenly now); rivers sinking into soluble rock or failing in deserts; deltas and estuaries;
+   river water in the census.
 5. **Lakes from their processes:** glacial scour basins and kettles, oxbows and floodplain ponds,
    dolines and cenotes, crater lakes, fault sag ponds, landslide dams, thaw lakes. Closed basins
    stand where evaporation balances inflow, below the sea if that's where it falls.

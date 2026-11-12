@@ -15,7 +15,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -30,9 +29,19 @@ public:
     struct Here {
         Noise top;                  // metres over the sea, slope per metre at the radius
         std::optional<double> lake; // metres over the sea a lake's water stands at
+        // Metres over the sea a river's water stands at the year round, and in the floods that
+        // fill its channel bank to bank; none off its channel.
+        struct River {
+            double level = 0.0;
+            double flood = 0.0;
+        };
+        std::optional<River> river;
         Strata layers;
         double light = 0.0;   // share of light crust
         double folding = 0.0; // how folded the beds are, 0 to 1
+        // Metres of the bed gullies and the hollows between wore off it, negative where spurs
+        // stand over it.
+        double cut = 0.0;
         // Metres the rotted core of a block of rock stands out of the ground about it as a crag.
         double crag = 0.0;
         // How the rock at the top weathers where it stands bare, which crags and the rock that
@@ -47,7 +56,7 @@ public:
             double loosening = 0.0;
         } weathering;
     };
-    // Gullies narrower than twice `lod` are left out.
+    // Gullies and river channels narrower than twice `lod` are left out.
     [[nodiscard]] Here at(DVec3 direction, double lod = 0.0) const;
 
     [[nodiscard]] bool has_sea() const noexcept { return has_sea_; }
@@ -68,25 +77,40 @@ private:
     // The ground's top at `direction`, read from the points weighed for it there: as the points
     // have it smoothly between them, but nowhere over the walls of the valleys their water runs
     // down, which rise as steeply as the ground about each stands. Crests stand where walls meet.
-    // With it, which way water runs off it, and how far over the valley floor nearest it stands.
+    // With it, which way water runs off it, and how far it stands over the floor of the valley
+    // it lies in.
     struct Carved {
         formation::Smooth::Read top;
         DVec3 fall{0.0}; // per radian, as the top's gradient
         double above_floor = 1e30;
         DVec3 above_floor_gradient{0.0}; // per metre, the floor's own fall left out
+        // Metres of a river's water over it, the year round and in flood.
+        double river = 0.0;
+        double flood = 0.0;
     };
-    [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights) const;
+    [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
+                                double lod) const;
     // The walls of the valley the river from `point` cuts, as they stand at `direction`, reaching
-    // `reach` metres from it; none off the sea's own points or out of its reach.
+    // `reach` metres from it, the spurs between its bends rounded `rounding` metres across, over
+    // no more than `blend` in height; none off the sea's own points or out of its reach.
     [[nodiscard]] std::optional<Wall> valley_wall(std::uint32_t point, DVec3 direction,
-                                                  double reach) const;
-    // The course the river from `point` cuts down to the point it runs to, worked out the first
-    // time it's read: directions from one to the other.
-    [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const;
+                                                  double reach, double lod, double rounding,
+                                                  double blend) const;
+    // The course the river from `point` cuts down to the point it runs to: directions from one to
+    // the other.
+    [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const {
+        return courses_[point];
+    }
+    void fill_courses();
+    [[nodiscard]] std::vector<DVec3> make_course(std::uint32_t point) const;
     // The ground carved, then cut by gullies no narrower than twice `lod`, what was carried onto
     // it settled into its hollows.
     struct Surface {
         Dissected ground;
+        double river = 0.0; // as carved
+        double flood = 0.0;
+        // Where the ground stood as cut, before what was carried settled on it.
+        double bed = 0.0;
         // The share of the points' sand, alluvium, lake beds and till that settled here.
         double settled = 1.0;
         // The bars, levees and hummocks laid ground stands in, about -1 to 1 of their height;
@@ -167,9 +191,8 @@ private:
     std::vector<double> years_;
     std::vector<double> strength_;
     std::uint64_t joints_seed_ = 0;
-    // Rivers' courses, each made once, and the seeds of the rock they cut through.
-    mutable std::vector<std::vector<DVec3>> courses_;
-    mutable std::vector<std::once_flag> course_made_;
+    // Rivers' courses, and the seeds of the rock they cut through.
+    std::vector<std::vector<DVec3>> courses_;
     std::uint64_t rock_seed_ = 0;
     std::uint64_t faults_seed_ = 0;
     // How steeply valley walls rise about each point, metres up per metre across.
@@ -212,6 +235,8 @@ private:
         [[nodiscard]] DVec3 toward(double x, double y) const noexcept;
     };
     std::vector<Lake> lakes_;
+    // Each lake's level once filled, for the rivers running into it; none while filling.
+    std::vector<std::optional<double>> lake_levels_;
     // The lakes whose water may stand about each point.
     std::vector<std::vector<std::uint32_t>> lakes_near_;
     // The nearest point to each cell of a cube's faces, for searches to start near.

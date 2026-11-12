@@ -45,6 +45,13 @@ struct Cell {
 // The unit direction through a cell's middle, and the cell a direction passes through.
 [[nodiscard]] DVec3 center(Cell cell);
 [[nodiscard]] Cell cell_under(DVec3 direction, int level);
+// The same, with where across it the direction passes, each way from -0.5 to 0.5 about its middle.
+struct CellPlace {
+    Cell cell;
+    double i = 0.0;
+    double j = 0.0;
+};
+[[nodiscard]] CellPlace place_under(DVec3 direction, int level);
 
 // Its corners as unit directions, anticlockwise seen from outside. Its sides are great-circle
 // arcs, so a neighbour shares two of them exactly.

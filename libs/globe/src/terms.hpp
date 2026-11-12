@@ -43,8 +43,9 @@ struct Ground {
     double height = 0.0;              // over the radius
     double surface_temperature = 0.0; // kelvin, at the reference level
     Layering layers;
-    std::optional<double> lake; // a lake's water, over the radius
-    DVec3 rise{0.0};            // which way it climbs and how steeply, metres up per metre along
+    std::optional<double> lake;  // a lake's water, over the radius
+    std::optional<double> river; // a river's, the year round
+    DVec3 rise{0.0};             // which way it climbs and how steeply, metres up per metre along
     // The rock at its top: metres a year of it coming loose in blocks, metres a year it breaks up
     // where bare and the ground wears down, the years it has had, how well it stands, 0 to 1, and
     // the share standing bare.
@@ -110,8 +111,11 @@ struct Fall {
     Rubble rubble;
 };
 [[nodiscard]] Fall fallen(const Context& context, DVec3 direction, double lod);
+// Over the cells `lod` resolves where they're coarser than the rock cells, whose rock falls
+// within them. `known` are cells of any level whose ground at `lod` is `grounds`.
 [[nodiscard]] std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells,
-                                       double lod);
+                                       double lod, std::span<const Cell> known = {},
+                                       std::span<const Ground> grounds = {});
 // The same at the middle of each of `cells`, all of one level, each rock made once.
 [[nodiscard]] std::vector<std::optional<Rock>> rockfall(const Context& context,
                                                         std::span<const Cell> cells, double lod);

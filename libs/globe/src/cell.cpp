@@ -156,6 +156,10 @@ DVec3 center(Cell cell) {
 }
 
 Cell cell_under(DVec3 direction, int level) {
+    return place_under(direction, level).cell;
+}
+
+CellPlace place_under(DVec3 direction, int level) {
     HOG_ASSERT(level >= 0 && level <= Cell::max_level, "level out of range");
     HOG_ASSERT(glm::length(direction) > 0.0, "no direction");
     int normal = 0;
@@ -168,15 +172,18 @@ Cell cell_under(DVec3 direction, int level) {
     const Frame frame = frame_of(face);
     const double n = std::ldexp(1.0, level);
     const double out = std::abs(direction[along(normal)]);
-    const auto index = [&](double offset) {
-        const double linear = unwarped(offset / out);
-        return static_cast<std::uint32_t>(
-            std::clamp(std::floor((linear + 1.0) / 2.0 * n), 0.0, n - 1.0));
-    };
-    return {.level = static_cast<std::uint8_t>(level),
-            .face = static_cast<std::uint8_t>(face),
-            .i = index(direction[along(frame.u)]),
-            .j = index(direction[along(frame.v)])};
+    const auto across = [&](double offset) { return (unwarped(offset / out) + 1.0) / 2.0 * n; };
+    const double u = across(direction[along(frame.u)]);
+    const double v = across(direction[along(frame.v)]);
+    const auto index = [&](double at) { return std::clamp(std::floor(at), 0.0, n - 1.0); };
+    const double i = index(u);
+    const double j = index(v);
+    return {.cell = {.level = static_cast<std::uint8_t>(level),
+                     .face = static_cast<std::uint8_t>(face),
+                     .i = static_cast<std::uint32_t>(i),
+                     .j = static_cast<std::uint32_t>(j)},
+            .i = std::clamp(u - i, 0.0, 1.0) - 0.5,
+            .j = std::clamp(v - j, 0.0, 1.0) - 0.5};
 }
 
 std::array<DVec3, 4> corners(Cell cell) {

@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <numbers>
 #include <span>
@@ -56,22 +57,34 @@ struct OnCube {
     double v = 0.0;
 };
 
-// A river's channel, as wide and deep as its water makes it (Leopold and Maddock's hydraulic
-// geometry), bending a bend every eleven widths (Leopold and Wolman), more the gentler its fall
-// and the looser its banks, its floor as wide as it wanders.
+// A river's channel, as wide and deep as what wears it makes it at its mean (Leopold and
+// Maddock's hydraulic geometry down rivers), cut out to hold the floods that overtop its banks
+// every year or two, `bankfull` times that mean (the same at one place as its flow rises),
+// bending a bend every eleven widths (Leopold and Wolman), more the gentler its fall and the
+// looser its banks, its floor as wide as it wanders. The water passing it stands `water` deep.
 struct Channel {
     double width = 0.0;
     double depth = 0.0;
+    double water = 0.0;
     double meander = 0.0;
     double meander_length = 0.0;
     double belt = 0.0;
 };
 
-Channel channel_of(double discharge, double fall, bool loose, double reach) noexcept {
+constexpr double bankfull = 4.0;
+
+// From cubic metres a year wearing it and passing it.
+Channel channel_of(double wearing, double passing, double fall, bool loose, double reach) noexcept {
     constexpr double seconds_a_year = 31'557'600.0;
     constexpr double gentle = 0.01; // falls under which rivers wander freely
-    const double water = discharge / seconds_a_year;
-    Channel channel{.width = 3.0 * std::sqrt(water), .depth = 0.27 * maths::pow(water, 0.4)};
+    const double mean = wearing / seconds_a_year;
+    const double mean_depth = 0.27 * maths::pow(mean, 0.4);
+    Channel channel{.width = 3.0 * std::sqrt(mean) * maths::pow(bankfull, 0.26),
+                    .depth = mean_depth * maths::pow(bankfull, 0.4)};
+    if (wearing > 0.0) {
+        channel.water =
+            std::min(channel.depth, mean_depth * maths::pow(std::max(passing, 0.0) / wearing, 0.4));
+    }
     channel.meander_length = 11.0 * channel.width;
     channel.meander = std::min(0.3 * channel.meander_length * (loose ? 1.0 : 0.3) *
                                    std::clamp(1.0 - (fall / gentle), 0.0, 1.0),
@@ -84,48 +97,32 @@ void add_weighted(Wall& sum, const Wall& one, double weight) noexcept {
     sum.height += weight * one.height;
     sum.gradient += weight * one.gradient;
     sum.floor += weight * one.floor;
+    sum.water += weight * one.water;
+    sum.bank += weight * one.bank;
     sum.fall += weight * one.fall;
     sum.reaching += weight * one.reaching;
+    sum.steep += weight * one.steep;
     sum.standing += weight * one.standing;
     sum.standing_gradient += weight * one.standing_gradient;
     sum.reaching_gradient += weight * one.reaching_gradient;
+    sum.cut += weight * one.cut;
+    sum.cut_gradient += weight * one.cut_gradient;
 }
 
 void divide(Wall& sum, double total) noexcept {
     sum.height /= total;
     sum.gradient /= total;
     sum.floor /= total;
+    sum.water /= total;
+    sum.bank /= total;
     sum.fall /= total;
     sum.reaching /= total;
+    sum.steep /= total;
     sum.standing /= total;
     sum.standing_gradient /= total;
     sum.reaching_gradient /= total;
-}
-
-// The lower of the ground standing so far and another way it could, `wall` of it a wall, merged
-// over `blend` in height as far as both are walls: a quadratic smooth minimum, its slope shared
-// between the two as they near.
-void merge_lower(formation::Smooth::Read& top, double& top_wall, double height, DVec3 gradient,
-                 double wall, double blend) noexcept {
-    const double width = blend * wall * top_wall;
-    const double apart = std::abs(height - top.value);
-    const bool lower = height < top.value;
-    if (apart >= width) {
-        if (lower) {
-            top = {.value = height, .gradient = gradient};
-            top_wall = wall;
-        }
-        return;
-    }
-    const double share = (width - apart) / width;
-    const double low = lower ? height : top.value;
-    const DVec3 low_gradient = lower ? gradient : top.gradient;
-    const DVec3 high_gradient = lower ? top.gradient : gradient;
-    const double low_wall = lower ? wall : top_wall;
-    const double high_wall = lower ? top_wall : wall;
-    top = {.value = low - (share * share * width / 4.0),
-           .gradient = (low_gradient * (1.0 - (share / 2.0))) + (high_gradient * (share / 2.0))};
-    top_wall = (low_wall * (1.0 - (share / 2.0))) + (high_wall * (share / 2.0));
+    sum.cut /= total;
+    sum.cut_gradient /= total;
 }
 
 OnCube on_cube(DVec3 direction) noexcept {
@@ -226,8 +223,7 @@ Formed::Formed(const Planet& planet)
             }
         }
     }
-    courses_.resize(size);
-    course_made_ = std::vector<std::once_flag>(size);
+    fill_courses();
     // Lakes below the sea fill on what the sea laid there, under its waves.
     fill_shores();
     fill_lakes();
@@ -318,9 +314,13 @@ void Formed::fill_lakes() {
 
     lakes_near_.assign(size, {});
     std::vector<std::uint32_t> listed(size, none);
+    lake_levels_.assign(lakes_.size(), std::nullopt);
     for (std::uint32_t lake = 0; lake < lakes_.size(); ++lake) {
         if (floor[lake] != none) {
             list_lake(lake, floor[lake], listed);
+            if (!lakes_[lake].pool.cells.empty()) {
+                lake_levels_[lake] = lakes_[lake].pool.level;
+            }
         }
     }
 }
@@ -749,56 +749,72 @@ std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
     return starts_[(((face * starts_across) + cell(on.u)) * starts_across) + cell(on.v)];
 }
 
-const std::vector<DVec3>& Formed::course_of(std::uint32_t point) const {
-    std::call_once(course_made_[point], [&] {
-        const formation::World& world = world_;
-        const formation::Sphere& sphere = world.sphere;
-        const std::uint32_t down = world.rivers.receiver[point];
-        const DVec3 from = sphere.point(point);
-        const DVec3 to = sphere.point(down);
-        const bool mouth = world.rivers.receiver[down] == down;
-        const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
-        // The rock about it varies from place to place, finer than its points can tell, at every
-        // scale down to what its lanes tell apart; faults crush it.
-        const Octaves rocks{
-            .wavelength = sphere.spacing() * radius_ / 2.0, .gain = 0.55, .finest = 20.0};
-        formation::Smooth::Weights weights;
-        std::uint32_t near = point;
-        const auto effort = [&](DVec3 at) {
-            smooth_.weigh(at, weights, near);
-            near = weights.nearest;
-            const auto value = [&](const std::vector<double>& field) {
-                return formation::Smooth::read(field, weights).value;
-            };
-            // As much as it has to cut down to its floor where it runs, and its own depth, which
-            // it cuts wherever it runs.
-            constexpr double channel_depth = 1.0;
-            const DVec3 along = to - from;
-            const double t =
-                std::clamp(glm::dot(at - from, along) / glm::dot(along, along), 0.0, 1.0);
-            const double floor = top_[point] + ((floor_to - top_[point]) * t);
-            const double cut = std::max(0.0, value(top_) - floor) + channel_depth;
-            // Loose ground cuts as the weakest rock does, but for how it lies.
-            const double deposits =
-                value(alluvium_) + value(lake_beds_) + value(till_) + value(sand_) + value(loess_);
-            const DVec3 metres = at * radius_;
-            const double strength =
-                std::clamp((deposits > loose_deep ? 0.0 : value(strength_)) +
-                               (0.5 * fbm(metres, rocks, 0.0, rock_seed_).value) -
-                               faulted(metres, faults_seed_),
-                           0.0, 1.0);
-            // As slowly as the rock wears (the rivers' own rule for rock strength).
-            return cut *
-                   maths::exp(std::numbers::ln10 * world.body.rock_hardness * (strength - 0.5));
-        };
-        const double apart = maths::atan2(glm::length(glm::cross(from, to)), glm::dot(from, to));
-        courses_[point] = course(
-            {.from = from, .to = to, .half_width = 0.3 * apart, .steps = 16, .lanes = 5}, effort);
-    });
-    return courses_[point];
+void Formed::fill_courses() {
+    courses_.assign(world_.sphere.size(), {});
+    std::atomic<std::uint32_t> next{0};
+    const auto fill = [&] {
+        for (std::uint32_t point = next++; point < courses_.size(); point = next++) {
+            if (world_.rivers.receiver[point] != point) {
+                courses_[point] = make_course(point);
+            }
+        }
+    };
+    std::vector<std::thread> workers;
+    const unsigned count = std::max(1U, std::thread::hardware_concurrency());
+    workers.reserve(count);
+    for (unsigned worker = 0; worker < count; ++worker) {
+        workers.emplace_back(fill);
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
 }
 
-Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights& weights) const {
+std::vector<DVec3> Formed::make_course(std::uint32_t point) const {
+    const formation::World& world = world_;
+    const formation::Sphere& sphere = world.sphere;
+    const std::uint32_t down = world.rivers.receiver[point];
+    const DVec3 from = sphere.point(point);
+    const DVec3 to = sphere.point(down);
+    const bool mouth = world.rivers.receiver[down] == down;
+    const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+    // The rock about it varies from place to place, finer than its points can tell, at every
+    // scale down to what its lanes tell apart; faults crush it.
+    const Octaves rocks{
+        .wavelength = sphere.spacing() * radius_ / 2.0, .gain = 0.55, .finest = 20.0};
+    formation::Smooth::Weights weights;
+    std::uint32_t near = point;
+    const auto effort = [&](DVec3 at) {
+        smooth_.weigh(at, weights, near);
+        near = weights.nearest;
+        const auto value = [&](const std::vector<double>& field) {
+            return formation::Smooth::read(field, weights).value;
+        };
+        // As much as it has to cut down to its floor where it runs, and its own depth, which
+        // it cuts wherever it runs.
+        constexpr double channel_depth = 1.0;
+        const DVec3 along = to - from;
+        const double t = std::clamp(glm::dot(at - from, along) / glm::dot(along, along), 0.0, 1.0);
+        const double floor = top_[point] + ((floor_to - top_[point]) * t);
+        const double cut = std::max(0.0, value(top_) - floor) + channel_depth;
+        // Loose ground cuts as the weakest rock does, but for how it lies.
+        const double deposits =
+            value(alluvium_) + value(lake_beds_) + value(till_) + value(sand_) + value(loess_);
+        const DVec3 metres = at * radius_;
+        const double strength = std::clamp((deposits > loose_deep ? 0.0 : value(strength_)) +
+                                               (0.5 * fbm(metres, rocks, 0.0, rock_seed_).value) -
+                                               faulted(metres, faults_seed_),
+                                           0.0, 1.0);
+        // As slowly as the rock wears (the rivers' own rule for rock strength).
+        return cut * maths::exp(std::numbers::ln10 * world.body.rock_hardness * (strength - 0.5));
+    };
+    const double apart = maths::atan2(glm::length(glm::cross(from, to)), glm::dot(from, to));
+    return course({.from = from, .to = to, .half_width = 0.3 * apart, .steps = 16, .lanes = 5},
+                  effort);
+}
+
+Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights& weights,
+                              double lod) const {
     const formation::World& world = world_;
     const formation::Sphere& sphere = world.sphere;
     const formation::Smooth::Read smooth = formation::Smooth::read(top_, weights);
@@ -811,6 +827,22 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     };
     thread_local std::vector<Way> ways;
     ways.clear();
+    // The water in each valley's channel, faded as its ground is.
+    struct River {
+        double ground = 0.0;
+        double water = 0.0;
+        double bank = 0.0;
+    };
+    thread_local std::vector<River> rivers;
+    rivers.clear();
+    // How high each valley's ground stands over its floor, and where it stands.
+    struct Floor {
+        double ground = 0.0;
+        double above = 0.0;
+        DVec3 gradient{0.0};
+    };
+    thread_local std::vector<Floor> floors;
+    floors.clear();
     ways.push_back({.height = smooth.value, .fall = smooth.gradient, .counts = 1.0});
     // Where walls meet, at crests, soil creeping off rounds them over as far as creep carries
     // it against the ground wearing down (a hilltop's steady parabola reaches the walls' slope
@@ -832,6 +864,28 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     // Walls reach a little way from their valleys, so none is ever missed among those of the
     // points weighed here, however the points weighed change.
     const double reach = 0.6 * sphere.spacing() * radius_;
+    // Valleys wander off the lines their courses are drawn on at every scale down to the finest
+    // asked, so their floors, walls and the reach of each ragged out of true; never so sharply
+    // that the ground folds over, so their walls stand a little steeper or gentler and their
+    // floors wider or narrower as they go.
+    const DVec3 metres = direction * radius_;
+    const Octaves wander{
+        .wavelength = 2.0 * sphere.spacing() * radius_, .gain = 0.35, .finest = 3.0 * voxel_};
+    constexpr double sharpest_wander = 0.9;
+    const double wandering = sharpest_wander / (std::numbers::sqrt3 * fbm_steepest(wander));
+    const std::array<Noise, 3> wanders{fbm(metres, wander, lod, hash_values(rock_seed_, 7)),
+                                       fbm(metres, wander, lod, hash_values(rock_seed_, 8)),
+                                       fbm(metres, wander, lod, hash_values(rock_seed_, 9))};
+    const DVec3 wandered = glm::normalize(
+        metres + (DVec3{wanders[0].value, wanders[1].value, wanders[2].value} * wandering));
+    // A slope over the wandered ground back to the ground's own.
+    const auto unwandered = [&](DVec3 slope) {
+        const DVec3 back =
+            slope + (((wanders[0].gradient * slope.x) + (wanders[1].gradient * slope.y) +
+                      (wanders[2].gradient * slope.z)) *
+                     wandering);
+        return back - (direction * glm::dot(back, direction));
+    };
     // A valley is read here as far as its points are weighed here, so none comes or goes at
     // once as the points weighed change.
     const auto valley = [&](std::uint32_t point, double weighed) {
@@ -841,29 +895,41 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         if (present <= 0.0) {
             return;
         }
-        const std::optional<Wall> read = valley_wall(point, direction, reach);
+        std::optional<Wall> read = valley_wall(point, wandered, reach, lod, rounding, blend);
         if (!read) {
             return;
         }
-        const Wall& wall = *read;
+        Wall& wall = *read;
+        for (DVec3* slope : {&wall.gradient, &wall.fall, &wall.standing_gradient,
+                             &wall.reaching_gradient, &wall.cut_gradient}) {
+            *slope = unwandered(*slope);
+        }
         // Out of its reach a valley fades into the ground as its points have it. Read's
         // gradient is per radian.
         const double reaching = wall.reaching * present;
+        const auto fade = [&](double height) {
+            return (reaching * height) + ((1.0 - reaching) * smooth.value);
+        };
+        // Its water too, fading out as its floor rises over the ground about it.
+        rivers.push_back(
+            {.ground = fade(wall.standing), .water = fade(wall.water), .bank = fade(wall.bank)});
         if (wall.standing < smooth.value) {
-            const double faded = (reaching * wall.standing) + ((1.0 - reaching) * smooth.value);
+            const double faded = fade(wall.standing);
             const DVec3 fading =
                 ((wall.standing_gradient * radius_) * reaching) +
                 (smooth.gradient * (1.0 - reaching)) +
                 ((wall.reaching_gradient * radius_) * present * (wall.standing - smooth.value));
-            merge_lower(carved.top, top_wall, faded, fading, reaching, blend);
+            merge_lower(carved.top, top_wall, faded, fading, reaching, rounding / radius_, blend);
         }
         if (reaching > 0.0) {
             ways.push_back(
                 {.height = wall.standing, .fall = wall.fall * radius_, .counts = reaching});
         }
-        if (const double above = (wall.height - wall.floor) / present; above < carved.above_floor) {
-            carved.above_floor = above;
-            carved.above_floor_gradient = wall.gradient / present;
+        // Its floor holds the gullies back as far as it reaches.
+        if (reaching > 0.0) {
+            floors.push_back({.ground = fade(wall.standing),
+                              .above = (wall.standing - wall.floor) / reaching,
+                              .gradient = wall.standing_gradient / reaching});
         }
     };
     for (std::size_t at = 0; at < weights.points.size(); ++at) {
@@ -875,6 +941,33 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
                 std::ranges::find(weights.points, up) == weights.points.end()) {
                 valley(up, weights.weights[at]);
             }
+        }
+    }
+    // A river's water stands only in the channel of the valley the ground lies in, fading out as
+    // another's takes over, so none stands over one it doesn't run in.
+    for (const River& river : rivers) {
+        const double over =
+            std::max(0.0, river.ground - carved.top.value) / std::max(blend, voxel_);
+        if (over >= 1.0) {
+            continue;
+        }
+        // As deep as it stands in its own channel, wherever the ground's merged lower.
+        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
+        carved.river = std::max(carved.river, in * (river.water - river.ground));
+        carved.flood = std::max(carved.flood, in * (river.bank - river.ground));
+    }
+    // Gullies cut down only as far as the floor of the valley the ground lies in, each valley's
+    // hold fading out as another's takes over, as its water does.
+    for (const Floor& floor : floors) {
+        const double over =
+            std::max(0.0, floor.ground - carved.top.value) / std::max(blend, voxel_);
+        if (over >= 1.0) {
+            continue;
+        }
+        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
+        if (const double above = floor.above / in; above < carved.above_floor) {
+            carved.above_floor = above;
+            carved.above_floor_gradient = floor.gradient / in;
         }
     }
     // Water runs off the lowest, blended with those near as low by how near, so where the ground
@@ -894,7 +987,8 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     return carved;
 }
 
-std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, double reach) const {
+std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, double reach,
+                                        double lod, double rounding, double blend) const {
     const formation::World& world = world_;
     const formation::Sphere& sphere = world.sphere;
     const std::uint32_t down = world.rivers.receiver[point];
@@ -922,10 +1016,45 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const double length = runs.back();
     const double metres = length * radius_;
     const double fall = metres > 0.0 ? (top_[point] - floor_to) / metres : 0.0;
-    const Channel channel =
-        channel_of(world.rivers.discharge[point], fall,
-                   alluvium_[point] + lake_beds_[point] + till_[point] > loose_deep, reach);
-    const double slope = std::max(wall_[point], wall_[down]);
+    const auto channel_at = [&](std::uint32_t at, double falling) {
+        Channel made = channel_of(world.rivers.flood[at], world.lakes.discharge[at], falling,
+                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep, reach);
+        // Channels too narrow for the detail asked fade out with their water, as gullies do.
+        const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
+        made.depth *= shown;
+        made.water *= shown;
+        return made;
+    };
+    const Channel channel = channel_at(point, fall);
+    // Its channel and water meet the next one's as they are where it runs into it; at the sea, it
+    // brims to the sea's level.
+    Channel next = channel;
+    if (mouth) {
+        next.water = channel.depth;
+    } else {
+        next = channel_at(down, fall);
+    }
+    // Running into a lake, its water stands no lower than the lake's, and comes down to it where
+    // it runs in: as deep in its channel there as the lake stands over its floor, brimming at most.
+    double least_water = -std::numeric_limits<double>::infinity();
+    if (const std::uint32_t lake = world.lakes.lake[down];
+        lake != formation::Lakes::none && lake < lake_levels_.size() && lake_levels_[lake]) {
+        least_water = *lake_levels_[lake];
+        next.water = std::clamp(least_water - floor_to + next.depth, 0.0, next.depth);
+    }
+    // Its walls stand less steep than their rock lets them in places, as each has been worn,
+    // so where they meet another valley's the crest between runs ragged.
+    const Noise worn =
+        fbm(direction * radius_,
+            {.wavelength = sphere.spacing() * radius_, .gain = 0.5, .finest = 8.0 * voxel_}, lod,
+            hash_values(rock_seed_, 10, point));
+    constexpr double least_steep = 0.35;
+    const double steep_share = std::clamp(0.65 + (0.45 * worn.value), least_steep, 1.0);
+    const double steepest_here = std::max(wall_[point], wall_[down]);
+    const double slope = steepest_here * steep_share;
+    const DVec3 slope_gradient = steep_share > least_steep && steep_share < 1.0
+                                     ? worn.gradient * (0.45 * steepest_here)
+                                     : DVec3{0.0};
     const auto floor_at = [&](double run) {
         return top_[point] + ((floor_to - top_[point]) * (length > 0.0 ? run / length : 0.0));
     };
@@ -933,26 +1062,50 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // brings two near, blended over a few metres between them so it never breaks.
     constexpr double blending = 5.0;
     thread_local std::vector<double> rough;
+    thread_local std::vector<double> least;
     rough.assign(line.size() - 1, 0.0);
+    least.assign(line.size() - 1, 0.0);
     double lowest = 1e300;
+    // Each stretch stands no lower than its floor and walls with the channel cut out of them, and
+    // no higher than the walls' foot rounded over the belt; any that might stand lowest is read,
+    // so none comes lowest with a step.
+    const double deepest = std::max(channel.depth, next.depth);
+    double surely = 1e300;
+    // How far the whole course lies, and which way from its nearest.
+    double nearest = 1e300;
+    DVec3 outward{0.0};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         const DVec3 along = line[k + 1] - line[k];
         const double t = std::clamp(glm::dot(direction - line[k], along) /
                                         std::max(glm::dot(along, along), 1e-300),
                                     0.0, 1.0);
-        const double away = glm::length(direction - (line[k] + (along * t))) * radius_;
-        rough[k] = floor_at(runs[k] + (t * (runs[k + 1] - runs[k]))) +
-                   (slope * std::max(0.0, away - channel.belt)) + rise_past(away, reach);
+        const DVec3 on = line[k] + (along * t);
+        const double away = glm::length(direction - on) * radius_;
+        const double walls = floor_at(runs[k] + (t * (runs[k + 1] - runs[k]))) +
+                             (slope * std::max(0.0, away - channel.belt));
+        rough[k] = walls + rise_past(away, reach);
         lowest = std::min(lowest, rough[k]);
+        least[k] = walls - deepest;
+        surely = std::min(surely, walls + (slope * channel.belt / 4.0));
+        if (away < nearest) {
+            nearest = away;
+            const DVec3 off =
+                direction - (glm::normalize(on) * glm::dot(direction, glm::normalize(on)));
+            outward = glm::length(off) > 0.0 ? glm::normalize(off) : DVec3{0.0};
+        }
     }
+    // The line's chord and arc differ by far less than this, so none is missed by their
+    // difference.
+    constexpr double slack = 0.01;
     const auto way = [&](std::size_t k) { return glm::normalize(line[k + 1] - line[k]); };
     Wall wall{.height = 0.0, .reaching = 0.0};
     double stretches = 0.0;
+    Lowest lowest_of{rounding, blend};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         // Weighed down to none at all by the furthest blended, so none drops out with a step.
         constexpr double furthest = 6.0;
         const double weight = maths::exp(-(rough[k] - lowest) / blending) - maths::exp(-furthest);
-        if (weight <= 0.0) {
+        if (weight <= 0.0 && least[k] > surely + std::max(handing_over, blend) + slack) {
             continue;
         }
         // Turning at each bend halfway between the stretches either side.
@@ -965,6 +1118,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .floor_from = floor_at(runs[k]),
                                   .floor_to = floor_at(runs[k + 1]),
                                   .wall = slope,
+                                  .wall_gradient = slope_gradient,
                                   .reach = reach,
                                   .head = length > 0.0 ? runs[k] / length : 0.0,
                                   .foot = length > 0.0 ? runs[k + 1] / length : 1.0,
@@ -972,22 +1126,37 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .belt = channel.belt,
                                   .channel_width = channel.width,
                                   .channel_depth = channel.depth,
+                                  .channel_depth_to = next.depth,
+                                  .water_depth = channel.water,
+                                  .water_depth_to = next.water,
+                                  .least_water = least_water,
                                   .meander = channel.meander,
                                   .meander_length = std::max(channel.meander_length, 1.0),
                                   .seed = hash_values(rock_seed_, point),
                                   .runs_from = runs_from,
                                   .runs_to = runs_to},
                                  direction, radius_);
-        stretches += weight;
-        add_weighted(wall, one, weight);
+        if (weight > 0.0) {
+            stretches += weight;
+            add_weighted(wall, one, weight);
+        }
+        lowest_of.add(one);
     }
     divide(wall, stretches);
+    lowest_of.lower(wall);
+    // The whole valley fades into the ground about it out of its reach of the course as a whole,
+    // not of each stretch, past half of it.
+    const double half = reach / 2.0;
+    const double past = std::clamp((nearest - half) / half, 0.0, 1.0);
+    wall.reaching = 1.0 - (past * past * (3.0 - (2.0 * past)));
+    wall.reaching_gradient = outward * (-6.0 * past * (1.0 - past) / half);
     return wall;
 }
 
+bool probe_surface = false;
 Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const {
-    const Carved ground = carved(direction, weights);
+    const Carved ground = carved(direction, weights, lod);
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
@@ -1074,6 +1243,7 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
         {.top = {.value = ground.top.value + raised,
                  .gradient = (ground.top.gradient / radius_) + tilt_wide + tilt_narrow},
          .fall = (ground.fall / radius_) + tilt_wide,
+         .broad_fall = formation::Smooth::read(top_, weights).gradient / radius_,
          .above_floor = std::max(0.0, above_floor + raised_wide),
          .above_floor_gradient =
              above_floor + raised_wide > 0.0 ? above_floor_gradient + tilt_wide : DVec3{0.0},
@@ -1085,10 +1255,22 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
     dissected.cut_gradient -= tilt_wide + tilt_narrow;
     dissected.spread.value += standing;
     dissected.spread.gradient += standing_gradient;
-    Surface cut{.ground = dissected, .settled = 1.0, .bedforms = Noise{}};
+    Surface cut{.ground = dissected,
+                .river = ground.river,
+                .flood = ground.flood,
+                .bed = dissected.top.value,
+                .settled = 1.0,
+                .bedforms = Noise{}};
     // Ice fills the gullies itself, what it carried lying under it.
     if (dissected.ice <= 0.0) {
         settle(direction, weights, lod, cut);
+    }
+    if (probe_surface) {
+        std::fprintf(stderr,
+                     "   smooth %7.2f carved %7.2f above %7.2f raised %6.2f diss %7.2f dcut %6.2f "
+                     "settled %7.2f river %5.2f\n",
+                     value(top_), ground.top.value, above_floor, raised, dissected.top.value,
+                     dissected.cut, cut.ground.top.value, ground.river);
     }
     return cut;
 }
@@ -1202,6 +1384,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.lava = value(lava_);
     // Gullies cut down through what lies draped over the ground and into the rock under it, the
     // top of which is what's rotted; under ice, which nothing settled under, through all of it.
+    here.cut = top.cut;
     double cut = std::max(0.0, top.cut);
     const std::array all{&layers.loess,     &layers.sand, &layers.alluvium,
                          &layers.lake_beds, &layers.till, &layers.lava};
@@ -1274,6 +1457,15 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);
     lay_beach(direction, weights, under, top.top, layers);
     here.top = top.top;
+    // A river stands over the ground as carved, not over crags standing in it, nor any higher
+    // where what was carried settled in its channel.
+    if (const double bed = here.top.value - here.crag; under.river > 0.0 && !here.lake) {
+        const double cut_bed = std::min(bed, under.bed);
+        if (const double level = cut_bed + under.river; level > bed) {
+            here.river =
+                Here::River{.level = level, .flood = cut_bed + std::max(under.flood, under.river)};
+        }
+    }
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.
     const DVec3 rise = top.top.gradient - (glm::dot(top.top.gradient, direction) * direction);

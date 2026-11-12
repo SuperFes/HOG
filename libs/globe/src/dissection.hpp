@@ -13,11 +13,13 @@ struct Undissected {
     // Which way water runs off and how steeply, per metre: the top's own gradient, blended where
     // it turns sharply, over crests and where walls meet, so gullies fade there and never break.
     DVec3 fall{0.0};
+    // Which way it falls on the whole, smoothed over the widest gullies' width, per metre.
+    DVec3 broad_fall{0.0};
     // How far it stands over the floor of the valley it drains to, below which nothing cuts.
     double above_floor = 1e30;
     DVec3 above_floor_gradient{0.0}; // per metre
-    double steepest = 0.0; // the steepest its walls stand, metres up per metre across
-    double ice = 0.0;      // metres of ice the top includes
+    double steepest = 0.0;           // the steepest its walls stand, metres up per metre across
+    double ice = 0.0;                // metres of ice the top includes
 };
 
 struct Dissected {
@@ -50,10 +52,16 @@ struct Gullies {
 // The ground at `direction` on a planet `radius` metres round, with gullies cut down it along the
 // way water runs: as deep as the ground falls over their own width, so flats are barely creased,
 // and no deeper than their walls can stand across them, so slopes cut to crests between them. Each
-// finer one runs down the walls of those before, branching off them, and none cuts below what it
-// drains to. Gullies narrower than twice `lod` are left out, the last faded in. Ice fills them, as
-// deep as it lay, so where it's thin the crests between them stand out of it.
+// finer one runs the way the ground falls, cut into the walls of those before and branching off
+// them, and none cuts below what it drains to. Gullies narrower than twice `lod` are left out, the
+// last faded in. Ice fills them, as deep as it lay, so where it's thin the crests between them
+// stand out of it.
 [[nodiscard]] Dissected dissect(DVec3 direction, double radius, const Undissected& ground,
                                 const Gullies& gullies, double lod) noexcept;
+
+// Bounds of how far dissect() moves the bed, its gullies cut and crests left standing, anywhere
+// within `within` metres of `metres`, its walls standing no steeper than `steepest`.
+[[nodiscard]] Interval gully_bounds(DVec3 metres, double within, double steepest,
+                                    const Gullies& gullies, double lod) noexcept;
 
 } // namespace hog::globe

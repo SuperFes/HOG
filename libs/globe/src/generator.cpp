@@ -159,7 +159,11 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
     }
     const auto height_at = [&](Cell cell) { return heights.at(index_of(cell)); };
 
-    const std::vector<terms::Fall> falls = terms::fallen(context, cells, lod);
+    std::vector<Cell> known{cells.begin(), cells.end()};
+    known.insert(known.end(), beyond.begin(), beyond.end());
+    std::vector<terms::Ground> grounds = found;
+    grounds.insert(grounds.end(), around_them.begin(), around_them.end());
+    const std::vector<terms::Fall> falls = terms::fallen(context, cells, lod, known, grounds);
     std::vector<Column> made;
     made.reserve(count);
     for (std::size_t k = 0; k < count; ++k) {
@@ -209,6 +213,9 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     }
     if (derived_.liquid && made.lake) {
         column.water_ = std::max(column.water_, planet_.body.radius + *made.lake);
+    }
+    if (derived_.liquid && made.river) {
+        column.water_ = std::max(column.water_, planet_.body.radius + *made.river);
     }
     column.slope_ = slope;
     column.surface_temperature_ = made.surface_temperature;
@@ -490,6 +497,9 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     made.layers = here.layers;
     made.height = here.top.value;
     made.lake = here.lake;
+    if (here.river) {
+        made.river = here.river->level;
+    }
     made.rise = tangential(here.top.gradient, direction);
     made.loosening = here.weathering.loosening;
     made.weathering = here.weathering.rate;

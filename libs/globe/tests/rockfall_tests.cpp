@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -34,6 +35,9 @@ struct Found {
 };
 
 // The rocks in coarsest cells spread over the planet and in the cells inside them.
+// Coarse enough that every block is rubble, fine enough that it's still reckoned over rock cells.
+constexpr double every_block = 20.0;
+
 std::vector<Found> rocks_on(const Setup& setup, std::uint64_t count, double lod) {
     std::vector<Found> found;
     const int level = hog::globe::terms::rock_level(setup.generator.planet());
@@ -190,7 +194,7 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     // deeper than the tallest block standing over all the ground.
     REQUIRE(cover > 0.0);
     double last = 0.0;
-    for (const double lod : {0.5, 1.0, 2.0, 4.0, 8.0, 1e9}) {
+    for (const double lod : {0.5, 1.0, 2.0, 4.0, 8.0, every_block}) {
         const hog::globe::terms::Rubble rubble =
             hog::globe::terms::fallen(setup.context, down, lod).rubble;
         CHECK(rubble.depth >= last);
@@ -202,11 +206,38 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     }
     CHECK(last > 0.0);
     // A column read coarsely rises by its rubble, which lies at its top.
-    const auto column = setup.generator.column(down, 1e9);
-    const auto bare = hog::globe::terms::ground(setup.context, down, 1e9);
+    const auto column = setup.generator.column(down, every_block);
+    const auto bare = hog::globe::terms::ground(setup.context, down, every_block);
     CHECK(std::abs(column.ground() - (setup.generator.planet().body.radius + bare.height + last)) <
           1e-6);
     CHECK(column.sample(column.ground() - (0.5 * last)).material == rock.material);
+}
+
+TEST_CASE("rubble runs on from one coarsest cell to the next without steps", "[globe][rockfall]") {
+    const Setup setup;
+    const auto found = rocks_on(setup, 1'500, 0.5);
+    REQUIRE_FALSE(found.empty());
+    const DVec3 down = glm::normalize(found.front().rock.middle);
+    const Cell coarsest =
+        hog::globe::cell_under(down, hog::globe::terms::rock_level(setup.generator.planet()));
+    const auto corner = hog::globe::corners(coarsest);
+    // Across two cells, a thousandth of one at a time.
+    const DVec3 step = (corner[1] - corner[0]) / 1'000.0;
+    std::vector<double> depths;
+    for (int k = -1'000; k <= 1'000; ++k) {
+        depths.push_back(
+            hog::globe::terms::fallen(
+                setup.context, glm::normalize(down + (step * static_cast<double>(k))), every_block)
+                .rubble.depth);
+    }
+    const auto [least, most] = std::ranges::minmax(depths);
+    REQUIRE(most > least);
+    double jump = 0.0;
+    for (std::size_t k = 1; k < depths.size(); ++k) {
+        jump = std::max(jump, std::abs(depths[k] - depths[k - 1]));
+    }
+    // Blended linearly, a thousandth of a cell moves it by no more than that of its range.
+    CHECK(jump <= 2.0 * (most - least) / 1'000.0);
 }
 
 TEST_CASE("a rock stands out of the ground its column is cut in", "[globe][rockfall]") {
@@ -258,4 +289,42 @@ TEST_CASE("rocks over a tile's cells at once are those found one at a time", "[g
         }
     }
     CHECK(found > 0);
+}
+
+TEST_CASE("a coarse tile's cells hold the rock that falls within them", "[globe][rockfall]") {
+    const Setup setup;
+    const auto rocks = rocks_on(setup, 1'500, 0.5);
+    REQUIRE_FALSE(rocks.empty());
+    // A tile whose cells are two levels wider than the rock cells.
+    const int level = hog::globe::terms::rock_level(setup.generator.planet()) - 2;
+    const double lod = hog::globe::voxel_lod(setup.generator) *
+                       std::ldexp(1.0, setup.generator.layers().level - level);
+    const Cell middle = hog::globe::cell_under(glm::normalize(rocks.front().rock.middle), level);
+    std::vector<Cell> cells;
+    for (std::uint32_t j = 0; j < 16; ++j) {
+        for (std::uint32_t i = 0; i < 16; ++i) {
+            cells.push_back({.level = static_cast<std::uint8_t>(level),
+                             .face = middle.face,
+                             .i = middle.i - 8 + i,
+                             .j = middle.j - 8 + j});
+        }
+    }
+    const auto grounds = hog::globe::terms::ground(setup.context, cells, lod);
+    const auto alone = hog::globe::terms::fallen(setup.context, cells, lod);
+    const auto knowing = hog::globe::terms::fallen(setup.context, cells, lod, cells, grounds);
+    REQUIRE(alone.size() == cells.size());
+    REQUIRE(knowing.size() == cells.size());
+    int covered = 0;
+    for (std::size_t n = 0; n < cells.size(); ++n) {
+        const hog::globe::terms::Fall one =
+            hog::globe::terms::fallen(setup.context, hog::globe::center(cells[n]), lod);
+        CAPTURE(n);
+        // Too wide a cell for any block to show; the ground already read walks the same way.
+        CHECK_FALSE(alone[n].rock.has_value());
+        CHECK(knowing[n].rubble.depth == alone[n].rubble.depth);
+        CHECK(one.rubble.depth == alone[n].rubble.depth);
+        CHECK(alone[n].rubble.depth <= hog::globe::widest_joints);
+        covered += alone[n].rubble.depth > 0.0 ? 1 : 0;
+    }
+    WARN("cells with rubble: " << covered);
 }
