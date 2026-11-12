@@ -19,7 +19,6 @@ add_library(hog_globe
     src/pockets.cpp
     src/qef.cpp
     src/rockfall.cpp
-    src/shape_tree.cpp
     src/shoreface.cpp
     src/strata.cpp
     src/surface.cpp
@@ -64,7 +63,6 @@ hog_add_tests(hog_globe
     tests/pockets_tests.cpp
     tests/qef_tests.cpp
     tests/rockfall_tests.cpp
-    tests/shape_tree_tests.cpp
     tests/shoreface_tests.cpp
     tests/strata_tests.cpp
     tests/vents_tests.cpp
