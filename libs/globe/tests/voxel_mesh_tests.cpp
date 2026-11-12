@@ -1,5 +1,6 @@
 #include "bed.hpp"
 
+#include <hog/globe/cell.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -279,6 +281,43 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
     const double coarse_top = layers.bottom((static_cast<int>(ground) + 1) * 4);
     for (const hog::globe::VoxelVertex& vertex : wide.vertices) {
         CHECK(std::abs(glm::length(wide.origin + hog::DVec3{vertex.position}) - coarse_top) < 0.01);
+    }
+}
+
+TEST_CASE("a tile at a face's edge reads the tile across it on the next face",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const VoxelTree rock = flat().tiles.front().second;
+    const VoxelTree air{Volume::tile_side};
+    const auto tiles = std::uint32_t{1} << (layers.level - std::countr_zero(tile));
+    for (const auto [i, by] : {std::pair{tiles - 1, 1}, std::pair{0U, -1}}) {
+        const hog::globe::TileKey key{.level = 0, .face = 2, .i = i, .j = 10, .k = 0};
+        const auto next = hog::globe::next_to(
+            {.level = static_cast<std::uint8_t>(layers.level - std::countr_zero(tile)),
+             .face = key.face,
+             .i = key.i,
+             .j = key.j},
+            by, 0);
+        REQUIRE(next.has_value());
+        const hog::globe::Cell across = next.value_or(hog::globe::Cell{});
+        CHECK(across.face != key.face);
+        const auto beside = [&](hog::globe::TileKey at) -> const VoxelTree* {
+            return at.face == across.face && at.i == across.i && at.j == across.j && at.k == 0
+                       ? &air
+                       : nullptr;
+        };
+        CAPTURE(i);
+        // Open air across the edge: its rock shows its side there; nothing held, it goes on.
+        CHECK(quads(hog::globe::mesh_tile(layers, key, rock)) == std::size_t{tile} * tile);
+        CHECK(quads(hog::globe::mesh_tile(layers, key, rock, beside)) ==
+              (std::size_t{tile} * tile) + (std::size_t{tile} * (ground + 1)));
+        // Rock across it the same: nothing shows between them.
+        const auto same = [&](hog::globe::TileKey at) -> const VoxelTree* {
+            return at.face == across.face && at.i == across.i && at.j == across.j && at.k == 0
+                       ? &rock
+                       : nullptr;
+        };
+        CHECK(quads(hog::globe::mesh_tile(layers, key, rock, same)) == std::size_t{tile} * tile);
     }
 }
 

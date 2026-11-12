@@ -8,6 +8,7 @@
 #include <cmath>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <utility>
 
 namespace hog::client {
@@ -17,21 +18,25 @@ constexpr int side = globe::Volume::tile_side;
 // A tile is a cell this many levels coarser than its voxels'.
 constexpr int coarser = std::countr_zero(static_cast<unsigned>(side));
 
-// The six tiles beside `key` on its face at its level, as many as there are.
-std::vector<globe::TileKey> beside(globe::TileKey key) {
+// The six tiles beside `key` at its level: across a face's edge, the next face's.
+std::vector<globe::TileKey> beside(globe::TileKey key, const globe::Layers& layers) {
+    const globe::Cell cell{.level = static_cast<std::uint8_t>(layers.level - coarser - key.level),
+                           .face = key.face,
+                           .i = key.i,
+                           .j = key.j};
     std::vector<globe::TileKey> next;
-    for (const auto [di, dj, dk] :
-         {std::array{-1, 0, 0}, std::array{1, 0, 0}, std::array{0, -1, 0}, std::array{0, 1, 0},
-          std::array{0, 0, -1}, std::array{0, 0, 1}}) {
-        if ((di < 0 && key.i == 0) || (dj < 0 && key.j == 0) || (dk < 0 && key.k == 0)) {
-            continue;
+    for (const auto [di, dj] :
+         {std::array{-1, 0}, std::array{1, 0}, std::array{0, -1}, std::array{0, 1}}) {
+        if (const std::optional<globe::Cell> over = globe::next_to(cell, di, dj)) {
+            next.push_back(
+                {.level = key.level, .face = over->face, .i = over->i, .j = over->j, .k = key.k});
         }
-        next.push_back({.level = key.level,
-                        .face = key.face,
-                        .i = key.i + static_cast<std::uint32_t>(di),
-                        .j = key.j + static_cast<std::uint32_t>(dj),
-                        .k = key.k + static_cast<std::uint32_t>(dk)});
     }
+    if (key.k > 0) {
+        next.push_back(
+            {.level = key.level, .face = key.face, .i = key.i, .j = key.j, .k = key.k - 1});
+    }
+    next.push_back({.level = key.level, .face = key.face, .i = key.i, .j = key.j, .k = key.k + 1});
     return next;
 }
 
@@ -139,7 +144,7 @@ void TileMeshes::take(const SentTree& sent) {
     waiting_.insert(key);
     // Those beside it read it at their edges, and so do the finer ones held against it, and the
     // coarser ones beside it with nothing of their level or coarser there.
-    for (const globe::TileKey next : beside(key)) {
+    for (const globe::TileKey next : beside(key, layers_)) {
         if (held_.contains(next)) {
             waiting_.insert(next);
         }
@@ -165,7 +170,7 @@ void TileMeshes::mesh(globe::TileKey key) {
     std::map<globe::TileKey, std::shared_ptr<const globe::VoxelTree>> near;
     // Beside it where held at its level, else as the finest coarser tile held there has it, else
     // as the finer ones held against it do.
-    for (const globe::TileKey next : beside(key)) {
+    for (const globe::TileKey next : beside(key, layers_)) {
         bool found = false;
         for (globe::TileKey over = next; over.level < by_level_.size() && !found;
              over = over.parent()) {
@@ -391,7 +396,7 @@ void TileMeshes::drop(globe::TileKey key) {
         touched_.insert(finer);
     }
     // Those that read it at their edges read what's held there now.
-    for (const globe::TileKey next : beside(key)) {
+    for (const globe::TileKey next : beside(key, layers_)) {
         if (held_.contains(next)) {
             waiting_.insert(next);
         }

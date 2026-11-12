@@ -6,6 +6,8 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <utility>
@@ -509,8 +511,9 @@ constexpr int coarsest_beside = 24;
 // nearest edge. Each tile beside is looked for once.
 class Near {
 public:
-    Near(TileKey key, const VoxelTree& tile, const TileAt& beside)
-        : key_{key}, tile_{&tile}, beside_{&beside} {}
+    Near(const Layers& layers, TileKey key, const VoxelTree& tile, const TileAt& beside)
+        : key_{key}, tile_{&tile}, beside_{&beside},
+          face_side_{std::int64_t{1} << (layers.level - key.level)} {}
 
     Cube operator()(int x, int y, int z) {
         constexpr int across = Volume::tile_side;
@@ -525,6 +528,15 @@ public:
         const int dz = step(z);
         if (dx == 0 && dy == 0 && dz == 0) {
             return tile_->at(x, y, z);
+        }
+        const std::int64_t wi = (std::int64_t{key_.i} * across) + x;
+        const std::int64_t wj = (std::int64_t{key_.j} * across) + y;
+        if (wi < 0 || wi >= face_side_ || wj < 0 || wj >= face_side_) {
+            if (const std::optional<Cube> over = across_edge(wi, wj, z)) {
+                return *over;
+            }
+            return tile_->at(std::clamp(x, 0, across - 1), std::clamp(y, 0, across - 1),
+                             std::clamp(z, 0, across - 1));
         }
         const Found& found = find(dx, dy, dz);
         if (found.tree == nullptr) {
@@ -544,6 +556,49 @@ public:
     }
 
 private:
+    // The voxel past the face's edge at (`wi`, `wj`), counted in the key's voxels along its face,
+    // `z` up the tile: on the next face, as the tile held there at the key's level or the finest
+    // coarser one has it; none past the cube's corners or where none's held.
+    [[nodiscard]] std::optional<Cube> across_edge(std::int64_t wi, std::int64_t wj, int z) {
+        constexpr int across = Volume::tile_side;
+        const std::int64_t wk = (std::int64_t{key_.k} * across) + z;
+        if (!*beside_ || wk < 0) {
+            return std::nullopt;
+        }
+        const auto edge = [&](std::int64_t at) {
+            return std::clamp<std::int64_t>(at, 0, face_side_ - 1);
+        };
+        const Cell from{.level = static_cast<std::uint8_t>(
+                            std::countr_zero(static_cast<std::uint64_t>(face_side_))),
+                        .face = key_.face,
+                        .i = static_cast<std::uint32_t>(edge(wi)),
+                        .j = static_cast<std::uint32_t>(edge(wj))};
+        const std::optional<Cell> next =
+            next_to(from, static_cast<int>(wi - edge(wi)), static_cast<int>(wj - edge(wj)));
+        if (!next) {
+            return std::nullopt;
+        }
+        for (int up = 0; up <= coarsest_beside && key_.level + up < UINT8_MAX; ++up) {
+            const auto i = static_cast<std::uint32_t>(next->i >> up);
+            const auto j = static_cast<std::uint32_t>(next->j >> up);
+            const auto k = static_cast<std::uint32_t>(wk >> up);
+            const TileKey key{.level = static_cast<std::uint8_t>(key_.level + up),
+                              .face = next->face,
+                              .i = i / across,
+                              .j = j / across,
+                              .k = k / across};
+            const auto [found, added] = across_.try_emplace(key, nullptr);
+            if (added) {
+                found->second = (*beside_)(key);
+            }
+            if (found->second != nullptr) {
+                return found->second->at(static_cast<int>(i % across), static_cast<int>(j % across),
+                                         static_cast<int>(k % across));
+            }
+        }
+        return std::nullopt;
+    }
+
     // The voxel at `x`, `y`, `z` of the key's level past its side `dx`, `dy`, `dz`, as the finest
     // tile there has it right where it meets the tile; none where none's held.
     [[nodiscard]] std::optional<Cube> finer_at(int x, int y, int z, int dx, int dy, int dz) const {
@@ -622,7 +677,9 @@ private:
     TileKey key_;
     const VoxelTree* tile_;
     const TileAt* beside_;
+    std::int64_t face_side_; // the key's voxels along a face
     std::array<Found, 27> found_{};
+    std::map<TileKey, const VoxelTree*> across_;
 };
 
 } // namespace
@@ -654,7 +711,7 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
 
     Block block{across, base - 1, across + 2};
     std::vector<Held> column(static_cast<std::size_t>(across + 2));
-    Near near{key, tile, beside};
+    Near near{layers, key, tile, beside};
     for (int y = -1; y <= across; ++y) {
         for (int x = -1; x <= across; ++x) {
             for (std::size_t n = 0; n < column.size(); ++n) {
