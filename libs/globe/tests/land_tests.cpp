@@ -332,4 +332,34 @@ TEST_CASE("generator term cost", "[.bench][globe][land]") {
              [&](hog::DVec3 d) { return terms::rockfall(context, d, lod) ? 1.0 : 0.0; });
         WARN(sink);
     }
+    // Over a whole tile's cells at each level, as tiles are made.
+    for (std::uint8_t level = 0; level <= 6; level += 2) {
+        TileKey up = key;
+        for (std::uint8_t k = 0; k < level; ++k) {
+            up = up.parent();
+        }
+        const hog::globe::Layers layers = hog::globe::coarser_layers(generator.layers(), level);
+        std::vector<hog::globe::Cell> cells;
+        for (std::uint32_t j = 0; j < 64; ++j) {
+            for (std::uint32_t i = 0; i < 64; ++i) {
+                cells.push_back({.level = static_cast<std::uint8_t>(layers.level),
+                                 .face = up.face,
+                                 .i = (up.i * 64) + i,
+                                 .j = (up.j * 64) + j});
+            }
+        }
+        const double lod = hog::globe::voxel_lod(generator) * (1 << level);
+        const auto per_cell = [&](auto from) {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count() /
+                   static_cast<double>(cells.size()) * 1e6;
+        };
+        auto started = std::chrono::steady_clock::now();
+        const auto grounds = terms::ground(context, cells, lod);
+        const double ground_us = per_cell(started);
+        started = std::chrono::steady_clock::now();
+        const auto falls = terms::fallen(context, cells, lod);
+        const double fallen_us = per_cell(started);
+        WARN("level " << int{level} << " tile cells: ground " << ground_us << " us, fallen "
+                      << fallen_us << " us (" << grounds.size() + falls.size() << ")");
+    }
 }

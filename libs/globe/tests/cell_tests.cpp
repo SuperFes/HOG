@@ -47,6 +47,25 @@ TEST_CASE("a cell's middle lies under it, down to the finest level", "[globe][ce
     }
 }
 
+TEST_CASE("a direction's place across a cell is where its finer cells put it", "[globe][cell]") {
+    constexpr int finer = 4;
+    for (const int level : {0, 3, 12}) {
+        const std::uint64_t count = hog::globe::cells_at(level + finer);
+        for (std::uint64_t k = 0; k < 600; ++k) {
+            const Cell fine =
+                hog::globe::cell_at_index(level + finer, (k * 0x9E37'79B9'7F4AULL) % count);
+            const auto [cell, i, j] = hog::globe::place_under(hog::globe::center(fine), level);
+            CHECK(cell == hog::globe::cell_under(hog::globe::center(fine), level));
+            const auto expected = [&](std::uint32_t along, std::uint32_t whole) {
+                return ((static_cast<double>(along - (whole << finer)) + 0.5) / (1U << finer)) -
+                       0.5;
+            };
+            CHECK(std::abs(i - expected(fine.i, cell.i)) < 1e-9);
+            CHECK(std::abs(j - expected(fine.j, cell.j)) < 1e-9);
+        }
+    }
+}
+
 TEST_CASE("cells tile the sphere, none more than root two the size of another", "[globe][cell]") {
     for (const int level : {0, 2, 6}) {
         double total = 0.0;

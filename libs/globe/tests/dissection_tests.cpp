@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
+#include <random>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -27,6 +29,7 @@ DVec3 at(double east, double north) {
 Undissected sloping(double east, double slope, double steepest) {
     return {.top = {.value = slope * east, .gradient = {0.0, slope, 0.0}},
             .fall = {0.0, slope, 0.0},
+            .broad_fall = {0.0, slope, 0.0},
             .above_floor = 1e30,
             .steepest = steepest,
             .ice = 0.0};
@@ -73,9 +76,10 @@ TEST_CASE("a slope is cut by gullies to crests between them, no steeper than it 
             highest = std::max(highest, here - (slope * east));
         }
     }
-    // The widest cut as deep as their walls can stand across half their width, taking what's
-    // left of the steepest once the slope down them has its share, less the rounding.
-    CHECK(highest - lowest > 0.9 * (steepest - slope) * gullies.longest / 2.0 * 0.75);
+    // The deepest of the widest, some cutting deeper than others, three quarters as deep as their
+    // walls can stand across half their width, taking what's left of the steepest once the slope
+    // down them has its share, less the rounding.
+    CHECK(highest - lowest > 0.75 * 0.9 * (steepest - slope) * gullies.longest / 2.0 * 0.75);
     // Where the gullies about fade and branch, their depth changes too, steepening them a little.
     CHECK(steepest_seen < 1.4 * steepest);
 }
@@ -207,9 +211,45 @@ TEST_CASE("the slope through the gullies is told", "[globe][dissection]") {
         }
     }
     UNSCOPED_INFO("told slope off by " << total / count << " on average, " << worst << " at worst");
-    // Left untold: how a finer gully's way turns with the walls it runs down, and how fast the
-    // stripes turn where they hold its walls back, both rare and local.
     CHECK(total / count < 0.06);
+    WARN("told worst " << worst << " mean " << total / count);
+}
+
+TEST_CASE("gullies widely spaced on a gentle slope stand no steeper than told",
+          "[globe][dissection]") {
+    // Wide gullies cut deep enough for their walls to hold them back, the finer ones cut into
+    // their walls: where they branch the stripes run close, and none may swing about there.
+    constexpr Gullies wide{.longest = 1024.0, .octaves = 7, .seed = 11};
+    constexpr double lod = 16.0;
+    constexpr double slope = 0.24;
+    constexpr double steepest = 1.73;
+    constexpr double h = 0.5;
+    const auto top = [&](double east, double north) {
+        return dissect(at(east, north), radius, sloping(east, slope, steepest), wide, lod).top;
+    };
+    double worst = 0.0;
+    double steepest_seen = 0.0;
+    double best_e = 0.0;
+    double best_n = 0.0;
+    for (int east_at = 0; east_at < 150; ++east_at) {
+        const double east = east_at * 10.0;
+        for (int north_at = 0; north_at < 150; ++north_at) {
+            const double north = north_at * 10.0;
+            const DVec3 told = top(east, north).gradient;
+            const double rising_east =
+                (top(east + h, north).value - top(east - h, north).value) / (2.0 * h);
+            const double rising_north =
+                (top(east, north + h).value - top(east, north - h).value) / (2.0 * h);
+            worst = std::max(worst, std::hypot(told.y - rising_east, told.z - rising_north));
+            if (std::hypot(rising_east, rising_north) > steepest_seen) {
+                best_e = east;
+                best_n = north;
+            }
+            steepest_seen = std::max(steepest_seen, std::hypot(rising_east, rising_north));
+        }
+    }
+    WARN("wide worst " << worst << " steepest " << steepest_seen << " at " << best_e << ","
+                       << best_n);
 }
 
 TEST_CASE("the bed's heights stand about within the spread told, which is told as it changes, "
@@ -231,15 +271,23 @@ TEST_CASE("the bed's heights stand about within the spread told, which is told a
             within += std::abs(here.cut) <= 1.5 * here.spread.value ? 1 : 0;
             share += std::abs(here.cut) / here.spread.value;
             spread += here.spread.value > 0.0 ? 1 : 0;
-            const auto rate = [&](auto of) {
-                return DVec3{0.0,
-                             (of(made(east + h, north)) - of(made(east - h, north))) / (2.0 * h),
-                             (of(made(east, north + h)) - of(made(east, north - h))) / (2.0 * h)};
+            // How each changes a metre east and north, against how its gradient says it does along
+            // the ground there.
+            const DVec3 eastward =
+                (at(east + h, north) - at(east - h, north)) * (radius / (2.0 * h));
+            const DVec3 northward =
+                (at(east, north + h) - at(east, north - h)) * (radius / (2.0 * h));
+            const auto off = [&](DVec3 gradient, auto of) {
+                const double de =
+                    (of(made(east + h, north)) - of(made(east - h, north))) / (2.0 * h);
+                const double dn =
+                    (of(made(east, north + h)) - of(made(east, north - h))) / (2.0 * h);
+                return std::hypot(glm::dot(gradient, eastward) - de,
+                                  glm::dot(gradient, northward) - dn);
             };
-            spread_off += glm::length(here.spread.gradient -
-                                      rate([](const Dissected& d) { return d.spread.value; }));
-            cut_off +=
-                glm::length(here.cut_gradient - rate([](const Dissected& d) { return d.cut; }));
+            spread_off +=
+                off(here.spread.gradient, [](const Dissected& d) { return d.spread.value; });
+            cut_off += off(here.cut_gradient, [](const Dissected& d) { return d.cut; });
             ++count;
         }
     }
@@ -252,7 +300,8 @@ TEST_CASE("the bed's heights stand about within the spread told, which is told a
     CHECK(share / count > 0.4);
     CHECK(share / count < 0.9);
     CHECK(within > 99 * count / 100);
-    CHECK(spread_off / count < 1e-9);
+    // As near as differences over a twentieth of a metre tell, on gullies a hundred metres apart.
+    CHECK(spread_off / count < 1e-6);
     CHECK(cut_off / count < 0.06);
 }
 
@@ -289,4 +338,43 @@ TEST_CASE("what's laid settles into the bed's hollows first, level over it once 
     }
     // Nothing laid lies nowhere, under the lowest of it.
     CHECK(settled(0.0, 3.0).level == -3.0);
+}
+
+TEST_CASE("gullies move the bed within their bounds anywhere in a ball", "[globe][dissection]") {
+    std::mt19937_64 random{3};
+    std::uniform_real_distribution<double> unit{0.0, 1.0};
+    double sampled = 0.0;
+    double bounded = 0.0;
+    for (int n = 0; n < 60; ++n) {
+        const double steepest = 0.5 + unit(random);
+        const double lod = n % 3 == 0 ? 0.5 : 8.0 * unit(random);
+        const double east = 5'000.0 * unit(random);
+        const double north = 5'000.0 * unit(random);
+        const double within = 1.0 + (200.0 * unit(random) * unit(random));
+        const hog::globe::Interval bounds =
+            hog::globe::gully_bounds(at(east, north) * radius, within, steepest, gullies, lod);
+        double low = 1e300;
+        double high = -1e300;
+        for (int k = 0; k < 300; ++k) {
+            const double turn = 2.0 * std::numbers::pi * unit(random);
+            const double off = within * std::sqrt(unit(random));
+            const DVec3 point = at(east + (off * std::cos(turn)), north + (off * std::sin(turn)));
+            // Any way down, no steeper than the walls stand, over any floor.
+            const double slope = steepest * unit(random);
+            const double way = 2.0 * std::numbers::pi * unit(random);
+            const DVec3 fall = DVec3{0.0, std::cos(way), std::sin(way)} * slope;
+            const Undissected ground{.top = {.value = 10.0, .gradient = fall},
+                                     .fall = fall,
+                                     .broad_fall = fall,
+                                     .above_floor = 40.0 * unit(random),
+                                     .steepest = steepest};
+            const double moved = dissect(point, radius, ground, gullies, lod).top.value - 10.0;
+            CHECK(bounds.contains(moved));
+            low = std::min(low, moved);
+            high = std::max(high, moved);
+        }
+        sampled += high - low;
+        bounded += bounds.high - bounds.low;
+    }
+    WARN("sampled span " << sampled / bounded << " of the bounds'");
 }

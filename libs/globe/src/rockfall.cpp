@@ -72,7 +72,7 @@ namespace {
 // Rock falling from a crag comes to rest no further out than where a line down from it at the
 // shadow angle meets the ground, 27.5 degrees at the least (Evans and Hungr).
 const double shadow = maths::tan(27.5 * std::numbers::pi / 180.0);
-// The way up from a cell is walked in steps a coarsest cell long, this many at most.
+// The way up from a cell is walked in steps a cell long, this many at most.
 constexpr int most_steps = 16;
 // The share of a block's height that lies in the ground.
 constexpr double sunk = 0.2;
@@ -125,35 +125,41 @@ double covered(const Ground& here, const Ground& source, double spread) noexcept
     return source.loosening * source.bare / spread * lasting(here, size) / size;
 }
 
-// What lies fallen about a coarsest cell, and the rock most of it fell from.
+// What lies fallen about a cell, and the rock most of it fell from.
 struct Fallen {
     double cover = 0.0;
     Ground source;
     DVec3 from{0.0};
 };
 
-Fallen fallen_about(const Context& context, Cell coarsest) noexcept {
-    const Planet& planet = *context.planet;
-    const double step = width_of(planet, coarsest);
-    // Read as coarsely as the step, so the way up isn't turned by every crag and gully.
-    const double lod = step / 2.0;
-    DVec3 at = center(coarsest);
-    const Ground here = ground(context, at, lod);
+// What lies fallen about `cell`, walking up from it cell by cell of its level and reading the
+// ground at each through `ground_of`.
+template <typename GroundOf>
+Fallen fallen_about(const Planet& planet, Cell cell, const GroundOf& ground_of) {
+    const double step = width_of(planet, cell);
+    const Ground here = ground_of(cell);
     Fallen fallen;
     if (glm::length(here.rise) > maths::tan(properties(Material::Gravel).repose)) {
         return fallen; // it rolls on down
     }
     // What comes loose here stays here.
     double most = covered(here, here, 1.0);
-    fallen = {.cover = most, .source = here, .from = at};
+    fallen = {.cover = most, .source = here, .from = center(cell)};
+    Cell at = cell;
     Ground last = here;
     for (int k = 1; k <= most_steps; ++k) {
         const double climbs = glm::length(last.rise);
         if (climbs <= 0.0) {
             break;
         }
-        at = glm::normalize(at + (last.rise / climbs * (step / planet.body.radius)));
-        const Ground next = ground(context, at, lod);
+        const Cell up = cell_under(
+            glm::normalize(center(at) + (last.rise / climbs * (step / planet.body.radius))),
+            cell.level);
+        if (up.face == at.face && up.i == at.i && up.j == at.j) {
+            break;
+        }
+        at = up;
+        const Ground next = ground_of(at);
         if (next.height <= last.height) {
             break; // over the crest
         }
@@ -168,11 +174,29 @@ Fallen fallen_about(const Context& context, Cell coarsest) noexcept {
         if (share > most) {
             most = share;
             fallen.source = next;
-            fallen.from = at;
+            fallen.from = center(at);
         }
     }
     fallen.cover = std::min(fallen.cover, 1.0);
     return fallen;
+}
+
+// The ground the walk up from a cell reads, as coarsely as its step so the way up isn't turned
+// by every crag and gully, and never finer than `lod`.
+double walk_lod(const Planet& planet, Cell cell, double lod) noexcept {
+    return std::max(lod, width_of(planet, cell) / 2.0);
+}
+
+// The level of the cells fallen rock is reckoned over at `lod`: the coarsest rock cells, or
+// the cells `lod` resolves where those are too fine to show, whose rock falls within them.
+int fall_level(const Planet& planet, double lod) noexcept {
+    const double side_at_root = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.body.radius;
+    int level = 0;
+    while (level < rock_level(planet) &&
+           side_at_root > std::ldexp(lod / std::numbers::sqrt2, level)) {
+        ++level;
+    }
+    return level;
 }
 
 double across(const std::array<double, 3>& sides) noexcept {
@@ -210,20 +234,24 @@ Material material_of(const Context& context, const Fallen& fallen) noexcept {
 // How many blocks are drawn about a coarsest cell to find the rubble the smallest make there.
 constexpr int rubble_draws = 8;
 
-// The rubble the blocks about `coarsest` too small for `lod` make, spread over the ground: each
+// The rubble the blocks about `cell` too small for `lod` make, spread over the ground: each
 // covers the same share of the ground whatever its size, so as deep as the share of it standing
 // over the ground on the whole, over the share of the ground they cover.
-Rubble rubble_in(const Context& context, Cell coarsest, const Fallen& fallen, double lod) noexcept {
+Rubble rubble_in(const Context& context, Cell cell, const Fallen& fallen, double lod) noexcept {
     if (fallen.cover <= 0.0 || lod <= 0.0) {
         return {};
     }
-    const double widest = fits * width_of(*context.planet, coarsest);
+    const Planet& planet = *context.planet;
+    const Cell coarsest = std::cmp_less(cell.level, rock_level(planet))
+                              ? cell_under(center(cell), rock_level(planet))
+                              : coarsest_of(planet, cell);
+    const double widest = fits * width_of(planet, coarsest);
     double deep = 0.0;
     for (int draw = 0; draw < rubble_draws; ++draw) {
         const std::array<double, 3> sides =
             sides_of(context, fallen, widest,
-                     hash_values(context.seed(Term::Rockfall), coarsest.level, index_of(coarsest),
-                                 draw, 0x7275'6262'6c65ULL));
+                     hash_values(context.seed(Term::Rockfall), cell.level, index_of(cell), draw,
+                                 0x7275'6262'6c65ULL));
         if (sides[0] < lod) {
             deep += sides[2] * (1.0 - sunk);
         }
@@ -289,11 +317,20 @@ std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fa
     return rock;
 }
 
-// Rocks found in each cell and what lies fallen about each coarsest one, kept for the cells
-// beside and inside them.
+// Rocks found in each cell, what lies fallen about each cell it's reckoned over and the ground
+// read on the way, kept for the cells beside and inside them.
 class Rocks {
 public:
     Rocks(const Context& context, double lod) : context_{&context}, lod_{lod} {}
+
+    // The ground of `cells`, read at the detail asked, so walks over them needn't read it again.
+    void know(std::span<const Cell> cells, std::span<const Ground> grounds) {
+        for (std::size_t k = 0; k < cells.size() && k < grounds.size(); ++k) {
+            if (walk_lod(*context_->planet, cells[k], lod_) == lod_) {
+                grounds_.try_emplace(key(cells[k]), grounds[k]);
+            }
+        }
+    }
 
     // The block in `cell`, none where a block in a cell holding it lies across it.
     std::optional<Rock> in(Cell cell) {
@@ -350,45 +387,43 @@ public:
     }
 
     // The rubble of the blocks too small to resolve under `direction`, blended between the
-    // middles of the coarsest cells about it so it runs on unbroken from one to the next.
+    // middles of the cells it's reckoned over so it runs on unbroken from one to the next.
     Rubble rubble(DVec3 direction) {
-        const int level = rock_level(*context_->planet);
-        const Cell coarsest = cell_under(direction, level);
-        constexpr int finer = 6;
-        const Cell fine = cell_under(direction, level + finer);
-        const auto off = [&](std::uint32_t along, std::uint32_t whole) {
-            return ((static_cast<double>(along - (whole << finer)) + 0.5) / (1U << finer)) - 0.5;
-        };
-        const double off_i = off(fine.i, coarsest.i);
-        const double off_j = off(fine.j, coarsest.j);
+        const auto [held, off_i, off_j] =
+            place_under(direction, fall_level(*context_->planet, lod_));
         const int di = off_i < 0.0 ? -1 : 1;
         const int dj = off_j < 0.0 ? -1 : 1;
-        const auto depth_at = [&](int i, int j) {
-            const std::optional<Cell> cell = next_to(coarsest, i, j);
-            return rubble_of(cell.value_or(coarsest)).depth;
+        const auto depth_at = [&](int i, int j, double weight) {
+            if (weight <= 0.0) {
+                return 0.0;
+            }
+            const std::optional<Cell> cell = next_to(held, i, j);
+            return weight * rubble_of(cell.value_or(held)).depth;
         };
         const double across_i = std::abs(off_i);
         const double across_j = std::abs(off_j);
-        Rubble blended = rubble_of(coarsest);
-        blended.depth =
-            ((1.0 - across_j) *
-             (((1.0 - across_i) * blended.depth) + (across_i * depth_at(di, 0)))) +
-            (across_j * (((1.0 - across_i) * depth_at(0, dj)) + (across_i * depth_at(di, dj))));
+        Rubble blended = rubble_of(held);
+        blended.depth = ((1.0 - across_j) * (1.0 - across_i) * blended.depth) +
+                        depth_at(di, 0, (1.0 - across_j) * across_i) +
+                        depth_at(0, dj, across_j * (1.0 - across_i)) +
+                        depth_at(di, dj, across_j * across_i);
         return blended;
     }
 
 private:
-    const Rubble& rubble_of(Cell coarsest) {
-        const auto [kept, added] = rubble_.try_emplace(index_of(coarsest));
+    static std::uint64_t key(Cell cell) noexcept { return hash_values(cell.level, index_of(cell)); }
+
+    const Rubble& rubble_of(Cell cell) {
+        const auto [kept, added] = rubble_.try_emplace(key(cell));
         if (added) {
-            kept->second = rubble_in(*context_, coarsest, fallen(coarsest), lod_);
+            kept->second = rubble_in(*context_, cell, fallen(cell), lod_);
         }
         return kept->second;
     }
 
     // The block `cell`'s draw places in it, whatever lies about it.
     const std::optional<Rock>& drawn(Cell cell) {
-        const auto [kept, added] = rocks_.try_emplace(hash_values(cell.level, index_of(cell)));
+        const auto [kept, added] = rocks_.try_emplace(key(cell));
         if (added) {
             kept->second =
                 drawn_in(*context_, cell, fallen(coarsest_of(*context_->planet, cell)), lod_);
@@ -396,10 +431,19 @@ private:
         return kept->second;
     }
 
-    const Fallen& fallen(Cell coarsest) {
-        const auto [kept, added] = fallen_.try_emplace(index_of(coarsest));
+    const Fallen& fallen(Cell cell) {
+        const auto [kept, added] = fallen_.try_emplace(key(cell));
         if (added) {
-            kept->second = fallen_about(*context_, coarsest);
+            kept->second = fallen_about(*context_->planet, cell,
+                                        [this](Cell at) -> const Ground& { return ground_of(at); });
+        }
+        return kept->second;
+    }
+
+    const Ground& ground_of(Cell cell) {
+        const auto [kept, added] = grounds_.try_emplace(key(cell));
+        if (added) {
+            kept->second = ground(*context_, center(cell), walk_lod(*context_->planet, cell, lod_));
         }
         return kept->second;
     }
@@ -409,6 +453,7 @@ private:
     std::unordered_map<std::uint64_t, std::optional<Rock>> rocks_;
     std::unordered_map<std::uint64_t, Fallen> fallen_;
     std::unordered_map<std::uint64_t, Rubble> rubble_;
+    std::unordered_map<std::uint64_t, Ground> grounds_;
 };
 
 } // namespace
@@ -419,7 +464,11 @@ int rock_level(const Planet& planet) noexcept {
 }
 
 double fallen_cover(const Context& context, Cell coarsest) noexcept {
-    return fallen_about(context, coarsest).cover;
+    return fallen_about(*context.planet, coarsest,
+                        [&](Cell at) {
+                            return ground(context, center(at), walk_lod(*context.planet, at, 0.0));
+                        })
+        .cover;
 }
 
 std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) {
@@ -446,8 +495,10 @@ Fall fallen(const Context& context, DVec3 direction, double lod) {
     return {.rock = rocks.under(direction), .rubble = rocks.rubble(direction)};
 }
 
-std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells, double lod) {
+std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells, double lod,
+                         std::span<const Cell> known, std::span<const Ground> grounds) {
     Rocks rocks{context, lod};
+    rocks.know(known, grounds);
     std::vector<Fall> found;
     found.reserve(cells.size());
     for (const Cell cell : cells) {

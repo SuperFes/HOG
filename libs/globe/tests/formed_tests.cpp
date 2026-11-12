@@ -19,6 +19,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -64,11 +65,9 @@ struct Settling {
     struct Read {
         Formed::Here here;
         Formed::Here uncut;
-        // How far the bed under what settled stands over, and the top over, the uncut ones.
-        [[nodiscard]] double bed() const {
-            return here.top.value - settled_on(here) - (uncut.top.value - settled_on(uncut));
-        }
-        [[nodiscard]] double top() const { return here.top.value - uncut.top.value; }
+        // How far the bed under what settled stands over, and the top over, the ground uncut.
+        [[nodiscard]] double bed() const { return -here.cut; }
+        [[nodiscard]] double top() const { return here.layers.beach + settled_on(here) - here.cut; }
         [[nodiscard]] bool covered() const { return settled_on(here) > 0.0; }
         [[nodiscard]] bool plain() const {
             return here.crag == 0.0 && here.layers.beach == 0.0 && uncut.layers.beach == 0.0 &&
@@ -218,6 +217,171 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
     }
     REQUIRE(walked > 0);
     CHECK(wet * 2 > walked);
+}
+
+namespace {
+
+// The land points whose rivers carry the most water on to land or the sea, most first.
+std::vector<std::uint32_t> largest_rivers(const hog::formation::World& world, std::size_t count) {
+    std::vector<std::uint32_t> rivers;
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        if (world.rivers.receiver[point] != point &&
+            world.lakes.lake[point] == hog::formation::Lakes::none &&
+            world.lakes.lake[world.rivers.receiver[point]] == hog::formation::Lakes::none) {
+            rivers.push_back(point);
+        }
+    }
+    const auto more = [&](std::uint32_t a, std::uint32_t b) {
+        return world.lakes.discharge[a] > world.lakes.discharge[b];
+    };
+    const auto kept = std::min(count, rivers.size());
+    std::ranges::partial_sort(rivers, rivers.begin() + static_cast<std::ptrdiff_t>(kept), more);
+    rivers.resize(kept);
+    return rivers;
+}
+
+} // namespace
+
+namespace {
+
+// Metres of a river's water over the ground.
+double river_depth(const Formed::Here& here) {
+    return here.river ? std::max(0.0, here.river->level - here.top.value) : 0.0;
+}
+
+// Narrowing in from between `low` and `high` on where the water read by `at` changes depth most,
+// where a wall keeps its step however close: the two ends then.
+template <class At>
+std::pair<double, double> sharpest(const At& at, double low, double high) {
+    for (int halving = 0; halving < 10; ++halving) {
+        const double mid = 0.5 * (low + high);
+        if (std::abs(river_depth(at(mid)) - river_depth(at(low))) >=
+            std::abs(river_depth(at(high)) - river_depth(at(mid)))) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    return {low, high};
+}
+
+} // namespace
+
+TEST_CASE("a formed river's water stands in its channel and meets its banks without walls",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double lod = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    int crossed = 0;
+    int wet = 0;
+    for (const std::uint32_t point : largest_rivers(world, 20)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 middle = glm::normalize(from + to);
+        const DVec3 across = glm::normalize(glm::cross(to - from, middle));
+        const auto at = [&](double off) {
+            return formed.at(glm::normalize(middle + (across * off)), lod);
+        };
+        if (at(0.0).top.value < 0.0) {
+            continue;
+        }
+        ++crossed;
+        // Across the valley as far as its course winds from the line, a metre at a time.
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
+        bool any = false;
+        Formed::Here last = at(-half / radius);
+        for (int metres = -half; metres < half; ++metres) {
+            const Formed::Here next = at((metres + 1) / radius);
+            if (last.river) {
+                any = true;
+                // It stands over the ground, no higher than its banks in flood.
+                CHECK(last.river->level > last.top.value - last.crag);
+                CHECK(last.river->flood >= last.river->level);
+            }
+            if (river_depth(last) != river_depth(next)) {
+                const auto [low, high] = sharpest(at, metres / radius, (metres + 1) / radius);
+                const Formed::Here a = at(low);
+                const Formed::Here b = at(high);
+                CHECK(std::abs(river_depth(b) - river_depth(a)) <
+                      std::abs(b.top.value - a.top.value) + 0.05 + ((high - low) * radius));
+            }
+            last = next;
+        }
+        wet += any ? 1 : 0;
+    }
+    REQUIRE(crossed > 10);
+    CHECK(wet * 10 > crossed * 9);
+}
+
+TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double lod = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    int walked = 0;
+    for (const std::uint32_t point : largest_rivers(world, 10)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 across = glm::normalize(glm::cross(to - from, from));
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
+        // Across each of a dozen stretches along it, 2 m at a time, the water nearest the line.
+        std::vector<double> levels;
+        constexpr int stretches = 12;
+        for (int k = 1; k < stretches; ++k) {
+            const DVec3 along = glm::normalize(from + ((to - from) * (k / double{stretches})));
+            std::optional<double> level;
+            int nearest = half;
+            for (int metres = -half; metres < half; metres += 2) {
+                const Formed::Here here =
+                    formed.at(glm::normalize(along + (across * (metres / radius))), lod);
+                if (here.river && std::abs(metres) < nearest) {
+                    nearest = std::abs(metres);
+                    level = here.river->level;
+                }
+            }
+            if (level) {
+                levels.push_back(*level);
+            }
+        }
+        if (levels.size() < stretches / 2) {
+            continue;
+        }
+        ++walked;
+        // Its course winds past a stretch more than once, the nearest water a bend on.
+        for (std::size_t k = 1; k < levels.size(); ++k) {
+            CHECK(levels[k] <= levels[k - 1] + 1.0);
+        }
+    }
+    CHECK(walked > 5);
+}
+
+TEST_CASE("a formed river's channel is left out with its water where read coarser than it's wide",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double lod = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    int wet = 0;
+    for (const std::uint32_t point : largest_rivers(world, 10)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 middle = glm::normalize(from + to);
+        const DVec3 across = glm::normalize(glm::cross(to - from, middle));
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
+        for (int metres = -half; metres < half; ++metres) {
+            const DVec3 direction = glm::normalize(middle + (across * (metres / radius)));
+            if (formed.at(direction, lod).river) {
+                ++wet;
+                CHECK_FALSE(formed.at(direction, 1'000.0).river);
+                break;
+            }
+        }
+    }
+    CHECK(wet > 5);
 }
 
 TEST_CASE("a formed lake that brims runs out over its rim at its level", "[globe][formed]") {
@@ -402,11 +566,7 @@ TEST_CASE("gullies cut down through what lies draped on formed ground, what was 
         if (uncut.layers.ice > 0.0 || here.layers.ice > 0.0 || here.crag != 0.0) {
             continue;
         }
-        // The bed under the beach the waves build up on it and what settled over it.
-        const auto bed = [](const Formed::Here& at) {
-            return at.top.value - at.layers.beach - settled_on(at);
-        };
-        const double cut = std::max(0.0, bed(uncut) - bed(here));
+        const double cut = std::max(0.0, here.cut);
         CHECK_THAT(draped(here), WithinAbs(std::max(0.0, draped(uncut) - cut), 1e-6));
         // Less soil and beach, which form again on what's left.
         CHECK(here.layers.cover <=

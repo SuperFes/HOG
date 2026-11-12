@@ -1,7 +1,11 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/formation/smooth.hpp>
+#include <hog/globe/interval.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace hog::globe {
@@ -15,6 +19,7 @@ struct Valley {
     double floor_from = 0.0;
     double floor_to = 0.0;
     double wall = 0.0;
+    DVec3 wall_gradient{0.0}; // how the walls' steepness changes, per metre, where it varies
     double reach = 1e30;
     // Where along the whole valley the line runs, 0 at its head to 1 at its foot, when it's one
     // stretch of a winding valley: water turns only at the valley's own ends.
@@ -25,9 +30,16 @@ struct Valley {
     // Metres either side of the line its floor runs flat, where its river wanders.
     double belt = 0.0;
     // The river's channel winding along the floor: metres across and deep, metres it bends
-    // either side of the line at most, and metres from one bend to the next like it.
+    // either side of the line at most, and metres from one bend to the next like it. Its depth,
+    // and the water's in it, change along the whole valley from those at its head to those at
+    // its foot, so it meets the next valley's channel and water as they are there.
     double channel_width = 0.0;
     double channel_depth = 0.0;
+    double channel_depth_to = 0.0;
+    double water_depth = 0.0;
+    double water_depth_to = 0.0;
+    // The lowest its water stands, as where it runs into a lake that holds it up.
+    double least_water = -1e300;
     double meander = 0.0;
     double meander_length = 1.0;
     std::uint64_t seed = 0;
@@ -48,17 +60,79 @@ struct Wall {
     double height = 0.0;
     DVec3 gradient{0.0};
     double floor = 0.0;
+    // Where the river's water stands along the line here, though only the channel lies under it,
+    // and the banks it rises to in flood.
+    double water = 0.0;
+    double bank = 0.0;
     DVec3 fall{0.0};
     double reaching = 1.0;
+    // How much of a wall the ground standing is, from none across the floor to all up the walls.
+    double steep = 0.0;
     double standing = 0.0;
     DVec3 standing_gradient{0.0}; // per metre, as `gradient`
     DVec3 reaching_gradient{0.0}; // how `reaching` changes, per metre
+    // How deep the channel cuts under `standing`.
+    double cut = 0.0;
+    DVec3 cut_gradient{0.0};
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
+
+// Bounds of where wall_at() has the ground stand anywhere within `within` radians of `direction`,
+// as `standing` and with its rise out of the way as `height`, its walls as steep as anywhere in
+// `steepness` in place of the valley's own.
+struct WallBounds {
+    Interval standing;
+    Interval height;
+};
+[[nodiscard]] WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within,
+                                     double radius, Interval steepness) noexcept;
 
 // Past half its reach, a wall rises away smoothly, `out_of_the_way` by its reach: how far, `away`
 // metres from its line.
 constexpr double out_of_the_way = 1e5;
 [[nodiscard]] double rise_past(double away, double reach) noexcept;
+
+// The lower of the ground standing so far and another way it could, `wall` of it a wall, merged
+// as far as both are walls: a quadratic smooth minimum, its slope shared between the two as they
+// near. The crease where they meet is rounded over `rounding` across, in the gradients' units, so
+// it merges over as much height as they part over that: none where they run alike, and no more
+// than `blend`, as walls meeting head on part; what parts faster, as a channel's banks, is no
+// crest to round.
+void merge_lower(formation::Smooth::Read& top, double& top_wall, double height, DVec3 gradient,
+                 double wall, double rounding, double blend) noexcept;
+
+// Of the stretches of a winding valley, the ground stands as the lowest has it, channel and all:
+// blending them would lift the floor up the walls of those beside and fill the channel in. Where
+// their walls meet, at the spurs between bends, they round over `rounding` metres across, over no
+// more than `blend` in height, as other crests do. The water stands as deep as in the channel of
+// whichever lies lowest, fading out over `handing_over` as another comes lower.
+constexpr double handing_over = 1.0;
+
+class Lowest {
+public:
+    Lowest(double rounding, double blend) noexcept : rounding_{rounding}, blend_{blend} {}
+
+    void add(const Wall& one) noexcept;
+    // `wall`, blended, lowered to it.
+    void lower(Wall& wall) const noexcept;
+
+private:
+    // How deep a stretch's water and floods stand in its channel.
+    struct Water {
+        double ground = 0.0;
+        double water = 0.0;
+        double flood = 0.0;
+    };
+    double rounding_ = 0.0;
+    double blend_ = 0.0;
+    formation::Smooth::Read top_;
+    double top_wall_ = 0.0;
+    double cut_ = 0.0;
+    DVec3 cut_gradient_{0.0};
+    DVec3 fall_{0.0};
+    double floor_ = 0.0;
+    std::array<Water, 32> waters_{};
+    std::size_t count_ = 0;
+};
 
 } // namespace hog::globe
