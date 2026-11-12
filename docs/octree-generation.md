@@ -83,8 +83,19 @@ parent's summary against its children's combined.
    built until nodes are decided or hold few primitives, read anywhere, summaries combine, any
    depth reads the same as the primitives evaluated directly. A 50 m ball split until decided
    sums to its volume within 0.01%.
-2. **Bounds for the ground's pieces**: the smooth field, fbm, valley walls, gullies, crags, each
-   with a value and an interval over a cube, tested against dense sampling.
+2. **Bounds for the ground's pieces** (done), each rigorous and tested against dense sampling,
+   with how much of the bounds the samples span:
+   - fbm over a ball (`fbm_bounds`): per octave the tighter of interval arithmetic over the
+     lattice cells it touches and the middle's value ± the steepest it gets there; 23–31% over a
+     few metres, 13–16% over hundreds.
+   - Smooth fields over a cap (`Smooth::range`): exact, between the points within reach.
+   - Valley walls (`wall_bounds`): floor, steepness and channel each bounded along the stretch;
+     71%.
+   - Gullies (`gully_bounds`): each octave at most half its deepest; 5%, and not shrinking with
+     the ball, since it ignores how finer gullies stay within the crests of coarser ones.
+   - Crags: from nothing to the most rotting over the node (`rotted_by` only grows with how fast
+     and how long the rock rots, and cores stand no higher than they rotted).
+   Walls and gullies live with the uncommitted noise work they bound.
 3. **Formed features as primitives**: forming emits them and builds the tree before play. The
    world must read as it does now at the finest depth, and forming's time is measured.
 4. **Coarse summaries**: right averages and roughness for detail finer than a node.
