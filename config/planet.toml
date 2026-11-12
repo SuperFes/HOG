@@ -3,7 +3,7 @@
 # and its tables; what's left out keeps the working world's value.
 [planet]
 seed = 1 # 812080951
-radius = 115000.0
+radius = 15000.0
 day = 4.0
 tilt = 23.44
 voxel = 0.5
