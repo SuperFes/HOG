@@ -22,6 +22,14 @@ std::optional<int> level_held(const globe::World& world, globe::Site corner) {
 
 } // namespace
 
+std::uint8_t edge_mark(float from_edge) noexcept {
+    const double steps = std::round(static_cast<double>(from_edge) * edge_steps_per_metre);
+    if (!(steps < most_edge_step)) {
+        return 0;
+    }
+    return static_cast<std::uint8_t>((static_cast<unsigned>(steps) + 1U) << edge_shift);
+}
+
 ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, double thickness) {
     ColumnDrawn drawn{
         .ground = {.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}},
@@ -47,7 +55,7 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
                                      .normal = vertex.normal,
                                      .tiles = {tile, tile, tile},
                                      .corner = static_cast<std::uint8_t>(
-                                         corner | (liquid && vertex.shore ? shore_corner : 0U))});
+                                         corner | (liquid ? edge_mark(vertex.from_edge) : 0U))});
         }
         // The face's two triangles, as the mesh has them, onto its corners here.
         const auto from = static_cast<std::uint32_t>(face);

@@ -8,9 +8,12 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <vector>
 
 namespace hog::globe {
+
+inline constexpr float no_edge = std::numeric_limits<float>::infinity();
 
 // A corner of a voxel's face: metres from the mesh's origin, the face's outward normal, and what
 // the voxel is made of.
@@ -18,9 +21,9 @@ struct VoxelVertex {
     Vec3 position{0.0F};
     Vec3 normal{0.0F};
     Material material = Material::Air;
-    // A water sheet's corner on its edge, where it meets what holds no water as high: waves
-    // mustn't lift it off what it meets.
-    bool shore = false;
+    // Of a water sheet's corner, metres along the ground from the sheet's edge, where it meets
+    // what holds no water as high: waves rise from nothing there. `no_edge` where none's near.
+    float from_edge = no_edge;
 };
 
 // The faces of voxels, two triangles each, anticlockwise seen from outside.

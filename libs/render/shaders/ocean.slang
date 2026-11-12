@@ -79,8 +79,12 @@ static const float voxel_sea_kind = 1.0;
 static const float still_kind = 2.0;
 // As hog::client::sea_corner marks the sea's own surfaces among still water's.
 static const uint sea_corner = 1u;
-// As hog::client::shore_corner marks a still water vertex on its sheet's edge.
-static const uint shore_corner = 2u;
+// As hog::client::edge_shift and edge_steps_per_metre mark how far a still water vertex lies from
+// its sheet's edge, 0 for far enough to be clear of it.
+static const uint edge_shift = 1u;
+static const float edge_steps_per_metre = 4.0;
+// Metres the waves may rise for each metre out from a sheet's edge, until they're at full height.
+static const float edge_grade = 0.25;
 
 Surf as_surf(float4 surf) {
     Surf taken;
@@ -220,10 +224,16 @@ Surface vertex_still(StillVertex vertex) {
     const WaveSurface water =
         wave_surface(waves, surface.rest, still_between, surface.floor.xyz, surface.reach);
     float3 moved = water.moved + (up * surface.floor.w);
-    if ((vertex.tiles.w & shore_corner) != 0u) {
-        // On the sheet's edge, waves and the tide may lower the water from what it meets, which
-        // reads as the tide going out, but never lift it off; nor sway it away sideways.
-        moved = up * min(dot(moved, up), 0.0);
+    const uint edge = vertex.tiles.w >> edge_shift;
+    if (edge != 0u) {
+        // Near the sheet's edge, waves and the tide may lower the water from what it meets, which
+        // reads as the tide going out, but rise from nothing at the edge no steeper than the
+        // grade, to as high as they'd stand anyway: twice their spread of heights, over the tide.
+        const float from_edge = float(edge - 1u) / edge_steps_per_metre;
+        const float crest = (2.0 * sqrt(max(water.heave, 0.0))) + max(surface.floor.w, 0.0);
+        const float risen = crest > 0.0 ? saturate(edge_grade * from_edge / crest) : 1.0;
+        const float3 lowered = up * min(dot(moved, up), 0.0);
+        moved = lowered + ((moved - lowered) * risen);
     }
     surface.from_eye += as_drawn(moved, up, surface.normal);
     const Surf surf = surf_at(waves, water, surface.floor.xyz);

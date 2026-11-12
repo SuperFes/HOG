@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <utility>
@@ -16,6 +18,9 @@ namespace hog::globe {
 namespace {
 
 constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+
+// Voxels from a water sheet's edge its corners are told how far they lie, at most.
+constexpr int edge_reach = 8;
 
 // The least share of a voxel a liquid shows in: less wets what's there without standing on it.
 constexpr double least_liquid = 1.0 / 16.0;
@@ -178,17 +183,20 @@ std::vector<Slot> stood(std::span<const Held> column) {
     return std::move(standing.slots);
 }
 
-// The voxels of a column and the columns about it, a voxel past it all round, as drawn.
+// The voxels of a column and the columns about it, `apron` voxels past it all round, as drawn.
 class Block {
 public:
-    Block(int across, int lowest, int height)
-        : across_{across}, lowest_{lowest}, height_{height},
-          slots_(static_cast<std::size_t>((across + 2) * (across + 2) * height)) {}
+    Block(int across, int lowest, int height, int apron = 1)
+        : across_{across}, lowest_{lowest}, height_{height}, apron_{apron},
+          slots_(static_cast<std::size_t>((across + (2 * apron)) * (across + (2 * apron)) *
+                                          height)) {}
 
     [[nodiscard]] int across() const noexcept { return across_; }
     [[nodiscard]] int lowest() const noexcept { return lowest_; }
     [[nodiscard]] int height() const noexcept { return height_; }
-    // `x` and `y` from -1 to across, `z` from lowest up height of them; open space past those.
+    [[nodiscard]] int apron() const noexcept { return apron_; }
+    // `x` and `y` from -apron to across + apron - 1, `z` from lowest up height of them; open space
+    // past those.
     [[nodiscard]] const Slot& at(int x, int y, int z) const {
         static const Slot open;
         return z < lowest_ || z >= lowest_ + height_ ? open : slots_[index(x, y, z)];
@@ -203,14 +211,15 @@ public:
 
 private:
     [[nodiscard]] std::size_t index(int x, int y, int z) const {
-        const int wide = across_ + 2;
-        const int flat = ((((z - lowest_) * wide) + (y + 1)) * wide) + (x + 1);
+        const int wide = across_ + (2 * apron_);
+        const int flat = ((((z - lowest_) * wide) + (y + apron_)) * wide) + (x + apron_);
         return static_cast<std::size_t>(flat);
     }
 
     int across_;
     int lowest_;
     int height_;
+    int apron_;
     std::vector<Slot> slots_;
 };
 
@@ -437,19 +446,94 @@ std::optional<double> surface_near(const Block& block, int x, int y, int z) {
     return std::nullopt;
 }
 
+// How far each corner of a column's water lies from its sheet's edge, in voxels along the ground,
+// as far as the block's apron lets it be told: past that, none's near enough to matter.
+class Edges {
+public:
+    explicit Edges(const Block& block)
+        : block_{&block}, reach_{block.apron() - 1},
+          wide_{block.across() + 1 + (2 * reach_)},
+          distances_(static_cast<std::size_t>(wide_ * wide_)) {}
+
+    // At the corner `x`, `y` of the column, counted from the block's first, of the water at `z`;
+    // none where it's as far as can be told or further.
+    [[nodiscard]] std::optional<double> at(int x, int y, int z) {
+        if (reach_ <= 0) {
+            return std::nullopt;
+        }
+        if (z != z_) {
+            measure(z);
+        }
+        const double distance =
+            distances_[static_cast<std::size_t>(((y + reach_) * wide_) + x + reach_)];
+        return distance < reach_ ? std::optional{distance} : std::nullopt;
+    }
+
+private:
+    // Chamfered: from each corner touching a column without water, on through the others twice.
+    void measure(int z) {
+        z_ = z;
+        const auto far = static_cast<double>(reach_);
+        for (int cy = 0; cy < wide_; ++cy) {
+            for (int cx = 0; cx < wide_; ++cx) {
+                bool dry = false;
+                for (const int by_x : {-1, 0}) {
+                    for (const int by_y : {-1, 0}) {
+                        dry = dry || !surface_near(*block_, cx - reach_ + by_x,
+                                                   cy - reach_ + by_y, z);
+                    }
+                }
+                distances_[static_cast<std::size_t>((cy * wide_) + cx)] = dry ? 0.0 : far;
+            }
+        }
+        const auto relax = [&](int cx, int cy, int dx, int dy, double step) {
+            const int nx = cx + dx;
+            const int ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= wide_ || ny >= wide_) {
+                return;
+            }
+            double& here = distances_[static_cast<std::size_t>((cy * wide_) + cx)];
+            here = std::min(here, distances_[static_cast<std::size_t>((ny * wide_) + nx)] + step);
+        };
+        constexpr double diagonal = std::numbers::sqrt2;
+        for (int cy = 0; cy < wide_; ++cy) {
+            for (int cx = 0; cx < wide_; ++cx) {
+                relax(cx, cy, -1, 0, 1.0);
+                relax(cx, cy, 0, -1, 1.0);
+                relax(cx, cy, -1, -1, diagonal);
+                relax(cx, cy, 1, -1, diagonal);
+            }
+        }
+        for (int cy = wide_ - 1; cy >= 0; --cy) {
+            for (int cx = wide_ - 1; cx >= 0; --cx) {
+                relax(cx, cy, 1, 0, 1.0);
+                relax(cx, cy, 0, 1, 1.0);
+                relax(cx, cy, 1, 1, diagonal);
+                relax(cx, cy, -1, 1, diagonal);
+            }
+        }
+    }
+
+    const Block* block_;
+    int reach_;
+    int wide_;
+    int z_ = std::numeric_limits<int>::min();
+    std::vector<double> distances_;
+};
+
 // The open top of the water in the voxel at `x`, `y`, `z` of the block, as one sheet with the
 // water beside it: each corner as high as the water of the columns about it stands, those within
 // a voxel of its own, so the sea meets itself across columns, tiles and levels rather than
 // standing in steps. Voxels are `size` layers tall.
-void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell first, int x, int y,
-               int z, int size) {
+void add_sheet(VoxelMesh& mesh, const Block& block, Edges& edges, const Layers& layers, Cell first,
+               int x, int y, int z, int size) {
     const Slot& here = block.at(x, y, z);
     if (here.liquid.empty() || end_hidden(here.liquid, true, here, block.at(x, y, z + 1), 1)) {
         return;
     }
     const double own = z + here.liquid.to;
     // A corner with fewer than its four columns' water about it is on the sheet's edge.
-    std::array<bool, 4> shore{};
+    std::array<std::optional<double>, 4> from_edge{};
     int count = 0;
     const auto standing = [&](int corner_x, int corner_y) {
         double sum = 0.0;
@@ -485,9 +569,14 @@ void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell f
         const int bits = corner_x + (2 * corner_y);
         const std::size_t at = rim_of.at(static_cast<std::size_t>(bits));
         points.at(k) = rim.at(at) * radius(standing(corner_x, corner_y));
-        shore.at(k) = count < 4;
+        from_edge.at(k) = count < 4 ? std::optional{0.0} : edges.at(x + corner_x, y + corner_y, z);
+        if (from_edge.at(k)) {
+            from_edge.at(k) = std::max(*from_edge.at(k), count < 4 ? 0.0 : 1.0);
+        }
         out += rim.at(at);
     }
+    // Along the ground, the sheet's voxels are about as wide as its first side.
+    const double wide = glm::distance(points[0], points[1]);
     DVec3 normal = glm::cross(points[1] - points[0], points[2] - points[0]);
     const bool flip = glm::dot(normal, out) < 0.0;
     if (flip) {
@@ -500,7 +589,9 @@ void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell f
         mesh.vertices.push_back({.position = Vec3{points.at(k) - mesh.origin},
                                  .normal = unit,
                                  .material = here.liquid.material,
-                                 .shore = shore.at(k)});
+                                 .from_edge = from_edge.at(k)
+                                                  ? static_cast<float>(*from_edge.at(k) * wide)
+                                                  : no_edge});
     }
     for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
                                            : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {
@@ -714,25 +805,39 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
         .j = key.j};
     mesh.origin = center(whole) * layers.bottom(base * size);
 
-    Block block{across, base - 1, across + 2};
+    Block block{across, base - 1, across + 2, edge_reach + 1};
     std::vector<Held> column(static_cast<std::size_t>(across + 2));
     Near near{layers, key, tile, beside};
-    for (int y = -1; y <= across; ++y) {
-        for (int x = -1; x <= across; ++x) {
-            for (std::size_t n = 0; n < column.size(); ++n) {
-                const int z = static_cast<int>(n) - 1;
-                column[n] = base + z < shell ? held_of(near(x, y, z)) : Held{};
+    bool wet = false;
+    // The columns `from` to `to` voxels past the tile's own, all round.
+    const auto stand = [&](int from, int to) {
+        for (int y = -to; y < across + to; ++y) {
+            for (int x = -to; x < across + to; ++x) {
+                if (std::max({0, -x, -y, x - across + 1, y - across + 1}) < from) {
+                    continue;
+                }
+                for (std::size_t n = 0; n < column.size(); ++n) {
+                    const int z = static_cast<int>(n) - 1;
+                    column[n] = base + z < shell ? held_of(near(x, y, z)) : Held{};
+                    wet = wet || column[n].liquid_share > 0.0;
+                }
+                block.stand(x, y, column);
             }
-            block.stand(x, y, column);
         }
+    };
+    stand(0, 1);
+    // Only water needs to see further, to how far its sheet's edge lies.
+    if (wet) {
+        stand(2, block.apron());
     }
+    Edges edges{block};
     for (int z = base; z < top; ++z) {
         const double low = layers.bottom(z * size);
         const double high = layers.bottom((z + 1) * size);
         for (int y = 0; y < across; ++y) {
             for (int x = 0; x < across; ++x) {
                 add_voxel(mesh, block, first, x, y, z, low, high);
-                add_sheet(mesh, block, layers, first, x, y, z, size);
+                add_sheet(mesh, block, edges, layers, first, x, y, z, size);
             }
         }
     }
@@ -761,13 +866,14 @@ VoxelMesh mesh_tile_column(const World& world, Site corner, int level) {
     // A voxel under the floor, all rock, and one over the top, all air.
     Block block{across, span->lowest - 1, span->highest - span->lowest + 2};
     fill(world, block, first, size);
+    Edges edges{block};
     for (int z = span->lowest; z < span->highest; ++z) {
         const double low = layers.bottom(z * size);
         const double high = layers.bottom((z + 1) * size);
         for (int y = 0; y < across; ++y) {
             for (int x = 0; x < across; ++x) {
                 add_voxel(mesh, block, first, x, y, z, low, high);
-                add_sheet(mesh, block, layers, first, x, y, z, size);
+                add_sheet(mesh, block, edges, layers, first, x, y, z, size);
             }
         }
     }

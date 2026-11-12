@@ -28,8 +28,14 @@ struct ColumnDrawn {
 
 // What marks the sea's own surfaces among still water: the corner byte of each of their vertices.
 inline constexpr std::uint8_t sea_corner = 1;
-// What marks a water vertex on its sheet's edge, which waves and the tide may lower, never raise.
-inline constexpr std::uint8_t shore_corner = 2;
+// Over the sea's mark, how far a water vertex lies from its sheet's edge, for waves to rise from
+// nothing there: 0 for far enough to be clear of it, else 1 + quarter metres, up to the most.
+inline constexpr unsigned edge_shift = 1;
+inline constexpr double edge_steps_per_metre = 4.0;
+inline constexpr std::uint8_t most_edge_step = 127;
+
+// The corner byte's mark for a vertex `from_edge` metres from its sheet's edge.
+[[nodiscard]] std::uint8_t edge_mark(float from_edge) noexcept;
 
 // The faces split into ground and water: a liquid's faces at `sea` metres from the planet's
 // centre, within a voxel `thickness`, are the sea's own, marked so for its waves to be drawn.
