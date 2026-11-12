@@ -61,6 +61,19 @@ CPMAddPackage(
     URL_HASH SHA3_256=7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93
     DOWNLOAD_ONLY YES)
 
+# The baked world's store: LMDB (OpenLDAP Public License, BSD-style), built from its two C files,
+# and lmdbxx (Unlicense), its header-only C++ wrapper.
+CPMAddPackage(
+    NAME lmdb
+    GITHUB_REPOSITORY LMDB/lmdb
+    GIT_TAG LMDB_0.9.36
+    DOWNLOAD_ONLY YES)
+CPMAddPackage(
+    NAME lmdbxx
+    GITHUB_REPOSITORY hoytech/lmdbxx
+    GIT_TAG 1.0.0
+    DOWNLOAD_ONLY YES)
+
 # Entity system; MIT. Static, from its own CMake so Windows gets its socket libraries.
 CPMAddPackage(
     NAME flecs
@@ -190,6 +203,7 @@ function(hog_add_benchmarks lib)
 endfunction()
 
 add_subdirectory(libs/atmosphere)
+add_subdirectory(libs/baked)
 add_subdirectory(libs/chat)
 add_subdirectory(libs/core)
 add_subdirectory(libs/flora)
@@ -215,6 +229,7 @@ add_subdirectory(libs/weather)
 if(HOG_BUILD_VIEWER OR HOG_BUILD_CLIENT)
     add_subdirectory(libs/window)
 endif()
+add_subdirectory(tools/bake)
 add_subdirectory(tools/build_world)
 add_subdirectory(tools/stills)
 add_subdirectory(tools/formation)
