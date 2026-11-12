@@ -105,6 +105,47 @@ parent's summary against its children's combined.
 8. **Remove** `Generator::columns`, `generate_stack`, `Land`'s tiles, `TileSending` and tile
    meshing.
 
+## Ideas, not decided (2026-11-12)
+
+Nothing may be generated at play: a read is a walk of stored data, never `Formed` or its maths.
+Writing out every metre of an Earth-sized world is petabytes (Flight Simulator streams over 2 PB),
+because detail that's pure noise holds nothing beyond its seed. So the unique part is stored and
+the noise part is made from stored numbers.
+
+- **Corrections, coarse to fine.** A node stores only the correction to what its parent predicts,
+  plus a few numbers (roughness, slope direction, gullying). Nodes exist only where something
+  can't be predicted from the parent, so the tree's size follows the features, not the area.
+  Reading anywhere is the parent's prediction plus the stored corrections, so every depth knows
+  how it looks. Wavelet terrain (C-BDAM, ~0.25 bits a sample for real global terrain) and
+  geometry clipmaps work this way.
+- **Seeds by position, in blocks, never chains.** Counter-based randomness (Philox, "as easy as
+  1, 2, 3"): a seed is `hash(world, size, lattice point)`, computed directly. A stored block owns
+  a band of sizes: under it, its stored corners blended plus one seeded layer per size, scaled by
+  its stored numbers. Layers don't depend on each other, and made-up detail never feeds the next
+  level; only stored data does. A read costs at most ~20 stored levels plus ~8 layers wherever
+  it cuts in. Neighbours share the lattice, so no seams.
+- **Gullies from layers.** Johansen's erosion filter (2026, MPL-2.0): each layer carries its slope
+  to the next, so small gullies branch off larger ones and run downhill, each point computed
+  alone. Steered by the block's stored slope and gullying; no real drainage, which the stored
+  valleys and rivers already give.
+- **Processes write the tree.** The tree is forming's working state as well as play's world.
+  Stages run in order, each at the scale it works at, reading what earlier stages stored and
+  writing corrections: tectonics at km nodes, then snow, then ice flowing over ~100 m nodes and
+  carving its bed (Cordonnier et al. 2023), then the sea flooding it into a fjord, then rivers in
+  what the ice left (hanging valleys from the order). The tree splits only where a result has
+  edges (fjord walls finer than its floor).
+- **Processes steer the seeds.** A stage also writes block numbers: ice flow direction, polish,
+  plucked slopes, walls left too steep. The seeded layers read them: striations along the flow,
+  smooth polished walls, jagged plucked sides, talus at the foot.
+- **Forming decides where a block is enough**: where the stored corners plus layers stay within
+  tolerance of the stage's result (the step 2 bounds tell without sampling), stop; elsewhere
+  store a correction and go finer.
+
+Open: how much land counts as unique (sets bytes and forming time); forming time for ice over
+every range; how the existing `libs/formation` stages write corrections instead of results.
+Possible first slices: one mountain range as stages in the tree until a fjord forms; seeded
+blocks with erosion-style gullies against `Formed::at` for how often a block is enough.
+
 ## Measured before (2026-11-11)
 
 Why the tile path is slow, for comparison: a 64×64 tile costs ~0.2 s at every level, ~85% of it the
@@ -127,3 +168,16 @@ searches, and an all-air tile costs as much as a ground tile.
   construction tree of features, water as its own.
 - Stolte and Kaufman, [parallel octree voxelization](https://nilostolte.github.io/research/parvox.pdf):
   an interval test skips octants that can't hold the surface.
+- Gobbetti et al. 2006, [C-BDAM](https://vcg-legacy.isti.cnr.it/Publications/2006/GMCDG06/eg2006-cbdam.pdf):
+  planet terrain as compressed wavelet corrections. Losasso and Hoppe 2004, geometry clipmaps:
+  stored terrain plus noise matched to its roughness.
+- Takikawa et al. 2022, [Variable Bitrate Neural Fields](https://research.nvidia.com/labs/toronto-ai/vqad):
+  a multiresolution octree streamed coarse first.
+- Salmon et al. 2011, [Parallel random numbers: as easy as 1, 2, 3](https://users.cs.utah.edu/~hari/teaching/bigdata/random123sc11.pdf):
+  random values computed straight from their counter.
+- Johansen 2026, [erosion filter](https://blog.runevision.com/2026/03/): branching gullies from
+  noise layers, each point alone.
+- Cordonnier et al. 2023, [Forming terrains by glacial erosion](https://people.cs.uct.ac.za/~jgain/wp-content/papercite-data/pdf/cordonnier2023.pdf):
+  ice flow and its carving at mountain-range scale.
+- Villanueva et al. 2016, [symmetry-aware sparse voxel DAGs](https://www.crs4.it/vic/data/papers/i3d2016-symmetry-dags.pdf):
+  repeated subtrees stored once.
