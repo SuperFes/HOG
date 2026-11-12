@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/interval.hpp>
 #include <hog/globe/material.hpp>
 
 #include <array>
@@ -46,11 +47,6 @@ struct Primitive {
 struct Inside {
     double distance = std::numeric_limits<double>::infinity(); // metres, negative in solid
     Material material = Material::Air;
-};
-
-struct Interval {
-    double low = 0.0;
-    double high = 0.0;
 };
 
 // A node of the tree: the cell `i`, `j` on `face` at `level`, and over it the `k`th span of radius

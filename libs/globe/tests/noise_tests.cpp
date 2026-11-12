@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <random>
 
 using hog::DVec3;
 using hog::globe::Noise;
@@ -113,4 +114,39 @@ TEST_CASE("the same seed gives the same noise, bit for bit", "[globe][noise]") {
           hog::globe::fbm(DVec3{1.0, 2.0, 3.0}, octaves, 0.0, 11).value);
     // If this moves, the world is generated differently than before, or on another platform.
     CHECK(digest == 0x8fa4'ad26'7832'9735ULL);
+}
+
+TEST_CASE("fbm stays within its bounds over a ball", "[globe][noise]") {
+    const hog::globe::Octaves octaves{.wavelength = 4000.0, .gain = 0.5, .finest = 5.0};
+    std::mt19937_64 random{11};
+    std::uniform_real_distribution<double> unit{-1.0, 1.0};
+    for (const double reach : {1.0, 30.0, 400.0, 5000.0}) {
+        for (const double lod : {0.0, 20.0}) {
+            double widest = 0.0;
+            double sampled = 0.0;
+            for (int ball = 0; ball < 20; ++ball) {
+                const hog::DVec3 middle =
+                    hog::DVec3{unit(random), unit(random), unit(random)} * 6.0e6;
+                const hog::globe::Interval bounds =
+                    hog::globe::fbm_bounds(middle, reach, octaves, lod, 9);
+                double low = 1e300;
+                double high = -1e300;
+                for (int n = 0; n < 400; ++n) {
+                    const hog::DVec3 off{unit(random), unit(random), unit(random)};
+                    if (glm::length(off) > 1.0) {
+                        continue;
+                    }
+                    const double value =
+                        hog::globe::fbm(middle + (off * reach), octaves, lod, 9).value;
+                    CHECK(bounds.contains(value));
+                    low = std::min(low, value);
+                    high = std::max(high, value);
+                }
+                widest += bounds.high - bounds.low;
+                sampled += high - low;
+            }
+            WARN("reach " << reach << " m, lod " << lod << ": sampled span " << sampled / widest
+                          << " of the bounds'");
+        }
+    }
 }
