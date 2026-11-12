@@ -231,3 +231,12 @@ TEST_CASE("a fade longer than the most a weather is faded over is kept as asked"
     }
     CHECK(made == 2);
 }
+
+TEST_CASE("the air's held about half a kilometre across, no finer than the weather is sent",
+          "[server][weather]") {
+    // A face of a planet 11.5 km round is about 18 km across: 32 cells of 565 m.
+    CHECK(skies::weather_level(11'500.0) == 5);
+    CHECK(skies::weather_level(2'000.0) == 3);
+    CHECK(skies::weather_level(6'371'000.0) == protocol::most_weather_level);
+    CHECK(skies::weather_level(10.0) == 1);
+}

@@ -1,5 +1,4 @@
 #include <hog/core/text_file.hpp>
-#include <hog/protocol/messages.hpp>
 #include <hog/server/server_config.hpp>
 
 #include <toml++/toml.hpp>
@@ -275,22 +274,19 @@ private:
 }
 
 [[nodiscard]] Result<void> parse_weather(const Table& weather, WeatherConfig& config) {
-    if (auto known = weather.only({"on", "level", "layers", "spin_up_hours"}); !known) {
+    if (auto known = weather.only({"on", "layers", "spin_up_hours"}); !known) {
         return known;
     }
     const auto on = weather.boolean("on");
-    const auto level = weather.integer("level", 1, protocol::most_weather_level);
     const auto layers = weather.integer("layers", 8, 64);
     const auto spin_up = weather.integer("spin_up_hours", 0, 240);
-    for (const Error* error :
-         {on ? nullptr : &on.error(), level ? nullptr : &level.error(),
-          layers ? nullptr : &layers.error(), spin_up ? nullptr : &spin_up.error()}) {
+    for (const Error* error : {on ? nullptr : &on.error(), layers ? nullptr : &layers.error(),
+                               spin_up ? nullptr : &spin_up.error()}) {
         if (error != nullptr) {
             return std::unexpected(*error);
         }
     }
     config.on = on->value_or(config.on);
-    config.level = static_cast<int>(level->value_or(config.level));
     config.layers = static_cast<int>(layers->value_or(config.layers));
     config.spin_up = std::chrono::hours{
         spin_up->value_or(std::chrono::duration_cast<std::chrono::hours>(config.spin_up).count())};

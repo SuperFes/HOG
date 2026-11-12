@@ -87,7 +87,6 @@ snapshot_bytes = 900
 
 [weather]
 on = false
-level = 3
 layers = 16
 spin_up_hours = 12
 
@@ -115,7 +114,6 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->log.file == std::filesystem::path{"/srv/hog/var/logs/server.jsonl"});
     CHECK(config->metrics_interval == 0s);
     CHECK_FALSE(config->weather.on);
-    CHECK(config->weather.level == 3);
     CHECK(config->weather.layers == 16);
     CHECK(config->weather.spin_up == std::chrono::hours{12});
     CHECK(config->net.port == 27100);
@@ -157,8 +155,7 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[log]\ncategories = \"save\"\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = -1\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = 1.5\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nlevel = 0\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nlevel = 6\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nlevel = 3\n"), ErrorCode::InvalidArgument},
         {with("[weather]\nlayers = 4\n"), ErrorCode::InvalidArgument},
         {with("[weather]\nspin_up_hours = -1\n"), ErrorCode::InvalidArgument},
         {with("[weather]\non = 1\n"), ErrorCode::InvalidArgument},

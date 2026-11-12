@@ -168,8 +168,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     }
     if (config.weather.on) {
         server->weather_.emplace(server->generator_, server->time_,
-                                 skies::WeatherSettings{.level = config.weather.level,
-                                                        .layers = config.weather.layers,
+                                 skies::WeatherSettings{.layers = config.weather.layers,
                                                         .spin_up = config.weather.spin_up});
         const save::Section* kept =
             loaded->snapshot ? loaded->snapshot->find(skies::WeatherKeeper::section) : nullptr;

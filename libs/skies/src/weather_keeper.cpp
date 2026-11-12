@@ -7,6 +7,8 @@
 #include <hog/weather/state.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace hog::skies {
@@ -50,17 +52,25 @@ constexpr float most_sea_height = 20.0F;
 
 } // namespace
 
+int weather_level(double radius) noexcept {
+    // A face is a quarter of the way round; its cells halve across with each level.
+    const double across = radius * std::numbers::pi / 2.0 / weather_column_width;
+    const auto level = static_cast<int>(std::lround(std::log2(std::max(across, 1.0))));
+    return std::clamp(level, 1, static_cast<int>(protocol::most_weather_level));
+}
+
 WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameTime start,
                              WeatherSettings settings)
     : settings_(settings),
+      level_(settings.level.value_or(weather_level(generator.planet().body.radius))),
       calendar_(globe::day_length(generator.planet()), generator.planet().body.tilt),
-      grid_(settings.level), air_(generator, settings.level, settings.layers),
+      grid_(level_), air_(generator, level_, settings.layers),
       reached_(start - settings.spin_up) {
     placed_.resize(air_.field().grid.columns());
     for (std::size_t column = 0; column < placed_.size(); ++column) {
         const DVec3 up =
-            globe::center(globe::cell_at_index(settings.level, static_cast<std::uint64_t>(column)));
-        placed_[column] = grid_.index(planet::cell_at(up, settings.level));
+            globe::center(globe::cell_at_index(level_, static_cast<std::uint64_t>(column)));
+        placed_[column] = grid_.index(planet::cell_at(up, level_));
     }
 }
 
@@ -152,11 +162,11 @@ std::optional<protocol::CellWeather> WeatherKeeper::at(DVec3 up) const {
     if (!latest_) {
         return std::nullopt;
     }
-    return latest_->cells[grid_.index(planet::cell_at(up, settings_.level))];
+    return latest_->cells[grid_.index(planet::cell_at(up, level_))];
 }
 
 protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade, float pace) const {
-    protocol::Weather weather{.level = static_cast<std::uint8_t>(settings_.level),
+    protocol::Weather weather{.level = static_cast<std::uint8_t>(level_),
                               .fade = fade,
                               .pace = pace,
                               .cells = std::vector<protocol::CellWeather>(placed_.size())};

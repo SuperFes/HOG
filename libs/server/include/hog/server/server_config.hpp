@@ -46,11 +46,10 @@ struct DebugSettings {
     std::optional<GameTime> start;
 };
 
-// The planet's air: how finely it is held, and how long a new world's still air is run on before
-// the winds are shown.
+// The planet's air: how many layers it is held in, and how long a new world's still air is run on
+// before the winds are shown. How finely it's held across follows from the planet's size.
 struct WeatherConfig {
     bool on = true;
-    int level = 4;
     int layers = 24;
     GameDuration spin_up = std::chrono::hours{48};
 };

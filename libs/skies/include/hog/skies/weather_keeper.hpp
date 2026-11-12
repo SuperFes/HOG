@@ -19,9 +19,17 @@
 
 namespace hog::skies {
 
+// Metres across the air's columns are held about, on a planet small enough for them.
+inline constexpr double weather_column_width = 500.0;
+
+// The cube-sphere level whose cells are nearest `weather_column_width` across on a planet of
+// `radius` metres, no finer than the weather is sent at.
+[[nodiscard]] int weather_level(double radius) noexcept;
+
 // How fine the air is held and how often it is stepped.
 struct WeatherSettings {
-    int level = 4;
+    // As weather_level() has it for the planet where none's given.
+    std::optional<int> level = std::nullopt;
     int layers = 24;
     // Game time the air waits to be stepped on by, so each job is worth its start.
     GameDuration interval = std::chrono::minutes{2};
@@ -79,6 +87,7 @@ private:
     void keep();
 
     WeatherSettings settings_;
+    int level_;
     sim::Calendar calendar_;
     sim::CellGrid grid_;
     weather::Atmosphere air_;

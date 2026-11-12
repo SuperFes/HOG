@@ -193,7 +193,7 @@ TEST_CASE("a reopened world catches up to now", "[app][server]") {
 TEST_CASE("a world with weather makes it as the clock runs", "[app][server]") {
     const World world;
     auto config = world.config();
-    config.weather = {.on = true, .level = 1, .layers = 8, .spin_up = 0h};
+    config.weather = {.on = true, .layers = 8, .spin_up = 0h};
     const auto server = opened(config);
     REQUIRE(server->weather());
     // Four game minutes outrun the keeper's interval of two; its job is taken in on a later tick.
@@ -209,7 +209,7 @@ TEST_CASE("a world with weather makes it as the clock runs", "[app][server]") {
 TEST_CASE("a reopened world has the air it saved, without spinning it up again", "[app][server]") {
     const World world;
     auto config = world.config();
-    config.weather = {.on = true, .level = 1, .layers = 8, .spin_up = 0h};
+    config.weather = {.on = true, .layers = 8, .spin_up = 0h};
     {
         const auto server = opened(config);
         GameTime now = start + 4min;
