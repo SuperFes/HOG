@@ -2,6 +2,7 @@
 #include <hog/formation/smooth.hpp>
 
 #include <algorithm>
+#include <limits>
 
 namespace hog::formation {
 
@@ -67,6 +68,33 @@ void Smooth::weigh(const DVec3& direction, Weights& into, std::uint32_t start) c
             ((into.gradients[n] * total) - (weight * total_gradient)) / (total * total);
         into.weights[n] = weight / total;
     }
+}
+
+Smooth::Range Smooth::range(std::span<const double> field, const DVec3& direction, double within,
+                            std::uint32_t start) const {
+    const Sphere& sphere = *sphere_;
+    const double near = within + reach_;
+    const double onward = near + (0.5 * sphere.spacing());
+    std::vector<std::uint32_t> seen{sphere.nearest(direction, start)};
+    Range range{.least = std::numeric_limits<double>::infinity(),
+                .most = -std::numeric_limits<double>::infinity()};
+    for (std::size_t next = 0; next < seen.size(); ++next) {
+        const std::uint32_t point = seen[next];
+        const double away = angle(direction, sphere.point(point));
+        if (away < near) {
+            range.least = std::min(range.least, field[point]);
+            range.most = std::max(range.most, field[point]);
+        }
+        if (away >= onward) {
+            continue;
+        }
+        for (const std::uint32_t beside : sphere.neighbors(point)) {
+            if (std::ranges::find(seen, beside) == seen.end()) {
+                seen.push_back(beside);
+            }
+        }
+    }
+    return range;
 }
 
 Smooth::Read Smooth::read(std::span<const double> field, const Weights& weights) {

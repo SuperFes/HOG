@@ -30,6 +30,15 @@ public:
     };
     [[nodiscard]] static Read read(std::span<const double> field, const Weights& weights);
 
+    // The least and the most `field` reads anywhere within `within` radians of `direction`: each
+    // read is shared out among the points within reach of it, so it lies between theirs.
+    struct Range {
+        double least = 0.0;
+        double most = 0.0;
+    };
+    [[nodiscard]] Range range(std::span<const double> field, const DVec3& direction, double within,
+                              std::uint32_t start = 0) const;
+
     [[nodiscard]] const Sphere& sphere() const noexcept { return *sphere_; }
     [[nodiscard]] double reach() const noexcept { return reach_; } // radians
 

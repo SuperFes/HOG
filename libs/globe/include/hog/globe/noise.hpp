@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/globe/interval.hpp>
 
 #include <cstdint>
 
@@ -40,5 +41,11 @@ struct Band {
 // The steepest an fbm of `octaves` can be anywhere, per unit, at any lod: how far its value can
 // change over a metre at most, so a value's distance from zero is at least the value over this.
 [[nodiscard]] double fbm_steepest(const Octaves& octaves) noexcept;
+
+// Bounds of the fbm fbm() gives anywhere within `within` metres of `middle`: octaves too fine for
+// the ball by their reach, the rest by bounding each lattice cell the ball touches, no wider than
+// the middle's value give or take the steepest it gets there.
+[[nodiscard]] Interval fbm_bounds(DVec3 middle, double within, const Octaves& octaves, double lod,
+                                  std::uint64_t seed, Band band = {}) noexcept;
 
 } // namespace hog::globe

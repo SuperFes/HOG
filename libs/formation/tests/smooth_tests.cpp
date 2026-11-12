@@ -107,3 +107,30 @@ TEST_CASE("a world forms every stage over the same points", "[formation][smooth]
     CHECK(world.ores.coal.size() == size);
     CHECK(world.landforms.mesas.size() == size);
 }
+
+TEST_CASE("a field reads within its range anywhere in a cap", "[formation][smooth]") {
+    const Sphere sphere{5, 1, 0.2};
+    const Smooth smooth{sphere};
+    std::vector<double> field(sphere.size());
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        field[point] = unit(hog::hash_values(3, point));
+    }
+    Smooth::Weights weights;
+    for (std::uint64_t n = 0; n < 50; ++n) {
+        const DVec3 middle = somewhere(n);
+        for (const double within : {0.0, 0.3 * sphere.spacing(), 3.0 * sphere.spacing()}) {
+            const Smooth::Range range = smooth.range(field, middle, within);
+            for (std::uint64_t k = 0; k < 200; ++k) {
+                // Anywhere in the cap, out to its edge.
+                const double off = within * std::sqrt(unit(hog::hash_values(5, n, k)));
+                const DVec3 at = glm::normalize(
+                    middle +
+                    (glm::normalize(glm::cross(middle, somewhere(k + 1000))) * std::tan(off)));
+                smooth.weigh(at, weights);
+                const double value = Smooth::read(field, weights).value;
+                CHECK(value >= range.least - 1e-12);
+                CHECK(value <= range.most + 1e-12);
+            }
+        }
+    }
+}
