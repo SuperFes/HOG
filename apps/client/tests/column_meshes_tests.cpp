@@ -52,7 +52,7 @@ TEST_CASE("a tile column's faces are drawn as ground, and water still or the sea
     CHECK(drawn.ground.vertices.front().tiles[0] == static_cast<std::uint8_t>(Material::Granite));
     REQUIRE(drawn.water.vertices.size() == 8);
     CHECK(drawn.water.indices == std::vector<std::uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7});
-    CHECK(drawn.water.vertices[0].corner == hog::client::sea_corner);
+    CHECK((drawn.water.vertices[0].corner & hog::client::sea_corner) != 0);
     CHECK(drawn.water.vertices[4].corner == 0);
     CHECK(drawn.ground.origin == hog::WorldPosition{mesh.origin});
 }

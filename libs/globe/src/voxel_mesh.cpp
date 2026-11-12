@@ -448,9 +448,12 @@ void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell f
         return;
     }
     const double own = z + here.liquid.to;
+    // A corner with fewer than its four columns' water about it is on the sheet's edge.
+    std::array<bool, 4> shore{};
+    int count = 0;
     const auto standing = [&](int corner_x, int corner_y) {
         double sum = 0.0;
-        int count = 0;
+        count = 0;
         for (const int by_x : {corner_x - 1, corner_x}) {
             for (const int by_y : {corner_y - 1, corner_y}) {
                 if (const std::optional<double> surface =
@@ -482,6 +485,7 @@ void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell f
         const int bits = corner_x + (2 * corner_y);
         const std::size_t at = rim_of.at(static_cast<std::size_t>(bits));
         points.at(k) = rim.at(at) * radius(standing(corner_x, corner_y));
+        shore.at(k) = count < 4;
         out += rim.at(at);
     }
     DVec3 normal = glm::cross(points[1] - points[0], points[2] - points[0]);
@@ -492,10 +496,11 @@ void add_sheet(VoxelMesh& mesh, const Block& block, const Layers& layers, Cell f
     const double length = glm::length(normal);
     const Vec3 unit = length > 0.0 ? Vec3{normal / length} : Vec3{glm::normalize(out)};
     const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
-    for (const DVec3& point : points) {
-        mesh.vertices.push_back({.position = Vec3{point - mesh.origin},
+    for (std::size_t k = 0; k < 4; ++k) {
+        mesh.vertices.push_back({.position = Vec3{points.at(k) - mesh.origin},
                                  .normal = unit,
-                                 .material = here.liquid.material});
+                                 .material = here.liquid.material,
+                                 .shore = shore.at(k)});
     }
     for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
                                            : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {

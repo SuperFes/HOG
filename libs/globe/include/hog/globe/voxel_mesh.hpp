@@ -18,6 +18,9 @@ struct VoxelVertex {
     Vec3 position{0.0F};
     Vec3 normal{0.0F};
     Material material = Material::Air;
+    // A water sheet's corner on its edge, where it meets what holds no water as high: waves
+    // mustn't lift it off what it meets.
+    bool shore = false;
 };
 
 // The faces of voxels, two triangles each, anticlockwise seen from outside.

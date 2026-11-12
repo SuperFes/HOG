@@ -79,6 +79,8 @@ static const float voxel_sea_kind = 1.0;
 static const float still_kind = 2.0;
 // As hog::client::sea_corner marks the sea's own surfaces among still water's.
 static const uint sea_corner = 1u;
+// As hog::client::shore_corner marks a still water vertex on its sheet's edge.
+static const uint shore_corner = 2u;
 
 Surf as_surf(float4 surf) {
     Surf taken;
@@ -217,7 +219,13 @@ Surface vertex_still(StillVertex vertex) {
     surface.kind = sea ? voxel_sea_kind : still_kind;
     const WaveSurface water =
         wave_surface(waves, surface.rest, still_between, surface.floor.xyz, surface.reach);
-    surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
+    float3 moved = water.moved + (up * surface.floor.w);
+    if ((vertex.tiles.w & shore_corner) != 0u) {
+        // On the sheet's edge, waves and the tide may lower the water from what it meets, which
+        // reads as the tide going out, but never lift it off; nor sway it away sideways.
+        moved = up * min(dot(moved, up), 0.0);
+    }
+    surface.from_eye += as_drawn(moved, up, surface.normal);
     const Surf surf = surf_at(waves, water, surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);

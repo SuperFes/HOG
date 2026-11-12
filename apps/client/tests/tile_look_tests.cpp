@@ -129,7 +129,7 @@ TEST_CASE("the land as the server cuts it and the client draws it, to look at", 
             const std::size_t level = shown.key >> 59U;
             water.at(level) += shown.water->indices.size() / 6;
             for (const auto& vertex : shown.water->vertices) {
-                sea.at(level) += vertex.corner == hog::client::sea_corner ? 1 : 0;
+                sea.at(level) += (vertex.corner & hog::client::sea_corner) != 0 ? 1 : 0;
             }
         }
         for (std::size_t level = 0; level < 8; ++level) {

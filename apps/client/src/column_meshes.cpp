@@ -42,10 +42,12 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
         const auto tile = static_cast<std::uint8_t>(first.material);
         const auto base = static_cast<std::uint32_t>(into.vertices.size());
         for (std::size_t k = 0; k < 4; ++k) {
-            into.vertices.push_back({.position = mesh.vertices[face + k].position,
-                                     .normal = mesh.vertices[face + k].normal,
+            const globe::VoxelVertex& vertex = mesh.vertices[face + k];
+            into.vertices.push_back({.position = vertex.position,
+                                     .normal = vertex.normal,
                                      .tiles = {tile, tile, tile},
-                                     .corner = corner});
+                                     .corner = static_cast<std::uint8_t>(
+                                         corner | (liquid && vertex.shore ? shore_corner : 0U))});
         }
         // The face's two triangles, as the mesh has them, onto its corners here.
         const auto from = static_cast<std::uint32_t>(face);

@@ -284,6 +284,34 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
     }
 }
 
+TEST_CASE("water's sheet marks the corners on its edge, where it meets ground standing higher",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
+    const auto shores = [](const VoxelMesh& mesh) {
+        return std::ranges::count(mesh.vertices, true, &hog::globe::VoxelVertex::shore);
+    };
+    // Open water right across: no edge anywhere.
+    CHECK(shores(hog::globe::mesh_tile(layers, key, flat(true).tiles.front().second)) == 0);
+
+    // A pool ten columns square sunk a voxel into the rock: its rim's corners are the edge's.
+    const VoxelTree pool = VoxelTree::build(Volume::tile_side, [](int x, int y, int z) {
+        const bool in_pool = x >= 10 && x < 20 && y >= 10 && y < 20;
+        if (std::cmp_less_equal(z, ground) || (std::cmp_equal(z, ground + 1) && !in_pool)) {
+            return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+        }
+        if (std::cmp_equal(z, ground + 1)) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return Cube{};
+    });
+    const VoxelMesh mesh = hog::globe::mesh_tile(layers, key, pool);
+    CHECK(std::ranges::count(mesh.vertices, Material::Water, &hog::globe::VoxelVertex::material) ==
+          4 * 10 * 10);
+    // Two corners of each column along its sides, three of each at its corners.
+    CHECK(shores(mesh) == (4 * 8 * 2) + (4 * 3));
+}
+
 TEST_CASE("a tile at a face's edge reads the tile across it on the next face",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
