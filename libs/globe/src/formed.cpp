@@ -161,10 +161,13 @@ struct ValleyFloor {
     DVec3 gradient{0.0};
 };
 
-// Metres of a river's water over the ground standing at `top`, the year round and in flood.
+// Metres of a river's water over the ground standing at `top`, the year round and in flood; and
+// the level its water stands at either way, metres over the sea, the deepest river's.
 struct RiverDepths {
     double river = 0.0;
     double flood = 0.0;
+    double level = 0.0;
+    double flood_level = 0.0;
 };
 
 // A river's water stands only in the channel of the valley the ground lies in, fading out over
@@ -179,7 +182,11 @@ RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top,
         }
         // As deep as it stands in its own channel, wherever the ground's merged lower.
         const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
-        depths.river = std::max(depths.river, in * (river.water - river.ground));
+        if (const double deep = in * (river.water - river.ground); deep > depths.river) {
+            depths.river = deep;
+            depths.level = river.water;
+            depths.flood_level = std::max(river.bank, river.water);
+        }
         depths.flood = std::max(depths.flood, in * (river.bank - river.ground));
     }
     return depths;
@@ -945,9 +952,10 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     ways.push_back({.height = smooth.value, .fall = smooth.gradient, .counts = 1.0});
     // Where walls meet, at crests, soil creeping off rounds them over as far as creep carries
     // it against the ground wearing down (a hilltop's steady parabola reaches the walls' slope
-    // D·S/E out), no further than a hillside runs; bare rock stays sharp. Merged as smoothly in
-    // height as that width climbs, as far as both walls are there: the ground as its points have
-    // it is no wall, nor is a valley faded into it.
+    // D·S/E out), no further than a hillside runs. Bare rock stays as sharp as its joints let it:
+    // a crest narrower than a block topples a block at a time, so none is thinner than the joints
+    // are apart. Merged as smoothly in height as that width climbs, as far as both walls are
+    // there: the ground as its points have it is no wall, nor is a valley faded into it.
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };
@@ -955,11 +963,13 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     const double creep = world.body.soil_creep * std::min(1.0, soil / creeping_depth);
     const double walls = value(wall_);
     const double rounding =
-        std::min(creep * walls / std::max(value(worn_), world.body.slowest_wear),
-                 sphere.spacing() * radius_ / 4.0);
+        std::max(std::min(creep * walls / std::max(value(worn_), world.body.slowest_wear),
+                          sphere.spacing() * radius_ / 4.0),
+                 joint_spacing(value(strength_)) / 2.0);
     const double blend = 2.0 * walls * rounding;
-    // How much of a wall the ground standing so far is.
-    double top_wall = 0.0;
+    // The ground as the lowest of the valleys has it, its points' own among them.
+    Lowered lowered{rounding / radius_, blend};
+    lowered.add(smooth, 0.0, smooth.value);
     // Walls reach a little way from their valleys, so none is ever missed among those of the
     // points weighed here, however the points weighed change.
     const double reach = 0.6 * sphere.spacing() * radius_;
@@ -1018,7 +1028,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
                 ((wall.standing_gradient * radius_) * reaching) +
                 (smooth.gradient * (1.0 - reaching)) +
                 ((wall.reaching_gradient * radius_) * present * (wall.standing - smooth.value));
-            merge_lower(carved.top, top_wall, faded, fading, reaching, rounding / radius_, blend);
+            lowered.add({.value = faded, .gradient = fading}, reaching, fade(wall.floor));
         }
         if (reaching > 0.0) {
             ways.push_back(
@@ -1042,10 +1052,13 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
             }
         }
     }
+    carved.top = lowered.lowest();
     const double spread = std::max(blend, voxel_);
     const RiverDepths depths = river_depths(rivers, carved.top.value, spread);
     carved.river = depths.river;
     carved.flood = depths.flood;
+    carved.river_level = depths.level;
+    carved.flood_level = depths.flood_level;
     const FloorHold hold = floor_hold(floors, carved.top.value, spread);
     carved.above_floor = hold.above;
     carved.above_floor_gradient = hold.gradient;
@@ -1317,6 +1330,8 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
     Surface cut{.ground = dissected,
                 .river = ground.river,
                 .flood = ground.flood,
+                .river_level = ground.river_level,
+                .flood_level = ground.flood_level,
                 .bed = dissected.top.value,
                 .settled = 1.0,
                 .bedforms = Noise{}};
@@ -1486,9 +1501,12 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     } else if (const double tallest = std::min(rotted, 2.0 * (spacing - rotted)); tallest > 0.0) {
         here.weathering.bare = std::max(0.0, 1.0 - (over / tallest));
     }
-    // Metres the rock's top rises with its core.
+    // Metres the rock's top rises with its core. Where a river runs, up to its floods, the water
+    // plucks the blocks loose along their joints and carries them off faster than cores rot out:
+    // none stands in its channel.
     double rock_rises = 0.0;
-    if (rotted > 0.0) {
+    const bool flowing = under.river > 0.0 && top.top.value - over < under.flood_level;
+    if (rotted > 0.0 && !flowing) {
         const DVec3 ground = direction * (radius_ + top.top.value - over);
         const Core core = core_over(block_at(ground - (direction * 1e-3), strength, joints_seed_),
                                     rotted, ground, direction);
@@ -1509,14 +1527,11 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);
     lay_beach(direction, weights, under, top.top, layers);
     here.top = top.top;
-    // A river stands over the ground as carved, not over crags standing in it, nor any higher
-    // where what was carried settled in its channel.
-    if (const double bed = here.top.value - here.crag; under.river > 0.0 && !here.lake) {
-        const double cut_bed = std::min(bed, under.bed);
-        if (const double level = cut_bed + under.river; level > bed) {
-            here.river =
-                Here::River{.level = level, .flood = cut_bed + std::max(under.flood, under.river)};
-        }
+    // A river stands at its own level along its course, one level across its channel, wherever
+    // the ground's lower: bars in it stand dry.
+    if (const double bed = here.top.value - here.crag;
+        under.river > 0.0 && !here.lake && under.river_level > bed) {
+        here.river = Here::River{.level = under.river_level, .flood = under.flood_level};
     }
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.

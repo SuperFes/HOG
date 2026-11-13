@@ -12,8 +12,8 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 using hog::DVec3;
+using hog::globe::Lowered;
 using hog::globe::Lowest;
-using hog::globe::merge_lower;
 using hog::globe::Valley;
 using hog::globe::Wall;
 using hog::globe::wall_at;
@@ -118,24 +118,46 @@ TEST_CASE("a valley's river stands in its channel, deepening along it to the nex
 
 TEST_CASE("ways the ground could stand that run alike merge without digging under either",
           "[globe][valleys]") {
-    hog::formation::Smooth::Read top{.value = 100.0, .gradient = {0.5, 0.0, 0.0}};
-    double top_wall = 1.0;
-    merge_lower(top, top_wall, 100.5, {0.5, 0.0, 0.0}, 1.0, 50.0, 50.0);
-    CHECK_THAT(top.value, WithinAbs(100.0, 1e-9));
+    Lowered lowered{50.0, 50.0};
+    lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+    lowered.add({.value = 100.5, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+    CHECK_THAT(lowered.lowest().value, WithinAbs(100.0, 1e-9));
 }
 
 TEST_CASE("walls meeting head on round over as much height as they part across the rounding, "
           "never more than the blend",
           "[globe][valleys]") {
-    hog::formation::Smooth::Read top{.value = 100.0, .gradient = {0.5, 0.0, 0.0}};
-    double top_wall = 1.0;
-    merge_lower(top, top_wall, 100.0, {-0.5, 0.0, 0.0}, 1.0, 40.0, 40.0);
-    CHECK_THAT(top.value, WithinAbs(90.0, 1e-9));
+    Lowered lowered{40.0, 40.0};
+    lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+    lowered.add({.value = 100.0, .gradient = {-0.5, 0.0, 0.0}}, 1.0, 0.0);
+    CHECK_THAT(lowered.lowest().value, WithinAbs(90.0, 1e-9));
     // A channel's banks part far faster than walls; they're no crest to round over more.
-    hog::formation::Smooth::Read bank{.value = 100.0, .gradient = {0.5, 0.0, 0.0}};
-    double bank_wall = 1.0;
-    merge_lower(bank, bank_wall, 100.0, {-9.5, 0.0, 0.0}, 1.0, 40.0, 40.0);
-    CHECK_THAT(bank.value, WithinAbs(90.0, 1e-9));
+    Lowered banks{40.0, 40.0};
+    banks.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+    banks.add({.value = 100.0, .gradient = {-9.5, 0.0, 0.0}}, 1.0, 0.0);
+    CHECK_THAT(banks.lowest().value, WithinAbs(90.0, 1e-9));
+}
+
+TEST_CASE("many walls meeting round the lowest no more than the one it meets most",
+          "[globe][valleys]") {
+    Lowered lowered{40.0, 40.0};
+    lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+    for (int k = 0; k < 12; ++k) {
+        lowered.add({.value = 100.0 + (0.1 * k), .gradient = {-0.5, 0.0, 0.0}}, 1.0, 0.0);
+    }
+    CHECK_THAT(lowered.lowest().value, WithinAbs(90.0, 1e-9));
+}
+
+TEST_CASE("rounding a crest never sinks it past halfway down to its floor", "[globe][valleys]") {
+    Lowered lowered{40.0, 40.0};
+    lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 96.0);
+    lowered.add({.value = 100.0, .gradient = {-0.5, 0.0, 0.0}}, 1.0, 96.0);
+    CHECK_THAT(lowered.lowest().value, WithinAbs(98.0, 1e-9));
+    // On its floor, nothing rounds it lower.
+    Lowered floor{40.0, 40.0};
+    floor.add({.value = 96.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 96.0);
+    floor.add({.value = 96.0, .gradient = {-0.5, 0.0, 0.0}}, 1.0, 96.0);
+    CHECK_THAT(floor.lowest().value, WithinAbs(96.0, 1e-9));
 }
 
 TEST_CASE("a winding valley's ground stands over the floor of the stretch it stands as, handed "

@@ -92,46 +92,68 @@ struct WallBounds {
 constexpr double out_of_the_way = 1e5;
 [[nodiscard]] double rise_past(double away, double reach) noexcept;
 
-// The lower of the ground standing so far and another way it could, `wall` of it a wall, merged
-// as far as both are walls: a quadratic smooth minimum, its slope shared between the two as they
-// near. The crease where they meet is rounded over `rounding` across, in the gradients' units, so
-// it merges over as much height as they part over that: none where they run alike, and no more
-// than `blend`, as walls meeting head on part; what parts faster, as a channel's banks, is no
-// crest to round.
-void merge_lower(formation::Smooth::Read& top, double& top_wall, double height, DVec3 gradient,
-                 double wall, double rounding, double blend) noexcept;
+// The lowest of several grounds, each standing over a floor and so much a wall, rounded where it
+// meets another as far as both are walls: a quadratic smooth minimum, its slope shared between the
+// two as they near. The crease is rounded over `rounding` across, in the gradients' units, so it
+// merges over as much height as they part over that: none where they run alike, and no more than
+// `blend`, as walls meeting head on part. Rounded by the one crest the lowest meets most, never by
+// every one at once, which would sink it far below them all; and never lower than halfway down to
+// its floor, handed over between floors as the ground is: what creeps off a crest never digs a
+// floor out.
+class Lowered {
+public:
+    Lowered(double rounding, double blend) noexcept : rounding_{rounding}, blend_{blend} {}
+
+    void add(const formation::Smooth::Read& ground, double wall, double floor) noexcept;
+    [[nodiscard]] bool empty() const noexcept { return count_ == 0; }
+    // Precondition: not empty().
+    [[nodiscard]] formation::Smooth::Read lowest() const noexcept;
+
+private:
+    struct Ground {
+        formation::Smooth::Read read;
+        double wall = 0.0;
+        double floor = 0.0;
+    };
+    double rounding_ = 0.0;
+    double blend_ = 0.0;
+    std::array<Ground, 32> grounds_{};
+    std::size_t count_ = 0;
+    std::size_t lowest_ = 0;
+};
 
 // Of the stretches of a winding valley, the ground stands as the lowest has it, channel and all:
 // blending them would lift the floor up the walls of those beside and fill the channel in. Where
 // their walls meet, at the spurs between bends, they round over `rounding` metres across, over no
-// more than `blend` in height, as other crests do. The water stands as deep as in the channel of
-// whichever lies lowest, fading out over `handing_over` as another comes lower.
+// more than `blend` in height, as other crests do: the lowest rounded by the one crest it meets
+// most, never by every stretch at once, which would sink it far below them all, nor lower than
+// halfway down to its floor: what creeps off a crest never digs the floor out. The water stands
+// at the level of whichever lies lowest, fading out over `handing_over` as another comes lower.
 constexpr double handing_over = 1.0;
 
 class Lowest {
 public:
-    Lowest(double rounding, double blend) noexcept : rounding_{rounding}, blend_{blend} {}
+    Lowest(double rounding, double blend) noexcept : blend_{blend}, lowered_{rounding, blend} {}
 
     void add(const Wall& one) noexcept;
     // `wall`, blended, lowered to it.
     void lower(Wall& wall) const noexcept;
 
 private:
-    // How deep a stretch's water and floods stand in its channel.
-    struct Water {
-        double ground = 0.0;
+    // A stretch's ground and the levels its water and floods stand at.
+    struct Stretch {
+        double standing = 0.0;
         double water = 0.0;
-        double flood = 0.0;
+        double bank = 0.0;
     };
-    double rounding_ = 0.0;
     double blend_ = 0.0;
-    formation::Smooth::Read top_;
-    double top_wall_ = 0.0;
+    Lowered lowered_;
+    double lowest_ = 0.0;
     double cut_ = 0.0;
     DVec3 cut_gradient_{0.0};
     DVec3 fall_{0.0};
     double floor_ = 0.0;
-    std::array<Water, 32> waters_{};
+    std::array<Stretch, 32> stretches_{};
     std::size_t count_ = 0;
 };
 

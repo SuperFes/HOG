@@ -146,7 +146,15 @@ TEST_CASE("slopes between neighbouring columns tell distance as truly as small s
 TEST_CASE("a world is its volume's voxels, air wherever nothing is made", "[globe][world]") {
     MadeWorld made{earth()};
     const World& world = made.world();
-    const DVec3 direction = somewhere(11);
+    // Somewhere the ground passes through the middle layers of its brick.
+    std::uint64_t k = 11;
+    const auto layer_in_brick = [&](DVec3 at) {
+        return earth().layers().layer_at(ground_at(earth(), at).radius) % hog::globe::brick_side;
+    };
+    while (layer_in_brick(somewhere(k)) < 2 || layer_in_brick(somewhere(k)) > 5) {
+        ++k;
+    }
+    const DVec3 direction = somewhere(k);
     const BrickSite brick = ground_at(earth(), direction).brick;
     // Nothing made yet: air through and through.
     for (const Voxel& voxel : world.brick(brick)) {

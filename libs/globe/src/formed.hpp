@@ -84,9 +84,12 @@ private:
         DVec3 fall{0.0}; // per radian, as the top's gradient
         double above_floor = 1e30;
         DVec3 above_floor_gradient{0.0}; // per metre, the floor's own fall left out
-        // Metres of a river's water over it, the year round and in flood.
+        // Metres of a river's water over it, the year round and in flood, and the levels its
+        // water stands at, metres over the sea: along its course, never the ground's.
         double river = 0.0;
         double flood = 0.0;
+        double river_level = 0.0;
+        double flood_level = 0.0;
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const;
@@ -109,6 +112,8 @@ private:
         Dissected ground;
         double river = 0.0; // as carved
         double flood = 0.0;
+        double river_level = 0.0;
+        double flood_level = 0.0;
         // Where the ground stood as cut, before what was carried settled on it.
         double bed = 0.0;
         // The share of the points' sand, alluvium, lake beds and till that settled here.

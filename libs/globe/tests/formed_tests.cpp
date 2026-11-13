@@ -4,6 +4,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/planet/projection.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -14,9 +15,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <print>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -313,6 +317,44 @@ TEST_CASE("a formed river's water stands in its channel and meets its banks with
     }
     REQUIRE(crossed > 10);
     CHECK(wet * 10 > crossed * 9);
+}
+
+TEST_CASE("a formed river's water stands level across its channel, no crag standing in it",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double lod = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    int steps = 0;
+    int stepped = 0;
+    for (const std::uint32_t point : largest_rivers(world, 20)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 middle = glm::normalize(from + to);
+        const DVec3 across = glm::normalize(glm::cross(to - from, middle));
+        const auto at = [&](double off) {
+            return formed.at(glm::normalize(middle + (across * off)), lod);
+        };
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
+        Formed::Here last = at(-half / radius);
+        for (int metres = -half; metres < half; ++metres) {
+            const Formed::Here next = at((metres + 1) / radius);
+            // A metre apart in the same water, it stands all but as high, however the bed under
+            // it rises and falls.
+            if (last.river && next.river) {
+                ++steps;
+                stepped += std::abs(next.river->level - last.river->level) > 0.05 ? 1 : 0;
+            }
+            // The water plucks out any crag that would stand in it.
+            if (last.river) {
+                CHECK(last.crag == 0.0);
+            }
+            last = next;
+        }
+    }
+    REQUIRE(steps > 100);
+    CHECK(stepped * 50 < steps);
 }
 
 TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
@@ -915,4 +957,98 @@ TEST_CASE("beaches meet the ground and the sea without walls or steps", "[globe]
     }
     CHECK(transects > 10);
     CHECK(with_beach > 3);
+}
+
+namespace {
+
+// The ground of the working world about a place, read metres east and north of it.
+struct Probe {
+    Generator generator;
+    DVec3 centre{0.0, 0.0, 1.0};
+    DVec3 east{1.0, 0.0, 0.0};
+    DVec3 north{0.0, 1.0, 0.0};
+    double lod = 0.0;
+
+    [[nodiscard]] Formed::Here at(double x, double y) const {
+        const double radius = generator.planet().body.radius;
+        return generator.shape().formed->at(
+            glm::normalize(centre + (((east * x) + (north * y)) / radius)), lod);
+    }
+};
+
+// NOLINTBEGIN(concurrency-mt-unsafe): read before any thread starts
+std::optional<double> from_environment(const char* name) {
+    const char* given = std::getenv(name);
+    return given != nullptr ? std::optional{std::stod(given)} : std::nullopt;
+}
+
+std::vector<double> numbers_from_environment(const char* name) {
+    std::vector<double> numbers;
+    if (const char* given = std::getenv(name)) {
+        std::istringstream read{given};
+        for (double number = 0.0; read >> number;) {
+            numbers.push_back(number);
+            read.ignore(1);
+        }
+    }
+    return numbers;
+}
+// NOLINTEND(concurrency-mt-unsafe)
+
+// A profile through (x, y) along (dx, dy), `spacing` metres a step.
+void print_profile(const Probe& probe, std::span<const double> line, double spacing) {
+    const double length = std::hypot(line[2], line[3]);
+    for (int k = -24; k <= 24; ++k) {
+        const double t = k * spacing;
+        const Formed::Here here =
+            probe.at(line[0] + (line[2] / length * t), line[1] + (line[3] / length * t));
+        std::println("{:6.2f}: top {:7.2f} cut {:6.2f} crag {:5.2f} lake {:7.2f}", t,
+                     here.top.value, here.cut, here.crag, here.lake.value_or(-1.0));
+    }
+}
+
+// Every column within `reach` standing over all four about it by more than a metre.
+void print_spikes(const Probe& probe, int reach) {
+    constexpr double step = 0.5;
+    for (int row = -reach; row <= reach; ++row) {
+        for (int column = -reach; column <= reach; ++column) {
+            const double x = column * step;
+            const double y = row * step;
+            const Formed::Here here = probe.at(x, y);
+            double about = -1e30;
+            for (const auto& [dx, dy] : {std::pair{1.0, 0.0}, std::pair{-1.0, 0.0},
+                                         std::pair{0.0, 1.0}, std::pair{0.0, -1.0}}) {
+                about = std::max(about, probe.at(x + dx, y + dy).top.value);
+            }
+            if (here.top.value - about > 1.0) {
+                std::println("{:6.1f} {:6.1f}: top {:7.2f} about {:7.2f} crag {:5.2f} lake {:7.2f}",
+                             x, y, here.top.value, about, here.crag, here.lake.value_or(-1.0));
+            }
+        }
+    }
+}
+
+} // namespace
+
+// Prints what stands out of the ground round $HOG_PROBE_AT ("lat,lon" in degrees) on the working
+// world: every column standing well over those about it, or with $HOG_PROBE_ACROSS
+// ("x,y,dx,dy" metres) a profile through one, $HOG_PROBE_STEP metres a step, read at
+// $HOG_PROBE_LOD.
+TEST_CASE("what stands out of the ground round a place", "[.probe_spikes]") {
+    const std::vector<double> place = numbers_from_environment("HOG_PROBE_AT");
+    REQUIRE(place.size() == 2);
+    auto planet = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
+    REQUIRE(planet.has_value());
+    Probe probe{.generator = Generator{planet.value()}};
+    probe.centre = hog::planet::direction_at(place[0] * std::numbers::pi / 180.0,
+                                             place[1] * std::numbers::pi / 180.0);
+    probe.east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, probe.centre));
+    probe.north = glm::cross(probe.centre, probe.east);
+    probe.lod = from_environment("HOG_PROBE_LOD").value_or(probe.generator.planet().voxel);
+    if (const std::vector<double> line = numbers_from_environment("HOG_PROBE_ACROSS");
+        line.size() == 4) {
+        print_profile(probe, line, from_environment("HOG_PROBE_STEP").value_or(0.25));
+    } else {
+        print_spikes(probe, 120);
+    }
 }

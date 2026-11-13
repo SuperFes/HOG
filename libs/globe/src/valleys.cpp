@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <span>
 
 namespace hog::globe {
 
@@ -184,56 +186,73 @@ WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within, dou
                                           .high = rise_past(away.high, valley.reach)}};
 }
 
-void merge_lower(formation::Smooth::Read& top, double& top_wall, double height, DVec3 gradient,
-                 double wall, double rounding, double blend) noexcept {
-    const double width =
-        std::min(blend, rounding * glm::length(gradient - top.gradient)) * wall * top_wall;
-    const double apart = std::abs(height - top.value);
-    const bool lower = height < top.value;
-    if (apart >= width) {
-        if (lower) {
-            top = {.value = height, .gradient = gradient};
-            top_wall = wall;
-        }
+void Lowered::add(const formation::Smooth::Read& ground, double wall, double floor) noexcept {
+    if (count_ >= grounds_.size()) {
         return;
     }
-    const double share = (width - apart) / width;
-    const double low = lower ? height : top.value;
-    const DVec3 low_gradient = lower ? gradient : top.gradient;
-    const DVec3 high_gradient = lower ? top.gradient : gradient;
-    const double low_wall = lower ? wall : top_wall;
-    const double high_wall = lower ? top_wall : wall;
-    top = {.value = low - (share * share * width / 4.0),
-           .gradient = (low_gradient * (1.0 - (share / 2.0))) + (high_gradient * (share / 2.0))};
-    top_wall = (low_wall * (1.0 - (share / 2.0))) + (high_wall * (share / 2.0));
+    grounds_[count_] = {.read = ground, .wall = wall, .floor = floor};
+    if (count_ == 0 || ground.value < grounds_[lowest_].read.value) {
+        lowest_ = count_;
+    }
+    ++count_;
+}
+
+formation::Smooth::Read Lowered::lowest() const noexcept {
+    const Ground& low = grounds_[lowest_];
+    const std::span<const Ground> all{grounds_.data(), count_};
+    double dip = 0.0;
+    formation::Smooth::Read rounded = low.read;
+    // The floor it stands over, handed over from the lowest's to those coming as low over the
+    // blend, so none breaks where another comes lowest.
+    const double over = std::max(blend_, handing_over);
+    double floors = 0.0;
+    double weights = 0.0;
+    for (const Ground& one : all) {
+        const double apart = one.read.value - low.read.value;
+        const double near = std::clamp(1.0 - (apart / over), 0.0, 1.0);
+        const double weight = near * near * (3.0 - (2.0 * near));
+        floors += weight * one.floor;
+        weights += weight;
+        const double width =
+            std::min(blend_, rounding_ * glm::length(one.read.gradient - low.read.gradient)) *
+            one.wall * low.wall;
+        if (width <= 0.0 || apart >= width) {
+            continue;
+        }
+        const double share = (width - apart) / width;
+        if (const double sunk = share * share * width / 4.0; sunk > dip) {
+            dip = sunk;
+            rounded.gradient =
+                (low.read.gradient * (1.0 - (share / 2.0))) + (one.read.gradient * (share / 2.0));
+        }
+    }
+    const double floor = floors / weights;
+    rounded.value = low.read.value - std::min(dip, std::max(0.0, low.read.value - floor) / 2.0);
+    return rounded;
 }
 
 void Lowest::add(const Wall& one) noexcept {
     if (count_ == 0) {
-        top_ = {.value = one.standing, .gradient = one.standing_gradient};
-        top_wall_ = one.steep;
         cut_ = one.cut;
         cut_gradient_ = one.cut_gradient;
         fall_ = one.fall;
         floor_ = one.floor;
+        lowest_ = one.standing;
     } else {
         // What runs with the ground hands over to the stretch coming lower over the blend, however
         // sharply the ground itself turns there, so none of it breaks where a floor meets a wall.
         const double over = std::max(blend_, handing_over);
-        const double lower =
-            std::clamp(0.5 + ((top_.value - one.standing) / (2.0 * over)), 0.0, 1.0);
+        const double lower = std::clamp(0.5 + ((lowest_ - one.standing) / (2.0 * over)), 0.0, 1.0);
         const double taken = lower * lower * (3.0 - (2.0 * lower));
         cut_ += (one.cut - cut_) * taken;
         cut_gradient_ += (one.cut_gradient - cut_gradient_) * taken;
         fall_ += (one.fall - fall_) * taken;
         floor_ += (one.floor - floor_) * taken;
-        merge_lower(top_, top_wall_, one.standing, one.standing_gradient, one.steep, rounding_,
-                    blend_);
+        lowest_ = std::min(lowest_, one.standing);
     }
-    if (count_ < waters_.size()) {
-        waters_[count_] = {.ground = one.standing,
-                           .water = std::max(0.0, one.water - one.standing),
-                           .flood = std::max(0.0, one.bank - one.standing)};
+    lowered_.add({.value = one.standing, .gradient = one.standing_gradient}, one.steep, one.floor);
+    if (count_ < stretches_.size()) {
+        stretches_[count_] = {.standing = one.standing, .water = one.water, .bank = one.bank};
     }
     ++count_;
 }
@@ -242,24 +261,35 @@ void Lowest::lower(Wall& wall) const noexcept {
     if (count_ == 0) {
         return;
     }
-    double water = 0.0;
-    double flood = 0.0;
-    for (std::size_t k = 0; k < std::min(count_, waters_.size()); ++k) {
-        const Water& one = waters_[k];
-        const double over = std::max(0.0, one.ground - top_.value) / handing_over;
-        if (over < 1.0) {
-            const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
-            water = std::max(water, in * one.water);
-            flood = std::max(flood, in * one.flood);
+    const formation::Smooth::Read ground = lowered_.lowest();
+    // The water's level is the deepest-standing stretch's, as far as each is the ground here.
+    double deepest = 0.0;
+    double flooded = 0.0;
+    double water = -std::numeric_limits<double>::infinity();
+    double bank = -std::numeric_limits<double>::infinity();
+    for (const Stretch& one :
+         std::span<const Stretch>{stretches_.data(), std::min(count_, stretches_.size())}) {
+        const double over = std::max(0.0, one.standing - lowest_) / handing_over;
+        if (over >= 1.0) {
+            continue;
+        }
+        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
+        if (const double deep = in * (one.water - one.standing); deep > deepest) {
+            deepest = deep;
+            water = one.water;
+        }
+        if (const double deep = in * (one.bank - one.standing); deep > flooded) {
+            flooded = deep;
+            bank = one.bank;
         }
     }
-    wall.standing = top_.value;
-    wall.standing_gradient = top_.gradient;
+    wall.standing = ground.value;
+    wall.standing_gradient = ground.gradient;
     // What it stands over is the floor of whichever stretch it stands as, handed over as the
     // ground is.
     wall.floor = floor_;
-    wall.water = wall.standing + water;
-    wall.bank = wall.standing + flood;
+    wall.water = std::max(water, wall.standing);
+    wall.bank = std::max({bank, water, wall.standing});
     wall.cut = cut_;
     wall.cut_gradient = cut_gradient_;
     // Water runs off the stretch the ground stands as, turning only where the ground does.
