@@ -1314,6 +1314,10 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                 session->grains().capsules(now, planet.voxel, planet.body.gravity);
             avatars.insert(avatars.end(), grains.begin(), grains.end());
         }
+        if (player) {
+            // The server doesn't say who the player is, so they take the colour of no one.
+            avatars.push_back(client::avatar(player->feet(), client::colour_of(protocol::NetId{})));
+        }
         const client::Shot shot{.camera = camera,
                                 .bend = bend,
                                 .time = clock.time(),
