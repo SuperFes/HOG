@@ -151,11 +151,13 @@ pressure_kpa = 90
 TEST_CASE("the shipped development config is the working world it names", "[globe][planet]") {
     const auto shipped = hog::globe::load_planet(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(shipped.has_value());
-    CHECK(shipped->body.radius == 115'000.0);
+    CHECK(shipped->body.radius == 11'500.0);
     CHECK(hog::globe::day_length(*shipped) == std::chrono::hours{4});
-    // The working world's knobs at that size, in a shallower shell, formed finer than tests need.
+    // The working world's knobs at that size, in a shallower shell of coarser voxels, formed finer
+    // than tests need.
     Planet working;
-    working.body.radius = 115'000.0;
+    working.body.radius = 11'500.0;
+    working.voxel = 0.5;
     working.floor_depth = 500.0;
     working.sky_height = 2'000.0;
     working.formed_detail = 7.0;

@@ -65,7 +65,11 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     shape_.highest = formed->highest();
     shape_.formed = formed;
     say("laying out the voxel layers");
-    layers_ = layers_about(planet_.body.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
+    // No shell reaches more than halfway to the centre, however deep a small planet's seas run:
+    // what lies under its floor is rock.
+    const double depth = std::min(planet_.floor_depth + std::max(0.0, -shape_.lowest),
+                                  planet_.body.radius / 2.0);
+    layers_ = layers_about(planet_.body.radius, depth,
                            planet_.sky_height + std::max(0.0, shape_.highest), planet_.voxel);
 }
 
