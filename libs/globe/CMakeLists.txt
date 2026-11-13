@@ -78,4 +78,5 @@ hog_add_tests(hog_globe
 
 if(TARGET hog_globe_tests)
     target_compile_definitions(hog_globe_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(hog_globe_tests PRIVATE hog::test_world)
 endif()

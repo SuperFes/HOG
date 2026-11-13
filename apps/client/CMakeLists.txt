@@ -59,7 +59,8 @@ hog_add_tests(hog_client
     tests/tides_tests.cpp)
 if(TARGET hog_client_tests)
     # The server, for players to meet through.
-    target_link_libraries(hog_client_tests PRIVATE hog::flow hog::app hog::planet hog::render_testing)
+    target_link_libraries(hog_client_tests PRIVATE hog::flow hog::app hog::planet hog::render_testing
+                                                   hog::test_world)
     target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
                                                         HOG_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     # Tests read their options from the environment before any thread starts.

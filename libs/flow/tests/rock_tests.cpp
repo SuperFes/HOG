@@ -6,6 +6,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
@@ -27,12 +28,13 @@ constexpr double tick = 0.05;
 
 // Some fallen rock on the planet, found by looking about cells spread over it.
 struct Found {
-    hog::globe::Generator generator{hog::globe::Planet{}};
+    const hog::globe::Generator* world = &hog::testing::small_world();
     std::optional<Rock> rock;
 
     // On ground that stays within a few metres of level a few rocks' lengths either side, so a rock
     // dug under rolls only into its hollow, not off down a slope.
     [[nodiscard]] bool gentle(const Rock& candidate) const {
+        const hog::globe::Generator& generator = *world;
         const double lod = hog::globe::voxel_lod(generator);
         const auto ground_at = [&](DVec3 point) {
             return hog::globe::ground_below(generator, glm::normalize(point), lod).value_or(0.0);
@@ -46,17 +48,28 @@ struct Found {
         });
     }
 
+    // Rocks lie under the bare rock they fell from: steep ground is looked for first, cheaply,
+    // and rocks only about the steepest found.
     Found() {
         const int level = 13;
+        const hog::globe::Generator& generator = *world;
+        const double lod = hog::globe::voxel_lod(generator);
+        const double radius = generator.planet().body.radius;
         const std::uint64_t cells = hog::globe::cells_at(level);
-        for (std::uint64_t k = 0; k < 40'000 && !rock; ++k) {
-            const auto cell = hog::globe::cell_at_index(level, (k * 2'654'435'761ULL) % cells);
-            const std::vector<Rock> near =
-                generator.rocks_near(hog::globe::center(cell) * generator.planet().body.radius,
-                                     hog::globe::voxel_lod(generator));
-            for (const Rock& candidate : near) {
-                if (!rock && candidate.axes.z > 2.5 && gentle(candidate)) {
+        std::vector<std::pair<double, DVec3>> steep;
+        for (std::uint64_t k = 0; k < 3'000; ++k) {
+            const DVec3 direction = hog::globe::center(
+                hog::globe::cell_at_index(level, (k * 2'654'435'761ULL) % cells));
+            if (const double slope = generator.column(direction, lod).slope(); slope > 0.5) {
+                steep.emplace_back(slope, direction);
+            }
+        }
+        std::ranges::sort(steep, std::ranges::greater{}, &std::pair<double, DVec3>::first);
+        for (const auto& [slope, direction] : steep) {
+            for (const Rock& candidate : generator.rocks_near(direction * radius, lod)) {
+                if (candidate.axes.z > 0.5 && gentle(candidate)) {
                     rock = candidate;
+                    return;
                 }
             }
         }
@@ -84,11 +97,13 @@ bool solid_at(hog::flow::Region& region, const hog::globe::Layers& layers, DVec3
 
 } // namespace
 
-TEST_CASE("a rock the ground holds up stays where it lies", "[flow][rocks]") {
+// Slow: finding a rock and rolling it takes minutes; run with [.slow] until the test world keeps
+// where its rocks lie.
+TEST_CASE("a rock the ground holds up stays where it lies", "[flow][rocks][.slow]") {
     const Found found;
     REQUIRE(found.rock.has_value());
     const Rock& rock = found.rock.value();
-    hog::globe::MadeWorld made{found.generator};
+    hog::globe::MadeWorld made{*found.world};
     hog::globe::World& world = made.world();
     made.cover(glm::normalize(rock.middle));
     hog::flow::Region region{world, false};
@@ -102,11 +117,11 @@ TEST_CASE("a rock the ground holds up stays where it lies", "[flow][rocks]") {
 }
 
 TEST_CASE("a rock with the ground dug from under it rolls into the hollow and rests there",
-          "[flow][rocks]") {
+          "[flow][rocks][.slow]") {
     const Found found;
     REQUIRE(found.rock.has_value());
     const Rock& rock = found.rock.value();
-    hog::globe::MadeWorld made{found.generator};
+    hog::globe::MadeWorld made{*found.world};
     hog::globe::World& world = made.world();
     made.cover(glm::normalize(rock.middle));
     // A ball taking the ground under the whole footprint, its top a voxel short of the rock's

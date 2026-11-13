@@ -3,6 +3,7 @@
 #include <hog/globe/planet.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -25,10 +26,7 @@ namespace {
 constexpr std::array voxels{0.5, 2.5};
 
 hog::globe::Generator world(double voxel) {
-    hog::globe::Planet planet;
-    planet.body.radius = 4'000.0;
-    planet.floor_depth = 100.0;
-    planet.sky_height = 500.0;
+    hog::globe::Planet planet = hog::testing::small_planet();
     planet.voxel = voxel;
     return hog::globe::Generator{planet};
 }
