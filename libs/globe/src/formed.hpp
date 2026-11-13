@@ -106,6 +106,8 @@ private:
     }
     void fill_courses();
     [[nodiscard]] std::vector<DVec3> make_course(std::uint32_t point) const;
+    [[nodiscard]] std::vector<double> floors_along(std::uint32_t point,
+                                                   const std::vector<DVec3>& line) const;
     // The ground carved, then cut by gullies no narrower than twice `lod`, what was carried onto
     // it settled into its hollows.
     struct Surface {
@@ -198,6 +200,8 @@ private:
     std::uint64_t joints_seed_ = 0;
     // Rivers' courses, and the seeds of the rock they cut through.
     std::vector<std::vector<DVec3>> courses_;
+    // The floor of each course at each of its turns.
+    std::vector<std::vector<double>> course_floors_;
     std::uint64_t rock_seed_ = 0;
     std::uint64_t faults_seed_ = 0;
     // How steeply valley walls rise about each point, metres up per metre across.

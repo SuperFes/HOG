@@ -198,17 +198,37 @@ void Lowered::add(const formation::Smooth::Read& ground, double wall, double flo
 }
 
 formation::Smooth::Read Lowered::lowest() const noexcept {
-    const Ground& low = grounds_[lowest_];
+    const std::span<const Ground> all{grounds_.data(), count_};
+    // Each crest rounded down from the lower of the two walls meeting at it, wherever another
+    // ground stands lowest: one lying low between them, but over the rounded crest, mustn't take
+    // the rounding away where it lies.
+    formation::Smooth::Read best = grounds_[lowest_].read;
+    for (const Ground& low : all) {
+        if (low.read.value - (blend_ / 4.0) >= best.value) {
+            continue;
+        }
+        const formation::Smooth::Read rounded = rounded_from(low);
+        if (rounded.value < best.value) {
+            best = rounded;
+        }
+    }
+    return best;
+}
+
+formation::Smooth::Read Lowered::rounded_from(const Ground& low) const noexcept {
     const std::span<const Ground> all{grounds_.data(), count_};
     double dip = 0.0;
     formation::Smooth::Read rounded = low.read;
-    // The floor it stands over, handed over from the lowest's to those coming as low over the
-    // blend, so none breaks where another comes lowest.
+    // The floor it stands over, handed over from its own to those coming as low over the blend,
+    // so none breaks where another comes lowest.
     const double over = std::max(blend_, handing_over);
     double floors = 0.0;
     double weights = 0.0;
     for (const Ground& one : all) {
         const double apart = one.read.value - low.read.value;
+        if (apart < 0.0) {
+            continue;
+        }
         const double near = std::clamp(1.0 - (apart / over), 0.0, 1.0);
         const double weight = near * near * (3.0 - (2.0 * near));
         floors += weight * one.floor;

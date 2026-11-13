@@ -170,24 +170,33 @@ struct RiverDepths {
     double flood_level = 0.0;
 };
 
-// A river's water stands only in the channel of the valley the ground lies in, fading out over
-// `spread` in height as another's takes over, so none stands over one it doesn't run in.
-RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top,
-                         double spread) noexcept {
+// A river's water stands only in the channel of the valley the ground lies in. Where another
+// valley takes the ground lower than its channel, nothing holds it up there: it fades out over its
+// own depth (or `spread`, the least it fades over), so none stands over a valley it doesn't run
+// in. Its flood fades so over the blend `flood_spread`. Nor does it stand over `banks`, the
+// lowest the ground stands about it with no channel cut in it, which is all that holds it in.
+RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top, double banks,
+                         double spread, double flood_spread) noexcept {
+    const auto faded = [&](double ground, double over_ground) {
+        const double over = std::max(0.0, ground - top) / over_ground;
+        return over >= 1.0 ? 0.0 : 1.0 - (over * over * (3.0 - (2.0 * over)));
+    };
     RiverDepths depths;
     for (const ValleyRiver& river : rivers) {
-        const double over = std::max(0.0, river.ground - top) / spread;
-        if (over >= 1.0) {
-            continue;
-        }
-        // As deep as it stands in its own channel, wherever the ground's merged lower.
-        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
-        if (const double deep = in * (river.water - river.ground); deep > depths.river) {
+        const double own = river.water - river.ground;
+        if (const double deep = faded(river.ground, std::max(spread, own)) * own;
+            deep > depths.river) {
             depths.river = deep;
             depths.level = river.water;
             depths.flood_level = std::max(river.bank, river.water);
         }
-        depths.flood = std::max(depths.flood, in * (river.bank - river.ground));
+        depths.flood =
+            std::max(depths.flood, faded(river.ground, flood_spread) * (river.bank - river.ground));
+    }
+    // Faded, it lies over the ground no deeper than it's faded to.
+    if (depths.river > 0.0) {
+        depths.level = std::min({depths.level, top + depths.river, banks});
+        depths.river = std::max(0.0, depths.level - top);
     }
     return depths;
 }
@@ -237,6 +246,22 @@ DVec3 blended_fall(const std::vector<GroundWay>& ways, double top, double blend)
 }
 
 // `run` as a share of `length`, or `none` along none.
+// A river `depth` deep where it ran, standing over `bed` at its own `level` along its course, one
+// level across its channel, wherever the ground's lower: bars in it stand dry. Where the ground
+// about was worn lower since, down towards a lake, say, its water went with it, no deeper than it
+// ran.
+std::optional<Formed::Here::River> river_over(double bed, double depth, double level,
+                                              double flood) noexcept {
+    if (depth <= 0.0) {
+        return std::nullopt;
+    }
+    const double stands = std::min(level, bed + depth);
+    if (stands <= bed) {
+        return std::nullopt;
+    }
+    return Formed::Here::River{.level = stands, .flood = std::max(stands, flood)};
+}
+
 double share_of(double run, double length, double none) noexcept {
     return length > 0.0 ? run / length : none;
 }
@@ -872,11 +897,13 @@ std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
 
 void Formed::fill_courses() {
     courses_.assign(world_.sphere.size(), {});
+    course_floors_.assign(world_.sphere.size(), {});
     std::atomic<std::uint32_t> next{0};
     const auto fill = [&] {
         for (std::uint32_t point = next++; point < courses_.size(); point = next++) {
             if (world_.rivers.receiver[point] != point) {
                 courses_[point] = make_course(point);
+                course_floors_[point] = floors_along(point, courses_[point]);
             }
         }
     };
@@ -889,6 +916,34 @@ void Formed::fill_courses() {
     for (std::thread& worker : workers) {
         worker.join();
     }
+}
+
+std::vector<double> Formed::floors_along(std::uint32_t point,
+                                         const std::vector<DVec3>& line) const {
+    const formation::World& world = world_;
+    const std::uint32_t down = world.rivers.receiver[point];
+    const bool mouth = world.rivers.receiver[down] == down;
+    const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+    std::vector<double> runs(line.size(), 0.0);
+    for (std::size_t k = 0; k + 1 < line.size(); ++k) {
+        runs[k + 1] = runs[k] + glm::length(line[k + 1] - line[k]);
+    }
+    // Falling evenly from one point's ground to the next's, but a river runs along the bottom:
+    // where the ground between sags under that, as down a steepening slope, so does its floor,
+    // never rising again on its way down.
+    std::vector<double> floors(line.size(), floor_to);
+    floors.front() = top_[point];
+    formation::Smooth::Weights weights;
+    std::uint32_t near = point;
+    for (std::size_t k = 1; k + 1 < line.size(); ++k) {
+        smooth_.weigh(line[k], weights, near);
+        near = weights.nearest;
+        const double even =
+            top_[point] + ((floor_to - top_[point]) * share_of(runs[k], runs.back(), 0.0));
+        const double ground = formation::Smooth::read(top_, weights).value;
+        floors[k] = std::max(floor_to, std::min({floors[k - 1], even, ground}));
+    }
+    return floors;
 }
 
 std::vector<DVec3> Formed::make_course(std::uint32_t point) const {
@@ -970,6 +1025,8 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     // The ground as the lowest of the valleys has it, its points' own among them.
     Lowered lowered{rounding / radius_, blend};
     lowered.add(smooth, 0.0, smooth.value);
+    // The lowest the ground stands with no river's channel cut in it.
+    double banks = smooth.value;
     // Walls reach a little way from their valleys, so none is ever missed among those of the
     // points weighed here, however the points weighed change.
     const double reach = 0.6 * sphere.spacing() * radius_;
@@ -1022,6 +1079,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         // Its water too, fading out as its floor rises over the ground about it.
         rivers.push_back(
             {.ground = fade(wall.standing), .water = fade(wall.water), .bank = fade(wall.bank)});
+        banks = std::min(banks, fade(wall.standing + wall.cut));
         if (wall.standing < smooth.value) {
             const double faded = fade(wall.standing);
             const DVec3 fading =
@@ -1054,7 +1112,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     }
     carved.top = lowered.lowest();
     const double spread = std::max(blend, voxel_);
-    const RiverDepths depths = river_depths(rivers, carved.top.value, spread);
+    const RiverDepths depths = river_depths(rivers, carved.top.value, banks, voxel_, spread);
     carved.river = depths.river;
     carved.flood = depths.flood;
     carved.river_level = depths.level;
@@ -1135,8 +1193,18 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const DVec3 slope_gradient = steep_share > least_steep && steep_share < 1.0
                                      ? worn.gradient * (0.45 * steepest_here)
                                      : DVec3{0.0};
+    const std::vector<double>& floors = course_floors_[point];
     const auto floor_at = [&](double run) {
-        return top_[point] + ((floor_to - top_[point]) * share_of(run, length, 0.0));
+        const auto after = std::ranges::upper_bound(runs, run);
+        if (after == runs.begin()) {
+            return floors.front();
+        }
+        if (after == runs.end()) {
+            return floors.back();
+        }
+        const auto k = static_cast<std::size_t>(after - runs.begin()) - 1;
+        return floors[k] +
+               ((floors[k + 1] - floors[k]) * share_of(run - runs[k], runs[k + 1] - runs[k], 0.0));
     };
     // The ground stands as low as the lowest stretch of its course has it, where a bend
     // brings two near, blended over a few metres between them so it never breaks.
@@ -1527,11 +1595,9 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);
     lay_beach(direction, weights, under, top.top, layers);
     here.top = top.top;
-    // A river stands at its own level along its course, one level across its channel, wherever
-    // the ground's lower: bars in it stand dry.
-    if (const double bed = here.top.value - here.crag;
-        under.river > 0.0 && !here.lake && under.river_level > bed) {
-        here.river = Here::River{.level = under.river_level, .flood = under.flood_level};
+    if (!here.lake) {
+        here.river = river_over(here.top.value - here.crag, under.river, under.river_level,
+                                under.flood_level);
     }
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.

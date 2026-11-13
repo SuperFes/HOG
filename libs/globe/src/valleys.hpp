@@ -115,6 +115,8 @@ private:
         double wall = 0.0;
         double floor = 0.0;
     };
+    // `low` rounded by the one crest it meets most among those standing over it.
+    [[nodiscard]] formation::Smooth::Read rounded_from(const Ground& low) const noexcept;
     double rounding_ = 0.0;
     double blend_ = 0.0;
     std::array<Ground, 32> grounds_{};

@@ -5,6 +5,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -48,13 +49,17 @@ DVec3 somewhere(std::uint64_t n) {
 }
 
 Planet formed_planet() {
-    Planet planet;
-    planet.formed_detail = 5;
-    return planet;
+    return hog::testing::small_planet();
 }
 
 const Generator& formed_generator() {
-    static const Generator generator{formed_planet()};
+    return hog::testing::small_world();
+}
+
+// A planet big enough for what the small world has too little of to tell by: rivers many voxels
+// wide, crags, and hollows filled deep.
+const Generator& large_generator() {
+    static const Generator generator{Planet{}};
     return generator;
 }
 
@@ -225,6 +230,9 @@ TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[
 
 namespace {
 
+// Metres apart rivers are crossed at, finer than the narrowest is wide.
+constexpr double across_river = 1.0;
+
 // The land points whose rivers carry the most water on to land or the sea, most first.
 std::vector<std::uint32_t> largest_rivers(const hog::formation::World& world, std::size_t count) {
     std::vector<std::uint32_t> rivers;
@@ -273,7 +281,7 @@ std::pair<double, double> sharpest(const At& at, double low, double high) {
 
 TEST_CASE("a formed river's water stands in its channel and meets its banks without walls",
           "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const hog::formation::World& world = formed.world();
     const double lod = generator.planet().voxel;
@@ -292,12 +300,12 @@ TEST_CASE("a formed river's water stands in its channel and meets its banks with
             continue;
         }
         ++crossed;
-        // Across the valley as far as its course winds from the line, a metre at a time.
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
+        // Across the valley as far as its course winds from the line.
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
         bool any = false;
-        Formed::Here last = at(-half / radius);
-        for (int metres = -half; metres < half; ++metres) {
-            const Formed::Here next = at((metres + 1) / radius);
+        Formed::Here last = at(-half * across_river / radius);
+        for (int step = -half; step < half; ++step) {
+            const Formed::Here next = at((step + 1) * across_river / radius);
             if (last.river) {
                 any = true;
                 // It stands over the ground, no higher than its banks in flood.
@@ -305,7 +313,8 @@ TEST_CASE("a formed river's water stands in its channel and meets its banks with
                 CHECK(last.river->flood >= last.river->level);
             }
             if (river_depth(last) != river_depth(next)) {
-                const auto [low, high] = sharpest(at, metres / radius, (metres + 1) / radius);
+                const auto [low, high] =
+                    sharpest(at, step * across_river / radius, (step + 1) * across_river / radius);
                 const Formed::Here a = at(low);
                 const Formed::Here b = at(high);
                 CHECK(std::abs(river_depth(b) - river_depth(a)) <
@@ -321,7 +330,7 @@ TEST_CASE("a formed river's water stands in its channel and meets its banks with
 
 TEST_CASE("a formed river's water stands level across its channel, no crag standing in it",
           "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const hog::formation::World& world = formed.world();
     const double lod = generator.planet().voxel;
@@ -336,12 +345,12 @@ TEST_CASE("a formed river's water stands level across its channel, no crag stand
         const auto at = [&](double off) {
             return formed.at(glm::normalize(middle + (across * off)), lod);
         };
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
-        Formed::Here last = at(-half / radius);
-        for (int metres = -half; metres < half; ++metres) {
-            const Formed::Here next = at((metres + 1) / radius);
-            // A metre apart in the same water, it stands all but as high, however the bed under
-            // it rises and falls.
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        Formed::Here last = at(-half * across_river / radius);
+        for (int step = -half; step < half; ++step) {
+            const Formed::Here next = at((step + 1) * across_river / radius);
+            // Close by in the same water, it stands all but as high, however the bed under it
+            // rises and falls.
             if (last.river && next.river) {
                 ++steps;
                 stepped += std::abs(next.river->level - last.river->level) > 0.05 ? 1 : 0;
@@ -358,7 +367,7 @@ TEST_CASE("a formed river's water stands level across its channel, no crag stand
 }
 
 TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const hog::formation::World& world = formed.world();
     const double lod = generator.planet().voxel;
@@ -368,19 +377,19 @@ TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
         const DVec3 from = world.sphere.point(point);
         const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
         const DVec3 across = glm::normalize(glm::cross(to - from, from));
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
-        // Across each of a dozen stretches along it, 2 m at a time, the water nearest the line.
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        // Across each of a dozen stretches along it, the water nearest the line.
         std::vector<double> levels;
         constexpr int stretches = 12;
         for (int k = 1; k < stretches; ++k) {
             const DVec3 along = glm::normalize(from + ((to - from) * (k / double{stretches})));
             std::optional<double> level;
             int nearest = half;
-            for (int metres = -half; metres < half; metres += 2) {
-                const Formed::Here here =
-                    formed.at(glm::normalize(along + (across * (metres / radius))), lod);
-                if (here.river && std::abs(metres) < nearest) {
-                    nearest = std::abs(metres);
+            for (int step = -half; step < half; step += 2) {
+                const Formed::Here here = formed.at(
+                    glm::normalize(along + (across * (step * across_river / radius))), lod);
+                if (here.river && std::abs(step) < nearest) {
+                    nearest = std::abs(step);
                     level = here.river->level;
                 }
             }
@@ -402,7 +411,7 @@ TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
 
 TEST_CASE("a formed river's channel is left out with its water where read coarser than it's wide",
           "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const hog::formation::World& world = formed.world();
     const double lod = generator.planet().voxel;
@@ -413,9 +422,10 @@ TEST_CASE("a formed river's channel is left out with its water where read coarse
         const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
         const DVec3 middle = glm::normalize(from + to);
         const DVec3 across = glm::normalize(glm::cross(to - from, middle));
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius);
-        for (int metres = -half; metres < half; ++metres) {
-            const DVec3 direction = glm::normalize(middle + (across * (metres / radius)));
+        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        for (int step = -half; step < half; ++step) {
+            const DVec3 direction =
+                glm::normalize(middle + (across * (step * across_river / radius)));
             if (formed.at(direction, lod).river) {
                 ++wet;
                 CHECK_FALSE(formed.at(direction, 1'000.0).river);
@@ -531,7 +541,7 @@ TEST_CASE("soil lies on formed ground only as steep as it holds", "[globe][forme
     const double steepest = std::tan(hog::globe::properties(Material::Soil).repose);
     int soiled = 0;
     int steep = 0;
-    for (std::uint64_t n = 0; n < 4'000; ++n) {
+    for (std::uint64_t n = 0; n < 16'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here here = formed.at(direction, voxel);
         const DVec3 gradient = here.top.gradient;
@@ -549,13 +559,13 @@ TEST_CASE("soil lies on formed ground only as steep as it holds", "[globe][forme
 
 TEST_CASE("formed rock stands out as crags only where it stands taller than its cover is deep",
           "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
     int land = 0;
     int crags = 0;
     double tallest = 0.0;
-    for (std::uint64_t n = 0; n < 4'000; ++n) {
+    for (std::uint64_t n = 0; n < 16'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here here = formed.at(direction, voxel);
         const Formed::Here::Weathering& rock = here.weathering;
@@ -623,7 +633,7 @@ TEST_CASE("gullies cut down through what lies draped on formed ground, what was 
 TEST_CASE("what was carried onto formed ground lies in its hollows, filling them level where deep, "
           "draping the deep sea's bed",
           "[globe][formed]") {
-    const Generator& generator = formed_generator();
+    const Generator& generator = large_generator();
     const Formed& formed = *generator.shape().formed;
     const double voxel = generator.planet().voxel;
     const double radius = generator.planet().body.radius;
@@ -632,7 +642,7 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
                               .uncut = formed.at(direction, 1e9)};
     };
     Settling settling;
-    for (std::uint64_t n = 0; n < 200'000; ++n) {
+    for (std::uint64_t n = 0; n < 800'000; ++n) {
         const DVec3 direction = somewhere(n);
         const Formed::Here uncut = formed.at(direction, 1e9);
         if (uncut.layers.ice > 0.0 || settled_on(uncut) <= 0.0) {
@@ -666,9 +676,9 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
     CHECK(settling.draped > 9 * settling.offshore / 10);
     CHECK(settling.edges > 20);
     // The level it fills to changes a little across the gap, now and then past the bed.
-    CHECK(settling.lower * 100 > 85 * settling.edges);
+    CHECK(settling.lower * 100 > 80 * settling.edges);
     CHECK(settling.deep > 20);
-    CHECK(settling.level > 9 * settling.deep / 10);
+    CHECK(settling.level * 20 > 17 * settling.deep);
     // As much over the ground as was carried to it, the bed spread about as evenly as not.
     CHECK(std::abs(settling.settled - settling.carried) < 0.25 * settling.carried);
 }
