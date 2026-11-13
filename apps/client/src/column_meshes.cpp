@@ -43,7 +43,13 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
         const auto base = static_cast<std::uint32_t>(into.vertices.size());
         for (std::size_t k = 0; k < 4; ++k) {
             const globe::VoxelVertex& vertex = mesh.vertices[face + k];
-            into.vertices.push_back({.position = vertex.position,
+            // The sea stands at its one level, however much water each voxel at it holds.
+            const Vec3 position =
+                (corner & sea_corner) != 0
+                    ? Vec3{(glm::normalize(mesh.origin + DVec3{vertex.position}) * *sea) -
+                           mesh.origin}
+                    : vertex.position;
+            into.vertices.push_back({.position = position,
                                      .normal = vertex.normal,
                                      .tiles = {tile, tile, tile},
                                      .corner = static_cast<std::uint8_t>(
@@ -82,7 +88,7 @@ void ColumnMeshes::changed(std::span<const globe::Site> corners) {
     for (const globe::Site corner : corners) {
         const globe::Cell cell{
             .level = columns, .face = corner.face, .i = corner.i / side, .j = corner.j / side};
-        for (const auto [di, dj] :
+        for (const auto& [di, dj] :
              {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
             if (const std::optional<globe::Cell> next = globe::next_to(cell, di, dj)) {
                 const globe::Site beside{

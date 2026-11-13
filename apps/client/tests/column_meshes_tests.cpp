@@ -54,6 +54,13 @@ TEST_CASE("a tile column's faces are drawn as ground, and water still or the sea
     CHECK(drawn.water.indices == std::vector<std::uint32_t>{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7});
     CHECK((drawn.water.vertices[0].corner & hog::client::sea_corner) != 0);
     CHECK(drawn.water.vertices[4].corner == 0);
+    // The sea's own stands at its level, the rest where the mesh has it.
+    for (std::size_t k = 0; k < 4; ++k) {
+        CHECK(glm::length(mesh.origin + hog::DVec3{drawn.water.vertices[k].position}) ==
+              Catch::Approx(1000.0).margin(1e-3));
+    }
+    CHECK(glm::length(mesh.origin + hog::DVec3{drawn.water.vertices[4].position}) ==
+          Catch::Approx(1040.0).margin(1e-2));
     CHECK(drawn.ground.origin == hog::WorldPosition{mesh.origin});
 }
 

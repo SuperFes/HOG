@@ -312,6 +312,32 @@ TEST_CASE("water's sheet marks the corners on its edge, where it meets ground st
     CHECK(shores(mesh) == (4 * 8 * 2) + (4 * 3));
 }
 
+TEST_CASE("water standing a voxel higher beside other water meets it in a step, each sheet flat",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
+    // A voxel of water on the rock to the west; to the east, on rock a voxel higher.
+    const VoxelTree terraced = VoxelTree::build(Volume::tile_side, [](int x, int, int z) {
+        const auto rock = static_cast<int>(ground) + (x < 32 ? 0 : 1);
+        if (z <= rock) {
+            return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+        }
+        if (z == rock + 1) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return Cube{};
+    });
+    const VoxelMesh mesh = hog::globe::mesh_tile(layers, key, terraced);
+    const double low = layers.bottom(ground + 2);
+    const double high = layers.bottom(ground + 3);
+    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
+        if (vertex.material == Material::Water) {
+            const double at = glm::length(mesh.origin + hog::DVec3{vertex.position});
+            CHECK(std::min(std::abs(at - low), std::abs(at - high)) < 0.01);
+        }
+    }
+}
+
 TEST_CASE("water's sheet runs on over the shore as far as the sea may rise over it, at its level",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
@@ -355,7 +381,7 @@ TEST_CASE("a tile at a face's edge reads the tile across it on the next face",
     const VoxelTree rock = flat().tiles.front().second;
     const VoxelTree air{Volume::tile_side};
     const auto tiles = std::uint32_t{1} << (layers.level - std::countr_zero(tile));
-    for (const auto [i, by] : {std::pair{tiles - 1, 1}, std::pair{0U, -1}}) {
+    for (const auto& [i, by] : {std::pair{tiles - 1, 1}, std::pair{0U, -1}}) {
         const hog::globe::TileKey key{.level = 0, .face = 2, .i = i, .j = 10, .k = 0};
         const auto next = hog::globe::next_to(
             {.level = static_cast<std::uint8_t>(layers.level - std::countr_zero(tile)),

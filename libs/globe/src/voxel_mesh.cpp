@@ -495,7 +495,8 @@ public:
 
 private:
     [[nodiscard]] std::size_t index(int x, int y) const {
-        return static_cast<std::size_t>(((y + apron_) * wide_) + x + apron_);
+        return (static_cast<std::size_t>(y + apron_) * static_cast<std::size_t>(wide_)) +
+               static_cast<std::size_t>(x + apron_);
     }
     [[nodiscard]] bool within(int at) const { return at >= -apron_ && at < wide_ - apron_; }
 
@@ -519,8 +520,8 @@ private:
                 }
             }
         }
-        // Ground a little under the level still holds the water off it; any lower is let be.
-        constexpr double held = 0.5;
+        // Only ground standing to the level hides what runs over it.
+        constexpr double held = 1e-6;
         for (std::size_t next = 0; next < reached.size(); ++next) {
             const auto [x, y] = reached[next];
             const double level = levels[next];
@@ -554,9 +555,9 @@ private:
 };
 
 // The open top of the water in the voxel at `x`, `y`, `z` of the block, or the sheet run on from it
-// over the shore there, as one sheet with the water beside it: each corner as high as the water of
-// the columns about it stands, those within a voxel of its own, so the sea meets itself across
-// columns, tiles and levels rather than standing in steps. Voxels are `size` layers tall.
+// over the shore there, as one sheet with the water beside it standing all but as high, so the sea
+// meets itself across columns, tiles and levels; water standing higher or lower is left to meet it
+// in a step, the sheet flat rather than tilted up to it. Voxels are `size` layers tall.
 void add_sheet(VoxelMesh& mesh, const Block& block, Sheet& sheet, const Layers& layers, Cell first,
                int x, int y, int z, int size) {
     const Slot& here = block.at(x, y, z);
@@ -572,6 +573,7 @@ void add_sheet(VoxelMesh& mesh, const Block& block, Sheet& sheet, const Layers& 
         return;
     }
     // A corner with fewer than its four columns' water about it is on the sheet's edge.
+    constexpr double joined = 0.25;
     std::array<bool, 4> shore{};
     int count = 0;
     const auto standing = [&](int corner_x, int corner_y) {
@@ -580,7 +582,7 @@ void add_sheet(VoxelMesh& mesh, const Block& block, Sheet& sheet, const Layers& 
         for (const int by_x : {corner_x - 1, corner_x}) {
             for (const int by_y : {corner_y - 1, corner_y}) {
                 if (const std::optional<double> surface = sheet.at(x + by_x, y + by_y, z);
-                    surface && std::abs(*surface - own) <= 1.0) {
+                    surface && std::abs(*surface - own) <= joined) {
                     sum += *surface;
                     ++count;
                 }
@@ -809,6 +811,29 @@ private:
     std::map<TileKey, const VoxelTree*> across_;
 };
 
+// Stands the columns `from` to `to` voxels past the tile's own, all round, as `near` reads them,
+// a voxel under the tile up to one over it, none from `shell` voxels up the tile; says whether any
+// holds liquid.
+bool stand_ring(Block& block, Near& near, int shell, int from, int to) {
+    const int across = block.across();
+    std::vector<Held> column(static_cast<std::size_t>(across + 2));
+    bool wet = false;
+    for (int y = -to; y < across + to; ++y) {
+        for (int x = -to; x < across + to; ++x) {
+            if (std::max({0, -x, -y, x - across + 1, y - across + 1}) < from) {
+                continue;
+            }
+            for (std::size_t n = 0; n < column.size(); ++n) {
+                const int z = static_cast<int>(n) - 1;
+                column[n] = z < shell ? held_of(near(x, y, z)) : Held{};
+                wet = wet || column[n].liquid_share > 0.0;
+            }
+            block.stand(x, y, column);
+        }
+    }
+    return wet;
+}
+
 } // namespace
 
 VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile, const TileAt& beside,
@@ -837,29 +862,11 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile, co
     mesh.origin = center(whole) * layers.bottom(base * size);
 
     Block block{across, base - 1, across + 2, shore_rise ? shore_columns + 1 : 1};
-    std::vector<Held> column(static_cast<std::size_t>(across + 2));
     Near near{layers, key, tile, beside};
-    bool wet = false;
-    // The columns `from` to `to` voxels past the tile's own, all round.
-    const auto stand = [&](int from, int to) {
-        for (int y = -to; y < across + to; ++y) {
-            for (int x = -to; x < across + to; ++x) {
-                if (std::max({0, -x, -y, x - across + 1, y - across + 1}) < from) {
-                    continue;
-                }
-                for (std::size_t n = 0; n < column.size(); ++n) {
-                    const int z = static_cast<int>(n) - 1;
-                    column[n] = base + z < shell ? held_of(near(x, y, z)) : Held{};
-                    wet = wet || column[n].liquid_share > 0.0;
-                }
-                block.stand(x, y, column);
-            }
-        }
-    };
-    stand(0, 1);
+    const int stood_to = shell - base;
     // Only water needs to see further, to how far its sheet runs over the shore.
-    if (wet) {
-        stand(2, block.apron());
+    if (stand_ring(block, near, stood_to, 0, 1)) {
+        stand_ring(block, near, stood_to, 2, block.apron());
     }
     const double voxel = layers.bottom((base + 1) * size) - layers.bottom(base * size);
     Sheet sheet{block, shore_rise ? *shore_rise / voxel : -1.0};
