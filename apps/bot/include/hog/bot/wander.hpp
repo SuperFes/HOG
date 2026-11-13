@@ -12,6 +12,8 @@ struct WanderSettings {
     double nearest = 20.0;    // no point going somewhere it's already arrived
     double near_enough = 2.0; // metres that count as arrived
     double patience = 60.0;   // seconds before somewhere else looks better
+    double stuck = 5.0;       // seconds getting no nearer before it tries elsewhere
+    double nearer = 0.5;      // metres nearer that count as getting there
 };
 
 // Where a bot is headed: a direction from the planet's centre it walks under, and how long it
@@ -19,6 +21,8 @@ struct WanderSettings {
 struct Wander {
     DVec3 target{1.0, 0.0, 0.0}; // unit
     double patience = 0.0;       // seconds left
+    double closest = 1e30;       // metres along the ground it has come to the target
+    double stalled = 0.0;        // seconds since it last came nearer
 };
 
 // A fresh target, `nearest` to `furthest` metres along the ground from under `at` (unit), any
@@ -26,8 +30,8 @@ struct Wander {
 [[nodiscard]] Wander pick(DVec3 at, double planet_radius, std::mt19937_64& random,
                           const WanderSettings& settings = {});
 
-// A frame of walking: which way along the ground, or nothing once it's arrived or has lost its
-// patience, when a fresh target is wanted.
+// A frame of walking: which way along the ground, or nothing once it's arrived, has lost its
+// patience or has got no nearer for a while, when a fresh target is wanted.
 struct Walked {
     Wander wander;
     std::optional<DVec3> heading; // unit, along the ground under the feet

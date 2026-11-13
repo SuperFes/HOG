@@ -1,10 +1,12 @@
 #include <hog/bot/wander.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <random>
 
 using hog::DVec3;
@@ -62,4 +64,21 @@ TEST_CASE("arriving, or losing patience, asks for somewhere new", "[bot][wander]
     // Far from it, but out of patience.
     const WorldPosition away{up * radius};
     CHECK_FALSE(walk(wander, away, radius, wander.patience + 1.0).heading);
+}
+
+TEST_CASE("held up and getting no nearer, it soon asks for somewhere new", "[bot][wander]") {
+    std::mt19937_64 random{7};
+    const WanderSettings settings{};
+    Wander wander = pick(up, radius, random, settings);
+    const WorldPosition held{up * radius};
+    double waited = 0.0;
+    std::optional<DVec3> heading = DVec3{0.0};
+    while (heading && waited < settings.patience) {
+        const Walked walked = walk(wander, held, radius, 0.1, settings);
+        wander = walked.wander;
+        heading = walked.heading;
+        waited += 0.1;
+    }
+    CHECK_FALSE(heading);
+    CHECK(waited == Catch::Approx(settings.stuck).margin(0.2));
 }

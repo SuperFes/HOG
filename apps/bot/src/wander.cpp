@@ -29,7 +29,15 @@ Walked walk(Wander wander, WorldPosition feet, double planet_radius, double seco
         planet_radius * std::acos(std::clamp(glm::dot(at, wander.target), -1.0, 1.0));
     const DVec3 toward = wander.target - (glm::dot(wander.target, at) * at);
     const double length = glm::length(toward);
-    if (wander.patience <= 0.0 || along <= settings.near_enough || length < 1e-9) {
+    // Held up against a step or a wall, it gets no nearer however long it tries.
+    if (along < wander.closest - settings.nearer) {
+        wander.closest = along;
+        wander.stalled = 0.0;
+    } else {
+        wander.stalled += seconds;
+    }
+    if (wander.patience <= 0.0 || wander.stalled >= settings.stuck ||
+        along <= settings.near_enough || length < 1e-9) {
         return {.wander = wander, .heading = std::nullopt};
     }
     return {.wander = wander, .heading = toward / length};
