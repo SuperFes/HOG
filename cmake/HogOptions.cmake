@@ -1,5 +1,7 @@
 option(HOG_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(HOG_BUILD_TESTS "Build unit tests" ON)
+# CI pays a test world's forming once per shard rather than once per test case.
+option(HOG_SHARD_TESTS "Register each test executable as a few shards, not one test per case" OFF)
 option(HOG_BUILD_VIEWER "Build the debug viewer app, with SDL3 and Dear ImGui" ON)
 option(HOG_BUILD_CLIENT "Build the game client app, with SDL3" ON)
 set(HOG_SANITIZE "" CACHE STRING "Semicolon-separated sanitizers, e.g. address;undefined or thread")

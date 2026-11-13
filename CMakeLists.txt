@@ -183,7 +183,15 @@ function(hog_add_tests lib)
     add_executable(${lib}_tests ${ARGN})
     target_link_libraries(${lib}_tests PRIVATE ${lib} hog::testing Catch2::Catch2WithMain)
     hog_target_defaults(${lib}_tests)
-    catch_discover_tests(${lib}_tests DISCOVERY_MODE PRE_TEST)
+    if(HOG_SHARD_TESTS)
+        foreach(shard RANGE 3)
+            add_test(NAME ${lib}_tests-${shard}
+                COMMAND ${lib}_tests --shard-count 4 --shard-index ${shard} --allow-running-no-tests)
+            set_tests_properties(${lib}_tests-${shard} PROPERTIES SKIP_RETURN_CODE 4)
+        endforeach()
+    else()
+        catch_discover_tests(${lib}_tests DISCOVERY_MODE PRE_TEST)
+    endif()
 endfunction()
 
 # Benchmarks are separate executables so ctest (and sanitizer runs) never pay for them.

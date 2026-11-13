@@ -56,19 +56,19 @@
       "name": "ci",
       "displayName": "CI (release, warnings as errors)",
       "inherits": "release",
-      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON" }
+      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON", "HOG_SHARD_TESTS": "ON" }
     },
     {
       "name": "ci-asan",
       "displayName": "CI sanitizers (warnings as errors)",
       "inherits": "asan",
-      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON" }
+      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON", "HOG_SHARD_TESTS": "ON" }
     },
     {
       "name": "ci-tsan",
       "displayName": "CI thread sanitizer (warnings as errors)",
       "inherits": "tsan",
-      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON" }
+      "cacheVariables": { "HOG_WARNINGS_AS_ERRORS": "ON", "HOG_SHARD_TESTS": "ON" }
     }
   ],
   "buildPresets": [
@@ -93,9 +93,9 @@
       "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/cmake/tsan.supp" }
     },
     { "name": "tsan", "inherits": "thread", "configurePreset": "tsan" },
-    { "name": "ci", "inherits": "base", "configurePreset": "ci" },
-    { "name": "ci-asan", "inherits": "base", "configurePreset": "ci-asan" },
-    { "name": "ci-tsan", "inherits": "thread", "configurePreset": "ci-tsan" }
+    { "name": "ci", "inherits": "base", "configurePreset": "ci", "execution": { "jobs": 4 } },
+    { "name": "ci-asan", "inherits": "base", "configurePreset": "ci-asan", "execution": { "jobs": 4 } },
+    { "name": "ci-tsan", "inherits": "thread", "configurePreset": "ci-tsan", "execution": { "jobs": 4 } }
   ],
   "workflowPresets": [
     {
