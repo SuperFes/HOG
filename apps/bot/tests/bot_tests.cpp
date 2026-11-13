@@ -11,6 +11,7 @@
 #include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
@@ -39,9 +40,9 @@ namespace {
 constexpr GameTime start{
     std::chrono::sys_days{std::chrono::year{2026} / 10 / 11}.time_since_epoch()};
 
-// A server on a free players' port, for a small planet in `directory`.
+// A server on a free players' port, for the small test planet in `directory`.
 std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory) {
-    std::ofstream{directory / "planet.toml"} << "[planet]\nseed = 1\nradius = 115000.0\n";
+    std::ofstream{directory / "planet.toml"} << hog::testing::small_planet_file();
     hog::server::ServerConfig config;
     config.world = directory / "var" / "world.db";
     config.planet = directory / "planet.toml";

@@ -8,6 +8,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/testing/temporary_directory.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,8 +23,7 @@ using hog::globe::TileKey;
 namespace {
 
 const Generator& planet() {
-    static const Generator generator{hog::globe::Planet{}};
-    return generator;
+    return hog::testing::small_world();
 }
 
 constexpr std::uint8_t level = 3;

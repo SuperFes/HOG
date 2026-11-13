@@ -46,5 +46,5 @@ hog_add_tests(hog_server
 
 if(TARGET hog_server_tests)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-    target_link_libraries(hog_server_tests PRIVATE stb_image_write)
+    target_link_libraries(hog_server_tests PRIVATE stb_image_write hog::test_world)
 endif()

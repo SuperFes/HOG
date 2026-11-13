@@ -2,6 +2,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,13 +17,13 @@ using hog::globe::Material;
 
 namespace {
 
-Generator wet() {
-    return Generator{hog::globe::Planet{}};
+const Generator& wet() {
+    return hog::testing::small_world();
 }
 
 // Too cold and thin-aired for seas.
 Generator frozen() {
-    hog::globe::Planet planet;
+    hog::globe::Planet planet = hog::testing::small_planet();
     planet.system.air.pressure = 636.0;
     planet.system.stars.front().luminosity = 0.3;
     return Generator{planet};
@@ -69,13 +70,13 @@ TEST_CASE("beds of rock lie under the ground, limestone only where seas laid it"
 }
 
 TEST_CASE("the ground under the sea is soaked to its pores, and dry above it", "[globe][strata]") {
-    const Generator earth = wet();
+    const Generator& earth = wet();
     const std::optional<double> level = earth.sea_level();
     REQUIRE(level);
     const double sea = level.value_or(0.0);
     int soaked = 0;
     int dry = 0;
-    for (std::uint64_t k = 0; k < 300; ++k) {
+    for (std::uint64_t k = 0; k < 1'000; ++k) {
         const DVec3 down = direction(k);
         const double ground = hog::globe::ground_below(earth, down, 1.0).value_or(0.0);
         const hog::globe::Sample under = earth.sample(down * (ground - 1.0), 1.0);

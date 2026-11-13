@@ -6,6 +6,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/noise.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -28,12 +29,12 @@ using hog::globe::Planet;
 namespace {
 
 Planet wet() {
-    return fine(Planet{});
+    return hog::testing::small_planet();
 }
 
 // No air or water, under a sixth of the gravity.
 Planet airless() {
-    Planet planet = fine(Planet{});
+    Planet planet = hog::testing::small_planet();
     planet.body.gravity = 1.62;
     planet.system.air.pressure = 0.0;
     return planet;
@@ -77,7 +78,7 @@ double floor_of(const Planet& planet) {
 
 TEST_CASE("a column's caves are found by casting down it, wherever its samples are open",
           "[globe][caves]") {
-    const Generator generator{wet()};
+    const Generator& generator = hog::testing::small_world();
     const double lod = hog::globe::voxel_lod(generator);
     constexpr double reach = 300.0;
     int with = 0;
@@ -166,7 +167,7 @@ TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]
 TEST_CASE("some columns cross solid ground more than once", "[globe][caves]") {
     // Where a cave runs under the ground, a column passes rock, open space, then rock again:
     // what a height map can't hold.
-    const Generator earth{wet()};
+    const Generator& earth = hog::testing::small_world();
     std::uint64_t crossed_again = 0;
     constexpr std::uint64_t columns = 4'000;
     for (std::uint64_t k = 0; k < columns; ++k) {
@@ -193,7 +194,7 @@ TEST_CASE("caves keep to their beds, their walls running on across the beds' fac
     // bounds, even where one bed gives way to another and a cave in the one stops at its face: a
     // step that changes it far more than the steps either side is a leap. Deeper in the rock a
     // passage narrowing to nothing may drop away whole, unseen.
-    const Generator earth{wet()};
+    const Generator& earth = hog::testing::small_world();
     constexpr double step = 0.05;
     int leaps = 0;
     int open = 0;
@@ -255,7 +256,7 @@ TEST_CASE("passages close where the stress round them overcomes the rock, deeper
     heavy.body.gravity *= 2.0;
     CHECK(floor_of(heavy) == Catch::Approx(earth / 2.0).margin(60.0));
     // Nothing is open at the floor, and a cast down a column never reaches below it.
-    const Generator generator{wet()};
+    const Generator& generator = hog::testing::small_world();
     for (std::uint64_t k = 0; k < 200; ++k) {
         const Generator::Column column = generator.column(direction(k), 0.5);
         for (const auto& [bottom, top] : column.caves(0.0, 1e9, 0.0)) {

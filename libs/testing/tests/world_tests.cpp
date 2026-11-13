@@ -19,3 +19,9 @@ TEST_CASE("the small world forms quickly, with sea and land", "[testing][world]"
     CHECK(hog::globe::world_id(hog::testing::small_planet()) ==
           hog::globe::world_id(world.planet()));
 }
+
+TEST_CASE("the small planet's file reads back as the small planet", "[testing][world]") {
+    const auto read = hog::globe::parse_planet(hog::testing::small_planet_file());
+    REQUIRE(read.has_value());
+    CHECK(hog::globe::world_id(read.value()) == hog::globe::world_id(hog::testing::small_planet()));
+}

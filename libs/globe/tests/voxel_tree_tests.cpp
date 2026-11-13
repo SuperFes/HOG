@@ -7,6 +7,7 @@
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_tree.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -135,7 +136,7 @@ TEST_CASE("cubes that repeat are stored once", "[globe][voxel_tree]") {
 
 TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][voxel_tree]") {
     using namespace hog::globe;
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Layers& layers = generator.layers();
     // Land: the highest ground over a coarse sweep.
     hog::DVec3 land{0.0, 0.0, 1.0};
@@ -330,7 +331,7 @@ BlockBytes block_bytes(const hog::globe::Generator& generator, const hog::globe:
 // Hidden: it generates the bricks.
 TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
     using namespace hog::globe;
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Layers& layers = generator.layers();
     const auto [peak, coast] = find_landmarks(generator);
     constexpr int blocks_across = 4; // 32-voxel blocks along each side of the patch

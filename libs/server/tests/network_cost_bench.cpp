@@ -6,6 +6,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/protocol/messages.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
@@ -58,7 +59,7 @@ TEST_CASE("what the network carries for everyday happenings", "[.network]") {
 
     // A hole dug in real generated ground, a ball 1.5 m across at a time, going down: the tile
     // columns changed, as the volume codes them.
-    const globe::Generator generator{globe::Planet{}};
+    const globe::Generator& generator = hog::testing::small_world();
     globe::MadeWorld made{generator};
     globe::World& world = made.world();
     const double sea = generator.sea_level().value_or(generator.planet().body.radius);

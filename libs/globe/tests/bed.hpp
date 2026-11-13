@@ -10,6 +10,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <algorithm>
 #include <array>
@@ -35,8 +36,7 @@ using hog::globe::Material;
 using hog::globe::World;
 
 inline const Generator& earth() {
-    static const Generator generator{fine(hog::globe::Planet{})};
-    return generator;
+    return hog::testing::small_world();
 }
 
 inline DVec3 somewhere(std::uint64_t k) {

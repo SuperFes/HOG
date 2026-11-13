@@ -4,6 +4,7 @@
 #include <hog/protocol/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/skies/weather_keeper.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -19,12 +20,6 @@ using namespace hog;
 using namespace std::chrono_literals;
 
 namespace {
-
-globe::Planet small_earth() {
-    globe::Planet planet;
-    planet.body.radius = 20'000.0;
-    return planet;
-}
 
 constexpr int level = 2;
 
@@ -48,7 +43,7 @@ std::optional<protocol::Weather> next(skies::WeatherKeeper& keeper, GameTime now
 } // namespace
 
 TEST_CASE("the keeper steps the air only once an interval has gone by", "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper keeper{generator, start, quick()};
     CHECK_FALSE(keeper.poll(start, 500ms));
     CHECK_FALSE(keeper.poll(start + 30s, 500ms));
@@ -57,7 +52,7 @@ TEST_CASE("the keeper steps the air only once an interval has gone by", "[server
 
 TEST_CASE("the weather it makes has a cell for each of the level's, in the grid's order",
           "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper keeper{generator, start, quick()};
     REQUIRE_FALSE(keeper.poll(start + 2min, 500ms));
     const auto found = next(keeper, start + 2min);
@@ -94,7 +89,7 @@ TEST_CASE("the weather it makes has a cell for each of the level's, in the grid'
 }
 
 TEST_CASE("the wind raises waves on the sea and none on land", "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper keeper{generator, start, quick()};
     REQUIRE_FALSE(keeper.poll(start + 2min, 500ms));
     const auto found = next(keeper, start + 2min);
@@ -120,7 +115,7 @@ TEST_CASE("the wind raises waves on the sea and none on land", "[server][weather
 
 TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
           "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     auto settings = quick();
     settings.spin_up = 90min;
     skies::WeatherKeeper keeper{generator, start, settings};
@@ -137,7 +132,7 @@ TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
 }
 
 TEST_CASE("a keeper given a save carries on from the air in it", "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper first{generator, start, quick()};
     REQUIRE_FALSE(first.poll(start + 2min, 500ms));
     const auto made = next(first, start + 2min);
@@ -155,7 +150,7 @@ TEST_CASE("a keeper given a save carries on from the air in it", "[server][weath
 }
 
 TEST_CASE("a save of another grid is refused", "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper first{generator, start, quick()};
     REQUIRE(next(first, start + 2min));
     auto other = quick();
@@ -192,7 +187,7 @@ TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
 
 TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips ahead past its lag",
           "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     auto settings = quick();
     settings.lag = 1h;
     skies::WeatherKeeper keeper{generator, start, settings};
@@ -217,7 +212,7 @@ TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips 
 
 TEST_CASE("a fade longer than the most a weather is faded over is kept as asked",
           "[server][weather]") {
-    const globe::Generator generator{small_earth()};
+    const globe::Generator& generator = hog::testing::small_world();
     skies::WeatherKeeper keeper{generator, start, quick()};
     GameTime now = start + 2min;
     int made = 0;

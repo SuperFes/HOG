@@ -181,11 +181,13 @@ TEST_CASE("the world as generated is at rest wherever it's touched: seabed, shor
         double low;
         double high;
     };
-    for (const Landform& landform :
-         {Landform{.name = "seabed", .low = -300.0, .high = -20.0},
-          Landform{.name = "shore", .low = -3.0, .high = 3.0},
-          Landform{.name = "lowland", .low = 20.0, .high = 300.0},
-          Landform{.name = "mountain", .low = 1'500.0, .high = 9'000.0}}) {
+    for (const Landform& landform : {Landform{.name = "seabed", .low = -300.0, .high = -20.0},
+                                     Landform{.name = "shore", .low = -3.0, .high = 3.0},
+                                     Landform{.name = "lowland", .low = 20.0, .high = 300.0},
+                                     // The world's own heights, however high they stand.
+                                     Landform{.name = "mountain",
+                                              .low = 0.6 * generator.shape().highest,
+                                              .high = generator.shape().highest}}) {
         for (int nth = 0; nth < 2; ++nth) {
             INFO(landform.name << " " << nth);
             MadeWorld made{generator};

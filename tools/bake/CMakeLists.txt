@@ -11,6 +11,9 @@ target_link_libraries(hog_bake_cli PRIVATE hog::bake)
 hog_target_defaults(hog_bake_cli)
 
 hog_add_tests(hog_bake tests/bake_tests.cpp)
+if(TARGET hog_bake_tests)
+    target_link_libraries(hog_bake_tests PRIVATE hog::test_world)
+endif()
 
 add_executable(hog_baked_bench src/bench.cpp)
 set_target_properties(hog_baked_bench PROPERTIES OUTPUT_NAME hog-baked-bench)

@@ -5,6 +5,7 @@
 #include <hog/globe/planet.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -74,7 +75,7 @@ void write_cover(const std::vector<double>& cover, const char* label) {
 // Loose cover over the ground of a patch of the highest mountain, before and after the cover
 // creeps. Hidden: for looking at.
 TEST_CASE("probe: cover on a mountain after creep", "[.creep_probe]") {
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Layers& layers = generator.layers();
     const hog::DVec3 peak = highest_peak(generator);
     const Cell centre = cell_under(peak, layers.level);

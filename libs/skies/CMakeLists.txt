@@ -10,3 +10,6 @@ target_link_libraries(hog_skies
 hog_target_defaults(hog_skies)
 
 hog_add_tests(hog_skies tests/weather_keeper_tests.cpp)
+if(TARGET hog_skies_tests)
+    target_link_libraries(hog_skies_tests PRIVATE hog::test_world)
+endif()

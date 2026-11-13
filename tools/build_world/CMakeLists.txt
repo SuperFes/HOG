@@ -11,3 +11,6 @@ target_link_libraries(hog_build_world_cli PRIVATE hog::build_world hog::store)
 hog_target_defaults(hog_build_world_cli)
 
 hog_add_tests(hog_build_world tests/build_world_tests.cpp)
+if(TARGET hog_build_world_tests)
+    target_link_libraries(hog_build_world_tests PRIVATE hog::test_world)
+endif()

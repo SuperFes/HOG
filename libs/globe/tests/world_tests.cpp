@@ -8,6 +8,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,8 +38,7 @@ using hog::globe::World;
 namespace {
 
 const Generator& earth() {
-    static const Generator generator{fine(hog::globe::Planet{})};
-    return generator;
+    return hog::testing::small_world();
 }
 
 // The brick the ground passes through above a direction, and the ground's radius there.
@@ -433,7 +433,7 @@ TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[
 
 TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
     {
-        const Generator generator{hog::globe::Planet{}};
+        const Generator& generator = hog::testing::small_world();
         std::vector<BrickSite> bricks;
         bricks.reserve(40);
         for (std::uint64_t k = 0; k < 40; ++k) {

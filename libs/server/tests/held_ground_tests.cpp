@@ -4,6 +4,7 @@
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/server/held_ground.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,8 +21,7 @@ using hog::globe::Volume;
 using hog::server::HeldGround;
 
 const hog::globe::Generator& earth() {
-    static const hog::globe::Generator generator{hog::globe::Planet{}};
-    return generator;
+    return hog::testing::small_world();
 }
 
 constexpr std::uint32_t ground = 100;

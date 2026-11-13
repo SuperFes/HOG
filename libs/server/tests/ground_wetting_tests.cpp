@@ -5,6 +5,7 @@
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/server/ground_wetting.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -36,7 +37,7 @@ struct Earth {
         made.cover(land);
     }
 
-    hog::globe::Generator generator{hog::globe::Planet{}};
+    const hog::globe::Generator& generator = hog::testing::small_world();
     hog::globe::MadeWorld made{generator};
     hog::globe::World& world = made.world();
     DVec3 land = land_of(generator);

@@ -9,6 +9,7 @@
 #include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,12 +38,7 @@ constexpr std::int64_t full = Voxel::full;
 constexpr double tick = 0.05;
 
 inline const Generator& earth() {
-    static const Generator generator{[] {
-        hog::globe::Planet planet;
-        planet.voxel = 0.5; // the flow's rates were tuned on voxels this fine
-        return planet;
-    }()};
-    return generator;
+    return hog::testing::small_world();
 }
 
 // Columns 24 across and 24 along in the middle of face 0, with a floor: all shaped rock up to

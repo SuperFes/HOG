@@ -1,6 +1,7 @@
 #include <hog/globe/grip.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -16,7 +17,7 @@ namespace {
 // Voxels thick enough that a full one is a deep drift.
 const Generator& earth() {
     static const Generator generator{[] {
-        Planet planet;
+        Planet planet = hog::testing::small_planet();
         planet.voxel = 2.5;
         return planet;
     }()};

@@ -6,27 +6,21 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/calendar.hpp>
+#include <hog/testing/world.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
 
 namespace hog::client::testing {
 
-// The development planet the client flies over, held in a coarser shell and formed less finely
-// than the shipped one, so it's quick to make.
+// The small test planet in coarse voxels, so its ground is quick to make.
 inline const globe::Planet& planet() {
-    static const globe::Planet shipped = [] {
-        globe::Planet planet =
-            globe::load_planet(std::filesystem::path{HOG_SOURCE_DIR} / "config" / "planet.toml")
-                .value();
+    static const globe::Planet coarse = [] {
+        globe::Planet planet = hog::testing::small_planet();
         planet.voxel = 2.5;
-        planet.floor_depth = 4'000.0;
-        planet.sky_height = 10'000.0;
-        planet.formed_detail = 5.0;
         return planet;
     }();
-    return shipped;
+    return coarse;
 }
 
 // The voxel world the client draws in place of the planet, as --globe makes it by default, its

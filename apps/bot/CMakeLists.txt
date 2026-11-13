@@ -19,5 +19,6 @@ hog_add_tests(hog_bot
     tests/wander_tests.cpp)
 if(TARGET hog_bot_tests)
     # The server, and ground built for it, for a bot to walk on.
-    target_link_libraries(hog_bot_tests PRIVATE hog::app hog::build_world hog::store)
+    target_link_libraries(hog_bot_tests PRIVATE hog::app hog::build_world hog::store
+                                                hog::test_world)
 endif()

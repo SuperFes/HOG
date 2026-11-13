@@ -12,3 +12,6 @@ hog_add_tests(hog_physics
     tests/character_tests.cpp
     tests/ground_tests.cpp
     tests/space_tests.cpp)
+if(TARGET hog_physics_tests)
+    target_link_libraries(hog_physics_tests PRIVATE hog::test_world)
+endif()

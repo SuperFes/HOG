@@ -12,3 +12,6 @@ target_link_libraries(hog_stills_cli PRIVATE hog::stills)
 hog_target_defaults(hog_stills_cli)
 
 hog_add_tests(hog_stills tests/stills_tests.cpp)
+if(TARGET hog_stills_tests)
+    target_link_libraries(hog_stills_tests PRIVATE hog::test_world)
+endif()

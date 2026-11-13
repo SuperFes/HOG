@@ -1,5 +1,6 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -11,7 +12,7 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("the baseline temperature is what the generator says at every point",
           "[globe][temperature]") {
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Planet& planet = generator.planet();
     for (int k = 0; k < 600; ++k) {
         const double z = 1.0 - (((2.0 * k) + 1.0) / 600.0);
@@ -37,7 +38,7 @@ TEST_CASE("the baseline temperature is what the generator says at every point",
 }
 
 TEST_CASE("it is colder the higher, and warmer the deeper", "[globe][temperature]") {
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Planet& planet = generator.planet();
     const double at_sea = temperature_at(planet, 0.3);
     const double ground = planet.body.radius + 100.0;

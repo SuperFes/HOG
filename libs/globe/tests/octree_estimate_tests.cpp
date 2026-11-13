@@ -3,6 +3,7 @@
 #include <hog/globe/planet.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -202,7 +203,7 @@ void measure(const Generator& generator, const char* label, hog::DVec3 at, int a
 
 // How many leaves a patch needs when every uniform cube is one. Hidden: it samples whole columns.
 TEST_CASE("octree leaves per column over land, coast and sea", "[.octree_estimate]") {
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const double sea = generator.sea_level().value_or(generator.planet().body.radius);
     hog::DVec3 peak{0.0, 0.0, 1.0};
     hog::DVec3 coast{0.0, 0.0, 1.0};

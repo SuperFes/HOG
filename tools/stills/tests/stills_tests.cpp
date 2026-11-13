@@ -3,6 +3,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/stills/stills.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,16 +16,15 @@ namespace {
 // No air, and nothing to lie liquid: no sea or sky over the ground; voxels as fine as a
 // section's half-metre pixels.
 hog::globe::Planet airless() {
-    hog::globe::Planet planet;
+    hog::globe::Planet planet = hog::testing::small_planet();
     planet.system.air.pressure = 0.0;
-    planet.voxel = 0.5;
     return planet;
 }
 
 } // namespace
 
 TEST_CASE("the map shows the sea blue and the land not", "[stills]") {
-    const hog::globe::Generator earth{hog::globe::Planet{}};
+    const hog::globe::Generator& earth = hog::testing::small_world();
     const hog::stills::Image map = hog::stills::map(earth, 64, 2);
     REQUIRE(map.width == 64);
     REQUIRE(map.height == 32);
@@ -62,7 +62,8 @@ TEST_CASE("a voxel section shows a dug ball open where the ground was", "[stills
     const double ground = hog::globe::ground_below(moon, place.direction(), 0.5).value_or(radius);
     hog::globe::MadeWorld made{moon};
     hog::globe::World& world = made.world();
-    made.cover(place.direction(), 1);
+    // Every column the section crosses.
+    made.cover(place.direction());
     const auto cut = [&] {
         return hog::stills::voxel_section(world, place, 16.0, ground - radius - 8.0,
                                           ground - radius + 8.0, 32);

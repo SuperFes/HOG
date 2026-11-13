@@ -7,6 +7,7 @@
 #include <hog/globe/world.hpp>
 #include <hog/server/ice_bake.hpp>
 #include <hog/server/ice_climate.hpp>
+#include <hog/testing/world.hpp>
 #include <hog/weather/field.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -44,7 +45,7 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* dir = std::getenv("HOG_LOOK_DIR");
     REQUIRE(dir != nullptr);
-    const Generator generator{Planet{}};
+    const Generator& generator = hog::testing::small_world();
     const Layers& layers = generator.layers();
     const Planet& planet = generator.planet();
 

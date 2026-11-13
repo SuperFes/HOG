@@ -152,7 +152,9 @@ TEST_CASE("the land makes only what it doesn't know, spread as asked", "[globe][
 }
 
 TEST_CASE("a tile deep under the ground is hidden until something in it changes", "[globe][land]") {
-    const auto& generator = hog::globe::bed::earth();
+    // A planet whose rock still changes within a tile three under the ground, so it's hidden for
+    // its depth alone; the small world's lies in thicker beds.
+    static const hog::globe::Generator generator{fine(hog::globe::Planet{})};
     Land land{generator};
     const TileKey surface = ground_tile(generator);
     TileKey deep = surface;

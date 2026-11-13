@@ -9,6 +9,7 @@
 #include <hog/globe/world.hpp>
 #include <hog/physics/ground.hpp>
 #include <hog/physics/space.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -30,14 +31,8 @@ using Catch::Approx;
 
 namespace {
 
-// Earth-like, once for every test: a generator costs a survey to set up.
 const globe::Generator& earth() {
-    static const globe::Generator generator{[] {
-        globe::Planet planet;
-        planet.body.seed = 1;
-        return planet;
-    }()};
-    return generator;
+    return hog::testing::small_world();
 }
 
 double lod() {
@@ -50,8 +45,12 @@ WorldPosition over(DVec3 direction) {
                          (globe::ground_below(earth(), direction, lod()).value_or(0.0) + 10.0)};
 }
 
+// Land, off the voxels' corners, which a ray dropped straight down can slip between.
 DVec3 land() {
-    return globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
+    const DVec3 found =
+        globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
+    const double off = 0.3 * earth().planet().voxel / earth().planet().body.radius;
+    return glm::normalize(found + DVec3{0.0, off, 2.0 * off});
 }
 
 // The finest tile holding a place.
@@ -227,8 +226,7 @@ TEST_CASE("a brick dug lets go of the ground over it, which comes back with the 
 TEST_CASE("there is ground under and round a walker, whatever the cell size", "[physics][ground]") {
     // Chunks wider than the reach: the walker's own chunk can have its middle farther than that.
     for (const double voxel : {5.0, 2.5, 1.0}) {
-        globe::Planet planet;
-        planet.body.seed = 1;
+        globe::Planet planet = hog::testing::small_planet();
         planet.voxel = voxel;
         const globe::Generator generator{planet};
         const double fine = globe::voxel_lod(generator);
