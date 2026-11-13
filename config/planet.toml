@@ -3,7 +3,7 @@ seed = 1 # 812080951
 radius = 11500.0
 day = 4.0
 tilt = 23.44
-voxel = 2.5
+voxel = 0.3333333
 
 # The land formed stage by stage, plates to soil, on a sphere split this many times.
 formed_detail = 7.0
