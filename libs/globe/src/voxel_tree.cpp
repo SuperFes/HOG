@@ -18,20 +18,27 @@ namespace hog::globe {
 
 namespace {
 
-// One of a cube's matters over eight voxels: the material holding most of it, and its average.
+// One of a cube's matters over eight voxels: the material holding most of it in its upper four, or
+// its lower four where the upper hold none, and its average. A cube shows what's at its top, as
+// the generator's voxels do at every detail: a thin top layer over other matter still shows.
 struct Share {
-    std::array<std::uint32_t, material_count> by{};
+    std::array<std::array<std::uint32_t, material_count>, 2> by{}; // lower, upper
 
-    void add(Material material, std::uint16_t amount) {
-        by.at(static_cast<std::size_t>(material)) += amount;
+    void add(Material material, std::uint16_t amount, bool upper) {
+        by.at(upper ? 1 : 0).at(static_cast<std::size_t>(material)) += amount;
     }
     [[nodiscard]] std::pair<Material, std::uint16_t> taken() const {
         // Air holds nothing of a matter, so is never the most of one.
-        std::size_t most = 1;
         std::uint32_t total = 0;
-        for (std::size_t k = 1; k < by.size(); ++k) {
-            total += by.at(k);
-            if (by.at(k) > by.at(most)) {
+        std::uint32_t upper = 0;
+        for (std::size_t k = 1; k < material_count; ++k) {
+            total += by[0].at(k) + by[1].at(k);
+            upper += by[1].at(k);
+        }
+        const auto& shown = by.at(upper > 0 ? 1 : 0);
+        std::size_t most = 1;
+        for (std::size_t k = 1; k < material_count; ++k) {
+            if (shown.at(k) > shown.at(most)) {
                 most = k;
             }
         }
@@ -47,10 +54,13 @@ Cube summed(const std::array<Cube, 8>& eight) {
     Share liquid;
     std::uint32_t heat = 0;
     std::uint8_t condition = Voxel::sound;
-    for (const Cube& cube : eight) {
-        solid.add(cube.solid, cube.solid_amount);
-        grain.add(cube.grain, cube.grain_amount);
-        liquid.add(cube.liquid, cube.liquid_amount);
+    for (std::size_t k = 0; k < eight.size(); ++k) {
+        const Cube& cube = eight.at(k);
+        // Children 4 to 7 are the upper layer.
+        const bool upper = k >= 4;
+        solid.add(cube.solid, cube.solid_amount, upper);
+        grain.add(cube.grain, cube.grain_amount, upper);
+        liquid.add(cube.liquid, cube.liquid_amount, upper);
         heat += cube.heat;
         condition = std::min(condition, cube.condition);
     }
@@ -204,7 +214,7 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
 }
 
 VoxelTree::Id VoxelTree::rejoined(const std::vector<Step>& path, Id replacement) {
-    for (auto step : std::views::reverse(path)) {
+    for (const auto step : std::views::reverse(path)) {
         const Node above = nodes_[step.node];
         std::array<Id, 8> children =
             above.leaf ? std::array<Id, 8>{step.node, step.node, step.node, step.node,

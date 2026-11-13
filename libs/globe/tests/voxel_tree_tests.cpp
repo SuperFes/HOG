@@ -398,6 +398,14 @@ TEST_CASE("a tree halved stands each voxel for the eight it covers", "[globe][vo
     const Cube one = hog::globe::halved(mixed).at(0, 0, 0);
     CHECK(one.solid == Material::Granite);
     CHECK(one.solid_amount == Voxel::full / 2);
+    // A thin top over other matter shows, as the generator's coarse voxels show what's at their
+    // top: sand a quarter up the upper half over rock filling the lower.
+    const Cube sand{.solid = Material::Sand, .solid_amount = Voxel::full / 4};
+    const Cube topped = hog::globe::halved(VoxelTree::build(2, [&](int, int, int z) {
+                            return z == 0 ? rock() : sand;
+                        })).at(0, 0, 0);
+    CHECK(topped.solid == Material::Sand);
+    CHECK(topped.solid_amount == (Voxel::full + (Voxel::full / 4)) / 2);
     // A trace too small to count is none.
     const VoxelTree trace = VoxelTree::build(2, [](int x, int y, int z) {
         return x + y + z == 0 ? Cube{.grain = Material::Sand, .grain_amount = 3} : Cube{};
