@@ -64,7 +64,8 @@ template <class Effort>
         return (static_cast<std::size_t>(step) * static_cast<std::size_t>(lanes)) +
                static_cast<std::size_t>(lane);
     };
-    const auto size = static_cast<std::size_t>(corridor.steps + 1) * static_cast<std::size_t>(lanes);
+    const auto size =
+        static_cast<std::size_t>(corridor.steps + 1) * static_cast<std::size_t>(lanes);
     std::vector<DVec3> place(size);
     std::vector<double> hard(size);
     for (int step = 0; step <= corridor.steps; ++step) {

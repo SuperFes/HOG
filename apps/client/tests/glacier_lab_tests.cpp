@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <print>
 #include <string>
 
 using namespace hog::client::lab;
@@ -51,8 +52,8 @@ TEST_CASE("a mountain above the snowline grows a glacier that reaches below it",
     run(bed, climate, 300);
     const auto took =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
-    std::printf("300 years on 48x48: %.3f s, ice %.0f, terminus %.0f m\n", took, total_ice(bed),
-                terminus(bed));
+    std::println("300 years on 48x48: {:.3f} s, ice {:.0f}, terminus {:.0f} m", took,
+                 total_ice(bed), terminus(bed));
     CHECK(total_ice(bed) > 0.0);
     CHECK(terminus(bed) < climate.snowline);
 }
@@ -180,9 +181,9 @@ TEST_CASE("a debris cover slows melt and bare rock walls shed debris onto ice",
     const Climate climate{.snowline = 500.0};
     Bed clean = flat(8, 10.0, 100.0);
     Bed covered = clean;
-    std::fill(clean.ice.begin(), clean.ice.end(), 20.0);
-    std::fill(covered.ice.begin(), covered.ice.end(), 20.0);
-    std::fill(covered.debris.begin(), covered.debris.end(), 1.0);
+    std::ranges::fill(clean.ice, 20.0);
+    std::ranges::fill(covered.ice, 20.0);
+    std::ranges::fill(covered.debris, 1.0);
     add_balance(clean, climate, 1.0);
     add_balance(covered, climate, 1.0);
     CHECK(covered.ice[0] > clean.ice[0]);
@@ -271,7 +272,7 @@ TEST_CASE("an ice age cuts the valley floor deeper than its sides and leaves it 
     add_ridge(bed, 4.0, 32.0, 24.0, 32.0, 250.0, 900.0);
     add_valley(bed, 14.0, 32.0, 63.0, 32.0, 200.0, 150.0);
     const Bed before = bed;
-    Climate cold{.snowline = 420.0, .gain = 0.004, .most_gain = 1.0, .wear = 1.0e-4};
+    const Climate cold{.snowline = 420.0, .gain = 0.004, .most_gain = 1.0, .wear = 1.0e-4};
     run(bed, cold, 300);
     const auto worn = [&](int x, int y) {
         return before.rock[bed.index(x, y)] - bed.rock[bed.index(x, y)];
@@ -291,8 +292,8 @@ TEST_CASE("glacier beds, to look at", "[.look]") {
     const auto show = [&](const char* name, Bed bed, const Climate& climate, int years) {
         write_ppm(bed, dir + "/" + name + "_0.ppm");
         run(bed, climate, years);
-        std::printf("%s: ice %.0f, deepest %.0f m\n", name, total_ice(bed),
-                    *std::max_element(bed.ice.begin(), bed.ice.end()));
+        std::println("{}: ice {:.0f}, deepest {:.0f} m", name, total_ice(bed),
+                     *std::ranges::max_element(bed.ice));
         write_ppm(bed, dir + "/" + name + "_" + std::to_string(years) + ".ppm");
     };
     show("massif", mountain(64, 50.0, 900.0, 3), Climate{.snowline = 620.0}, 300);
@@ -308,11 +309,11 @@ TEST_CASE("glacier beds, to look at", "[.look]") {
     const Bed range = range_bed(4);
     Bed grown = range;
     run(grown, wet, 600);
-    std::printf("valley ice along axis:");
+    std::print("valley ice along axis:");
     for (const double ice : profile(grown, 6, 24, 46, 24, 14)) {
-        std::printf(" %.0f", ice);
+        std::print(" {:.0f}", ice);
     }
-    std::printf("\n");
+    std::println("");
     show("range", range, wet, 600);
     Bed retreat = grown;
     run_drifting(retreat, wet, 300, 3.0);
@@ -331,7 +332,7 @@ TEST_CASE("glacier beds, to look at", "[.look]") {
     Climate rocky = wet;
     rocky.rockfall = 0.002;
     run(dirty, rocky, 600);
-    std::printf("debris %.1f\n", total_debris(dirty));
+    std::println("debris {:.1f}", total_debris(dirty));
     write_ppm(dirty, dir + "/dirty_600.ppm");
     // Sea ice from open water at the warm edge to a pack at the cold one.
     Bed sea = flat(64, 100.0, -50.0);
@@ -339,7 +340,7 @@ TEST_CASE("glacier beds, to look at", "[.look]") {
     for (unsigned year = 0; year < 30; ++year) {
         sea_ice_year(sea, water, Cold{.base = -2.0, .per_row = 0.2, .patchy = 5.0}, 3);
     }
-    std::printf("sea cover %.2f\n", sea_ice_cover(sea, water));
+    std::println("sea cover {:.2f}", sea_ice_cover(sea, water));
     write_ppm(sea, dir + "/sea_ice.ppm", 8, water.sea);
 }
 
@@ -389,8 +390,8 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     const auto began = std::chrono::steady_clock::now();
     const hog::globe::Generator generator{planet};
     const auto lod = hog::globe::voxel_lod(generator) * 8.0;
-    std::printf("generator: %.2f s\n",
-                std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
+    std::println("generator: {:.2f} s",
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
     const double datum = generator.sea_level().value_or(planet.body.radius);
     const auto snowline_at = [&](const hog::DVec3& d) {
         return std::max((hog::globe::temperature_at(planet, std::asin(d.z)) - 273.15) / 0.0065,
@@ -400,7 +401,8 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     const auto pick = [&](double min_lat, double max_lat, double colder) {
         hog::DVec3 best{1.0, 0.0, 0.0};
         double most = -1.0e30;
-        for (double lat = min_lat; lat <= max_lat; lat += 4.0) {
+        for (int step = 0; min_lat + (4.0 * step) <= max_lat; ++step) {
+            const double lat = min_lat + (4.0 * step);
             for (int lon = 0; lon < 360; lon += 4) {
                 const double a = lat * 0.0174533;
                 const double b = lon * 0.0174533;
@@ -419,15 +421,13 @@ TEST_CASE("glaciers on a world, to look at", "[.look]") {
     const auto glaciate = [&](const char* name, hog::DVec3 at, double colder) {
         WorldPatch world = patch_of(generator, at, 64, 100.0);
         world.climate.snowline = std::max(world.climate.snowline - colder, 0.0);
-        std::printf("%s: lat %.1f, ground %.0f..%.0f m, snowline %.0f m\n", name,
-                    std::asin(at.z) / 0.0174533,
-                    *std::min_element(world.bed.rock.begin(), world.bed.rock.end()),
-                    *std::max_element(world.bed.rock.begin(), world.bed.rock.end()),
-                    world.climate.snowline);
+        std::println("{}: lat {:.1f}, ground {:.0f}..{:.0f} m, snowline {:.0f} m", name,
+                     std::asin(at.z) / 0.0174533, *std::ranges::min_element(world.bed.rock),
+                     *std::ranges::max_element(world.bed.rock), world.climate.snowline);
         write_ppm(world.bed, dir + "/" + name + "_0.ppm", 8, world.climate.sea);
         run(world.bed, world.climate, 500);
-        std::printf("%s: ice %.0f, deepest %.0f m\n", name, total_ice(world.bed),
-                    *std::max_element(world.bed.ice.begin(), world.bed.ice.end()));
+        std::println("{}: ice {:.0f}, deepest {:.0f} m", name, total_ice(world.bed),
+                     *std::ranges::max_element(world.bed.ice));
         write_ppm(world.bed, dir + "/" + name + "_500.ppm", 8, world.climate.sea);
     };
     glaciate("today", pick(-80.0, 80.0, 0.0), 0.0);

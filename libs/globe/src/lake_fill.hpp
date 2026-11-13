@@ -276,7 +276,7 @@ public:
             }
         }
         bool any = false;
-        for (const auto cell : splitting) {
+        for (const auto& cell : splitting) {
             any = split_.insert(key_of(cell)).second || any;
         }
         return any;

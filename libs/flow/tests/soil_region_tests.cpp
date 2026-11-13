@@ -67,12 +67,9 @@ TEST_CASE("rain washes the weathered ground down a bowl's sides", "[flow][soil]"
     Block block{floor_above_sea(100.0), false,
                 [](std::uint32_t i, std::uint32_t j, int layer) { return layer >= bowl(i, j); }};
     static_cast<void>(block.region().weather_ground(everywhere({}), 3.0));
-    const hog::flow::Stepped stepped =
-        block.region().wash({.rain = [](hog::DVec3) { return 0.3; },
-                             .river = {},
-                             .springs = {},
-                             .evaporation = 1.0},
-                            2'000.0);
+    const hog::flow::Stepped stepped = block.region().wash(
+        {.rain = [](hog::DVec3) { return 0.3; }, .river = {}, .springs = {}, .evaporation = 1.0},
+        2'000.0);
     CHECK(stepped.washed > 0);
     // What the water dropped lies mostly in the bowl's lower half.
     std::int64_t low = 0;
@@ -89,8 +86,9 @@ TEST_CASE("rain washes the weathered ground down a bowl's sides", "[flow][soil]"
 }
 
 TEST_CASE("what creeps off a step of weathered ground is its topsoil", "[flow][soil]") {
-    Block block{floor_above_sea(100.0), false,
-                [](std::uint32_t i, std::uint32_t, int layer) { return layer >= (i < 12 ? 6 : 3); }};
+    Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t, int layer) {
+                    return layer >= (i < 12 ? 6 : 3);
+                }};
     static_cast<void>(block.region().weather_ground(everywhere({}), 3.0));
     std::int64_t moved = 0;
     for (int step = 0; step < 10; ++step) {

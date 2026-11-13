@@ -64,11 +64,67 @@ std::size_t root_of(std::vector<std::size_t>& parent, std::size_t at) {
     return at;
 }
 
+// The grid of columns searched about the eye: `side` across, `spacing` metres apart, laid on the
+// ground under it, and the heights from the planet's centre searched between.
+struct Grid {
+    DVec3 eye{0.0};
+    double range = 0.0;
+    double spacing = 0.0;
+    double radius = 0.0;
+    DVec3 up{0.0};
+    DVec3 east{0.0};
+    DVec3 north{0.0};
+    int half = 0;
+    int side = 0;
+    double floor = 0.0;
+    double ceiling = 0.0;
+};
+
+// The open runs within range in row `i` of the grid, into `row`; `found` is room to work in.
+void runs_in_row(const World& world, const Grid& grid, int i,
+                 std::vector<std::pair<double, double>>& found, std::vector<Run>& row) {
+    const Layers& layers = world.generator().layers();
+    for (int j = 0; j < grid.side; ++j) {
+        const DVec3 across = (grid.east * (static_cast<double>(i - grid.half) * grid.spacing)) +
+                             (grid.north * (static_cast<double>(j - grid.half) * grid.spacing));
+        if (glm::length(across) > grid.range) {
+            continue;
+        }
+        const DVec3 direction = glm::normalize((grid.up * grid.radius) + across);
+        const Cell cell = cell_under(direction, layers.level);
+        found.clear();
+        open_runs(world, cell, std::max(0, layers.layer_at(grid.floor)),
+                  std::min(layers.count - 1, layers.layer_at(grid.ceiling)), found);
+        for (const auto& [bottom, top] : found) {
+            // Within range of the eye, not only along the ground and up or down.
+            if (glm::length((direction * ((bottom + top) / 2.0)) - grid.eye) > grid.range) {
+                continue;
+            }
+            row.push_back({.i = i, .j = j, .bottom = bottom, .top = top});
+        }
+    }
+}
+
+// Joins runs in neighbouring columns whose stretches overlap into one pocket, `runs` in order of
+// row.
+void join_overlapping(const std::vector<Run>& runs, std::vector<std::size_t>& parent) {
+    for (std::size_t a = 0; a < runs.size(); ++a) {
+        for (std::size_t b = a + 1; b < runs.size(); ++b) {
+            if (runs[b].i > runs[a].i + 1) {
+                break;
+            }
+            if (std::abs(runs[b].j - runs[a].j) <= 1 && runs[a].bottom <= runs[b].top &&
+                runs[b].bottom <= runs[a].top) {
+                parent[root_of(parent, a)] = root_of(parent, b);
+            }
+        }
+    }
+}
+
 } // namespace
 
 std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, double spacing) {
     const Generator& generator = world.generator();
-    const Layers& layers = generator.layers();
     const Planet& planet = generator.planet();
     const double lod = voxel_lod(generator);
     const DVec3 up = glm::normalize(eye);
@@ -77,8 +133,17 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
     const DVec3 north = glm::cross(up, east);
     const int half = static_cast<int>(std::ceil(range / spacing));
     const int side = (2 * half) + 1;
-    const double floor = glm::length(eye) - range;
-    const double ceiling = glm::length(eye) + range;
+    const Grid grid{.eye = eye,
+                    .range = range,
+                    .spacing = spacing,
+                    .radius = planet.body.radius,
+                    .up = up,
+                    .east = east,
+                    .north = north,
+                    .half = half,
+                    .side = side,
+                    .floor = glm::length(eye) - range,
+                    .ceiling = glm::length(eye) + range};
 
     // Each row of the grid by its own thread's turn.
     std::vector<std::vector<Run>> rows(static_cast<std::size_t>(side));
@@ -90,26 +155,7 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
             threads.emplace_back([&, worker] {
                 std::vector<std::pair<double, double>> found;
                 for (int i = static_cast<int>(worker); i < side; i += static_cast<int>(workers)) {
-                    for (int j = 0; j < side; ++j) {
-                        const DVec3 across = (east * (static_cast<double>(i - half) * spacing)) +
-                                             (north * (static_cast<double>(j - half) * spacing));
-                        if (glm::length(across) > range) {
-                            continue;
-                        }
-                        const DVec3 direction = glm::normalize((up * planet.body.radius) + across);
-                        const Cell cell = cell_under(direction, layers.level);
-                        found.clear();
-                        open_runs(world, cell, std::max(0, layers.layer_at(floor)),
-                                  std::min(layers.count - 1, layers.layer_at(ceiling)), found);
-                        for (const auto& [bottom, top] : found) {
-                            // Within range of the eye, not only along the ground and up or down.
-                            if (glm::length((direction * ((bottom + top) / 2.0)) - eye) > range) {
-                                continue;
-                            }
-                            rows[static_cast<std::size_t>(i)].push_back(
-                                {.i = i, .j = j, .bottom = bottom, .top = top});
-                        }
-                    }
+                    runs_in_row(world, grid, i, found, rows[static_cast<std::size_t>(i)]);
                 }
             });
         }
@@ -124,18 +170,8 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
         runs.insert(runs.end(), row.begin(), row.end());
     }
     std::vector<std::size_t> parent(runs.size());
-    std::iota(parent.begin(), parent.end(), std::size_t{0});
-    for (std::size_t a = 0; a < runs.size(); ++a) {
-        for (std::size_t b = a + 1; b < runs.size(); ++b) {
-            if (runs[b].i > runs[a].i + 1) {
-                break;
-            }
-            if (std::abs(runs[b].j - runs[a].j) <= 1 && runs[a].bottom <= runs[b].top &&
-                runs[b].bottom <= runs[a].top) {
-                parent[root_of(parent, a)] = root_of(parent, b);
-            }
-        }
-    }
+    std::ranges::iota(parent, std::size_t{0});
+    join_overlapping(runs, parent);
     struct Gathered {
         DVec3 total{0.0};
         double weight = 0.0;

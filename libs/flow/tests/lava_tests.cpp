@@ -165,9 +165,8 @@ TEST_CASE("too little water only cools the lava it touches", "[flow][lava]") {
 }
 
 TEST_CASE("water poured onto lava from above chills the top of it", "[flow][lava]") {
-    Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t j, int) {
-                    return i == 12 && j == 12;
-                }};
+    Block block{floor_above_sea(100.0), false,
+                [](std::uint32_t i, std::uint32_t j, int) { return i == 12 && j == 12; }};
     const double melts = hog::globe::properties(Material::Basalt).melts;
     block.pour_lava(12, 12, 0, full, melts + 100.0);
     block.pour_lava(12, 12, 1, full, melts + 100.0);

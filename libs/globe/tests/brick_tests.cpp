@@ -133,9 +133,10 @@ TEST_CASE("a damaged brick fails to read rather than read wrong", "[globe][brick
     CHECK_FALSE(Brick::read(material));
 }
 
-TEST_CASE("a brick written when voxels kept a distance and a normal still reads", "[globe][brick]") {
+TEST_CASE("a brick written when voxels kept a distance and a normal still reads",
+          "[globe][brick]") {
     hog::ByteWriter out;
-    out.write(std::uint8_t{0}); // a whole brick of the old kind
+    out.write(std::uint8_t{0});       // a whole brick of the old kind
     out.write(std::uint16_t{0x8001}); // its distance
     out.write(std::uint16_t{0x8080}); // its normal
     out.write(static_cast<std::uint8_t>(Material::Basalt));
@@ -151,7 +152,6 @@ TEST_CASE("a brick written when voxels kept a distance and a normal still reads"
     const auto read = Brick::read(in);
     REQUIRE(read);
     CHECK(read->is_uniform());
-    CHECK(read->at(0) == Voxel{.solid = Material::Basalt,
-                               .temperature = 2'400,
-                               .solid_amount = Voxel::full});
+    CHECK(read->at(0) ==
+          Voxel{.solid = Material::Basalt, .temperature = 2'400, .solid_amount = Voxel::full});
 }

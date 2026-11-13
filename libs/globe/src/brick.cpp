@@ -289,9 +289,10 @@ std::size_t Brick::bytes() const noexcept {
     if (parts_ == nullptr) {
         return sizeof(Brick);
     }
-    return sizeof(Brick) + sizeof(Parts) + parts_->solid.bytes() + parts_->condition.bytes() + parts_->grain.bytes() +
-           parts_->grain_amount.bytes() + parts_->liquid.bytes() + parts_->liquid_amount.bytes() +
-           parts_->temperature.bytes() + parts_->solid_amount.bytes();
+    return sizeof(Brick) + sizeof(Parts) + parts_->solid.bytes() + parts_->condition.bytes() +
+           parts_->grain.bytes() + parts_->grain_amount.bytes() + parts_->liquid.bytes() +
+           parts_->liquid_amount.bytes() + parts_->temperature.bytes() +
+           parts_->solid_amount.bytes();
 }
 
 namespace {

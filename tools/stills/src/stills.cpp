@@ -265,7 +265,7 @@ std::size_t lake_cells(const std::vector<float>& heights, int level, double radi
     const globe::Drainage found = globe::drain(heights, level, radius, sea);
     std::size_t held = 0;
     for (std::uint32_t cell = 0; cell < heights.size(); ++cell) {
-        held += static_cast<double>(heights[cell]) > sea && found.depth(cell) > 0.5 ? 1 : 0;
+        held += static_cast<double>(heights[cell]) > sea && found.depth(cell) > 0.5 ? 1U : 0U;
     }
     return held;
 }

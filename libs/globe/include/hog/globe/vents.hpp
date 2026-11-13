@@ -1,9 +1,8 @@
 #pragma once
 
 #include <hog/core/math.hpp>
-#include <hog/globe/generator.hpp>
-
 #include <hog/globe/cell.hpp>
+#include <hog/globe/generator.hpp>
 
 #include <array>
 #include <cstdint>
@@ -35,7 +34,8 @@ struct Volcano {
     double height = 0.0; // metres over the ground, before the crater
     double crater = 0.0; // share of the radius
     double depth = 0.0;  // metres, of the crater below the cone's top
-    // The outline's warp: radius times 1 + sum of amplitude * cos(k * bearing + phase), k = 2, 3, 5.
+    // The outline's warp: radius times 1 + sum of amplitude * cos(k * bearing + phase), k = 2,
+    // 3, 5.
     std::array<double, 3> amplitude{};
     std::array<double, 3> phase{};
     // Dead volcanoes keep their cone and crater but give nothing.

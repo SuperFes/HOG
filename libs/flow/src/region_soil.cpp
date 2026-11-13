@@ -34,9 +34,8 @@ int drains_to(const Runoff& runoff, std::size_t n) {
     for (const int beside : runoff[n].next) {
         if (beside != Runoff::none &&
             runoff[static_cast<std::size_t>(beside)].ground < runoff[n].ground &&
-            (lowest == Wash::none ||
-             runoff[static_cast<std::size_t>(beside)].ground <
-                 runoff[static_cast<std::size_t>(lowest)].ground)) {
+            (lowest == Wash::none || runoff[static_cast<std::size_t>(beside)].ground <
+                                         runoff[static_cast<std::size_t>(lowest)].ground)) {
             lowest = beside;
         }
     }
@@ -103,7 +102,8 @@ Stepped Region::weather_ground(const ClimateAt& climate, double depth) {
                 const double radius = layers.floor + (static_cast<double>(top.ground) /
                                                       static_cast<double>(full) * layers.thickness);
                 const DVec3 up = glm::normalize(globe::middle_of(site, layers));
-                stepped.changed += weather_column(site, top.ground, low, climate(up, radius), depth);
+                stepped.changed +=
+                    weather_column(site, top.ground, low, climate(up, radius), depth);
             }
         }
     }
@@ -159,7 +159,8 @@ void Region::pile_pieces(Site column, std::uint32_t voxels,
     }
     std::int64_t below = 0;
     for (std::uint32_t up = 0; up < voxels; ++up) {
-        const Site site{.face = column.face, .i = column.i, .j = column.j, .layer = column.layer + up};
+        const Site site{
+            .face = column.face, .i = column.i, .j = column.j, .layer = column.layer + up};
         Voxel* here = voxel(site);
         if (here == nullptr) {
             break;
@@ -189,8 +190,7 @@ void Region::pile_pieces(Site column, std::uint32_t voxels,
 std::int64_t Region::relay(const Top& top, const Wash::Node& washed, double taken) {
     const double thickness = world_->layers().thickness;
     const Site column{.face = top.face, .i = top.i, .j = top.j, .layer = top.first};
-    const std::int64_t off =
-        dithered(taken / thickness * static_cast<double>(full), column, 11);
+    const std::int64_t off = dithered(taken / thickness * static_cast<double>(full), column, 11);
     std::vector<Wash::Piece> laid;
     for (const Wash::Piece& piece : washed.loose) {
         if (piece.laid) {

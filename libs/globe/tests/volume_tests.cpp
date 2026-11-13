@@ -380,7 +380,7 @@ TEST_CASE("a tile is made at any level straight from the generator, at its own v
         hog::globe::generate_tile(
             generator, {.level = 1, .face = cell.face, .i = i / 2, .j = j / 2, .k = coarse_k + 1})};
     const int lowest = static_cast<int>(coarse_k * side * 2);
-    for (const auto [x, y] :
+    for (const auto& [x, y] :
          {std::pair{5, 9}, std::pair{30, 30}, std::pair{50, 12}, std::pair{17, 44}}) {
         CAPTURE(x, y);
         double coarse_height = 0.0;

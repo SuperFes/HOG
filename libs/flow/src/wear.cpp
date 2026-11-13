@@ -21,19 +21,19 @@ Process process_of(globe::Material material) {
     using globe::Material;
     switch (material) {
     case Material::Granite:
-        return {200'000 * year, 2.0, 8.0};
+        return {.lifetime = 200'000 * year, .damp_gain = 2.0, .frost_gain = 8.0};
     case Material::Basalt:
-        return {100'000 * year, 2.0, 6.0};
+        return {.lifetime = 100'000 * year, .damp_gain = 2.0, .frost_gain = 6.0};
     case Material::Anorthosite:
-        return {200'000 * year, 2.0, 8.0};
+        return {.lifetime = 200'000 * year, .damp_gain = 2.0, .frost_gain = 8.0};
     case Material::Sandstone:
-        return {20'000 * year, 3.0, 20.0};
+        return {.lifetime = 20'000 * year, .damp_gain = 3.0, .frost_gain = 20.0};
     case Material::Limestone:
-        return {20'000 * year, 6.0, 10.0};
+        return {.lifetime = 20'000 * year, .damp_gain = 6.0, .frost_gain = 10.0};
     case Material::Shale:
-        return {5'000 * year, 10.0, 15.0};
+        return {.lifetime = 5'000 * year, .damp_gain = 10.0, .frost_gain = 15.0};
     case Material::Iron:
-        return {200 * year, 25.0, 0.0};
+        return {.lifetime = 200 * year, .damp_gain = 25.0, .frost_gain = 0.0};
     default:
         return {};
     }
@@ -47,8 +47,8 @@ double wearing_rate(globe::Material material, const Exposure& exposure) {
         return 0.0;
     }
     // Frost only works where there is water to freeze.
-    const double speed = 1.0 + process.damp_gain * exposure.damp +
-                         process.frost_gain * exposure.freeze * exposure.damp;
+    const double speed = 1.0 + (process.damp_gain * exposure.damp) +
+                         (process.frost_gain * exposure.freeze * exposure.damp);
     return exposure.open * speed / process.lifetime;
 }
 
@@ -66,7 +66,7 @@ double softness(std::uint64_t key) {
     key = (key ^ (key >> 27U)) * 0x94D049BB133111EBULL;
     key ^= key >> 31U;
     const double u = static_cast<double>(key >> 11U) / 9007199254740992.0;
-    return 0.2 + 2.4 * u * u * u;
+    return 0.2 + (2.4 * u * u * u);
 }
 
 } // namespace hog::flow

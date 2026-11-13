@@ -5,6 +5,44 @@
 
 namespace hog::flow {
 
+namespace {
+
+constexpr std::size_t faces = 2;
+
+using Faces = std::vector<std::array<double, faces>>;
+
+// Moves the ice and the debris it carries across the faces over `dt` years, and wears the bed
+// under moving ice.
+void shift(std::vector<Glacier::Node>& nodes, const Faces& flux, const Faces& carried, double dt,
+           const Glacier::Law& law) {
+    for (std::size_t n = 0; n < nodes.size(); ++n) {
+        Glacier::Node& node = nodes[n];
+        double in = 0.0;
+        double debris_in = 0.0;
+        double out = 0.0;
+        double debris_out = 0.0;
+        double worn = 0.0;
+        for (std::size_t f = 0; f < faces; ++f) {
+            // The face from the -x or -y side comes in here, the other goes out.
+            const int before = node.next[f + faces];
+            if (before != Glacier::none) {
+                const auto b = static_cast<std::size_t>(before);
+                in += flux[b][f];
+                debris_in += carried[b][f];
+                worn += std::abs(flux[b][f]);
+            }
+            out += flux[n][f];
+            debris_out += carried[n][f];
+        }
+        worn += std::abs(out);
+        node.ice = std::max(node.ice + (dt * (in - out) / law.cell), 0.0);
+        node.debris = std::max(node.debris + (dt * (debris_in - debris_out) / law.cell), 0.0);
+        node.rock -= node.ice > 0.0 ? law.wear * dt * worn : 0.0;
+    }
+}
+
+} // namespace
+
 double Glacier::total() const noexcept {
     double sum = 0.0;
     for (const Node& node : nodes_) {
@@ -34,11 +72,10 @@ std::vector<Glacier::Hang> Glacier::hangs(double least) const {
 }
 
 double Glacier::step(double years) {
-    constexpr std::size_t faces = 2;
     const std::size_t count = nodes_.size();
     // Flux through each column's +x and +y faces, positive towards that side, and debris with it.
-    std::vector<std::array<double, faces>> flux(count);
-    std::vector<std::array<double, faces>> carried(count);
+    Faces flux(count);
+    Faces carried(count);
     double stiffest = 0.0;
     for (std::size_t n = 0; n < count; ++n) {
         for (std::size_t f = 0; f < faces; ++f) {
@@ -72,30 +109,7 @@ double Glacier::step(double years) {
             carried[n][f] = donor.ice > 0.0 ? flux[n][f] * donor.debris / donor.ice : 0.0;
         }
     }
-    for (std::size_t n = 0; n < count; ++n) {
-        Node& node = nodes_[n];
-        double in = 0.0;
-        double debris_in = 0.0;
-        double out = 0.0;
-        double debris_out = 0.0;
-        double worn = 0.0;
-        for (std::size_t f = 0; f < faces; ++f) {
-            // The face from the -x or -y side comes in here, the other goes out.
-            const int before = node.next[f + faces];
-            if (before != none) {
-                const auto b = static_cast<std::size_t>(before);
-                in += flux[b][f];
-                debris_in += carried[b][f];
-                worn += std::abs(flux[b][f]);
-            }
-            out += flux[n][f];
-            debris_out += carried[n][f];
-        }
-        worn += std::abs(out);
-        node.ice = std::max(node.ice + (dt * (in - out) / law_.cell), 0.0);
-        node.debris = std::max(node.debris + (dt * (debris_in - debris_out) / law_.cell), 0.0);
-        node.rock -= node.ice > 0.0 ? law_.wear * dt * worn : 0.0;
-    }
+    shift(nodes_, flux, carried, dt, law_);
     return dt;
 }
 

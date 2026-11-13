@@ -17,6 +17,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -308,12 +309,30 @@ private:
     static void scale(std::vector<Transfer>& transfers, std::size_t Transfer::* end,
                       const std::vector<std::int64_t>& asked, const auto& limit);
     void settle(const std::vector<Column>& columns, double seconds, Stepped& stepped);
+    // A run of open voxels up a column, bottom first: each one's site, brick and voxel.
+    using OpenRun = std::vector<std::tuple<globe::Site, Held*, globe::Voxel*>>;
+    // A voxel of lava in a section, with its heat.
+    struct Hot;
+    // Fills a run's voxels from its section, full from the bottom up over the grain piled there,
+    // the rest in the voxel over them, and lets its lava cool.
+    void fill(const Section& section, const OpenRun& run, double seconds,
+              std::set<std::uint64_t>& wanted, Stepped& stepped);
+    // The top of a section's lava gives its heat to the air over it and sets into a crust; the
+    // rest is warmed or cooled only through what lies over it. `count` is the run's voxels.
+    void cool_lava(const Section& section, std::vector<Hot>& hot, std::int64_t count,
+                   double seconds);
     // Where water touches lava the lava chills and the water boils away: lava that has water
     // enough sets into rock, else it cools by what there is.
     void quench(Stepped& stepped);
+    // Quenches a voxel of lava with the water about it.
+    void quench_at(globe::Site site, double volume, Stepped& stepped);
+    // The voxels about a site: over it, under it, and beside it on its face.
+    [[nodiscard]] std::vector<globe::Site> touching(globe::Site site) const;
     // Hot rock that has set, or lies beside lava, loses its heat to the air, a little each stretch
     // of seconds so the change isn't lost to the stored temperature's steps.
     void cool_rock(double seconds);
+    // How many of a voxel's faces are on open ground.
+    [[nodiscard]] int open_faces(globe::Site site);
     [[nodiscard]] bool red_hot(const globe::Voxel& voxel) const;
     // Sets a voxel of cooled lava into whole rock.
     static void freeze(globe::Site site, Held& brick);
@@ -355,7 +374,21 @@ private:
     // Ice on the topmost ground flows downhill as a glacier; see Glacier. Only the top surface of
     // a column flows, and caves under it do not.
     void glaciate(Stepped& stepped, double years);
+    // Wears a column's bed `worn` metres down, and sets the ice over it from `before` units to
+    // `units`.
+    void set_ice(globe::Site column, std::uint32_t voxels, double worn, std::int64_t before,
+                 std::int64_t units, Stepped& stepped);
     void creep(Stepped& stepped, double years);
+    // A column's top ground, the loose cover on it, and where the cover's bed lies.
+    struct Covered;
+    // The cover of a column held from layer `low` to `high`; none where it has no top ground, or
+    // grain on it that isn't loose.
+    [[nodiscard]] std::optional<Covered> covered(std::uint8_t face, std::uint32_t i,
+                                                 std::uint32_t j, std::uint32_t low,
+                                                 std::uint32_t high, Stepped& stepped);
+    // Lays `gained` metres more cover on a column, or takes it off where less: from the grain
+    // first and then from the loose ground under it.
+    void recover(const Covered& top, double gained, Stepped& stepped);
     // Weathers one column's rock from layer `top` down; voxels changed.
     std::int64_t weather_column(globe::Site top, std::int64_t ground, std::uint32_t low,
                                 const globe::Climate& climate, double depth);
@@ -402,6 +435,14 @@ private:
     [[nodiscard]] std::vector<Scan> floors(std::uint8_t face, std::uint32_t i, std::uint32_t j,
                                            std::uint32_t low, std::uint32_t high);
     bool drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j, const Scan& floor);
+    // Asks for the ground under a column open at `low`, the bottom of what's held, where it isn't
+    // held.
+    void ask_under(std::uint8_t face, std::uint32_t i, std::uint32_t j, std::uint32_t low,
+                   Stepped& stepped);
+    // The floors up a column through all its bricks held, asking for the ground under it; none
+    // where none of them are.
+    [[nodiscard]] std::vector<Scan> column_floors(std::uint8_t face, std::uint32_t i,
+                                                  std::uint32_t j, Stepped& stepped);
     // Sets the grain over a column's ground to `depth`, filling its voxels from `column`'s layer
     // up, `voxels` of them.
     void fill_grain(globe::Site column, std::uint32_t voxels, std::int64_t depth,
@@ -439,10 +480,22 @@ private:
     // Wears the voxels of a brick by `seconds` of weather; those worn to nothing are returned
     // as falling.
     [[nodiscard]] std::vector<globe::Site> weather(globe::BrickSite site, double seconds);
+    // Wears one voxel of the brick by `seconds` of weather in weathering round `round`; whether
+    // it wore to nothing.
+    [[nodiscard]] bool weather_voxel(globe::BrickSite site, globe::Site where, std::uint64_t round,
+                                     double seconds);
+    // Whether the bricks about one are all held; asks for those that aren't.
+    [[nodiscard]] bool box_held(globe::BrickSite at, Stepped& stepped) const;
     // Looks at the box of bricks about one; whether any matter in it is cracking.
     [[nodiscard]] bool check_support(globe::BrickSite site, double seconds, Stepped& stepped);
     // Takes the voxels out of the ground and sends them down as boulders and rubble.
     void fall(const std::vector<globe::Site>& sites, Stepped& stepped);
+    // Takes out the voxels of piece `p`, and sends it down as a boulder or rubble.
+    void fall_piece(const std::vector<globe::Site>& sites, const std::vector<int>& piece, int p,
+                    Stepped& stepped);
+    // Throws a lump of grain from each column piece `p` stood in.
+    void throw_rubble(const std::vector<globe::Site>& sites, const std::vector<int>& piece, int p,
+                      globe::Material material);
 
     globe::World* world_;
     bool hold_sea_;

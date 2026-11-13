@@ -321,7 +321,7 @@ TEST_CASE("ice laid over a column lies on its ground and is written to the world
     hog::DVec3 up{0.0, 0.0, 1.0};
     double top = 0.0;
     for (int k = 0; k < 4000; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / 4000.0);
+        const double z = 1.0 - (((2.0 * k) + 1.0) / 4000.0);
         const double r = std::sqrt(1.0 - (z * z));
         const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
         if (const double ground = generator.column(d, 200.0).ground(); ground > top) {
@@ -343,7 +343,8 @@ TEST_CASE("ice laid over a column lies on its ground and is written to the world
     const auto layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground));
     double ice = 0.0;
     for (std::uint32_t up_by = 0; up_by < 12; ++up_by) {
-        const auto voxel = world.at({cell.face, cell.i, cell.j, layer + up_by});
+        const auto voxel =
+            world.at({.face = cell.face, .i = cell.i, .j = cell.j, .layer = layer + up_by});
         if (voxel.grain == Material::Ice) {
             ice += static_cast<double>(voxel.grain_amount) / static_cast<double>(full) *
                    generator.layers().thickness;

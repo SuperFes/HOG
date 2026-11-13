@@ -30,14 +30,13 @@ inline constexpr unsigned soaked_level = 47;
 inline constexpr unsigned standing_level = 48;
 inline constexpr unsigned glow_base = 48;
 inline constexpr unsigned glow_levels = 15;
-[[nodiscard]] constexpr std::uint8_t packed_corner(std::uint8_t which, double wet,
-                                                   double glow = 0.0,
-                                                   bool standing = false) noexcept {
-    unsigned level = standing ? standing_level
-                              : static_cast<unsigned>(std::clamp(wet, 0.0, 1.0) * soaked_level);
+[[nodiscard]] constexpr std::uint8_t
+packed_corner(std::uint8_t which, double wet, double glow = 0.0, bool standing = false) noexcept {
+    unsigned level =
+        standing ? standing_level : static_cast<unsigned>(std::clamp(wet, 0.0, 1.0) * soaked_level);
     if (glow > 0.0) {
-        level = glow_base + std::max(1U, static_cast<unsigned>(std::clamp(glow, 0.0, 1.0) *
-                                                               glow_levels));
+        level = glow_base +
+                std::max(1U, static_cast<unsigned>(std::clamp(glow, 0.0, 1.0) * glow_levels));
     }
     return static_cast<std::uint8_t>((level << 2U) | (which & 3U));
 }

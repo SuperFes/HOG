@@ -1,14 +1,12 @@
 #include <hog/core/assert.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/server/players.hpp>
 #include <hog/server/spatial_tracking.hpp>
-
-#include <hog/planet/tangent_frame.hpp>
 
 #include <glm/geometric.hpp>
 
 #include <cmath>
 #include <numbers>
-
 #include <utility>
 
 namespace hog::server {
@@ -177,9 +175,9 @@ std::vector<std::pair<net::ConnectionId, Players::Look>> Players::looks() const 
         const double turn = static_cast<double>(joined.placed->facing.heading) * facing_radians;
         const double pitch = static_cast<double>(joined.placed->facing.pitch) * facing_radians;
         const DVec3 along = (frame.east * std::sin(turn)) + (frame.north * std::cos(turn));
-        found.emplace_back(connection, Look{.at = at,
-                                            .forward = (along * std::cos(pitch)) +
-                                                       (frame.up * std::sin(pitch))});
+        found.emplace_back(
+            connection,
+            Look{.at = at, .forward = (along * std::cos(pitch)) + (frame.up * std::sin(pitch))});
     }
     return found;
 }

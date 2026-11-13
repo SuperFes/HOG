@@ -14,7 +14,7 @@ double IceMap::at(std::uint32_t i, std::uint32_t j) const noexcept {
     }
     // Node n's middle is at column (n + 1/2) * stride.
     const auto along = [&](std::uint32_t column) {
-        return (static_cast<double>(column) + 0.5) / stride - 0.5;
+        return ((static_cast<double>(column) + 0.5) / stride) - 0.5;
     };
     const double u = std::clamp(along(i), 0.0, static_cast<double>(side - 1));
     const double v = std::clamp(along(j), 0.0, static_cast<double>(side - 1));

@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 
 namespace {
 
@@ -15,7 +16,7 @@ using hog::globe::Voxel;
 
 constexpr std::int64_t full = Voxel::full;
 // 33 degrees over a column as wide as a voxel is tall.
-const auto rise = static_cast<std::int64_t>(std::tan(33.0 * 3.14159265358979 / 180.0) * full);
+const auto rise = static_cast<std::int64_t>(std::tan(33.0 * std::numbers::pi / 180.0) * full);
 
 // A square patch of columns linked to their eight neighbours.
 struct Grid {
@@ -40,7 +41,10 @@ struct Grid {
             }
         }
     }
-    Slump::Node& at(int i, int j) { return slump[static_cast<std::size_t>((j * width) + i)]; }
+    Slump::Node& at(int i, int j) {
+        return slump[(static_cast<std::size_t>(j) * static_cast<std::size_t>(width)) +
+                     static_cast<std::size_t>(i)];
+    }
     std::int64_t surface(int i, int j) { return at(i, j).ground + at(i, j).grain; }
 };
 
@@ -73,7 +77,7 @@ TEST_CASE("a settled heap holds no steeper than its repose, any way across", "[s
     settle(grid);
 
     const auto diagonal =
-        static_cast<std::int64_t>(std::llround(static_cast<double>(rise) * std::sqrt(2.0)));
+        static_cast<std::int64_t>(std::llround(static_cast<double>(rise) * std::numbers::sqrt2));
     // Whole-unit steps leave a hair over, never a voxel's worth.
     const std::int64_t slack = full / 8;
     for (int j = 1; j < 40; ++j) {

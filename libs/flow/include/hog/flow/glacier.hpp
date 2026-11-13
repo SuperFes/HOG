@@ -25,9 +25,9 @@ public:
     };
 
     struct Law {
-        double cell = 10.0; // metres between columns
-        double flow = 2.2e-5;  // Glen's law, temperate ice, per year
-        double wear = 1.0e-5;  // metres of bed worn per metre of ice moved
+        double cell = 10.0;   // metres between columns
+        double flow = 2.2e-5; // Glen's law, temperate ice, per year
+        double wear = 1.0e-5; // metres of bed worn per metre of ice moved
         // A step is kept so thick ice can't force it ever finer, and a face gives away at most
         // this share of what its donor holds.
         double shortest = 0.05;

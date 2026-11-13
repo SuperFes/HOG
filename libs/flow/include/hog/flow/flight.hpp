@@ -80,7 +80,7 @@ Flight::Fate Flight::advance(Parcel& parcel, double seconds, double gravity, dou
         const double into = glm::dot(parcel.velocity, n);
         DVec3 along = parcel.velocity - (n * into);
         double off = 0.0;
-        double grip = below->holds;
+        const double grip = below->holds;
         // Pressing in at the pace gravity alone gives in a slice is resting, not an impact.
         if (-into > dead) {
             off = -into * bounce;

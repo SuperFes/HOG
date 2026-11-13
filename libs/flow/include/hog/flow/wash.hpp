@@ -36,8 +36,8 @@ public:
         // runs off it alone.
         bool gathers = false;
         double runs_off = 0.0;
-        int drains = none;      // where it runs to; none where it leaves the set
-        bool still = false;     // water stands over it
+        int drains = none;  // where it runs to; none where it leaves the set
+        bool still = false; // water stands over it
     };
 
     struct Law {

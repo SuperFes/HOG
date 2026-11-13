@@ -14,13 +14,13 @@ namespace hog::globe {
 // on it, and how wet. The one description everything that acts on the ground reads: grain
 // slumping, footing underfoot, and whatever comes to roll or leave a mark on it.
 struct Surface {
-    std::uint32_t first = 0;         // the layer of the lowest open voxel over the bed
-    Material bed = Material::Air;    // the shaped matter under it
-    Voxel bottom{};                  // that open voxel, which holds the shaped surface's distance
-    Material grain = Material::Air;  // what lies on the bed, the first kind found
-    std::int64_t grain_amount = 0;   // all of it, in units where Voxel::full is a voxel's height
-    std::uint32_t open = 0;          // open voxels up from `first`, where grain has room
-    double wetness = 0.0;            // from 0 dry to 1 soaked, by the water in bed and grain
+    std::uint32_t first = 0;        // the layer of the lowest open voxel over the bed
+    Material bed = Material::Air;   // the shaped matter under it
+    Voxel bottom{};                 // that open voxel, which holds the shaped surface's distance
+    Material grain = Material::Air; // what lies on the bed, the first kind found
+    std::int64_t grain_amount = 0;  // all of it, in units where Voxel::full is a voxel's height
+    std::uint32_t open = 0;         // open voxels up from `first`, where grain has room
+    double wetness = 0.0;           // from 0 dry to 1 soaked, by the water in bed and grain
 
     // The tangent of the steepest slope this surface holds: its grain on its bed, or the bed bare.
     [[nodiscard]] double holds(double thickness, double gravity) const;

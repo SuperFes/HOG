@@ -9,7 +9,7 @@
 namespace hog::server {
 
 flow::Sky GroundWetting::sky_of(const protocol::CellWeather& weather) {
-    const double falling = static_cast<double>(weather.falling);
+    const auto falling = static_cast<double>(weather.falling);
     const bool rain = weather.snow < rainy;
     return {.rain = rain ? falling : 0.0,
             .dryness = falling > 0.0 ? 0.0 : 1.0 - static_cast<double>(weather.humidity)};
@@ -30,14 +30,13 @@ std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::World& 
         const auto first = [&](std::uint32_t at) {
             return std::clamp(at, std::uint32_t{reach}, across - reach - 1) - reach;
         };
-        const globe::Cell corner{.level = under.level,
-                                 .face = under.face,
-                                 .i = first(under.i),
-                                 .j = first(under.j)};
+        const globe::Cell corner{
+            .level = under.level, .face = under.face, .i = first(under.i), .j = first(under.j)};
         for (int k = 0; k < side * side; ++k) {
             const std::uint32_t i = corner.i + static_cast<std::uint32_t>(k % side);
             const std::uint32_t j = corner.j + static_cast<std::uint32_t>(k / side);
-            const std::uint64_t key = (std::uint64_t{corner.face} << 56U) | (std::uint64_t{i} << 28U) | j;
+            const std::uint64_t key =
+                (std::uint64_t{corner.face} << 56U) | (std::uint64_t{i} << 28U) | j;
             if (!taken.insert(key).second) {
                 continue;
             }

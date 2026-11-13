@@ -2,7 +2,6 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
 #include <glm/geometric.hpp>
 
 #include <cmath>
@@ -109,8 +108,7 @@ TEST_CASE("rubble rebounds higher than sand, which hardly does, and both come to
     CHECK(glm::length(rubble.velocity) == 0.0);
 }
 
-TEST_CASE("a parcel stays on a slope its ground holds and slides down one it doesn't",
-              "[flight]") {
+TEST_CASE("a parcel stays on a slope its ground holds and slides down one it doesn't", "[flight]") {
     Parcel held = dropped(Material::Sand, 0.0);
     fly(held, Field{.lean = 20.0, .grip = 30.0}, 5.0);
     CHECK(glm::length(held.velocity) == 0.0);
@@ -122,7 +120,7 @@ TEST_CASE("a parcel stays on a slope its ground holds and slides down one it doe
     }
     // After a second it moves at about what gravity along the slope less friction leaves.
     const double expected =
-        gravity * (std::sin(40.0 * degree) - std::tan(30.0 * degree) * std::cos(40.0 * degree));
+        gravity * (std::sin(40.0 * degree) - (std::tan(30.0 * degree) * std::cos(40.0 * degree)));
     CHECK(glm::length(loose.velocity) == Catch::Approx(expected * 1.0).epsilon(0.15));
 }
 

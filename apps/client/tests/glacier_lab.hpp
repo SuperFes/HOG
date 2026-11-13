@@ -398,7 +398,7 @@ inline void sea_ice_year(Bed& bed, const Climate& climate, const Cold& cold, uns
             double h = bed.floe[i];
             if (degrees > 0.0) {
                 bool touching = false;
-                for (const auto [dx, dy] :
+                for (const auto& [dx, dy] :
                      {std::pair{-1, 0}, std::pair{1, 0}, std::pair{0, -1}, std::pair{0, 1}}) {
                     const int nx = std::clamp(x + dx, 0, bed.size - 1);
                     const int ny = std::clamp(y + dy, 0, bed.size - 1);

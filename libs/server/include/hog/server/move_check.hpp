@@ -14,7 +14,7 @@ struct MoveRules {
     double fastest = 6.6; // metres a second a player may cover, falling aside
     // Seconds of moving at the fastest that may arrive at once, as moves held up on the way do.
     double burst = 1.0;
-    double sunk = 0.3; // metres the feet may be under the ground, allowing for rounding
+    double sunk = 0.3;      // metres the feet may be under the ground, allowing for rounding
     double steepest = 0.87; // radians from level climbed where the ground's grip isn't known
     // Metres of rise beyond what the slope holds that may come at once, a jump's worth and a
     // step's, and how fast it comes back.

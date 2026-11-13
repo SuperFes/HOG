@@ -5,11 +5,12 @@
 
 #include <cmath>
 #include <cstdint>
+#include <utility>
 
 using namespace hog::globe;
 
 TEST_CASE("a voxel comes back from a cube with its amounts as they were", "[globe][cube]") {
-    for (int amount = 0; amount <= Voxel::full; amount += 211) {
+    for (int amount = 0; std::cmp_less_equal(amount, Voxel::full); amount += 211) {
         Voxel voxel;
         voxel.solid = Material::Granite;
         voxel.solid_amount = static_cast<std::uint16_t>(amount);

@@ -407,7 +407,8 @@ TEST_CASE("water standing on level ground mirrors what the probe took round the 
         *device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .layers = 6, .cube = true}, red);
     REQUIRE(around);
     BlockView view{
-        .camera = Camera{.eye = {}, .forward = glm::normalize(DVec3{0.0, 1.0, -0.12}),
+        .camera = Camera{.eye = {},
+                         .forward = glm::normalize(DVec3{0.0, 1.0, -0.12}),
                          .up = {0.0, 0.0, 1.0}},
         .sun = glm::normalize(DVec3{0.0, -1.0, 1.0}),
         .bend = {.up = {0.0, 0.0, 1.0}, .eye_height = 1.0, .radius = 1.0e6, .faked = 1.0e6}};

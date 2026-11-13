@@ -31,7 +31,7 @@ Cell highest() {
     double top = 0.0;
     constexpr int points = 40'000;
     for (int k = 0; k < points; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / points);
+        const double z = 1.0 - (((2.0 * k) + 1.0) / points);
         const double r = std::sqrt(1.0 - (z * z));
         const double a = 2.399963 * k;
         const hog::DVec3 d{r * std::cos(a), r * std::sin(a), z};
@@ -57,7 +57,7 @@ hog::weather::Climate climate_of(const Cell& /*column*/) {
 } // namespace
 
 TEST_CASE("an ice map reads between its nodes and is bare outside", "[server][ice]") {
-    IceMap map{.corner = {}, .stride = 4, .side = 2, .ice = {10.0, 20.0, 30.0, 40.0}};
+    const IceMap map{.corner = {}, .stride = 4, .side = 2, .ice = {10.0, 20.0, 30.0, 40.0}};
     CHECK(map.columns() == 8);
     CHECK(map.at(8, 0) == 0.0);
     // Past the outer nodes' middles it holds the edge value, and between them it rises.
@@ -93,6 +93,7 @@ TEST_CASE("a mountain's snow settles to ice on its heights and flows off its rim
     CHECK(rim == 0.0);
     // Read back between the nodes, it never passes the thickest.
     CHECK(map.at((side / 2 * stride) + (stride / 2), (side / 2 * stride) + (stride / 2)) <= most);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     if (const char* dir = std::getenv("HOG_LOOK_DIR")) {
         std::ofstream out{std::string{dir} + "/ice_map.pgm", std::ios::binary};
         out << "P5\n" << side << " " << side << "\n255\n";

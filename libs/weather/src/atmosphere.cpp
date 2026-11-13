@@ -53,7 +53,7 @@ double edge_between(const Grid& grid, int inside, int outside, double inner, dou
     const double across = inner > outer ? (inner - 0.5) / (inner - outer) : 0.5;
     // Half way across is the shared edge whatever the layers' depths, so each half of the span is
     // scaled by its own layer's.
-    const double sign = static_cast<double>(outside - inside);
+    const auto sign = static_cast<double>(outside - inside);
     const double inner_half = 0.5 * grid.depth_of(inside);
     const double outer_half = 0.5 * grid.depth_of(outside);
     const double reach = across <= 0.5 ? 2.0 * across * inner_half
@@ -77,6 +77,29 @@ double edge_below(const Field& field, std::size_t column, int layer) {
     }
     return edge_between(grid, layer, layer - 1, filling(field, column, layer),
                         filling(field, column, layer - 1));
+}
+
+// How much of a layer's sky its cloud covers, from 0 to 1, as a share of the vapour its air could
+// hold, `held`.
+double cover_of(double cloud, double held) {
+    return cloud > 0.0 && held > 0.0 ? 1.0 - std::exp(-cloud / (cover_spread * held)) : 0.0;
+}
+
+// Relative humidity, from 0 to 1, of air holding `vapour` that could hold `held`.
+float humidity_of(double vapour, double held) {
+    return held > 0.0 ? static_cast<float>(std::clamp(vapour / held, 0.0, 1.0)) : 0.0F;
+}
+
+// How much of what falls on a column falls as snow, from 0 to 1: snow where the ground's air is
+// below freezing, easing to rain over a few kelvin; `none` for a column that's ground through.
+float snow_share(const Field& field, std::size_t column, float none) {
+    for (int layer = 0; layer < field.grid.layers; ++layer) {
+        if (!field.solid(column, layer)) {
+            const double cold = freezing - static_cast<double>(field.at(column, layer).temperature);
+            return static_cast<float>(std::clamp(0.5 + (cold / sleet_span), 0.0, 1.0));
+        }
+    }
+    return none;
 }
 
 } // namespace
@@ -116,9 +139,7 @@ Column Atmosphere::column(std::size_t column) const {
         const double mass = air_density(temperature, pressure) * grid.depth_of(layer);
         const auto cloud = static_cast<double>(air.cloud);
         const double held_here = saturation_ratio(temperature, pressure);
-        const double covered = cloud > 0.0 && held_here > 0.0
-                                   ? 1.0 - std::exp(-cloud / (cover_spread * held_here))
-                                   : 0.0;
+        const double covered = cover_of(cloud, held_here);
         if (covered > 0.0) {
             run = std::max(run, covered);
         } else if (run > 0.0) {
@@ -129,9 +150,7 @@ Column Atmosphere::column(std::size_t column) const {
         if (lowest) {
             shown.wind = along(frame, air.wind);
             const double held = saturation_ratio(temperature, pressure);
-            shown.humidity = held > 0.0 ? static_cast<float>(std::clamp(
-                                              static_cast<double>(air.vapour) / held, 0.0, 1.0))
-                                        : 0.0F;
+            shown.humidity = humidity_of(static_cast<double>(air.vapour), held);
         }
         if (cloud > visible) {
             if (shown.top == 0.0F) {
@@ -154,15 +173,7 @@ Column Atmosphere::column(std::size_t column) const {
     }
 
     shown.falling = field_.precipitation[column];
-    // Snow where the ground's air is below freezing, easing to rain over a few kelvin.
-    for (int layer = 0; layer < grid.layers; ++layer) {
-        if (!field_.solid(column, layer)) {
-            const double cold =
-                freezing - static_cast<double>(field_.at(column, layer).temperature);
-            shown.snow = static_cast<float>(std::clamp(0.5 + (cold / sleet_span), 0.0, 1.0));
-            break;
-        }
-    }
+    shown.snow = snow_share(field_, column, shown.snow);
     return shown;
 }
 

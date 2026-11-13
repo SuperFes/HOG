@@ -39,11 +39,11 @@ struct Voxel {
     static constexpr std::uint8_t sound = 255;
     static constexpr std::uint16_t full = 1U << 15U; // with room over it for matter pressed in
 
-    Material solid = Material::Air;   // what the shaped matter is made of
-    std::uint8_t condition = sound;   // how whole it is; nothing is left of it at 0
-    Material grain = Material::Air;   // sand, rubble or snow
-    std::uint16_t grain_amount = 0;   // of `full`
-    Material liquid = Material::Air;  // water or lava, filling open space or a solid's pores
+    Material solid = Material::Air;  // what the shaped matter is made of
+    std::uint8_t condition = sound;  // how whole it is; nothing is left of it at 0
+    Material grain = Material::Air;  // sand, rubble or snow
+    std::uint16_t grain_amount = 0;  // of `full`
+    Material liquid = Material::Air; // water or lava, filling open space or a solid's pores
     std::uint16_t liquid_amount = 0;
     std::uint16_t temperature = 0; // eighths of a kelvin
     // How much of the voxel's volume is shaped matter, of `full`: all of it deep in the ground,

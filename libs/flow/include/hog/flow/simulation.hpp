@@ -44,7 +44,9 @@ public:
     void attend(DVec3 centre, double reach, double gap);
 
     // Sets how ice gains and loses by place; see Region::IceBalance. Ice moves only when aged.
-    void set_ice_balance(Region::IceBalance balance) { region_.set_ice_balance(std::move(balance)); }
+    void set_ice_balance(Region::IceBalance balance) {
+        region_.set_ice_balance(std::move(balance));
+    }
     // Takes up `bricks` and ages the ice on all the ground held by `years`, however long the flow
     // itself has run: glaciers move over years, not seconds. Returns the bricks written to the
     // world.
@@ -138,8 +140,8 @@ private:
     };
     std::vector<Venting> vents_;
     std::unordered_map<std::uint64_t, double> worn_at_; // clock_ when each brick was last worn
-    std::vector<globe::BrickSite> sweeping_; // bricks yet to be looked at this round
-    std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
+    std::vector<globe::BrickSite> sweeping_;            // bricks yet to be looked at this round
+    std::unordered_map<std::uint64_t, int> still_;      // steps each brick held has gone unchanged
     std::unordered_map<std::uint64_t, Moisture> moisture_;
     std::uint64_t wettings_ = 0; // varies how a fraction of a unit rounds from one to the next
 };

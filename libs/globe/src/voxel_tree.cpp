@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -203,13 +204,13 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube
 }
 
 VoxelTree::Id VoxelTree::rejoined(const std::vector<Step>& path, Id replacement) {
-    for (auto step = path.rbegin(); step != path.rend(); ++step) {
-        const Node above = nodes_[step->node];
+    for (auto step : std::views::reverse(path)) {
+        const Node above = nodes_[step.node];
         std::array<Id, 8> children =
-            above.leaf ? std::array<Id, 8>{step->node, step->node, step->node, step->node,
-                                           step->node, step->node, step->node, step->node}
+            above.leaf ? std::array<Id, 8>{step.node, step.node, step.node, step.node,
+                                           step.node, step.node, step.node, step.node}
                        : above.child;
-        children.at(step->child) = replacement;
+        children.at(step.child) = replacement;
         replacement = joined(children);
     }
     return replacement;
@@ -484,6 +485,49 @@ std::optional<Cube> read_cube(ByteReader& in) {
                 .heat = *heat};
 }
 
+// What's wrong with a tree's side and node count, if anything.
+std::optional<std::string_view> size_fault(std::uint64_t side, std::uint64_t count) {
+    if (side == 0 || (side & (side - 1)) != 0 || side > (std::uint64_t{1} << 20U)) {
+        return "a tree's side must be a power of two";
+    }
+    if (count == 0 || count > most_nodes) {
+        return "a tree's node count is out of range";
+    }
+    return std::nullopt;
+}
+
+// A leaf's voxel and how coarsely it was made, from the bytes after its tag `tag`; none where
+// they're cut short or out of range.
+struct Leaf {
+    Cube voxel;
+    std::uint8_t open = 0;
+};
+
+std::optional<Leaf> read_leaf(ByteReader& in, std::uint8_t tag) {
+    const auto open =
+        tag == open_tag ? in.read<std::uint8_t>() : Result<std::uint8_t>{std::uint8_t{0}};
+    const std::optional<Cube> voxel = read_cube(in);
+    if (!open || (tag == open_tag && *open == 0) || !voxel) {
+        return std::nullopt;
+    }
+    return Leaf{.voxel = *voxel, .open = *open};
+}
+
+// The eight children of the cube that is node `k`, each from its bytes as how far back it is
+// among the nodes read so far, `ids`; none where one is not an earlier node.
+std::optional<std::array<VoxelTree::Id, 8>> read_children(ByteReader& in, std::uint64_t k,
+                                                          const std::vector<VoxelTree::Id>& ids) {
+    std::array<VoxelTree::Id, 8> children{};
+    for (VoxelTree::Id& child : children) {
+        const auto back = in.read_varint();
+        if (!back || *back == 0 || *back > k) {
+            return std::nullopt;
+        }
+        child = ids[static_cast<std::size_t>(k - *back)];
+    }
+    return children;
+}
+
 } // namespace
 
 std::vector<std::byte> VoxelTree::encode() const {
@@ -555,11 +599,8 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
     if (!side || !count) {
         return fail("a tree's bytes are cut short");
     }
-    if (*side == 0 || (*side & (*side - 1)) != 0 || *side > (std::uint64_t{1} << 20U)) {
-        return fail("a tree's side must be a power of two");
-    }
-    if (*count == 0 || *count > most_nodes) {
-        return fail("a tree's node count is out of range");
+    if (const std::optional<std::string_view> fault = size_fault(*side, *count)) {
+        return fail(*fault);
     }
     VoxelTree tree{static_cast<int>(*side)};
     std::vector<Id> ids;
@@ -570,24 +611,18 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
             return fail("a tree's bytes are cut short");
         }
         if (*tag == leaf_tag || *tag == open_tag) {
-            const auto open =
-                *tag == open_tag ? in.read<std::uint8_t>() : Result<std::uint8_t>{std::uint8_t{0}};
-            const std::optional<Cube> voxel = read_cube(in);
-            if (!open || (*tag == open_tag && *open == 0) || !voxel) {
+            const std::optional<Leaf> leaf = read_leaf(in, *tag);
+            if (!leaf) {
                 return fail("a leaf is cut short or has a value out of range");
             }
-            ids.push_back(tree.leaf_of(*voxel, *open));
+            ids.push_back(tree.leaf_of(leaf->voxel, leaf->open));
         } else if (*tag == cube_tag) {
-            std::array<Id, 8> children{};
-            for (Id& child : children) {
-                const auto back = in.read_varint();
-                if (!back || *back == 0 || *back > k) {
-                    return fail("a cube's child is not an earlier node");
-                }
-                child = ids[static_cast<std::size_t>(k - *back)];
+            const std::optional<std::array<Id, 8>> children = read_children(in, k, ids);
+            if (!children) {
+                return fail("a cube's child is not an earlier node");
             }
             // Bytes made by encode never hold eight leaves alike; refusing them keeps one form.
-            const Id joined = tree.joined(children);
+            const Id joined = tree.joined(*children);
             if (tree.nodes_[joined].leaf) {
                 return fail("a cube of eight alike leaves is not in its joined form");
             }

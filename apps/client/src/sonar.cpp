@@ -33,9 +33,11 @@ std::vector<Blip> blips(std::span<const globe::Pocket> pockets, const render::Ca
             // Held in from the edge by the margin.
             ndc.x *= 1.0 - (2.0 * margin / size.x);
             ndc.y *= 1.0 - (2.0 * margin / size.y);
-            arrow = std::abs(ndc.x) * size.x > std::abs(ndc.y) * size.y
-                        ? (ndc.x < 0.0 ? "<- " : "-> ")
-                        : (ndc.y < 0.0 ? "^ " : "v ");
+            if (std::abs(ndc.x) * size.x > std::abs(ndc.y) * size.y) {
+                arrow = ndc.x < 0.0 ? "<- " : "-> ";
+            } else {
+                arrow = ndc.y < 0.0 ? "^ " : "v ";
+            }
         }
         const DVec2 drawn = ((DVec2{ndc.x, ndc.y}) + 1.0) / 2.0;
         found.push_back({.text = std::format("{}cave {:.0f} m, {:.0f} m {}", arrow, distance,

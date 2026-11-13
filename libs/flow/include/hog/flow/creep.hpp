@@ -24,12 +24,12 @@ public:
     };
 
     struct Law {
-        double cell = 2.5;     // metres between columns
+        double cell = 2.5;          // metres between columns
         double diffusivity = 0.005; // metres squared a year across a gentle slope
-        double steepest = 1.0; // slope at which cover can no longer lie, rise over run
+        double steepest = 1.0;      // slope at which cover can no longer lie, rise over run
         double production = 0.0002; // metres of new cover a year where there is none
-        double deep = 1.5;     // metres of cover at which weathering has slowed by 1/e
-        double share = 0.2;    // most of a surface gap a face may close in a step
+        double deep = 1.5;          // metres of cover at which weathering has slowed by 1/e
+        double share = 0.2;         // most of a surface gap a face may close in a step
     };
 
     Creep(std::size_t count, Law law) : nodes_(count), law_{law} {}

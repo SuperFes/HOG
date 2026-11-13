@@ -600,7 +600,7 @@ void Server::tell_tiles() {
 
 void Server::tell_grains() {
     const std::vector<flow::Parcel>& parcels = flow_.region().parcels();
-    if (parcels.empty() && grains_told_.empty()) {
+    if (!players_ || (parcels.empty() && grains_told_.empty())) {
         return;
     }
     for (const auto& [connection, at] : joined_.located()) {
@@ -666,7 +666,7 @@ void Server::hold(std::span<const DVec3> places) {
         return;
     }
     constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
-    const auto tiles_up = static_cast<std::uint32_t>((generator_.layers().count + side - 1) / side);
+    const auto tiles_up = (static_cast<std::uint32_t>(generator_.layers().count) + side - 1) / side;
     for (const globe::Site corner : changed->loaded) {
         for (std::uint32_t k = 0; k < tiles_up; ++k) {
             ground_.changed(globe::TileKey{.level = 0,

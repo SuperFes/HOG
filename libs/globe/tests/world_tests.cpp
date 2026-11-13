@@ -589,7 +589,7 @@ TEST_CASE("a world of tiles held alone reads them as the world they were made fr
     REQUIRE(column);
     hog::globe::HeldTiles held;
     constexpr std::uint32_t side = hog::globe::Volume::tile_side;
-    for (const auto& [k, tree] : column->tiles) {
+    for (const auto& [k, tree] : column.value().tiles) {
         held.put({.level = 0, .face = cell.face, .i = cell.i / side, .j = cell.j / side, .k = k},
                  std::make_shared<const hog::globe::VoxelTree>(tree));
     }
@@ -601,20 +601,20 @@ TEST_CASE("a world of tiles held alone reads them as the world they were made fr
     REQUIRE(ground);
     CHECK(hog::globe::top_of(alone, up) == ground);
     for (const double under : {0.5, 3.0, 12.0}) {
-        const Site site{.face = cell.face,
-                        .i = cell.i,
-                        .j = cell.j,
-                        .layer =
-                            static_cast<std::uint32_t>(earth().layers().layer_at(*ground - under))};
+        const Site site{
+            .face = cell.face,
+            .i = cell.i,
+            .j = cell.j,
+            .layer = static_cast<std::uint32_t>(earth().layers().layer_at(ground.value() - under))};
         CHECK(alone.at(site) == made.world().at(site));
     }
     const hog::globe::TileKey key{.level = 0,
                                   .face = cell.face,
                                   .i = cell.i / side,
                                   .j = cell.j / side,
-                                  .k = column->tiles.back().first};
+                                  .k = column.value().tiles.back().first};
     CHECK(alone.tile(key) == held.tile(key));
-    CHECK(alone.tile_over(key)->key == key);
+    CHECK(alone.tile_over(key).value().key == key);
 
     // Held only coarser, a voxel is the coarse one standing for it.
     const hog::globe::TileKey coarse{.level = 3, .face = cell.face, .i = 0, .j = 0, .k = 0};
@@ -622,7 +622,7 @@ TEST_CASE("a world of tiles held alone reads them as the world they were made fr
              std::make_shared<const hog::globe::VoxelTree>(
                  side, hog::globe::Cube{.solid = Material::Basalt, .solid_amount = Voxel::full}));
     const hog::globe::TileKey under{.level = 0, .face = cell.face, .i = 2, .j = 5, .k = 1};
-    CHECK(alone.tile_over(under)->key == coarse);
+    CHECK(alone.tile_over(under).value().key == coarse);
     CHECK(alone.at({.face = cell.face, .i = 2 * side, .j = 5 * side, .layer = side}).solid ==
           Material::Basalt);
 }

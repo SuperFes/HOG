@@ -213,7 +213,7 @@ TEST_CASE("first view cost", "[.bench][server][tiles]") {
         quads.at(key.level) +=
             hog::globe::mesh_tile(generator.layers(), key, tree).indices.size() / 6;
         within.at(key.level) +=
-            hog::server::metres_to(generator.layers(), key, here) < 8'000.0 ? 1 : 0;
+            hog::server::metres_to(generator.layers(), key, here) < 8'000.0 ? 1U : 0U;
     }
     for (std::size_t level = 0; level < 8; ++level) {
         WARN("level " << level << ": windows " << window_time.at(level) << " s, encode "

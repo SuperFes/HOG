@@ -243,8 +243,8 @@ void check_far_sides(Cell cell) {
     for (int apart = 1; apart < n; ++apart) {
         const hog::globe::CellNeighbors beside = hog::globe::sides(cell, apart);
         CHECK(beside.count == 4);
-        for (const auto [di, dj] : {std::pair{apart, 0}, std::pair{-apart, 0}, std::pair{0, apart},
-                                    std::pair{0, -apart}}) {
+        for (const auto& [di, dj] : {std::pair{apart, 0}, std::pair{-apart, 0}, std::pair{0, apart},
+                                     std::pair{0, -apart}}) {
             CHECK(lists(beside, straight_on(cell, di, dj)));
         }
     }

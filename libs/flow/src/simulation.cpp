@@ -72,7 +72,7 @@ void Simulation::reload(BrickSite site) {
 }
 
 std::vector<BrickSite> Simulation::weather_ground(std::span<const BrickSite> bricks,
-                                                 const Region::ClimateAt& climate, double depth) {
+                                                  const Region::ClimateAt& climate, double depth) {
     for (const BrickSite brick : bricks) {
         take(brick);
     }
@@ -85,7 +85,7 @@ std::vector<BrickSite> Simulation::weather_ground(std::span<const BrickSite> bri
 }
 
 std::vector<BrickSite> Simulation::wash(std::span<const BrickSite> bricks,
-                                       const Region::Rainfall& rainfall, double years) {
+                                        const Region::Rainfall& rainfall, double years) {
     for (const BrickSite brick : bricks) {
         take(brick);
     }
@@ -98,7 +98,7 @@ std::vector<BrickSite> Simulation::wash(std::span<const BrickSite> bricks,
 }
 
 std::vector<BrickSite> Simulation::settle_water(std::span<const BrickSite> bricks,
-                                               const Region::Rainfall& rainfall) {
+                                                const Region::Rainfall& rainfall) {
     for (const BrickSite brick : bricks) {
         take(brick);
     }
@@ -130,8 +130,11 @@ std::vector<BrickSite> Simulation::lay_ice(std::span<const Laid> columns) {
         const int low = std::max(layers.layer_at(ground) - 1, 0);
         const int high = std::min(layers.layer_at(ground + laid.metres) + 1, layers.count - 1);
         for (int layer = low; layer <= high + globe::brick_side - 1; layer += globe::brick_side) {
-            hold(globe::brick_of({laid.face, laid.i, laid.j,
-                                  static_cast<std::uint32_t>(std::min(layer, layers.count - 1))}));
+            hold(globe::brick_of(
+                {.face = laid.face,
+                 .i = laid.i,
+                 .j = laid.j,
+                 .layer = static_cast<std::uint32_t>(std::min(layer, layers.count - 1))}));
         }
     }
     for (const Laid& laid : columns) {
@@ -170,9 +173,9 @@ void Simulation::vent(double seconds) {
             if (!region_.holds(globe::brick_of(site))) {
                 break;
             }
-            venting.owed -= static_cast<double>(region_.add_lava(
-                site, venting.vent.rock, static_cast<std::int64_t>(venting.owed),
-                venting.vent.kelvin));
+            venting.owed -= static_cast<double>(
+                region_.add_lava(site, venting.vent.rock, static_cast<std::int64_t>(venting.owed),
+                                 venting.vent.kelvin));
         }
         // A vent stopped up holds back no more than it can push.
         venting.owed = std::min(venting.owed, pressure * static_cast<double>(globe::Voxel::full));
@@ -271,7 +274,8 @@ std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double s
             if (std::cmp_greater_equal(layer, world_->layers().count)) {
                 return std::nullopt;
             }
-            const globe::Site site{.face = column.face, .i = column.i, .j = column.j, .layer = layer};
+            const globe::Site site{
+                .face = column.face, .i = column.i, .j = column.j, .layer = layer};
             const BrickSite brick = globe::brick_of(site);
             if (region_.holds(brick)) {
                 return region_.at(site);
@@ -279,7 +283,7 @@ std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double s
             return copy(brick).voxels[static_cast<std::size_t>(globe::index_in_brick(site))];
         };
         for (const Soaking& change : Wetting::column(read, column, column.layer, thickness,
-                                                      wetted.sky, seconds, wettings_)) {
+                                                     wetted.sky, seconds, wettings_)) {
             const BrickSite brick = globe::brick_of(change.site);
             if (region_.holds(brick)) {
                 region_.pour(change.site, change.amount);

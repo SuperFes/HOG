@@ -2,7 +2,6 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
 #include <glm/geometric.hpp>
 
 #include <chrono>
@@ -47,7 +46,8 @@ TEST_CASE("grain is carried on only a short while with no word of it", "[client]
     field.receive(told(1, -500), start);
     const auto soon = field.capsules(start + 400ms, 1.0, 9.81);
     const auto long_after = field.capsules(start + 5s, 1.0, 9.81);
-    CHECK(glm::length(soon[0].feet.metres()) == Catch::Approx(glm::length(long_after[0].feet.metres())));
+    CHECK(glm::length(soon[0].feet.metres()) ==
+          Catch::Approx(glm::length(long_after[0].feet.metres())));
 }
 
 TEST_CASE("word older than what is held is ignored, and an empty list clears the grain",

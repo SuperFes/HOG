@@ -195,15 +195,19 @@ TEST_CASE("a world with weather makes it as the clock runs", "[app][server]") {
     auto config = world.config();
     config.weather = {.on = true, .layers = 8, .spin_up = 0h};
     const auto server = opened(config);
-    REQUIRE(server->weather());
+    const hog::skies::WeatherKeeper* weather = server->weather();
+    if (weather == nullptr) {
+        FAIL("no weather");
+        return;
+    }
     // Four game minutes outrun the keeper's interval of two; its job is taken in on a later tick.
     GameTime now = start + 4min;
-    for (int tries = 0; tries < 10'000 && !server->weather()->latest(); ++tries) {
+    for (int tries = 0; tries < 10'000 && !weather->latest(); ++tries) {
         server->catch_up([&] { return now; });
         now += 100ms;
         std::this_thread::sleep_for(1ms);
     }
-    CHECK(server->weather()->latest());
+    CHECK(weather->latest());
 }
 
 TEST_CASE("a reopened world has the air it saved, without spinning it up again", "[app][server]") {
@@ -212,20 +216,29 @@ TEST_CASE("a reopened world has the air it saved, without spinning it up again",
     config.weather = {.on = true, .layers = 8, .spin_up = 0h};
     {
         const auto server = opened(config);
+        const hog::skies::WeatherKeeper* weather = server->weather();
+        if (weather == nullptr) {
+            FAIL("no weather");
+            return;
+        }
         GameTime now = start + 4min;
-        for (int tries = 0; tries < 10'000 && !server->weather()->latest(); ++tries) {
+        for (int tries = 0; tries < 10'000 && !weather->latest(); ++tries) {
             server->catch_up([&] { return now; });
             now += 100ms;
             std::this_thread::sleep_for(1ms);
         }
-        REQUIRE(server->weather()->latest());
+        REQUIRE(weather->latest());
         REQUIRE(server->save());
     }
     // A long spin-up would keep a new world's weather from showing for good; a kept one shows.
     config.weather.spin_up = 48h;
     const auto reopened = opened(config, start);
-    REQUIRE(reopened->weather());
-    CHECK(reopened->weather()->latest());
+    const hog::skies::WeatherKeeper* kept = reopened->weather();
+    if (kept == nullptr) {
+        FAIL("no weather");
+        return;
+    }
+    CHECK(kept->latest());
 }
 
 TEST_CASE("a world without weather has none", "[app][server]") {

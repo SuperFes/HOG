@@ -29,7 +29,15 @@ struct Replicated {
     std::string name;
 };
 
-enum class Ruling : std::uint8_t { Taken, Stale, NotJoined, OutOfBounds, TooFast, UnderGround, TooSteep };
+enum class Ruling : std::uint8_t {
+    Taken,
+    Stale,
+    NotJoined,
+    OutOfBounds,
+    TooFast,
+    UnderGround,
+    TooSteep
+};
 
 // How a ruling reads in a log: "too fast", say.
 [[nodiscard]] std::string_view describe(Ruling ruling) noexcept;

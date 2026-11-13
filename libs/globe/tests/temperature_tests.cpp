@@ -14,7 +14,7 @@ TEST_CASE("the baseline temperature is what the generator says at every point",
     const Generator generator{Planet{}};
     const Planet& planet = generator.planet();
     for (int k = 0; k < 600; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / 600.0);
+        const double z = 1.0 - (((2.0 * k) + 1.0) / 600.0);
         const double r = std::sqrt(1.0 - (z * z));
         const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
         const auto column = generator.column(d, 2.0);

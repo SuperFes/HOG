@@ -37,14 +37,15 @@ double warm_kelvin(double mean, double swing) {
     }
     // The part of the sine over zero runs from asin(-mean/swing) to its mirror.
     const double rise = std::asin(-mean / swing);
-    const double area =
-        (mean * (std::numbers::pi - (2.0 * rise))) + (2.0 * std::sqrt((swing * swing) - (mean * mean)));
+    const double area = (mean * (std::numbers::pi - (2.0 * rise))) +
+                        (2.0 * std::sqrt((swing * swing) - (mean * mean)));
     return area / (2.0 * std::numbers::pi);
 }
 
 Balance ice_balance(const globe::Planet& planet, const Climate& climate, double height) {
     const double mean = air_temperature(planet, climate.surface, height);
-    // Snow falls on the cold side of the season; treat the year's mean as the temperature it falls at.
+    // Snow falls on the cold side of the season; treat the year's mean as the temperature it falls
+    // at.
     const double water = climate.precipitation * hours_a_year / 1'000.0 * snow_share(mean);
     return {.gain = water * water_density / ice_density,
             .loss = melt_factor * days_a_year * warm_kelvin(mean - freezing, climate.swing) *

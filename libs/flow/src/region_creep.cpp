@@ -4,11 +4,11 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <utility>
 
 namespace hog::flow {
 namespace {
 
-using globe::BrickSite;
 using globe::Material;
 using globe::Site;
 using globe::Voxel;
@@ -29,6 +29,21 @@ bool loose(Material material) {
     return material != Material::Air && globe::properties(material).repose > 0.0;
 }
 
+// Points each side of a column at the one beside it, where that has cover.
+void link(std::array<int, Creep::sides>& next, const Key& key,
+          const std::map<Key, std::size_t>& index, int level) {
+    for (std::size_t side = 0; side < Creep::sides; ++side) {
+        const auto over = globe::next_to(
+            {.level = static_cast<std::uint8_t>(level), .face = key.face, .i = key.i, .j = key.j},
+            around[side].first, around[side].second);
+        const auto found =
+            over ? index.find(Key{.face = over->face, .i = over->i, .j = over->j}) : index.end();
+        if (found != index.end()) {
+            next[side] = static_cast<int>(found->second);
+        }
+    }
+}
+
 } // namespace
 
 Stepped Region::age_cover(double years) {
@@ -38,6 +53,18 @@ Stepped Region::age_cover(double years) {
     return stepped;
 }
 
+struct Region::Covered {
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint32_t first = 0;
+    std::uint32_t voxels = 0;
+    std::int64_t ground = 0;
+    std::int64_t grain = 0;
+    std::int64_t bed = 0;
+    Material material = Material::Soil;
+};
+
 void Region::creep(Stepped& stepped, double years) {
     const globe::Layers& layers = world_->layers();
     const double thickness = layers.thickness;
@@ -45,17 +72,7 @@ void Region::creep(Stepped& stepped, double years) {
         return static_cast<double>(units) / static_cast<double>(full) * thickness;
     };
 
-    // Each column's top ground, the loose cover on it, and where the cover's bed lies.
-    struct Top {
-        Key key;
-        std::uint32_t first = 0;
-        std::uint32_t voxels = 0;
-        std::int64_t ground = 0;
-        std::int64_t grain = 0;
-        std::int64_t bed = 0;
-        Material material = Material::Soil;
-    };
-    std::vector<Top> tops;
+    std::vector<Covered> tops;
     std::map<Key, std::size_t> index;
     for (const auto& [stack, layers_held] : stacks_) {
         const auto face = static_cast<std::uint8_t>(stack >> 42U);
@@ -65,50 +82,12 @@ void Region::creep(Stepped& stepped, double years) {
         const std::uint32_t high = ((layers_held.back() + 1) * globe::brick_side) - 1;
         for (std::uint32_t a = 0; a < globe::brick_side; ++a) {
             for (std::uint32_t b = 0; b < globe::brick_side; ++b) {
-                const Key key{face, (bi * globe::brick_side) + a, (bj * globe::brick_side) + b};
-                // Open to the bottom of what's held: the ground under it isn't, so ask for it.
-                const Voxel* bottom = voxel({key.face, key.i, key.j, low});
-                if (bottom != nullptr && bottom->solid == Material::Air) {
-                    if (const auto missing = unheld_below(
-                            globe::middle_of({key.face, key.i, key.j, low}, layers))) {
-                        stepped.wanted.push_back(*missing);
-                    }
+                const std::uint32_t i = (bi * globe::brick_side) + a;
+                const std::uint32_t j = (bj * globe::brick_side) + b;
+                if (const std::optional<Covered> made = covered(face, i, j, low, high, stepped)) {
+                    index.emplace(Key{.face = face, .i = i, .j = j}, tops.size());
+                    tops.push_back(*made);
                 }
-                const std::vector<Scan> found = floors(key.face, key.i, key.j, low, high);
-                if (found.empty()) {
-                    continue;
-                }
-                const Scan& top = found.back();
-                Top made{.key = key,
-                         .first = top.surface.first,
-                         .voxels = top.surface.open,
-                         .ground = top.ground,
-                         .grain = top.surface.grain_amount,
-                         .bed = top.ground};
-                if (loose(top.surface.grain)) {
-                    made.material = top.surface.grain;
-                } else if (top.surface.grain != Material::Air) {
-                    // Grain that isn't loose, like ice, is not cover to be crept.
-                    continue;
-                }
-                // Down through the loose solid under the ground, to the first that isn't. What
-                // creeps is what's on top: the grain, else the loose ground just under it.
-                bool named = loose(top.surface.grain);
-                std::int64_t layer = static_cast<std::int64_t>(top.surface.first) - 1;
-                while (layer >= low) {
-                    const Voxel* below = voxel({key.face, key.i, key.j, static_cast<std::uint32_t>(layer)});
-                    if (below == nullptr || !loose(below->solid)) {
-                        break;
-                    }
-                    if (!named) {
-                        made.material = below->solid;
-                        named = true;
-                    }
-                    --layer;
-                }
-                made.bed = std::min((layer + 1) * full, top.ground);
-                index.emplace(key, tops.size());
-                tops.push_back(made);
             }
         }
     }
@@ -116,32 +95,18 @@ void Region::creep(Stepped& stepped, double years) {
     if (tops.empty() || years <= 0.0) {
         return;
     }
-    const auto beside = [&](const Key& key, std::size_t side) -> std::optional<Key> {
-        const auto next = globe::next_to({.level = static_cast<std::uint8_t>(layers.level),
-                                          .face = key.face,
-                                          .i = key.i,
-                                          .j = key.j},
-                                         around[side].first, around[side].second);
-        return next ? std::optional<Key>{Key{next->face, next->i, next->j}} : std::nullopt;
-    };
-    const Site base{.face = tops.front().key.face,
-                    .i = tops.front().key.i,
-                    .j = tops.front().key.j,
+    const Site base{.face = tops.front().face,
+                    .i = tops.front().i,
+                    .j = tops.front().j,
                     .layer = tops.front().first};
-    const double width =
-        std::sqrt(layers.volume(globe::column_of(base, layers), static_cast<int>(base.layer)) /
-                  thickness);
+    const double width = std::sqrt(
+        layers.volume(globe::column_of(base, layers), static_cast<int>(base.layer)) / thickness);
     Creep cover{tops.size(), {.cell = width}};
     for (std::size_t n = 0; n < tops.size(); ++n) {
         cover[n].bed = metres(tops[n].bed);
         cover[n].cover = metres(tops[n].ground + tops[n].grain - tops[n].bed);
-        for (std::size_t side = 0; side < Creep::sides; ++side) {
-            const auto over = beside(tops[n].key, side);
-            const auto found = over ? index.find(*over) : index.end();
-            if (found != index.end()) {
-                cover[n].next[side] = static_cast<int>(found->second);
-            }
-        }
+        link(cover[n].next, Key{.face = tops[n].face, .i = tops[n].i, .j = tops[n].j}, index,
+             layers.level);
     }
     std::vector<double> before(tops.size());
     for (std::size_t n = 0; n < tops.size(); ++n) {
@@ -152,32 +117,77 @@ void Region::creep(Stepped& stepped, double years) {
         left -= cover.step(left);
     }
 
-    // Written back as whole units: cover that came is laid as grain, and cover that went is taken
-    // from the grain first and then from the loose ground under it.
+    // Written back as whole units.
     for (std::size_t n = 0; n < tops.size(); ++n) {
-        const Site column{.face = tops[n].key.face,
-                          .i = tops[n].key.i,
-                          .j = tops[n].key.j,
-                          .layer = tops[n].first};
-        const std::int64_t change =
-            dithered((cover[n].cover - before[n]) / thickness * static_cast<double>(full), column, 5);
-        if (change == 0) {
-            continue;
-        }
-        stepped.crept += std::abs(change);
-        std::int64_t grain = tops[n].grain + change;
-        if (grain < 0) {
-            // More left than the grain held: the rest comes off the ground under it.
-            const double mm = static_cast<double>(-grain) * thickness * 1000.0 /
-                              static_cast<double>(full);
-            if (const auto cut = static_cast<int>(std::llround(mm)); cut > 0) {
-                scour(column, cut);
-            }
-            grain = 0;
-        }
-        grain = std::min(grain, std::int64_t{tops[n].voxels} * full);
-        fill_grain(column, tops[n].voxels, grain, tops[n].material);
+        recover(tops[n], cover[n].cover - before[n], stepped);
     }
+}
+
+std::optional<Region::Covered> Region::covered(std::uint8_t face, std::uint32_t i, std::uint32_t j,
+                                               std::uint32_t low, std::uint32_t high,
+                                               Stepped& stepped) {
+    // Open to the bottom of what's held: the ground under it isn't, so ask for it.
+    ask_under(face, i, j, low, stepped);
+    const std::vector<Scan> found = floors(face, i, j, low, high);
+    if (found.empty()) {
+        return std::nullopt;
+    }
+    const Scan& top = found.back();
+    Covered made{.face = face,
+                 .i = i,
+                 .j = j,
+                 .first = top.surface.first,
+                 .voxels = top.surface.open,
+                 .ground = top.ground,
+                 .grain = top.surface.grain_amount,
+                 .bed = top.ground};
+    if (loose(top.surface.grain)) {
+        made.material = top.surface.grain;
+    } else if (top.surface.grain != Material::Air) {
+        // Grain that isn't loose, like ice, is not cover to be crept.
+        return std::nullopt;
+    }
+    // Down through the loose solid under the ground, to the first that isn't. What creeps is
+    // what's on top: the grain, else the loose ground just under it.
+    bool named = loose(top.surface.grain);
+    std::int64_t layer = static_cast<std::int64_t>(top.surface.first) - 1;
+    while (std::cmp_greater_equal(layer, low)) {
+        const Voxel* below =
+            voxel({.face = face, .i = i, .j = j, .layer = static_cast<std::uint32_t>(layer)});
+        if (below == nullptr || !loose(below->solid)) {
+            break;
+        }
+        if (!named) {
+            made.material = below->solid;
+            named = true;
+        }
+        --layer;
+    }
+    made.bed = std::min((layer + 1) * full, top.ground);
+    return made;
+}
+
+void Region::recover(const Covered& top, double gained, Stepped& stepped) {
+    const double thickness = world_->layers().thickness;
+    const Site column{.face = top.face, .i = top.i, .j = top.j, .layer = top.first};
+    const std::int64_t change = dithered(gained / thickness * static_cast<double>(full), column, 5);
+    if (change == 0) {
+        return;
+    }
+    stepped.crept += std::abs(change);
+    // Cover that came is laid as grain, and cover that went is taken from the grain first.
+    std::int64_t grain = top.grain + change;
+    if (grain < 0) {
+        // More left than the grain held: the rest comes off the ground under it.
+        const double mm =
+            static_cast<double>(-grain) * thickness * 1000.0 / static_cast<double>(full);
+        if (const auto cut = static_cast<int>(std::llround(mm)); cut > 0) {
+            scour(column, cut);
+        }
+        grain = 0;
+    }
+    grain = std::min(grain, std::int64_t{top.voxels} * full);
+    fill_grain(column, top.voxels, grain, top.material);
 }
 
 } // namespace hog::flow

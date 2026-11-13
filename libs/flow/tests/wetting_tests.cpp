@@ -14,7 +14,6 @@ using hog::flow::Sky;
 using hog::flow::Soaking;
 using hog::flow::Wetting;
 using hog::globe::Material;
-using hog::globe::Site;
 using hog::globe::Voxel;
 
 namespace {
@@ -41,12 +40,14 @@ struct Ground {
     // Runs `seconds` of `sky` in steps, applying what the ground is told.
     void weather(Sky sky, double seconds) {
         std::uint64_t draw = 0;
-        for (double t = 0.0; t < seconds; t += step) {
+        const auto steps = static_cast<int>(std::ceil(seconds / step));
+        for (int taken = 0; taken < steps; ++taken) {
             const auto read = [&](std::uint32_t layer) -> std::optional<Voxel> {
                 return layer < voxels.size() ? std::optional{voxels[layer]} : std::nullopt;
             };
-            for (const Soaking& change : Wetting::column(read, {.face = 0, .i = 7, .j = 9, .layer = 0},
-                                                         top + 2, thickness, sky, step, ++draw)) {
+            for (const Soaking& change :
+                 Wetting::column(read, {.face = 0, .i = 7, .j = 9, .layer = 0}, top + 2, thickness,
+                                 sky, step, ++draw)) {
                 voxels[change.site.layer].liquid_amount = change.amount;
                 voxels[change.site.layer].liquid = change.liquid;
             }
@@ -84,7 +85,8 @@ TEST_CASE("water in the ground stops at its pores, and what is over runs on as f
           "[flow][wetting]") {
     Ground ground{Material::Soil};
     ground.bed().liquid = Material::Water;
-    ground.bed().liquid_amount = hog::globe::amount_of(hog::globe::properties(Material::Soil).porosity);
+    ground.bed().liquid_amount =
+        hog::globe::amount_of(hog::globe::properties(Material::Soil).porosity);
     const std::uint16_t soaked = ground.bed().liquid_amount;
     ground.weather({.rain = 30.0}, 600.0);
     CHECK(ground.bed().liquid_amount == soaked);

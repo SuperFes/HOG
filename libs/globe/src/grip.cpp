@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <utility>
 
 namespace hog::globe {
 
@@ -27,7 +28,7 @@ std::optional<double> grip_at(const World& world, DVec3 feet) {
     // The voxels met, kept so the lookup can hand out pointers to them.
     std::array<Voxel, tallest + reach + 2> met{};
     const auto lookup = [&](std::uint32_t layer) -> const Voxel* {
-        if (layer >= static_cast<std::uint32_t>(layers.count)) {
+        if (std::cmp_greater_equal(layer, layers.count)) {
             return nullptr;
         }
         Voxel& slot = met[layer % met.size()];

@@ -28,7 +28,7 @@ Creep square(Creep::Law law = {}) {
 }
 
 std::size_t at(int x, int y) {
-    return static_cast<std::size_t>((y * side) + x);
+    return (static_cast<std::size_t>(y) * std::size_t{side}) + static_cast<std::size_t>(x);
 }
 
 void run(Creep& creep, double years) {

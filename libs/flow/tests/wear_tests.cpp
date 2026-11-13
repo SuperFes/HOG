@@ -13,7 +13,8 @@ using hog::flow::testing::Block;
 using hog::flow::testing::floor_above_sea;
 using hog::globe::Material;
 
-TEST_CASE("only exposed, wet and freezing matter wears fast, and only what can wear", "[flow][wear]") {
+TEST_CASE("only exposed, wet and freezing matter wears fast, and only what can wear",
+          "[flow][wear]") {
     const Exposure dry{.open = 1.0};
     const Exposure wet{.open = 1.0, .damp = 1.0};
     const Exposure freezing{.open = 1.0, .damp = 1.0, .freeze = 1.0};

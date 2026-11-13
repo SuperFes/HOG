@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <print>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -47,11 +49,13 @@ public:
 private:
     static constexpr std::int64_t leaf_base = -1000;
 
-    int uniform(int x0, int y0, int z0, int side) const {
+    [[nodiscard]] int uniform(int x0, int y0, int z0, int side) const {
         int kind = -1;
         for (int y = y0; y < std::min(y0 + side, across_); ++y) {
             for (int x = x0; x < std::min(x0 + side, across_); ++x) {
-                const Runs& runs = (*columns_)[static_cast<std::size_t>((y * across_) + x)];
+                const Runs& runs =
+                    (*columns_)[(static_cast<std::size_t>(y) * static_cast<std::size_t>(across_)) +
+                                static_cast<std::size_t>(x)];
                 const auto next = std::ranges::upper_bound(runs, z0, {}, &Run::start);
                 const Run& run = *(next - 1);
                 const int end = next == runs.end() ? layers_ : next->start;
@@ -60,7 +64,7 @@ private:
                 }
                 if (kind == -1) {
                     kind = static_cast<int>(run.kind);
-                } else if (kind != static_cast<int>(run.kind)) {
+                } else if (std::cmp_not_equal(kind, run.kind)) {
                     return -1;
                 }
             }
@@ -69,6 +73,7 @@ private:
     }
 
     // The node's id: the same for equal nodes. A leaf is its kind; a node is its children's ids.
+    // NOLINTNEXTLINE(misc-no-recursion): as deep as the octree's levels, a handful
     std::int64_t build(int x0, int y0, int z0, int side) {
         ++tree_;
         if (x0 >= across_ || y0 >= across_ || z0 >= layers_) {
@@ -126,11 +131,46 @@ void report(const char* label, const char* what, const std::vector<Runs>& column
     for (const Runs& runs : columns) {
         changes += static_cast<std::int64_t>(runs.size()) - 1;
     }
-    std::printf(
-        "%-9s %-8s %5.1f changes/column, nodes/column: %6.2f as a tree, %.3f shared (%.0fx)\n",
-        label, what, static_cast<double>(changes) / count, static_cast<double>(total.tree) / count,
-        static_cast<double>(total.shared) / count,
-        static_cast<double>(total.tree) / static_cast<double>(total.shared));
+    std::println("{:9} {:8} {:5.1f} changes/column, nodes/column: {:6.2f} as a tree, {:.3f} shared "
+                 "({:.0f}x)",
+                 label, what, static_cast<double>(changes) / count,
+                 static_cast<double>(total.tree) / count, static_cast<double>(total.shared) / count,
+                 static_cast<double>(total.tree) / static_cast<double>(total.shared));
+}
+
+// A column's voxels from the bottom up, as the generator makes them.
+std::vector<Voxel> column_voxels(const Generator& generator, const Cell& cell) {
+    const Layers& layers = generator.layers();
+    const std::vector<Generator::Column> columns{
+        generator.column(center(cell), voxel_lod(generator))};
+    std::vector<Voxel> filled;
+    filled.reserve(static_cast<std::size_t>(layers.count));
+    for (int layer = 0; layer < layers.count; ++layer) {
+        filled.push_back(generated_at(columns[0], layers, static_cast<std::uint32_t>(layer)));
+    }
+    return filled;
+}
+
+// A column's voxels as runs of material alone, and as runs of the voxel as it would be stored.
+void column_runs(const std::vector<Voxel>& filled, std::map<std::uint64_t, std::uint32_t>& ids,
+                 Runs& by_material, Runs& by_voxel) {
+    for (std::size_t at = 0; at < filled.size(); ++at) {
+        const int layer = static_cast<int>(at);
+        const Voxel& voxel = filled[at];
+        auto kind = static_cast<std::uint32_t>(Material::Air);
+        if (voxel.solid_amount >= Voxel::full / 2) {
+            kind = static_cast<std::uint32_t>(voxel.solid);
+        } else if (voxel.liquid_amount >= Voxel::full / 2) {
+            kind = static_cast<std::uint32_t>(Material::Water);
+        }
+        if (by_material.empty() || by_material.back().kind != kind) {
+            by_material.push_back({.start = layer, .kind = kind});
+        }
+        const std::uint32_t stored = stored_key(voxel, ids);
+        if (by_voxel.empty() || by_voxel.back().kind != stored) {
+            by_voxel.push_back({.start = layer, .kind = stored});
+        }
+    }
 }
 
 // The patch's columns over all their depth, as runs of material alone, and as runs of the voxel
@@ -149,31 +189,9 @@ void measure(const Generator& generator, const char* label, hog::DVec3 at, int a
                                  static_cast<std::uint32_t>(a),
                             .j = centre.j - static_cast<std::uint32_t>(across / 2) +
                                  static_cast<std::uint32_t>(b)};
-            const std::vector<Generator::Column> columns{
-                generator.column(center(cell), voxel_lod(generator))};
-            std::vector<Voxel> filled;
-            filled.reserve(static_cast<std::size_t>(layers.count));
-            for (int layer = 0; layer < layers.count; ++layer) {
-                filled.push_back(
-                    generated_at(columns[0], layers, static_cast<std::uint32_t>(layer)));
-            }
             Runs by_material;
             Runs by_voxel;
-            for (int layer = 0; layer < layers.count; ++layer) {
-                const Voxel& voxel = filled[static_cast<std::size_t>(layer)];
-                const std::uint32_t kind = voxel.solid_amount >= Voxel::full / 2
-                                               ? static_cast<std::uint32_t>(voxel.solid)
-                                           : voxel.liquid_amount >= Voxel::full / 2
-                                               ? static_cast<std::uint32_t>(Material::Water)
-                                               : static_cast<std::uint32_t>(Material::Air);
-                if (by_material.empty() || by_material.back().kind != kind) {
-                    by_material.push_back({layer, kind});
-                }
-                const std::uint32_t stored = stored_key(voxel, ids);
-                if (by_voxel.empty() || by_voxel.back().kind != stored) {
-                    by_voxel.push_back({layer, stored});
-                }
-            }
+            column_runs(column_voxels(generator, cell), ids, by_material, by_voxel);
             material.push_back(std::move(by_material));
             voxels.push_back(std::move(by_voxel));
         }
@@ -193,7 +211,7 @@ TEST_CASE("octree leaves per column over land, coast and sea", "[.octree_estimat
     double nearest = 1e18;
     double lowest = 1e18;
     for (int k = 0; k < 40000; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / 40000.0);
+        const double z = 1.0 - (((2.0 * k) + 1.0) / 40000.0);
         const double r = std::sqrt(1.0 - (z * z));
         const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
         const double ground = generator.column(d, 200.0).ground();

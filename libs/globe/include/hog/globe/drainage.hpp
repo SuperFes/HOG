@@ -11,8 +11,8 @@ namespace hog::globe {
 // much ground drains through each. It only reads the ground; it carves and places nothing.
 struct Drainage {
     int level = 0;
-    std::vector<float> ground;   // metres, as given
-    std::vector<float> filled;   // ground, raised where a hollow holds water before it spills
+    std::vector<float> ground; // metres, as given
+    std::vector<float> filled; // ground, raised where a hollow holds water before it spills
     // The neighbour water runs on to: the one it was reached from, lowest first. A cell at the
     // sea is its own.
     std::vector<std::uint32_t> receiver;

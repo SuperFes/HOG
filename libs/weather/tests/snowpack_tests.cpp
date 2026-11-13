@@ -46,13 +46,13 @@ TEST_CASE("the snowline sits where the balance crosses zero", "[snowpack]") {
     const Climate temperate{.surface = 283.0, .swing = 10.0, .precipitation = 0.15};
     const auto line = snowline(planet, temperate, 8'000.0);
     REQUIRE(line.has_value());
-    CHECK(ice_balance(planet, temperate, *line - 50.0).net() < 0.0);
-    CHECK(ice_balance(planet, temperate, *line + 50.0).net() > 0.0);
+    CHECK(ice_balance(planet, temperate, line.value() - 50.0).net() < 0.0);
+    CHECK(ice_balance(planet, temperate, line.value() + 50.0).net() > 0.0);
 
     // Colder ground has its line lower, and a desert one never makes snow.
     Climate cold = temperate;
     cold.surface = 270.0;
-    CHECK(*snowline(planet, cold, 8'000.0) < *line);
+    CHECK(snowline(planet, cold, 8'000.0).value() < line.value());
     Climate dry = temperate;
     dry.precipitation = 0.0;
     CHECK_FALSE(snowline(planet, dry, 8'000.0).has_value());

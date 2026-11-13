@@ -47,8 +47,7 @@ TEST_CASE("matter touching nothing falls", "[flow][support]") {
     CHECK(failed.size() == 25);
 }
 
-TEST_CASE("a short overhang stands and a long one of the same rock breaks off",
-          "[flow][support]") {
+TEST_CASE("a short overhang stands and a long one of the same rock breaks off", "[flow][support]") {
     const double reach = floored().reach(Material::Sandstone, 1.0, 255);
     const int short_by = static_cast<int>(0.5 * reach / 0.5);
     const int long_by = static_cast<int>(1.5 * reach / 0.5);

@@ -23,8 +23,9 @@ protocol::Grains GrainSharing::near(std::span<const flow::Parcel> parcels, World
         }
     }
     if (seen.size() > protocol::most_grains) {
-        std::ranges::nth_element(seen, seen.begin() + protocol::most_grains,
-                                 [](const Seen& a, const Seen& b) { return a.distance < b.distance; });
+        std::ranges::nth_element(
+            seen, seen.begin() + protocol::most_grains,
+            [](const Seen& a, const Seen& b) { return a.distance < b.distance; });
         seen.resize(protocol::most_grains);
     }
     std::ranges::sort(seen,
@@ -38,11 +39,11 @@ protocol::Grains GrainSharing::near(std::span<const flow::Parcel> parcels, World
                                 .at = protocol::to_millimetres(WorldPosition{parcel.at})};
         for (std::size_t axis = 0; axis < 3; ++axis) {
             flying.velocity[axis] = static_cast<std::int16_t>(
-                std::clamp(std::lround(parcel.velocity[axis] * 100.0), -32'768L,
-                           32'767L));
+                std::clamp(std::lround(parcel.velocity[axis] * 100.0), -32'768L, 32'767L));
         }
         flying.material = static_cast<std::uint8_t>(parcel.material);
-        flying.amount = static_cast<std::uint32_t>(std::min<std::int64_t>(parcel.amount, 0xFFFF'FFFF));
+        flying.amount =
+            static_cast<std::uint32_t>(std::min<std::int64_t>(parcel.amount, 0xFFFF'FFFF));
         grains.flying.push_back(flying);
     }
     return grains;

@@ -65,10 +65,9 @@ Horizons horizons(Material rock, const Climate& climate, double depth) {
     // Too dry to grow enough to make topsoil.
     constexpr double desert = 0.25;
     const double wet = std::clamp(climate.rain / middling_rain, 0.25, 2.0);
-    const double rot =
-        climate.kelvin < frozen
-            ? 0.0
-            : std::min(3.0, wet * std::exp2((climate.kelvin - temperate) / 10.0));
+    const double rot = climate.kelvin < frozen
+                           ? 0.0
+                           : std::min(3.0, wet * std::exp2((climate.kelvin - temperate) / 10.0));
     const double scaled = depth * how->deep;
     Horizons made{.under = how->fines};
     made.top = climate.rain < desert ? Material::Sand : Material::Soil;

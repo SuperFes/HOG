@@ -49,8 +49,8 @@ struct Ground {
 
     void lay(Material material, double share, double water) {
         BrickVoxels voxels{};
-        Voxel& here = voxels[static_cast<std::size_t>(
-            ((column.j % brick_side) * brick_side) + (column.i % brick_side))];
+        constexpr auto side = static_cast<std::uint32_t>(brick_side);
+        Voxel& here = voxels[(std::size_t{column.j % side} * side) + (column.i % side)];
         here.grain = material;
         here.grain_amount = amount_of(share);
         if (water > 0.0) {
@@ -79,11 +79,11 @@ TEST_CASE("footing on bare granite is the rock's grip, less when wet", "[globe][
     Ground ground;
     const std::optional<double> dry = grip_at(ground.world, ground.feet());
     REQUIRE(dry);
-    CHECK(*dry == Catch::Approx(45.0 * degrees));
+    CHECK(dry.value() == Catch::Approx(45.0 * degrees));
     ground.lay(Material::Air, 0.0, 1.0);
     const std::optional<double> wet = grip_at(ground.world, ground.feet());
     REQUIRE(wet);
-    CHECK(*wet == Catch::Approx(38.0 * degrees));
+    CHECK(wet.value() == Catch::Approx(38.0 * degrees));
 }
 
 TEST_CASE("a dusting of snow on granite holds a steep slope, a deep drift much less",
@@ -95,11 +95,11 @@ TEST_CASE("a dusting of snow on granite holds a steep slope, a deep drift much l
     const std::optional<double> drift = grip_at(ground.world, ground.feet());
     REQUIRE(dusting);
     REQUIRE(drift);
-    CHECK(*dusting > *drift);
-    CHECK(*drift < 45.0 * degrees);
+    CHECK(dusting.value() > drift.value());
+    CHECK(drift.value() < 45.0 * degrees);
 }
 
 TEST_CASE("no ground just under the feet gives no grip", "[globe][grip]") {
-    Ground ground;
+    const Ground ground;
     CHECK_FALSE(grip_at(ground.world, ground.feet() * 1.001));
 }

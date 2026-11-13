@@ -8,7 +8,8 @@ Stage stage_at(const Vent& vent, double clock) {
     if (vent.period <= 0.0) {
         return Stage::Active;
     }
-    const double into = std::fmod(std::fmod(clock + vent.phase, vent.period) + vent.period, vent.period);
+    const double into =
+        std::fmod(std::fmod(clock + vent.phase, vent.period) + vent.period, vent.period);
     if (into < vent.eruption) {
         return Stage::Erupting;
     }

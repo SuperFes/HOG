@@ -178,4 +178,3 @@ TEST_CASE("logging in needs a name and a server to go on to", "[client][options]
         parse_options(Arguments{"--login", "127.0.0.1:4647", "--connect", "127.0.0.1:7675"}));
     CHECK_FALSE(parse_options(Arguments{"--name", "Matt", "--connect", "127.0.0.1:7675"}));
 }
-

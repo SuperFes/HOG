@@ -42,6 +42,9 @@ ExcludeHeaderFilterRegex: '.*/\.cache/.*'
 FormatStyle: file
 CheckOptions:
   - { key: readability-function-cognitive-complexity.IgnoreMacros, value: true }
+  # value() throws on an empty optional, so it's checked already; tests reach for it after a REQUIRE
+  # the check can't see through.
+  - { key: bugprone-unchecked-optional-access.IgnoreValueCalls, value: true }
   - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
   - { key: readability-identifier-naming.ClassCase, value: CamelCase }
   - { key: readability-identifier-naming.StructCase, value: CamelCase }

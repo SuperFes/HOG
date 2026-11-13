@@ -88,8 +88,8 @@ private:
     std::vector<double> surface_;
     std::vector<double> discharge_;
     std::vector<bool> standing_;
-    std::vector<double> filled_; // the lowest way out of each column
-    std::vector<int> drains_;    // where each column's water goes; none out of the set
+    std::vector<double> filled_;     // the lowest way out of each column
+    std::vector<int> drains_;        // where each column's water goes; none out of the set
     std::vector<std::size_t> order_; // lowest way out first
     std::vector<int> hollow_of_;
     std::vector<Hollow> hollows_;

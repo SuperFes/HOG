@@ -40,7 +40,7 @@ TEST_CASE("a voxel is as the finest tile held over it has it", "[globe][held_til
     const Site corner{.face = 3, .i = 4 * side, .j = 4 * side, .layer = 0};
     CHECK(held.at({.face = 3, .i = corner.i, .j = corner.j, .layer = 39}) == rock);
     CHECK(held.at({.face = 3, .i = corner.i, .j = corner.j, .layer = 40}) == Cube{});
-    CHECK(held.finest_over({.level = 0, .face = 3, .i = 5, .j = 6, .k = 3})->key == coarse);
+    CHECK(held.finest_over({.level = 0, .face = 3, .i = 5, .j = 6, .k = 3}).value().key == coarse);
     CHECK_FALSE(held.finest_over({.level = 0, .face = 3, .i = 8, .j = 4, .k = 0}));
     CHECK(held.at({.face = 3, .i = 8 * side, .j = 4 * side, .layer = 0}) == Cube{});
 

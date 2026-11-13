@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <utility>
+
 using hog::flow::testing::Block;
 using hog::flow::testing::floor_above_sea;
 using hog::globe::Material;
@@ -34,8 +36,8 @@ int rest(Block& block, int most) {
 
 TEST_CASE("a lump of ground hanging from nothing cracks through and falls", "[flow][collapse]") {
     Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t j, int layer) {
-                    const bool slab = i >= 8 && i <= 14 && j >= 8 && j <= 14 && layer >= 3 &&
-                                      layer <= 5;
+                    const bool slab =
+                        i >= 8 && i <= 14 && j >= 8 && j <= 14 && layer >= 3 && layer <= 5;
                     return !slab;
                 }};
     REQUIRE(solid(block, 11, 11, 4));
@@ -60,8 +62,8 @@ TEST_CASE("ground standing on the ground, or hung within its reach, stays", "[fl
     Block block{floor_above_sea(100.0), false,
                 [](std::uint32_t i, std::uint32_t j, int layer) {
                     const bool pillar = i >= 3 && i <= 4 && j >= 8 && j <= 14 && layer <= 6;
-                    const bool slab = i >= 5 && i <= 9 && j >= 8 && j <= 14 && layer >= 5 &&
-                                      layer <= 6;
+                    const bool slab =
+                        i >= 5 && i <= 9 && j >= 8 && j <= 14 && layer >= 5 && layer <= 6;
                     return !(pillar || slab);
                 },
                 Material::Sandstone};
@@ -78,8 +80,8 @@ TEST_CASE("an overhang longer than the rock can reach breaks off at its tip", "[
     Block block{floor_above_sea(100.0), false,
                 [](std::uint32_t i, std::uint32_t j, int layer) {
                     const bool pillar = i >= 3 && i <= 4 && j >= 8 && j <= 14 && layer <= 6;
-                    const bool slab = i >= 5 && i <= 22 && j >= 8 && j <= 14 && layer >= 5 &&
-                                      layer <= 6;
+                    const bool slab =
+                        i >= 5 && i <= 22 && j >= 8 && j <= 14 && layer >= 5 && layer <= 6;
                     return !(pillar || slab);
                 },
                 Material::Sandstone};
@@ -93,15 +95,15 @@ TEST_CASE("an overhang longer than the rock can reach breaks off at its tip", "[
 
 TEST_CASE("the sweep brings down hanging ground nobody is near", "[flow][collapse]") {
     Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t j, int layer) {
-                    const bool slab = i >= 8 && i <= 14 && j >= 8 && j <= 14 && layer >= 3 &&
-                                      layer <= 5;
+                    const bool slab =
+                        i >= 8 && i <= 14 && j >= 8 && j <= 14 && layer >= 3 && layer <= 5;
                     return !slab;
                 }};
     hog::flow::Simulation simulation{block.world()};
     std::int64_t collapsed = 0;
     // A brick a step, going round those changed from the generated ground.
     for (int step = 0; step < 1'500 && collapsed == 0; ++step) {
-        if (step < static_cast<int>(block.bricks().size())) {
+        if (std::cmp_less(step, block.bricks().size())) {
             simulation.sweep(1);
         }
         collapsed += simulation.step(hog::flow::testing::tick).collapsed;

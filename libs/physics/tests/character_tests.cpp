@@ -194,7 +194,8 @@ TEST_CASE("a character put somewhere is there at rest", "[physics][character]") 
     CHECK(glm::length(character.velocity()) == 0.0);
 }
 
-TEST_CASE("a character standing still on a walkable slope stays where it is", "[physics][character]") {
+TEST_CASE("a character standing still on a walkable slope stays where it is",
+          "[physics][character]") {
     for (const double degrees : {10.0, 25.0, 40.0}) {
         const double tilt = std::tan(glm::radians(degrees));
         Stage stage{Scenery{}.quad({-20.0, -20.0, -20.0 * tilt}, {20.0, -20.0, 20.0 * tilt},

@@ -281,10 +281,10 @@ void fly_through(const std::vector<hog::DVec3>& eyes) {
         std::size_t over = 0;
         for (const std::uint64_t one : drawn) {
             const TileKey key = keys.at(one);
-            stale += held.contains(key) ? 0 : 1;
+            stale += held.contains(key) ? 0U : 1U;
             for (TileKey parent = key; parent.level < land.top();) {
                 parent = parent.parent();
-                over += drawn.contains(tile_key(parent)) ? 1 : 0;
+                over += drawn.contains(tile_key(parent)) ? 1U : 0U;
             }
         }
         CAPTURE(step, drawn.size(), held.size(), cut.sent.size());
@@ -305,10 +305,10 @@ Drawn drawn_against(const std::set<std::uint64_t>& drawn,
     Drawn counted;
     for (const std::uint64_t one : drawn) {
         const TileKey key = keys.at(one);
-        counted.stale += held.contains(key) ? 0 : 1;
+        counted.stale += held.contains(key) ? 0U : 1U;
         for (TileKey parent = key; parent.level < top;) {
             parent = parent.parent();
-            counted.over += drawn.contains(tile_key(parent)) ? 1 : 0;
+            counted.over += drawn.contains(tile_key(parent)) ? 1U : 0U;
         }
     }
     return counted;

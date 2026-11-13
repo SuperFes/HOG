@@ -5,6 +5,7 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace hog::flow {
@@ -67,14 +68,13 @@ std::optional<bool> Region::solid_at(DVec3 point) {
 void Region::loosen(const globe::Rock& rock) {
     const double reach = std::max({rock.axes.x, rock.axes.y, rock.axes.z});
     const double thickness = world_->layers().thickness;
-    reshape(rock.middle, reach,
-            [&](DVec3 at) {
-                DVec3 outward{0.0};
-                return rock.distance(at, outward);
-            },
-            [thickness](globe::Voxel& voxel, double to) {
-                globe::dig_voxel(voxel, to, thickness);
-            });
+    reshape(
+        rock.middle, reach,
+        [&](DVec3 at) {
+            DVec3 outward{0.0};
+            return rock.distance(at, outward);
+        },
+        [thickness](globe::Voxel& voxel, double to) { globe::dig_voxel(voxel, to, thickness); });
     parcels_.push_back(
         {.id = ++parcel_ids_,
          .at = rock.middle,
@@ -103,11 +103,11 @@ std::size_t Region::loosen_unsupported(DVec3 point, std::size_t& unjudged) {
         const DVec3 below = rock.middle - (rock.up * (rock.axes.z + (0.75 * layers.thickness)));
         bool unknown = false;
         bool held_up = false;
-        const double across[] = {0.0, 0.5, -0.5, 0.0, 0.0};
-        const double along[] = {0.0, 0.0, 0.0, 0.5, -0.5};
+        constexpr std::array<double, 5> across{0.0, 0.5, -0.5, 0.0, 0.0};
+        constexpr std::array<double, 5> along{0.0, 0.0, 0.0, 0.5, -0.5};
         for (std::size_t k = 0; k < std::size(across); ++k) {
-            const std::optional<bool> ground = solid_at(below + (rock.across * across[k] * rock.axes.x) +
-                                                        (side * along[k] * rock.axes.y));
+            const std::optional<bool> ground = solid_at(
+                below + (rock.across * across[k] * rock.axes.x) + (side * along[k] * rock.axes.y));
             unknown = unknown || !ground;
             held_up = held_up || ground.value_or(false);
         }
@@ -153,11 +153,11 @@ std::optional<globe::BrickSite> Region::settle_boulder(const Parcel& parcel) {
             return brick;
         }
     }
-    reshape(centre, parcel.radius,
-            [&](DVec3 at) { return glm::length(at - centre) - parcel.radius; },
-            [&](globe::Voxel& voxel, double to) {
-                globe::build_voxel(voxel, to, parcel.material, layers.thickness);
-            });
+    reshape(
+        centre, parcel.radius, [&](DVec3 at) { return glm::length(at - centre) - parcel.radius; },
+        [&](globe::Voxel& voxel, double to) {
+            globe::build_voxel(voxel, to, parcel.material, layers.thickness);
+        });
     return std::nullopt;
 }
 

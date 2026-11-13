@@ -67,13 +67,36 @@ std::optional<Volcano> volcano_in(const Planet& planet, Cell cell) {
     return volcano;
 }
 
-std::vector<VentSite> vent_sites(const Generator& generator) {
-    const Planet& planet = generator.planet();
+namespace {
+
+// Where a pool could lie in the column, on the floor of a cave under the ground high enough to
+// stand in: where the cave first opens from solid rock.
+std::optional<double> pool_floor(const Generator::Column& column) {
+    for (const auto& [bottom, top] :
+         column.caves(column.ground() - pool_reach, column.ground(), 0.0)) {
+        bool solid = false;
+        for (int step = -1;; ++step) {
+            const double at = bottom + (pool_step * step);
+            if (at + pool_headroom >= top) {
+                break;
+            }
+            const double distance = column.sample(at).distance;
+            if (distance > 0.0 && solid && column.sample(at + pool_headroom).distance > 0.0) {
+                return at;
+            }
+            // On the surface itself is neither: the floor is under rock.
+            solid = distance < 0.0;
+        }
+    }
+    return std::nullopt;
+}
+
+// The vents of the volcanoes not yet extinct, on land.
+void add_vents(const Generator& generator, std::vector<VentSite>& sites) {
     const std::uint64_t cells = 6ULL << (2 * scatter_level);
     const double sea = generator.sea_level().value_or(0.0);
-    std::vector<VentSite> sites;
     for (std::uint64_t index = 0; index < cells; ++index) {
-        const auto volcano = volcano_in(planet, cell_at_index(scatter_level, index));
+        const auto volcano = volcano_in(generator.planet(), cell_at_index(scatter_level, index));
         if (!volcano || volcano->extinct) {
             continue;
         }
@@ -83,7 +106,13 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
             sites.push_back({.direction = volcano->centre, .ground = *ground, .key = volcano->key});
         }
     }
-    // Pools on cavern floors, in whatever rock holds a cave open near the surface.
+}
+
+// Pools on cavern floors, in whatever rock holds a cave open near the surface.
+void add_pools(const Generator& generator, std::vector<VentSite>& sites) {
+    const Planet& planet = generator.planet();
+    const std::uint64_t cells = 6ULL << (2 * scatter_level);
+    const double sea = generator.sea_level().value_or(0.0);
     const double ratio = planet.heat_flow / earth_heat_flow;
     const double area_km2 = 4.0 * std::numbers::pi * planet.body.radius * planet.body.radius * 1e-6;
     const double chance = pools_per_km2 * ratio * ratio * area_km2 / static_cast<double>(cells);
@@ -110,32 +139,21 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
             if (column.ground() <= sea) {
                 continue;
             }
-            bool found = false;
-            for (const auto& [bottom, top] :
-                 column.caves(column.ground() - pool_reach, column.ground(), 0.0)) {
-                // The stretch only may hold a cave: the floor is where it first opens from solid.
-                bool solid = false;
-                for (double at = bottom - pool_step; at + pool_headroom < top && !found;
-                     at += pool_step) {
-                    const double distance = column.sample(at).distance;
-                    const bool open = distance > 0.0;
-                    if (open && solid && column.sample(at + pool_headroom).distance > 0.0) {
-                        sites.push_back(
-                            {.direction = direction, .ground = at, .pool = true, .key = own});
-                        found = true;
-                    }
-                    // On the surface itself is neither: the floor is under rock.
-                    solid = distance < 0.0;
-                }
-                if (found) {
-                    break;
-                }
-            }
-            if (found) {
+            if (const std::optional<double> floor = pool_floor(column)) {
+                sites.push_back(
+                    {.direction = direction, .ground = *floor, .pool = true, .key = own});
                 break;
             }
         }
     }
+}
+
+} // namespace
+
+std::vector<VentSite> vent_sites(const Generator& generator) {
+    std::vector<VentSite> sites;
+    add_vents(generator, sites);
+    add_pools(generator, sites);
     return sites;
 }
 

@@ -700,6 +700,91 @@ void write_weather(ByteWriter& out, const Weather& weather) {
     }
 }
 
+void write_tiles(ByteWriter& out, const Tiles& tiles) {
+    HOG_ASSERT(tiles.tiles.size() <= most_tiles, "too many tiles to send at once");
+    out.write(static_cast<std::uint16_t>(Kind::Tiles));
+    out.write(static_cast<std::uint16_t>(tiles.tiles.size()));
+    for (const SentTile& tile : tiles.tiles) {
+        HOG_ASSERT(tile.bytes.size() <= most_tile, "a tile too big to send");
+        out.write(tile.level);
+        out.write(tile.face);
+        out.write(tile.i);
+        out.write(tile.j);
+        out.write(tile.k);
+        out.write(static_cast<std::uint32_t>(tile.bytes.size()));
+        out.write_bytes(tile.bytes);
+    }
+}
+
+void write_grains(ByteWriter& out, const Grains& grains) {
+    HOG_ASSERT(grains.flying.size() <= most_grains, "too much grain to send at once");
+    out.write(static_cast<std::uint16_t>(Kind::Grains));
+    out.write(grains.tick);
+    out.write(static_cast<std::uint16_t>(grains.flying.size()));
+    for (const Flying& one : grains.flying) {
+        out.write(std::to_underlying(one.id));
+        write_position(out, one.at);
+        for (const std::int16_t axis : one.velocity) {
+            out.write(static_cast<std::uint16_t>(axis));
+        }
+        out.write(one.material);
+        out.write(one.amount);
+    }
+}
+
+[[nodiscard]] Result<Message> read_welcome(ByteReader& in) {
+    const auto spoken = read<std::uint32_t>(in, "welcome");
+    if (!spoken) {
+        return std::unexpected(spoken.error());
+    }
+    const auto world = read<std::uint64_t>(in, "welcome");
+    if (!world) {
+        return std::unexpected(world.error());
+    }
+    const auto planet = read_sized(in, most_planet, "a welcome");
+    if (!planet) {
+        return std::unexpected(planet.error());
+    }
+    const auto ground = read_sized(in, most_planet, "a welcome");
+    if (!ground) {
+        return std::unexpected(ground.error());
+    }
+    return finished(in, Welcome{.version = *spoken,
+                                .world = *world,
+                                .planet = {planet->begin(), planet->end()},
+                                .ground = {ground->begin(), ground->end()}});
+}
+
+[[nodiscard]] Result<Message> read_moved(ByteReader& in) {
+    const auto sequence = read<std::uint32_t>(in, "a move");
+    const auto corrections = read<std::uint32_t>(in, "a move");
+    const auto at = read_position(in, "a move");
+    if (!sequence || !corrections || !at) {
+        return make_error(ErrorCode::Parse, "a move cut short");
+    }
+    const auto stance = read_stance(in, "a move");
+    if (!stance) {
+        return std::unexpected(stance.error());
+    }
+    return finished(in, Moved{.sequence = *sequence,
+                              .corrections = *corrections,
+                              .at = *at,
+                              .stance = stance->stance,
+                              .facing = stance->facing});
+}
+
+[[nodiscard]] Result<Message> read_placed(ByteReader& in) {
+    const auto at = read_position(in, "a placing");
+    if (!at) {
+        return std::unexpected(at.error());
+    }
+    const auto stance = read_stance(in, "a placing");
+    if (!stance) {
+        return std::unexpected(stance.error());
+    }
+    return finished(in, Placed{.at = *at, .stance = stance->stance, .facing = stance->facing});
+}
+
 } // namespace
 
 CellWeather as_sent(const CellWeather& cell) noexcept {
@@ -754,33 +839,9 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(body.radius);
                 out.write(body.material);
             } else if constexpr (std::is_same_v<Body, Tiles>) {
-                HOG_ASSERT(body.tiles.size() <= most_tiles, "too many tiles to send at once");
-                out.write(static_cast<std::uint16_t>(Kind::Tiles));
-                out.write(static_cast<std::uint16_t>(body.tiles.size()));
-                for (const SentTile& tile : body.tiles) {
-                    HOG_ASSERT(tile.bytes.size() <= most_tile, "a tile too big to send");
-                    out.write(tile.level);
-                    out.write(tile.face);
-                    out.write(tile.i);
-                    out.write(tile.j);
-                    out.write(tile.k);
-                    out.write(static_cast<std::uint32_t>(tile.bytes.size()));
-                    out.write_bytes(tile.bytes);
-                }
+                write_tiles(out, body);
             } else if constexpr (std::is_same_v<Body, Grains>) {
-                HOG_ASSERT(body.flying.size() <= most_grains, "too much grain to send at once");
-                out.write(static_cast<std::uint16_t>(Kind::Grains));
-                out.write(body.tick);
-                out.write(static_cast<std::uint16_t>(body.flying.size()));
-                for (const Flying& one : body.flying) {
-                    out.write(std::to_underlying(one.id));
-                    write_position(out, one.at);
-                    for (const std::int16_t axis : one.velocity) {
-                        out.write(static_cast<std::uint16_t>(axis));
-                    }
-                    out.write(one.material);
-                    out.write(one.amount);
-                }
+                write_grains(out, body);
             } else if constexpr (std::is_same_v<Body, Ack>) {
                 out.write(static_cast<std::uint16_t>(Kind::Ack));
                 out.write(body.tick);
@@ -829,58 +890,14 @@ Result<Message> decode(std::span<const std::byte> bytes) {
     switch (static_cast<Kind>(*kind)) {
     case Kind::Hello:
         return read_hello(in);
-    case Kind::Welcome: {
-        const auto spoken = read<std::uint32_t>(in, "welcome");
-        if (!spoken) {
-            return std::unexpected(spoken.error());
-        }
-        const auto world = read<std::uint64_t>(in, "welcome");
-        if (!world) {
-            return std::unexpected(world.error());
-        }
-        const auto planet = read_sized(in, most_planet, "a welcome");
-        if (!planet) {
-            return std::unexpected(planet.error());
-        }
-        const auto ground = read_sized(in, most_planet, "a welcome");
-        if (!ground) {
-            return std::unexpected(ground.error());
-        }
-        return finished(in, Welcome{.version = *spoken,
-                                    .world = *world,
-                                    .planet = {planet->begin(), planet->end()},
-                                    .ground = {ground->begin(), ground->end()}});
-    }
+    case Kind::Welcome:
+        return read_welcome(in);
     case Kind::Refused:
         return read_refused(in);
-    case Kind::Moved: {
-        const auto sequence = read<std::uint32_t>(in, "a move");
-        const auto corrections = read<std::uint32_t>(in, "a move");
-        const auto at = read_position(in, "a move");
-        if (!sequence || !corrections || !at) {
-            return make_error(ErrorCode::Parse, "a move cut short");
-        }
-        const auto stance = read_stance(in, "a move");
-        if (!stance) {
-            return std::unexpected(stance.error());
-        }
-        return finished(in, Moved{.sequence = *sequence,
-                                  .corrections = *corrections,
-                                  .at = *at,
-                                  .stance = stance->stance,
-                                  .facing = stance->facing});
-    }
-    case Kind::Placed: {
-        const auto at = read_position(in, "a placing");
-        if (!at) {
-            return std::unexpected(at.error());
-        }
-        const auto stance = read_stance(in, "a placing");
-        if (!stance) {
-            return std::unexpected(stance.error());
-        }
-        return finished(in, Placed{.at = *at, .stance = stance->stance, .facing = stance->facing});
-    }
+    case Kind::Moved:
+        return read_moved(in);
+    case Kind::Placed:
+        return read_placed(in);
     case Kind::Corrected: {
         const auto count = read<std::uint32_t>(in, "a correction");
         const auto at = read_position(in, "a correction");

@@ -5,8 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 using hog::flow::testing::Block;
@@ -28,13 +28,10 @@ Block bowl_block() {
 
 } // namespace
 
-TEST_CASE("rain run off the voxels fills a hollow with water voxels to its rim",
-          "[flow][runoff]") {
+TEST_CASE("rain run off the voxels fills a hollow with water voxels to its rim", "[flow][runoff]") {
     Block block = bowl_block();
-    block.region().settle_water({.rain = [](hog::DVec3) { return 2.0; },
-                                 .river = {},
-                                 .springs = {},
-                                 .evaporation = 0.5});
+    block.region().settle_water(
+        {.rain = [](hog::DVec3) { return 2.0; }, .river = {}, .springs = {}, .evaporation = 0.5});
     // Water lies over the middle, up to the lowest edge column's ground and no higher.
     int rim = 1'000;
     for (std::uint32_t j = 0; j < Block::side; ++j) {
@@ -52,10 +49,8 @@ TEST_CASE("rain run off the voxels fills a hollow with water voxels to its rim",
 
 TEST_CASE("without rain the voxels stay dry", "[flow][runoff]") {
     Block block = bowl_block();
-    block.region().settle_water({.rain = [](hog::DVec3) { return 0.0; },
-                                 .river = {},
-                                 .springs = {},
-                                 .evaporation = 0.5});
+    block.region().settle_water(
+        {.rain = [](hog::DVec3) { return 0.0; }, .river = {}, .springs = {}, .evaporation = 0.5});
     for (int layer = 0; layer < 16; ++layer) {
         CHECK(block.amount(12, 12, layer) == 0);
     }

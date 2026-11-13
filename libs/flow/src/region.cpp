@@ -645,11 +645,10 @@ void Region::want_around(Site site, std::set<std::uint64_t>& wanted) {
 }
 
 void Region::settle(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
-    const double thickness = world_->layers().thickness;
     std::set<std::uint64_t> wanted;
     for (const Column& column : columns) {
         std::size_t next = column.first;
-        std::vector<std::tuple<Site, Held*, Voxel*>> run;
+        OpenRun run;
         walk(
             column,
             [&](Site site, Held& brick, Voxel& voxel) { run.emplace_back(site, &brick, &voxel); },
@@ -657,81 +656,7 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
                 if (run.empty()) {
                     return;
                 }
-                const Section& section = sections_[next++];
-                const auto count = static_cast<std::int64_t>(run.size());
-                HOG_ASSERT(section.amount <= (count * full) - section.bed,
-                           "a section holding more than fills it");
-                // Full from the bottom up, over the grain piled there, the rest in the voxel
-                // over them.
-                std::int64_t left = section.amount;
-                // Each voxel of lava keeps its own heat; one newly reached takes the section's
-                // mean.
-                struct Hot {
-                    Site site;
-                    Held* brick;
-                    Voxel* voxel;
-                    double kelvin;
-                    std::int64_t amount;
-                };
-                std::vector<Hot> hot;
-                const double mean =
-                    section.amount > 0 && molten(section.liquid)
-                        ? globe::kelvin(static_cast<std::uint16_t>(section.heat / section.amount))
-                        : 0.0;
-                for (std::int64_t k = 0; k < count; ++k) {
-                    auto [site, brick, voxel] = run[static_cast<std::size_t>(k)];
-                    const std::int64_t amount =
-                        std::clamp(left, std::int64_t{0}, full - voxel->grain_amount);
-                    left -= amount;
-                    const Material liquid = amount > 0 ? section.liquid : Material::Air;
-                    const auto held_amount = static_cast<std::uint16_t>(amount);
-                    const std::int64_t before = voxel->liquid_amount;
-                    stepped.changed += std::abs(amount - before);
-                    if (amount > 0 && molten(liquid)) {
-                        hot.push_back(
-                            {.site = site,
-                             .brick = brick,
-                             .voxel = voxel,
-                             .kelvin = before > 0 ? globe::kelvin(voxel->temperature) : mean,
-                             .amount = amount});
-                    }
-                    if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
-                        voxel->liquid_amount = held_amount;
-                        voxel->liquid = liquid;
-                        brick->dirty = true;
-                    }
-                    // Only liquid on the move would run on; what stands still needs nothing.
-                    if (amount > 0 && (section.moving || amount != before)) {
-                        want_around(site, wanted);
-                    }
-                }
-                // The top of the lava gives its heat to the air over it and sets into a crust; the
-                // rest is warmed or cooled only through what lies over it.
-                if (!hot.empty()) {
-                    const bool exposed = section.amount + section.bed < count * full;
-                    const double depth =
-                        std::max(static_cast<double>(hot.back().amount) / full * thickness, 0.01);
-                    hot.back().kelvin = cooled(section.liquid, hot.back().kelvin, ambient,
-                                               exposed ? 1.0 : 0.0, depth, seconds);
-                    for (std::size_t h = hot.size() - 1; h-- > 0;) {
-                        conduct(section.liquid, hot[h].kelvin, hot[h + 1].kelvin, thickness,
-                                seconds);
-                    }
-                    for (const Hot& each : hot) {
-                        if (lava_mobility(section.liquid, each.kelvin) == 0.0) {
-                            setting_.emplace_back(each.site, each.brick);
-                            continue;
-                        }
-                        // Rounded by chance, since a step's cooling is far under a step of the
-                        // stored temperature.
-                        const auto temperature =
-                            static_cast<std::uint16_t>(dithered(each.kelvin * 8.0, each.site, 2));
-                        if (each.voxel->temperature != temperature) {
-                            each.voxel->temperature = temperature;
-                            each.brick->dirty = true;
-                        }
-                    }
-                }
+                fill(sections_[next++], run, seconds, wanted, stepped);
                 run.clear();
             });
         HOG_ASSERT(next == column.first + column.count, "the column's sections don't match");
@@ -740,6 +665,82 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
     stepped.wanted.reserve(wanted.size());
     for (const std::uint64_t key : wanted) {
         stepped.wanted.push_back(globe::brick_at_key(key));
+    }
+}
+
+struct Region::Hot {
+    Site site;
+    Held* brick = nullptr;
+    Voxel* voxel = nullptr;
+    double kelvin = 0.0;
+    std::int64_t amount = 0;
+};
+
+void Region::fill(const Section& section, const OpenRun& run, double seconds,
+                  std::set<std::uint64_t>& wanted, Stepped& stepped) {
+    const auto count = static_cast<std::int64_t>(run.size());
+    HOG_ASSERT(section.amount <= (count * full) - section.bed,
+               "a section holding more than fills it");
+    std::int64_t left = section.amount;
+    // Each voxel of lava keeps its own heat; one newly reached takes the section's mean.
+    std::vector<Hot> hot;
+    const double mean =
+        section.amount > 0 && molten(section.liquid)
+            ? globe::kelvin(static_cast<std::uint16_t>(section.heat / section.amount))
+            : 0.0;
+    for (std::int64_t k = 0; k < count; ++k) {
+        auto [site, brick, voxel] = run[static_cast<std::size_t>(k)];
+        const std::int64_t amount = std::clamp(left, std::int64_t{0}, full - voxel->grain_amount);
+        left -= amount;
+        const Material liquid = amount > 0 ? section.liquid : Material::Air;
+        const auto held_amount = static_cast<std::uint16_t>(amount);
+        const std::int64_t before = voxel->liquid_amount;
+        stepped.changed += std::abs(amount - before);
+        if (amount > 0 && molten(liquid)) {
+            hot.push_back({.site = site,
+                           .brick = brick,
+                           .voxel = voxel,
+                           .kelvin = before > 0 ? globe::kelvin(voxel->temperature) : mean,
+                           .amount = amount});
+        }
+        if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
+            voxel->liquid_amount = held_amount;
+            voxel->liquid = liquid;
+            brick->dirty = true;
+        }
+        // Only liquid on the move would run on; what stands still needs nothing.
+        if (amount > 0 && (section.moving || amount != before)) {
+            want_around(site, wanted);
+        }
+    }
+    if (!hot.empty()) {
+        cool_lava(section, hot, count, seconds);
+    }
+}
+
+void Region::cool_lava(const Section& section, std::vector<Hot>& hot, std::int64_t count,
+                       double seconds) {
+    const double thickness = world_->layers().thickness;
+    const bool exposed = section.amount + section.bed < count * full;
+    const double depth = std::max(static_cast<double>(hot.back().amount) / full * thickness, 0.01);
+    hot.back().kelvin =
+        cooled(section.liquid, hot.back().kelvin, ambient, exposed ? 1.0 : 0.0, depth, seconds);
+    for (std::size_t h = hot.size() - 1; h-- > 0;) {
+        conduct(section.liquid, hot[h].kelvin, hot[h + 1].kelvin, thickness, seconds);
+    }
+    for (const Hot& each : hot) {
+        if (lava_mobility(section.liquid, each.kelvin) == 0.0) {
+            setting_.emplace_back(each.site, each.brick);
+            continue;
+        }
+        // Rounded by chance, since a step's cooling is far under a step of the stored
+        // temperature.
+        const auto temperature =
+            static_cast<std::uint16_t>(dithered(each.kelvin * 8.0, each.site, 2));
+        if (each.voxel->temperature != temperature) {
+            each.voxel->temperature = temperature;
+            each.brick->dirty = true;
+        }
     }
 }
 

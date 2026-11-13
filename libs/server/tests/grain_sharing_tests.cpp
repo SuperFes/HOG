@@ -37,10 +37,11 @@ TEST_CASE("grain is told to those within reach, in order of id", "[server][grain
     CHECK(told.flying[1].amount == 40'000);
 }
 
-TEST_CASE("when there is more grain than a message holds, the nearest is told", "[server][grains]") {
+TEST_CASE("when there is more grain than a message holds, the nearest is told",
+          "[server][grains]") {
     std::vector<Parcel> parcels;
     for (std::uint32_t id = 1; id <= hog::protocol::most_grains + 10; ++id) {
-        parcels.push_back(parcel(id, 100.0 - static_cast<double>(id) * 0.1));
+        parcels.push_back(parcel(id, 100.0 - (static_cast<double>(id) * 0.1)));
     }
     const auto told = GrainSharing::near(parcels, WorldPosition{0.0, 6.0e6, 0.0}, 1);
     REQUIRE(told.flying.size() == hog::protocol::most_grains);

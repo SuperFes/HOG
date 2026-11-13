@@ -6,11 +6,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <span>
 #include <utility>
 #include <vector>
@@ -313,8 +313,8 @@ void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const Bl
     }
     for (const auto& [key, placed] : placed_) {
         if (seen(view.camera, aspect, placed)) {
-            draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin,
-                     view, aspect);
+            draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin, view,
+                     aspect);
         }
     }
 }

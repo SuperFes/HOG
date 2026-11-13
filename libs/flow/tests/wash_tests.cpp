@@ -53,8 +53,7 @@ TEST_CASE("running water carries topsoil off a slope into the still water at its
     CHECK(loose_in(wash) == Approx(before));
 }
 
-TEST_CASE("clay holds against water that strips topsoil, and stones against both",
-          "[flow][wash]") {
+TEST_CASE("clay holds against water that strips topsoil, and stones against both", "[flow][wash]") {
     const auto taken_of = [](Material material) {
         Wash wash{slope(10, 0.3, material, 1.0, 20.0), {.cell = 2.0}};
         wash.run(200.0, 8);

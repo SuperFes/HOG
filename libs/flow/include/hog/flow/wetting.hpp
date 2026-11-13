@@ -47,8 +47,8 @@ public:
     // fine for one step still falls.
     template <typename Read>
     [[nodiscard]] static std::vector<Soaking> column(const Read& read, globe::Site column,
-                                                     std::uint32_t start, double thickness,
-                                                     Sky sky, double seconds, std::uint64_t draw);
+                                                     std::uint32_t start, double thickness, Sky sky,
+                                                     double seconds, std::uint64_t draw);
 };
 
 namespace detail {
@@ -83,13 +83,15 @@ std::vector<Soaking> Wetting::column(const Read& read, globe::Site column, std::
     if (!surface || surface->first == 0) {
         return {};
     }
-    const globe::Site bed_at{.face = column.face,
-                             .i = column.i,
-                             .j = column.j,
-                             .layer = surface->first - 1};
+    const globe::Site bed_at{
+        .face = column.face, .i = column.i, .j = column.j, .layer = surface->first - 1};
     globe::Site film_at = bed_at;
     ++film_at.layer;
-    Voxel bed = *lookup(bed_at.layer);
+    const Voxel* const below = lookup(bed_at.layer);
+    if (below == nullptr) {
+        return {};
+    }
+    Voxel bed = *below;
     Voxel film = surface->bottom;
     // Only water wets or dries; lava or another liquid in the ground is left alone.
     const auto water = [](const Voxel& voxel) {
@@ -121,15 +123,14 @@ std::vector<Soaking> Wetting::column(const Read& read, globe::Site column, std::
             std::max<std::int64_t>(pores, 0));
         bed_amount += soaked;
         fallen -= soaked;
-        film_amount =
-            std::min<std::int64_t>(film_amount + fallen, Voxel::full - film.grain_amount);
+        film_amount = std::min<std::int64_t>(film_amount + fallen, Voxel::full - film.grain_amount);
     }
     // Water standing deeper than a film is a pond or the sea, which the air takes too slowly for
     // here to matter and the ground under it stays soaked.
     const bool standing = static_cast<double>(film_amount) * thickness > 0.05 * Voxel::full;
     if (sky.dryness > 0.0 && !standing) {
-        const double warmth = std::clamp((globe::kelvin(bed.temperature) - 273.15) / drying_kelvin,
-                                         0.0, 1.5);
+        const double warmth =
+            std::clamp((globe::kelvin(bed.temperature) - 273.15) / drying_kelvin, 0.0, 1.5);
         std::int64_t taken = units(drying_peak * sky.dryness * warmth, 3);
         const std::int64_t from_film = std::min(taken, film_amount);
         film_amount -= from_film;

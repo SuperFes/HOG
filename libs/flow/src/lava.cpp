@@ -22,9 +22,9 @@ double lava_mobility(globe::Material rock, double kelvin) {
     if (melts <= 0.0) {
         return 0.0;
     }
-    const double t = std::clamp(
-        (kelvin - (melts - stiff_below)) / (stiff_below + runny_above), 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
+    const double t =
+        std::clamp((kelvin - (melts - stiff_below)) / (stiff_below + runny_above), 0.0, 1.0);
+    return t * t * (3.0 - (2.0 * t));
 }
 
 bool is_molten(globe::Material rock, double kelvin) {
@@ -40,11 +40,10 @@ double cooled(globe::Material rock, double kelvin, double ambient, double open, 
         return kelvin;
     }
     const double settle = properties.density * properties.heat_capacity * thickness / loss;
-    return ambient + (kelvin - ambient) * std::exp(-seconds / settle);
+    return ambient + ((kelvin - ambient) * std::exp(-seconds / settle));
 }
 
-void conduct(globe::Material rock, double& below, double& above, double thickness,
-             double seconds) {
+void conduct(globe::Material rock, double& below, double& above, double thickness, double seconds) {
     const globe::Properties& properties = globe::properties(rock);
     // The two meet halfway, as fast as the heat crosses a voxel's depth.
     const double settle =

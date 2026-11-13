@@ -3,8 +3,8 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <chrono>
+#include <cmath>
 
 namespace hog::server {
 
@@ -39,8 +39,8 @@ Verdict MoveCheck::judge(WorldPosition to, MonotonicClock::time_point now,
     double excess = 0.0;
     if (rise > 0.0) {
         const double held = grip ? grip(at_).value_or(rules_.steepest) : rules_.steepest;
-        excess = std::max(rise - (glm::length(sideways) * std::tan(std::min(held, rules_.steepest))),
-                          0.0);
+        excess = std::max(
+            rise - (glm::length(sideways) * std::tan(std::min(held, rules_.steepest))), 0.0);
         if (excess > lift_) {
             return Verdict::TooSteep;
         }

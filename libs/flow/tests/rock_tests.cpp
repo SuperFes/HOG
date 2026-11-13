@@ -87,7 +87,7 @@ bool solid_at(hog::flow::Region& region, const hog::globe::Layers& layers, DVec3
 TEST_CASE("a rock the ground holds up stays where it lies", "[flow][rocks]") {
     const Found found;
     REQUIRE(found.rock.has_value());
-    const Rock& rock = *found.rock;
+    const Rock& rock = found.rock.value();
     hog::globe::MadeWorld made{found.generator};
     hog::globe::World& world = made.world();
     made.cover(glm::normalize(rock.middle));
@@ -105,7 +105,7 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
           "[flow][rocks]") {
     const Found found;
     REQUIRE(found.rock.has_value());
-    const Rock& rock = *found.rock;
+    const Rock& rock = found.rock.value();
     hog::globe::MadeWorld made{found.generator};
     hog::globe::World& world = made.world();
     made.cover(glm::normalize(rock.middle));
@@ -123,7 +123,7 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
     CHECK_FALSE(solid_at(region, world.layers(), rock.middle));
 
     DVec3 last = region.parcels().front().at;
-    double radius = region.parcels().front().radius;
+    const double radius = region.parcels().front().radius;
     for (int step = 0; step < 700 && !region.parcels().empty(); ++step) {
         last = region.parcels().front().at;
         region.step(tick);

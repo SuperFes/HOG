@@ -312,9 +312,9 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     }
     // Each weather's cloud is read where its own drift brought it from.
     const auto read = [&](const Cells& cells, double age) {
-        const protocol::CellWeather here = interpolated(*grid_, cells, direction);
+        const protocol::CellWeather taken = interpolated(*grid_, cells, direction);
         const DVec3 blown = planet::tangent_frame(direction).to_world(
-            {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0});
+            {static_cast<double>(taken.drift.x), static_cast<double>(taken.drift.y), 0.0});
         return interpolated(*grid_, cells, glm::normalize((direction * radius_) - (blown * age)));
     };
     const protocol::CellWeather there =

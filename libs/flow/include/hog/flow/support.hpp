@@ -28,9 +28,7 @@ public:
 
     Support(int across_i, int across_j, int layers, double thickness, double gravity);
 
-    [[nodiscard]] Cell& at(int i, int j, int layer) {
-        return cells_[index(i, j, layer)];
-    }
+    [[nodiscard]] Cell& at(int i, int j, int layer) { return cells_[index(i, j, layer)]; }
     [[nodiscard]] const Cell& at(int i, int j, int layer) const {
         return cells_[index(i, j, layer)];
     }
@@ -47,7 +45,8 @@ public:
 
     // The most a beam of `depth` metres of `material` at condition `condition` can reach out
     // from its root, in metres.
-    [[nodiscard]] double reach(globe::Material material, double depth, std::uint8_t condition) const;
+    [[nodiscard]] double reach(globe::Material material, double depth,
+                               std::uint8_t condition) const;
 
 private:
     [[nodiscard]] std::size_t index(int i, int j, int layer) const {

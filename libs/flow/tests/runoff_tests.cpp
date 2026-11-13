@@ -48,7 +48,9 @@ double bowl(int x, int y) {
     return 100.0 + (0.02 * ((dx * dx) + (dy * dy))) - (0.05 * dx);
 }
 
-bool east_edge(int x, int /*y*/) { return x == side - 1; }
+bool east_edge(int x, int /*y*/) {
+    return x == side - 1;
+}
 
 } // namespace
 

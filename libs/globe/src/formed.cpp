@@ -140,6 +140,120 @@ OnCube on_cube(DVec3 direction) noexcept {
             .v = direction[(axis + 2) % 3] / major};
 }
 
+// A way the ground could stand at a place, the lowest of which it does, and how it falls.
+struct GroundWay {
+    double height = 0.0;
+    DVec3 fall{0.0};
+    double counts = 1.0;
+};
+
+// The water in a valley's channel at a place, faded as its ground is.
+struct ValleyRiver {
+    double ground = 0.0;
+    double water = 0.0;
+    double bank = 0.0;
+};
+
+// How high a valley's ground stands over its floor at a place, and where it stands.
+struct ValleyFloor {
+    double ground = 0.0;
+    double above = 0.0;
+    DVec3 gradient{0.0};
+};
+
+// Metres of a river's water over the ground standing at `top`, the year round and in flood.
+struct RiverDepths {
+    double river = 0.0;
+    double flood = 0.0;
+};
+
+// A river's water stands only in the channel of the valley the ground lies in, fading out over
+// `spread` in height as another's takes over, so none stands over one it doesn't run in.
+RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top,
+                         double spread) noexcept {
+    RiverDepths depths;
+    for (const ValleyRiver& river : rivers) {
+        const double over = std::max(0.0, river.ground - top) / spread;
+        if (over >= 1.0) {
+            continue;
+        }
+        // As deep as it stands in its own channel, wherever the ground's merged lower.
+        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
+        depths.river = std::max(depths.river, in * (river.water - river.ground));
+        depths.flood = std::max(depths.flood, in * (river.bank - river.ground));
+    }
+    return depths;
+}
+
+// How far over the floor of the valley it lies in the ground standing at `top` stands, per metre
+// over the ground as well.
+struct FloorHold {
+    double above = 1e30;
+    DVec3 gradient{0.0};
+};
+
+// Gullies cut down only as far as the floor of the valley the ground lies in, each valley's hold
+// fading out over `spread` in height as another's takes over, as its water does.
+FloorHold floor_hold(const std::vector<ValleyFloor>& floors, double top, double spread) noexcept {
+    FloorHold hold;
+    for (const ValleyFloor& floor : floors) {
+        const double over = std::max(0.0, floor.ground - top) / spread;
+        if (over >= 1.0) {
+            continue;
+        }
+        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
+        if (const double above = floor.above / in; above < hold.above) {
+            hold.above = above;
+            hold.gradient = floor.gradient / in;
+        }
+    }
+    return hold;
+}
+
+// Water runs off the lowest of the ground's ways, blended with those within `blend` as low by how
+// near, so where the ground turns sharply, over crests and where walls meet, the way it runs
+// turns smoothly.
+DVec3 blended_fall(const std::vector<GroundWay>& ways, double top, double blend) noexcept {
+    double blended = 0.0;
+    DVec3 fall{0.0};
+    for (const GroundWay& way : ways) {
+        // A wall rising out of the way may stand under the ground as it is here, fading out.
+        const double apart = std::max(0.0, (way.height - top) / blend);
+        if (apart < 1.0) {
+            const double weight = way.counts * (1.0 - apart) * (1.0 - apart) * (1.0 - apart);
+            blended += weight;
+            fall += way.fall * weight;
+        }
+    }
+    fall /= blended;
+    return fall;
+}
+
+// `run` as a share of `length`, or `none` along none.
+double share_of(double run, double length, double none) noexcept {
+    return length > 0.0 ? run / length : none;
+}
+
+// Which way a course runs at each end of its stretch `k`, turning at each bend halfway between
+// the stretches either side.
+struct Bends {
+    DVec3 from{0.0};
+    DVec3 to{0.0};
+};
+
+Bends bends_at(const std::vector<DVec3>& line, std::size_t k) noexcept {
+    const auto way = [&](std::size_t at) { return glm::normalize(line[at + 1] - line[at]); };
+    const DVec3 here_way = way(k);
+    return {.from = k > 0 ? glm::normalize(way(k - 1) + here_way) : here_way,
+            .to = k + 2 < line.size() ? glm::normalize(here_way + way(k + 1)) : here_way};
+}
+
+// Which way along the sphere `direction` lies from `on`, none from right over it.
+DVec3 outward_from(DVec3 direction, DVec3 on) noexcept {
+    const DVec3 off = direction - (glm::normalize(on) * glm::dot(direction, glm::normalize(on)));
+    return glm::length(off) > 0.0 ? glm::normalize(off) : DVec3{0.0};
+}
+
 } // namespace
 
 Formed::Formed(const Planet& planet)
@@ -820,28 +934,13 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     const formation::Smooth::Read smooth = formation::Smooth::read(top_, weights);
     Carved carved{.top = smooth, .fall = smooth.gradient, .above_floor = 1e30};
     // The ways the ground could stand here, the lowest of which it does, and how each falls.
-    struct Way {
-        double height = 0.0;
-        DVec3 fall{0.0};
-        double counts = 1.0;
-    };
-    thread_local std::vector<Way> ways;
+    thread_local std::vector<GroundWay> ways;
     ways.clear();
     // The water in each valley's channel, faded as its ground is.
-    struct River {
-        double ground = 0.0;
-        double water = 0.0;
-        double bank = 0.0;
-    };
-    thread_local std::vector<River> rivers;
+    thread_local std::vector<ValleyRiver> rivers;
     rivers.clear();
     // How high each valley's ground stands over its floor, and where it stands.
-    struct Floor {
-        double ground = 0.0;
-        double above = 0.0;
-        DVec3 gradient{0.0};
-    };
-    thread_local std::vector<Floor> floors;
+    thread_local std::vector<ValleyFloor> floors;
     floors.clear();
     ways.push_back({.height = smooth.value, .fall = smooth.gradient, .counts = 1.0});
     // Where walls meet, at crests, soil creeping off rounds them over as far as creep carries
@@ -943,47 +1042,14 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
             }
         }
     }
-    // A river's water stands only in the channel of the valley the ground lies in, fading out as
-    // another's takes over, so none stands over one it doesn't run in.
-    for (const River& river : rivers) {
-        const double over =
-            std::max(0.0, river.ground - carved.top.value) / std::max(blend, voxel_);
-        if (over >= 1.0) {
-            continue;
-        }
-        // As deep as it stands in its own channel, wherever the ground's merged lower.
-        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
-        carved.river = std::max(carved.river, in * (river.water - river.ground));
-        carved.flood = std::max(carved.flood, in * (river.bank - river.ground));
-    }
-    // Gullies cut down only as far as the floor of the valley the ground lies in, each valley's
-    // hold fading out as another's takes over, as its water does.
-    for (const Floor& floor : floors) {
-        const double over =
-            std::max(0.0, floor.ground - carved.top.value) / std::max(blend, voxel_);
-        if (over >= 1.0) {
-            continue;
-        }
-        const double in = 1.0 - (over * over * (3.0 - (2.0 * over)));
-        if (const double above = floor.above / in; above < carved.above_floor) {
-            carved.above_floor = above;
-            carved.above_floor_gradient = floor.gradient / in;
-        }
-    }
-    // Water runs off the lowest, blended with those near as low by how near, so where the ground
-    // turns sharply, over crests and where walls meet, the way it runs turns smoothly.
-    double blended = 0.0;
-    carved.fall = DVec3{0.0};
-    for (const Way& way : ways) {
-        // A wall rising out of the way may stand under the ground as it is here, fading out.
-        const double apart = std::max(0.0, (way.height - carved.top.value) / fall_blend_);
-        if (apart < 1.0) {
-            const double weight = way.counts * (1.0 - apart) * (1.0 - apart) * (1.0 - apart);
-            blended += weight;
-            carved.fall += way.fall * weight;
-        }
-    }
-    carved.fall /= blended;
+    const double spread = std::max(blend, voxel_);
+    const RiverDepths depths = river_depths(rivers, carved.top.value, spread);
+    carved.river = depths.river;
+    carved.flood = depths.flood;
+    const FloorHold hold = floor_hold(floors, carved.top.value, spread);
+    carved.above_floor = hold.above;
+    carved.above_floor_gradient = hold.gradient;
+    carved.fall = blended_fall(ways, carved.top.value, fall_blend_);
     return carved;
 }
 
@@ -1037,9 +1103,10 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // Running into a lake, its water stands no lower than the lake's, and comes down to it where
     // it runs in: as deep in its channel there as the lake stands over its floor, brimming at most.
     double least_water = -std::numeric_limits<double>::infinity();
-    if (const std::uint32_t lake = world.lakes.lake[down];
-        lake != formation::Lakes::none && lake < lake_levels_.size() && lake_levels_[lake]) {
-        least_water = *lake_levels_[lake];
+    if (const std::uint32_t lake = world.lakes.lake[down]; lake != formation::Lakes::none &&
+                                                           lake < lake_levels_.size() &&
+                                                           lake_levels_[lake].has_value()) {
+        least_water = lake_levels_[lake].value();
         next.water = std::clamp(least_water - floor_to + next.depth, 0.0, next.depth);
     }
     // Its walls stand less steep than their rock lets them in places, as each has been worn,
@@ -1056,7 +1123,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                      ? worn.gradient * (0.45 * steepest_here)
                                      : DVec3{0.0};
     const auto floor_at = [&](double run) {
-        return top_[point] + ((floor_to - top_[point]) * (length > 0.0 ? run / length : 0.0));
+        return top_[point] + ((floor_to - top_[point]) * share_of(run, length, 0.0));
     };
     // The ground stands as low as the lowest stretch of its course has it, where a bend
     // brings two near, blended over a few metres between them so it never breaks.
@@ -1089,15 +1156,12 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
         surely = std::min(surely, walls + (slope * channel.belt / 4.0));
         if (away < nearest) {
             nearest = away;
-            const DVec3 off =
-                direction - (glm::normalize(on) * glm::dot(direction, glm::normalize(on)));
-            outward = glm::length(off) > 0.0 ? glm::normalize(off) : DVec3{0.0};
+            outward = outward_from(direction, on);
         }
     }
     // The line's chord and arc differ by far less than this, so none is missed by their
     // difference.
     constexpr double slack = 0.01;
-    const auto way = [&](std::size_t k) { return glm::normalize(line[k + 1] - line[k]); };
     Wall wall{.height = 0.0, .reaching = 0.0};
     double stretches = 0.0;
     Lowest lowest_of{rounding, blend};
@@ -1108,11 +1172,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
         if (weight <= 0.0 && least[k] > surely + std::max(handing_over, blend) + slack) {
             continue;
         }
-        // Turning at each bend halfway between the stretches either side.
-        const DVec3 here_way = way(k);
-        const DVec3 runs_from = k > 0 ? glm::normalize(way(k - 1) + here_way) : here_way;
-        const DVec3 runs_to =
-            k + 2 < line.size() ? glm::normalize(here_way + way(k + 1)) : here_way;
+        const Bends bends = bends_at(line, k);
         const Wall one = wall_at({.from = line[k],
                                   .to = line[k + 1],
                                   .floor_from = floor_at(runs[k]),
@@ -1120,8 +1180,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .wall = slope,
                                   .wall_gradient = slope_gradient,
                                   .reach = reach,
-                                  .head = length > 0.0 ? runs[k] / length : 0.0,
-                                  .foot = length > 0.0 ? runs[k + 1] / length : 1.0,
+                                  .head = share_of(runs[k], length, 0.0),
+                                  .foot = share_of(runs[k + 1], length, 1.0),
                                   .length = metres,
                                   .belt = channel.belt,
                                   .channel_width = channel.width,
@@ -1133,8 +1193,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .meander = channel.meander,
                                   .meander_length = std::max(channel.meander_length, 1.0),
                                   .seed = hash_values(rock_seed_, point),
-                                  .runs_from = runs_from,
-                                  .runs_to = runs_to},
+                                  .runs_from = bends.from,
+                                  .runs_to = bends.to},
                                  direction, radius_);
         if (weight > 0.0) {
             stretches += weight;
@@ -1153,7 +1213,6 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     return wall;
 }
 
-bool probe_surface = false;
 Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const {
     const Carved ground = carved(direction, weights, lod);
@@ -1264,13 +1323,6 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
     // Ice fills the gullies itself, what it carried lying under it.
     if (dissected.ice <= 0.0) {
         settle(direction, weights, lod, cut);
-    }
-    if (probe_surface) {
-        std::fprintf(stderr,
-                     "   smooth %7.2f carved %7.2f above %7.2f raised %6.2f diss %7.2f dcut %6.2f "
-                     "settled %7.2f river %5.2f\n",
-                     value(top_), ground.top.value, above_floor, raised, dissected.top.value,
-                     dissected.cut, cut.ground.top.value, ground.river);
     }
     return cut;
 }

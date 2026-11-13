@@ -18,6 +18,42 @@ struct Ask {
     bool falls;
 };
 
+// Asks each lower side of column `n` for its share of the excess over the rise the column holds.
+void ask_sides(const Slump& slump, std::size_t n, std::vector<Ask>& asks) {
+    const Slump::Node& node = slump[n];
+    if (node.grain == 0) {
+        return;
+    }
+    const std::size_t first = asks.size();
+    std::int64_t asked = 0;
+    for (std::size_t s = 0; s < Slump::sides; ++s) {
+        if (node.next[s] == Slump::none) {
+            continue;
+        }
+        const bool diagonal = s >= 4;
+        const auto held = diagonal
+                              ? std::llround(static_cast<double>(node.rise) * std::numbers::sqrt2)
+                              : node.rise;
+        const auto to = static_cast<std::size_t>(node.next[s]);
+        const std::int64_t excess = slump.surface(n) - slump.surface(to) - held;
+        const std::int64_t ask = excess > 0 ? excess / (diagonal ? 2 * share : share) : 0;
+        if (ask > 0) {
+            asks.push_back({.from = n,
+                            .to = to,
+                            .side = s,
+                            .amount = ask,
+                            .falls = slump.surface(n) - slump.surface(to) > node.reach});
+            asked += ask;
+        }
+    }
+    // Never more than the column has to give.
+    if (asked > node.grain) {
+        for (std::size_t k = first; k < asks.size(); ++k) {
+            asks[k].amount = asks[k].amount * node.grain / asked;
+        }
+    }
+}
+
 } // namespace
 
 std::int64_t Slump::total() const {
@@ -31,38 +67,7 @@ std::int64_t Slump::total() const {
 std::int64_t Slump::step() {
     std::vector<Ask> asks;
     for (std::size_t n = 0; n < nodes_.size(); ++n) {
-        const Node& node = nodes_[n];
-        if (node.grain == 0) {
-            continue;
-        }
-        const std::size_t first = asks.size();
-        std::int64_t asked = 0;
-        for (std::size_t s = 0; s < sides; ++s) {
-            if (node.next[s] == none) {
-                continue;
-            }
-            const bool diagonal = s >= 4;
-            const auto held = diagonal ? std::llround(static_cast<double>(node.rise) *
-                                                      std::numbers::sqrt2)
-                                       : node.rise;
-            const auto to = static_cast<std::size_t>(node.next[s]);
-            const std::int64_t excess = surface(n) - surface(to) - held;
-            const std::int64_t ask = excess > 0 ? excess / (diagonal ? 2 * share : share) : 0;
-            if (ask > 0) {
-                asks.push_back({.from = n,
-                                .to = to,
-                                .side = s,
-                                .amount = ask,
-                                .falls = surface(n) - surface(to) > node.reach});
-                asked += ask;
-            }
-        }
-        // Never more than the column has to give.
-        if (asked > node.grain) {
-            for (std::size_t k = first; k < asks.size(); ++k) {
-                asks[k].amount = asks[k].amount * node.grain / asked;
-            }
-        }
+        ask_sides(*this, n, asks);
     }
 
     // And never more than a column has room for: its inflows share what's left.

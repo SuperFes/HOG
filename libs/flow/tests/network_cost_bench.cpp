@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <map>
+#include <print>
 
 using hog::flow::testing::Block;
 using hog::flow::testing::floor_above_sea;
@@ -22,7 +23,8 @@ TEST_CASE("a waterfall's cost on the network", "[.network]") {
     };
     Block block{floor_above_sea(100.0), false, shape};
     block.region().flush();
-    std::printf("waterfall, a spring pouring at the cliff's lip; bricks changed and bytes to send each window:\n");
+    std::println("waterfall, a spring pouring at the cliff's lip; bricks changed and bytes to send "
+                 "each window:");
     std::map<std::uint64_t, hog::globe::BrickSite> window;
     std::size_t total = 0;
     int steps_in_window = 0;
@@ -44,13 +46,14 @@ TEST_CASE("a waterfall's cost on the network", "[.network]") {
             }
             total += bytes;
             const double seconds = steps_in_window * tick;
-            std::printf("  t=%3.0f s: %zu bricks changed in the last %.0f s, %zu bytes (%.0f B/s)\n",
-                        (step + 1) * tick, window.size(), seconds, bytes,
-                        static_cast<double>(bytes) / seconds);
+            std::println(
+                "  t={:3.0f} s: {} bricks changed in the last {:.0f} s, {} bytes ({:.0f} B/s)",
+                (step + 1) * tick, window.size(), seconds, bytes,
+                static_cast<double>(bytes) / seconds);
             window.clear();
             steps_in_window = 0;
         }
     }
-    std::printf("  total over 240 s: %zu bytes\n", total);
+    std::println("  total over 240 s: {} bytes", total);
     CHECK(total > 0);
 }

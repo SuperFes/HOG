@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 using hog::flow::Region;
@@ -490,7 +491,7 @@ TEST_CASE("a dusting of snow clings to a steep slope that a deep drift slides do
     using hog::globe::Material;
     // Rock rising a voxel for each column along i: a slope of one in one.
     const auto ramp = [](std::uint32_t i, std::uint32_t, int layer) {
-        return layer >= static_cast<int>(std::min<std::uint32_t>(i, 16));
+        return std::cmp_greater_equal(layer, std::min<std::uint32_t>(i, 16));
     };
     const auto lay = [&](Block& block, std::int64_t amount, int depth) {
         for (std::uint32_t i = 4; i < 13; ++i) {
@@ -569,7 +570,7 @@ TEST_CASE("a lump thrown onto a heap's flank rolls off down it instead of droppi
     CHECK(block.region().grain() == before + full);
     // It went on along the flank, not straight down where it hit.
     const double along =
-        std::acos(std::min(1.0, glm::dot(glm::normalize(*start), glm::normalize(last)))) *
+        std::acos(std::min(1.0, glm::dot(glm::normalize(start.value()), glm::normalize(last)))) *
         glm::length(last);
     CHECK(along > 0.1);
 }
@@ -599,8 +600,10 @@ TEST_CASE("sand heaped at a cube edge slumps over it onto the next face, losing 
     const auto over = hog::globe::next_to(
         {.level = static_cast<std::uint8_t>(level), .face = 0, .i = last, .j = j}, 1, 0);
     REQUIRE(over);
-    CHECK(over->face != 0);
-    CHECK(block.region().at({.face = over->face, .i = over->i, .j = over->j, .layer = layer})
+    const hog::globe::Cell beyond = over.value();
+    CHECK(beyond.face != 0);
+    CHECK(block.region()
+              .at({.face = beyond.face, .i = beyond.i, .j = beyond.j, .layer = layer})
               .grain_amount > 0);
     CHECK(block.region().at({.face = 0, .i = last - 1, .j = j, .layer = layer}).grain_amount > 0);
 }
@@ -658,9 +661,8 @@ TEST_CASE("ice aged in one go grows where it is cold and stops where it is warm"
     using hog::globe::Material;
     Block block{floor_above_sea(100.0)};
     const std::uint32_t split = block.at(12, 12, 0).i;
-    block.region().set_ice_balance([&](const hog::globe::Cell& column, double) {
-        return column.i < split ? 0.5 : -5.0;
-    });
+    block.region().set_ice_balance(
+        [&](const hog::globe::Cell& column, double) { return column.i < split ? 0.5 : -5.0; });
     std::int64_t moved = 0;
     for (int year = 0; year < 400; ++year) {
         moved += block.region().age_ice(1.0).glaciated;

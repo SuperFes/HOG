@@ -285,7 +285,10 @@ TEST_CASE("water split about its edge stands in no hollow cut off from it beside
         }
         const bool trough = x > 11 && x < 16 && y > -0.55 && y < -0.35;
         const bool pond = std::hypot(x - 14.0, y + 1.0) < 0.7;
-        return std::min(hollow, trough || pond ? 4.6 : std::abs(y) < 0.5 ? 5.2 : 5.5);
+        if (trough || pond) {
+            return std::min(hollow, 4.6);
+        }
+        return std::min(hollow, std::abs(y) < 0.5 ? 5.2 : 5.5);
     };
     constexpr int fine = 8;
     const Pool coarse = fill_pool(40, ground, 5.0, 2.0);

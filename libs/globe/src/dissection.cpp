@@ -192,6 +192,56 @@ Noise spread_about(DVec3 metres, DVec3 direction, const Undissected& ground, con
             .gradient = share.gradient * (falls * fade / 2.0)};
 }
 
+// How the ground about pushes the gullies aside as they wind: how far here, and a way through
+// the pushed ground back to the ground's own, over the ground.
+struct Winding {
+    DVec3 wound{0.0};
+    glm::dmat3 unwinding{1.0};
+};
+
+Winding wind(DVec3 metres, DVec3 direction, const Gullies& gullies, double lod) noexcept {
+    // Which way the ground about turns them, in their spacings, down to the finest's.
+    const Octaves turning{.wavelength = bends_over * gullies.longest,
+                          .gain = 0.45,
+                          .finest = std::ldexp(gullies.longest, -gullies.octaves)};
+    const double pushed = std::min(winding * gullies.longest,
+                                   sharpest_bend / (std::numbers::sqrt3 * fbm_steepest(turning)));
+    const std::array<Noise, 3> turns{fbm(metres, turning, lod, hash_values(gullies.seed, 0x77)),
+                                     fbm(metres, turning, lod, hash_values(gullies.seed, 0x78)),
+                                     fbm(metres, turning, lod, hash_values(gullies.seed, 0x79))};
+    const DVec3 wound = DVec3{turns[0].value, turns[1].value, turns[2].value} * pushed;
+    glm::dmat3 wound_by{1.0};
+    for (glm::length_t axis = 0; axis < 3; ++axis) {
+        wound_by[axis] += turns[axis].gradient * pushed;
+    }
+    return {.wound = wound,
+            .unwinding = (glm::dmat3{1.0} - glm::outerProduct(direction, direction)) * wound_by};
+}
+
+// Which way across the gullies `wavelength` apart run, the widest `longest` apart, over ground
+// falling `fall`. Each runs the way the ground falls smoothed over its own width, the widest as it
+// falls on the whole, the finest as it falls here: turned faster than that, the stripes of gullies
+// a cell off would swing about faster than they run.
+DVec3 gully_across(DVec3 direction, const Undissected& ground, DVec3 fall, double slope,
+                   double wavelength, double longest) noexcept {
+    const double broad = std::clamp(std::log2(wavelength * 8.0 / longest) / 2.0, 0.0, 1.0);
+    const DVec3 led = (ground.fall * (1.0 - broad)) + (ground.broad_fall * broad);
+    const double leading = glm::length(led);
+    return leading > 0.0 ? glm::cross(direction, led) / leading
+                         : glm::cross(direction, fall) / slope;
+}
+
+// Ice as deep as it lay over the uncut bed settles into what's cut, its top level: over all of it
+// if as deep as the cut, else to where it fills the gullies, crests out of it.
+void settle_ice(Dissected& dissected, const Undissected& ground, double bed, double cut,
+                Noise cut_top) noexcept {
+    const double surface = bed + settled(ground.ice, cut).level;
+    dissected.top = cut_top.value < surface
+                        ? Noise{.value = surface, .gradient = ground.top.gradient}
+                        : Noise{.value = cut_top.value, .gradient = cut_top.gradient};
+    dissected.ice = std::max(0.0, surface - cut_top.value);
+}
+
 } // namespace
 
 Settled settled(double thick, double spread) noexcept {
@@ -222,24 +272,9 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
     DVec3 room_gradient = ground.above_floor_gradient;
     DVec3 under_crest_gradient{0.0};
     double cut = 0.0;
-    // Which way the ground about turns them, in their spacings, down to the finest's.
+    // How the ground about pushes them aside as they wind.
     const DVec3 metres = direction * radius;
-    const Octaves turning{.wavelength = bends_over * gullies.longest,
-                          .gain = 0.45,
-                          .finest = std::ldexp(gullies.longest, -gullies.octaves)};
-    const double pushed = std::min(winding * gullies.longest,
-                                   sharpest_bend / (std::numbers::sqrt3 * fbm_steepest(turning)));
-    const std::array<Noise, 3> turns{fbm(metres, turning, lod, hash_values(gullies.seed, 0x77)),
-                                     fbm(metres, turning, lod, hash_values(gullies.seed, 0x78)),
-                                     fbm(metres, turning, lod, hash_values(gullies.seed, 0x79))};
-    const DVec3 wound = DVec3{turns[0].value, turns[1].value, turns[2].value} * pushed;
-    // A way through the pushed ground back to the ground's own, over the ground.
-    glm::dmat3 wound_by{1.0};
-    for (glm::length_t axis = 0; axis < 3; ++axis) {
-        wound_by[axis] += turns[axis].gradient * pushed;
-    }
-    const glm::dmat3 unwinding =
-        (glm::dmat3{1.0} - glm::outerProduct(direction, direction)) * wound_by;
+    const auto [wound, unwinding] = wind(metres, direction, gullies, lod);
     const auto unwound = [&](DVec3 way) { return unwinding * way; };
     // How the way down changes, per metre, as the gullies cut so far turn it; the ground's own
     // turning is left untold.
@@ -265,15 +300,8 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
             held < slope * wavelength
                 ? (room < under_crest ? room_gradient : under_crest_gradient) * (2.0 * fade)
                 : steepening * (wavelength * fade);
-        // Each runs the way the ground falls smoothed over its own width, the widest as it falls
-        // on the whole, the finest as it falls here: turned faster than that, the stripes of
-        // gullies a cell off would swing about faster than they run.
-        const double broad =
-            std::clamp(std::log2(wavelength * 8.0 / gullies.longest) / 2.0, 0.0, 1.0);
-        const DVec3 led = (ground.fall * (1.0 - broad)) + (ground.broad_fall * broad);
-        const double leading = glm::length(led);
-        const DVec3 across = leading > 0.0 ? glm::cross(direction, led) / leading
-                                           : glm::cross(direction, fall) / slope;
+        const DVec3 across =
+            gully_across(direction, ground, fall, slope, wavelength, gullies.longest);
         const Stripes made = stripes((metres + wound) / wavelength, across, direction,
                                      hash_values(gullies.seed, octave));
         // Per metre over the ground; the walls are as steep as the phase turns, however close
@@ -327,12 +355,7 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
                         .cut_gradient = ground.top.gradient - gradient,
                         .spread = spread_about(metres, direction, ground, gullies, lod)};
     if (ground.ice > 0.0) {
-        // Ice as deep as it lay over the uncut bed settles into what's cut, its top level: over
-        // all of it if as deep as the cut, else to where it fills the gullies, crests out of it.
-        const double surface = bed + settled(ground.ice, cut).level;
-        dissected.top = height < surface ? Noise{.value = surface, .gradient = ground.top.gradient}
-                                         : Noise{.value = height, .gradient = gradient};
-        dissected.ice = std::max(0.0, surface - height);
+        settle_ice(dissected, ground, bed, cut, {.value = height, .gradient = gradient});
     }
     return dissected;
 }

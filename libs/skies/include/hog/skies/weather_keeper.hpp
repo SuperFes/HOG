@@ -99,7 +99,7 @@ private:
     GameDuration running_{}; // game time the job in flight runs on
     GameDuration ran_{};     // game time the air has run since it started or was restored
     bool live_ = false;      // whether the air is shown
-    std::chrono::steady_clock::time_point last_made_{}; // real time of the last weather made
+    std::chrono::steady_clock::time_point last_made_; // real time of the last weather made
     std::optional<protocol::Weather> latest_;
     std::vector<std::byte> saved_;
 };

@@ -9,8 +9,12 @@ if(NOT MSVC)
     target_compile_options(lmdb PRIVATE -w)
 endif()
 
+# Its header alone: the repository's VERSION file would stand in for <version> on a filesystem
+# that ignores case.
+set(lmdbxx_include "${CMAKE_CURRENT_BINARY_DIR}/lmdbxx")
+configure_file("${lmdbxx_SOURCE_DIR}/lmdb++.h" "${lmdbxx_include}/lmdb++.h" COPYONLY)
 add_library(lmdbxx INTERFACE)
-target_include_directories(lmdbxx SYSTEM INTERFACE "${lmdbxx_SOURCE_DIR}")
+target_include_directories(lmdbxx SYSTEM INTERFACE "${lmdbxx_include}")
 target_link_libraries(lmdbxx INTERFACE lmdb)
 
 add_library(hog_baked

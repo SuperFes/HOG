@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <print>
 #include <span>
 #include <string>
 #include <vector>
@@ -140,7 +141,7 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
     hog::DVec3 land{0.0, 0.0, 1.0};
     double top = 0.0;
     for (int k = 0; k < 2000; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / 2000.0);
+        const double z = 1.0 - (((2.0 * k) + 1.0) / 2000.0);
         const double r = std::sqrt(1.0 - (z * z));
         const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
         if (const double ground = generator.column(d, 200.0).ground(); ground > top) {
@@ -248,38 +249,97 @@ TEST_CASE("bytes that aren't a tree are refused", "[globe][voxel_tree]") {
     CHECK_FALSE(VoxelTree::decode(cube.bytes()).has_value());
 }
 
+namespace {
+
+// The highest ground and the ground nearest the sea's level, among points spread evenly over the
+// planet.
+struct Landmarks {
+    hog::DVec3 peak{0.0, 0.0, 1.0};
+    hog::DVec3 coast{0.0, 0.0, 1.0};
+};
+
+Landmarks find_landmarks(const hog::globe::Generator& generator) {
+    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
+    Landmarks found;
+    double highest = 0.0;
+    double nearest = 1e18;
+    for (int k = 0; k < 40000; ++k) {
+        const double z = 1.0 - (((2.0 * k) + 1.0) / 40000.0);
+        const double r = std::sqrt(1.0 - (z * z));
+        const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
+        const double ground = generator.column(d, 200.0).ground();
+        if (ground > highest) {
+            highest = ground;
+            found.peak = d;
+        }
+        if (std::abs(ground - sea) < nearest) {
+            nearest = std::abs(ground - sea);
+            found.coast = d;
+        }
+    }
+    return found;
+}
+
+// What a block costs in bytes as the world's own bricks and as a tree of the same voxels.
+struct BlockBytes {
+    std::size_t bricks = 0;
+    std::size_t tree = 0;
+};
+
+// The block `side` voxels across, `bricks_across` bricks a side, from `corner` up, its corner
+// given in voxels.
+BlockBytes block_bytes(const hog::globe::Generator& generator, const hog::globe::BrickSite& corner,
+                       int side, int bricks_across) {
+    using namespace hog::globe;
+    const auto layer0 = static_cast<int>(corner.layer);
+    const auto edge = static_cast<std::size_t>(side);
+    std::vector<Voxel> voxels(edge * edge * edge);
+    std::size_t packed = 0;
+    for (int cj = 0; cj < bricks_across; ++cj) {
+        for (int ci = 0; ci < bricks_across; ++ci) {
+            for (int cl = 0; cl < bricks_across; ++cl) {
+                const BrickSite brick{.face = corner.face,
+                                      .i = (corner.i / brick_side) + static_cast<std::uint32_t>(ci),
+                                      .j = (corner.j / brick_side) + static_cast<std::uint32_t>(cj),
+                                      .layer =
+                                          static_cast<std::uint32_t>((layer0 / brick_side) + cl)};
+                const BrickVoxels held = generated(generator, brick);
+                packed += Brick::pack(held).bytes();
+                for (int index = 0; index < brick_voxels; ++index) {
+                    const Site site = site_in(brick, index);
+                    const auto x = static_cast<int>(site.i - corner.i);
+                    const auto y = static_cast<int>(site.j - corner.j);
+                    const auto z = static_cast<int>(site.layer) - layer0;
+                    voxels[place(x, y, z, side)] = held[static_cast<std::size_t>(index)];
+                }
+            }
+        }
+    }
+    // As cubes: what they are and how full, not the distance, normal or temperature the place can
+    // say.
+    const VoxelTree tree = VoxelTree::build(side, [&](int x, int y, int z) {
+        const Voxel& v = voxels[place(x, y, z, side)];
+        return cube_of(v, kelvin(v.temperature));
+    });
+    return {.bricks = packed, .tree = tree.encode().size()};
+}
+
+} // namespace
+
 // What the world's own bricks cost in bytes, and what the same voxels cost as trees of 32 across.
 // Hidden: it generates the bricks.
 TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
     using namespace hog::globe;
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    const double sea = generator.sea_level().value_or(generator.planet().body.radius);
-    hog::DVec3 peak{0.0, 0.0, 1.0};
-    hog::DVec3 coast{0.0, 0.0, 1.0};
-    double highest = 0.0;
-    double nearest = 1e18;
-    for (int k = 0; k < 40000; ++k) {
-        const double z = 1.0 - ((2.0 * k + 1.0) / 40000.0);
-        const double r = std::sqrt(1.0 - (z * z));
-        const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
-        const double ground = generator.column(d, 200.0).ground();
-        if (ground > highest) {
-            highest = ground;
-            peak = d;
-        }
-        if (std::abs(ground - sea) < nearest) {
-            nearest = std::abs(ground - sea);
-            coast = d;
-        }
-    }
+    const auto [peak, coast] = find_landmarks(generator);
     constexpr int blocks_across = 4; // 32-voxel blocks along each side of the patch
     constexpr int bricks_across = 4; // bricks across a block
     constexpr int side = bricks_across * brick_side;
     for (const auto& [label, at] : {std::pair{"mountain", peak}, std::pair{"coast", coast}}) {
         const Cell centre = cell_under(at, layers.level);
-        const auto base_i = (centre.i / side) * side - ((blocks_across / 2) * side);
-        const auto base_j = (centre.j / side) * side - ((blocks_across / 2) * side);
+        const auto base_i = ((centre.i / side) * side) - ((blocks_across / 2) * side);
+        const auto base_j = ((centre.j / side) * side) - ((blocks_across / 2) * side);
         const int ground_layer = layers.layer_at(generator.column(center(centre), 1.0).ground());
         std::size_t brick_bytes = 0;
         std::size_t tree_bytes = 0;
@@ -288,51 +348,23 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
         for (int bj = 0; bj < blocks_across; ++bj) {
             for (int bi = 0; bi < blocks_across; ++bi) {
                 for (int layer0 = std::max((ground_layer / side) - 4, 0) * side;
-                     layer0 < std::min(ground_layer + 4 * side, layers.count); layer0 += side) {
-                    std::vector<Voxel> voxels(static_cast<std::size_t>(side) * side * side);
-                    std::size_t packed = 0;
-                    for (int cj = 0; cj < bricks_across; ++cj) {
-                        for (int ci = 0; ci < bricks_across; ++ci) {
-                            for (int cl = 0; cl < bricks_across; ++cl) {
-                                const BrickSite brick{
-                                    .face = centre.face,
-                                    .i = (base_i + static_cast<std::uint32_t>(bi * side)) /
-                                             brick_side +
-                                         static_cast<std::uint32_t>(ci),
-                                    .j = (base_j + static_cast<std::uint32_t>(bj * side)) /
-                                             brick_side +
-                                         static_cast<std::uint32_t>(cj),
-                                    .layer = static_cast<std::uint32_t>(layer0 / brick_side + cl)};
-                                const BrickVoxels held = generated(generator, brick);
-                                packed += Brick::pack(held).bytes();
-                                for (int index = 0; index < brick_voxels; ++index) {
-                                    const Site site = site_in(brick, index);
-                                    const auto x = static_cast<int>(
-                                        site.i - (base_i + static_cast<std::uint32_t>(bi * side)));
-                                    const auto y = static_cast<int>(
-                                        site.j - (base_j + static_cast<std::uint32_t>(bj * side)));
-                                    const auto z = static_cast<int>(site.layer) - layer0;
-                                    voxels[place(x, y, z, side)] =
-                                        held[static_cast<std::size_t>(index)];
-                                }
-                            }
-                        }
-                    }
-                    // As cubes: what they are and how full, not the distance, normal or temperature
-                    // the place can say.
-                    const VoxelTree tree = VoxelTree::build(side, [&](int x, int y, int z) {
-                        const Voxel& v = voxels[place(x, y, z, side)];
-                        return cube_of(v, kelvin(v.temperature));
-                    });
-                    brick_bytes += packed;
-                    tree_bytes += tree.encode().size();
+                     layer0 < std::min(ground_layer + (4 * side), layers.count); layer0 += side) {
+                    const BlockBytes block =
+                        block_bytes(generator,
+                                    {.face = centre.face,
+                                     .i = base_i + static_cast<std::uint32_t>(bi * side),
+                                     .j = base_j + static_cast<std::uint32_t>(bj * side),
+                                     .layer = static_cast<std::uint32_t>(layer0)},
+                                    side, bricks_across);
+                    brick_bytes += block.bricks;
+                    tree_bytes += block.tree;
                     ++blocks;
                 }
             }
         }
-        std::printf("%-9s %zu blocks of %d^3: bricks %zu bytes; cube trees %zu (%.1fx)\n", label,
-                    blocks, side, brick_bytes, tree_bytes,
-                    static_cast<double>(brick_bytes) / static_cast<double>(tree_bytes));
+        std::println("{:9} {} blocks of {}^3: bricks {} bytes; cube trees {} ({:.1f}x)", label,
+                     blocks, side, brick_bytes, tree_bytes,
+                     static_cast<double>(brick_bytes) / static_cast<double>(tree_bytes));
     }
 }
 
