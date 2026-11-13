@@ -12,7 +12,7 @@ struct WanderSettings {
     double nearest = 20.0;    // no point going somewhere it's already arrived
     double near_enough = 2.0; // metres that count as arrived
     double patience = 60.0;   // seconds before somewhere else looks better
-    double stuck = 5.0;       // seconds getting no nearer before it tries elsewhere
+    double stuck = 3.0;       // seconds getting no nearer before it tries elsewhere
     double nearer = 0.5;      // metres nearer that count as getting there
 };
 
@@ -26,15 +26,17 @@ struct Wander {
 };
 
 // A fresh target, `nearest` to `furthest` metres along the ground from under `at` (unit), any
-// way round.
+// way round but the way it was `held` up, when it was.
 [[nodiscard]] Wander pick(DVec3 at, double planet_radius, std::mt19937_64& random,
-                          const WanderSettings& settings = {});
+                          const WanderSettings& settings = {},
+                          std::optional<DVec3> held = std::nullopt);
 
 // A frame of walking: which way along the ground, or nothing once it's arrived, has lost its
 // patience or has got no nearer for a while, when a fresh target is wanted.
 struct Walked {
     Wander wander;
     std::optional<DVec3> heading; // unit, along the ground under the feet
+    std::optional<DVec3> held;    // unit, the way it got no nearer, when it gave up for that
 };
 
 [[nodiscard]] Walked walk(Wander wander, WorldPosition feet, double planet_radius, double seconds,

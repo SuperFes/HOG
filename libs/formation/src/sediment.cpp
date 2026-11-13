@@ -30,7 +30,7 @@ std::vector<std::uint32_t> highest_first(const Rivers& rivers) {
             order.push_back(point);
         }
     }
-    std::ranges::sort(order, [&](std::uint32_t a, std::uint32_t b) {
+    std::ranges::stable_sort(order, [&](std::uint32_t a, std::uint32_t b) {
         return rivers.height[a] > rivers.height[b];
     });
     return order;

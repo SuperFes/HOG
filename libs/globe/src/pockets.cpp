@@ -203,8 +203,8 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
                            .across = std::sqrt(static_cast<double>(one.columns)) * spacing,
                            .height = one.height});
     }
-    std::ranges::sort(pockets, {},
-                      [&](const Pocket& pocket) { return glm::length(pocket.at - eye); });
+    std::ranges::stable_sort(pockets, {},
+                             [&](const Pocket& pocket) { return glm::length(pocket.at - eye); });
     return pockets;
 }
 

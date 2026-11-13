@@ -15,14 +15,6 @@ namespace {
 constexpr double radiated_per_degree = 1.9;
 constexpr int rows = 181; // latitudes from -90° to 90°, a degree apart
 
-double asin(double x) noexcept {
-    return maths::atan2(x, std::sqrt(std::max(0.0, 1.0 - (x * x))));
-}
-
-double acos(double x) noexcept {
-    return maths::atan2(std::sqrt(std::max(0.0, 1.0 - (x * x))), x);
-}
-
 // Sunlight on the ground averaged over a day, W/m², the sun `declination` radians off the equator.
 double daily_sunlight(double flux, double latitude, double declination) noexcept {
     const double sin_lat = maths::sin(latitude);
@@ -34,7 +26,7 @@ double daily_sunlight(double flux, double latitude, double declination) noexcept
     if (std::abs(across) < 1e-12) {
         half_day = sin_lat * sin_dec > 0.0 ? std::numbers::pi : 0.0;
     } else {
-        half_day = acos(std::clamp(-(sin_lat * sin_dec) / across, -1.0, 1.0));
+        half_day = maths::acos(std::clamp(-(sin_lat * sin_dec) / across, -1.0, 1.0));
     }
     return (flux / std::numbers::pi) *
            ((half_day * sin_lat * sin_dec) + (across * maths::sin(half_day)));
@@ -51,7 +43,7 @@ std::array<double, rows> temperature_rows(const Body& body) {
         for (int step = 0; step < steps; ++step) {
             const double season = (step + 0.5) * 2.0 * std::numbers::pi / steps;
             sum += daily_sunlight(body.star_flux, latitude,
-                                  asin(maths::sin(tilt) * maths::sin(season)));
+                                  maths::asin(maths::sin(tilt) * maths::sin(season)));
         }
         sunlight[static_cast<std::size_t>(row)] = sum / steps;
         weight[static_cast<std::size_t>(row)] = maths::cos(latitude);
@@ -103,7 +95,7 @@ void set_temperature_and_winds(const Sphere& sphere, std::span<const double> hei
     const double turning = body.day < 0.0 ? -1.0 : 1.0;
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
         const DVec3& here = sphere.point(point);
-        const double latitude = asin(std::clamp(here.z, -1.0, 1.0));
+        const double latitude = maths::asin(std::clamp(here.z, -1.0, 1.0));
         climate.temperature[point] =
             read_rows(table, latitude) - (body.lapse_rate * std::max(heights[point], 0.0));
         const double phase = std::abs(latitude) / cell_width;

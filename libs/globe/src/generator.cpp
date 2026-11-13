@@ -445,8 +445,8 @@ std::optional<DVec3> land_near(const Generator& generator, DVec3 direction, doub
         const int points = 8 * k;
         for (int n = 0; n < points; ++n) {
             const double turn = 2.0 * std::numbers::pi * n / points;
-            const DVec3 at = glm::normalize(up + (east * (out * std::cos(turn))) +
-                                            (north * (out * std::sin(turn))));
+            const DVec3 at = glm::normalize(up + (east * (out * maths::cos(turn))) +
+                                            (north * (out * maths::sin(turn))));
             if (land(at)) {
                 return at;
             }

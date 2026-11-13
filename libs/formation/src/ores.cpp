@@ -39,7 +39,7 @@ std::vector<double> placed(const Rivers& rivers, const Sediment& sediment,
             order.push_back(point);
         }
     }
-    std::ranges::sort(order, [&](std::uint32_t a, std::uint32_t b) {
+    std::ranges::stable_sort(order, [&](std::uint32_t a, std::uint32_t b) {
         return rivers.height[a] > rivers.height[b];
     });
     std::vector<double> arriving(size, 0.0);

@@ -26,14 +26,6 @@ double angle(const DVec3& a, const DVec3& b) noexcept {
     return maths::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
 
-double asin(double x) noexcept {
-    return maths::atan2(x, std::sqrt(std::max(0.0, 1.0 - (x * x))));
-}
-
-double acos(double x) noexcept {
-    return maths::atan2(std::sqrt(std::max(0.0, 1.0 - (x * x))), x);
-}
-
 bool in_sea(const Rivers& rivers, std::uint32_t point) {
     return rivers.receiver[point] == point;
 }
@@ -47,7 +39,7 @@ std::vector<std::uint32_t> lowest_first(const Rivers& rivers) {
             order.push_back(point);
         }
     }
-    std::ranges::sort(order, [&](std::uint32_t a, std::uint32_t b) {
+    std::ranges::stable_sort(order, [&](std::uint32_t a, std::uint32_t b) {
         return rivers.height[a] < rivers.height[b];
     });
     return order;
@@ -81,7 +73,7 @@ struct Cover {
 void balance(const Land& land, double cooling, Cover& cover) {
     const Body& body = *land.body;
     for (const std::uint32_t point : land.upward) {
-        const double latitude = asin(std::clamp(land.sphere->point(point).z, -1.0, 1.0));
+        const double latitude = maths::asin(std::clamp(land.sphere->point(point).z, -1.0, 1.0));
         const double swing = seasonal_swing(latitude, false, body);
         const double raised = cover.surface[point] - std::max(land.crust->base[point], 0.0);
         const double celsius =
@@ -101,7 +93,7 @@ double top(const Land& land, const Cover& cover, std::uint32_t point) {
 // Land points from the ice's top down.
 std::vector<std::uint32_t> downhill(const Land& land, const Cover& cover) {
     std::vector<std::uint32_t> downward = land.upward;
-    std::ranges::sort(downward, [&](std::uint32_t a, std::uint32_t b) {
+    std::ranges::stable_sort(downward, [&](std::uint32_t a, std::uint32_t b) {
         return cover.surface[a] > cover.surface[b];
     });
     return downward;
@@ -366,7 +358,7 @@ double degree_days(double mean, double swing) {
     if (mean <= -swing) {
         return 0.0;
     }
-    const double thawed = acos(-mean / swing);
+    const double thawed = maths::acos(-mean / swing);
     return days_a_year / std::numbers::pi *
            ((mean * thawed) + std::sqrt((swing * swing) - (mean * mean)));
 }
@@ -383,7 +375,7 @@ double cold_share(double mean, double swing) {
     if (swing <= 0.0) {
         return mean < 0.0 ? 1.0 : 0.0;
     }
-    return 1.0 - (acos(std::clamp(-mean / swing, -1.0, 1.0)) / std::numbers::pi);
+    return 1.0 - (maths::acos(std::clamp(-mean / swing, -1.0, 1.0)) / std::numbers::pi);
 }
 
 double seasonal_swing(double latitude, bool sea, const Body& body) {
@@ -453,7 +445,7 @@ Ice ice_on(const Sphere& sphere, const Crust& crust, const Climate& climate, con
         if (!in_sea(rivers, point)) {
             continue;
         }
-        const double latitude = asin(std::clamp(sphere.point(point).z, -1.0, 1.0));
+        const double latitude = maths::asin(std::clamp(sphere.point(point).z, -1.0, 1.0));
         ice.sea_ice[point] = cold_share(climate.temperature[point] - body.sea_freezing,
                                         seasonal_swing(latitude, true, body));
     }

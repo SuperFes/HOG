@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace hog::terrain {
 
@@ -32,8 +33,17 @@ DVec3 rebend(const Bend& bend, double from, double to, DVec3 from_eye) {
 
 } // namespace
 
+double blended_out(double radius, const BendSettings& settings) noexcept {
+    // Seen from h up, a sphere of radius F has its horizon √(2·F·h) away, and the far side lies a
+    // quarter turn, π·r/2, round the true one. With the curvature blending as h², that holds at
+    // every height while the blend's done within about 2·√(r³/F); a little sooner, for room.
+    constexpr double sooner = 1.5;
+    return std::min(settings.blended_out,
+                    sooner * std::sqrt(radius * radius * radius / settings.faked_radius));
+}
+
 double faked_radius(double radius, double over_ground, const BendSettings& settings) {
-    const double blend = std::clamp(over_ground / settings.blended_out, 0.0, 1.0);
+    const double blend = std::clamp(over_ground / blended_out(radius, settings), 0.0, 1.0);
     if (radius >= settings.faked_radius || blend == 1.0) {
         return radius;
     }
@@ -57,6 +67,18 @@ DVec3 bent(const Bend& bend, DVec3 from_eye) {
 
 DVec3 unbent(const Bend& bend, DVec3 from_eye) {
     return rebend(bend, bend.faked, bend.radius, from_eye);
+}
+
+bool folds_over(const Bend& bend, DVec3 middle, double reach) {
+    if (bend.faked == bend.radius) {
+        return false;
+    }
+    const double out = glm::length(middle);
+    if (reach >= out) {
+        return true;
+    }
+    const double away = std::acos(std::clamp(glm::dot(middle / out, bend.up), -1.0, 1.0));
+    return away + std::asin(reach / out) >= std::numbers::pi;
 }
 
 } // namespace hog::terrain

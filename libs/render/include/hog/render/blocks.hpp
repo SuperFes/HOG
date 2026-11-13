@@ -106,7 +106,7 @@ private:
 
     [[nodiscard]] Result<> copy(Copy& copy) const;
     // Whether any of the mesh can be in the camera's view.
-    [[nodiscard]] static bool seen(const Camera& camera, double aspect, const Placed& placed);
+    [[nodiscard]] static bool seen(const BlockView& view, double aspect, const Placed& placed);
     [[nodiscard]] Result<> upload(Placed& placed) const;
     // Lets a mesh go once no frame in flight can still be drawing it.
     void retire(Placed placed);

@@ -103,9 +103,12 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
         server->generator(), std::format("127.0.0.1:{}", server->players()->port()), {}, middle, 7);
     REQUIRE(bot);
     std::optional<hog::WorldPosition> began;
+    hog::WorldPosition was;
+    double walked = 0.0;
 
     std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 60s;
+    // Streaming the ground in is timed apart; this is how long it has to walk once it stands.
+    auto give_up = MonotonicClock::now() + 120s;
     MonotonicClock::time_point last = MonotonicClock::now();
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
@@ -115,16 +118,24 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
         // It stands once the ground under it is sent.
         if (!began && bot->standing()) {
             began = bot->feet();
+            was = *began;
+            give_up = now + 60s;
+        }
+        // Walked, not set back: a correction from the server would jump it further in a frame.
+        if (began) {
+            const double step = glm::length(bot->feet() - was);
+            walked += step < 1.0 ? step : 0.0;
+            was = bot->feet();
         }
         // Far enough that only taken moves get there: the server isn't sending it back.
-        if ((began && glm::length(bot->feet() - *began) >= 5.0) || now >= give_up) {
+        if (walked >= 5.0 || now >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     CHECK(bot->session().state() == hog::client::Session::State::Welcomed);
     REQUIRE(began);
-    CHECK(glm::length(bot->feet() - began.value_or(bot->feet())) >= 5.0);
+    CHECK(walked >= 5.0);
     // On the ground it was sent, which is the ground built, not falling through where none is.
     const DVec3 feet = bot->feet().metres();
     const double ground = hog::globe::top_of(bot->world(), glm::normalize(feet)).value_or(0.0);

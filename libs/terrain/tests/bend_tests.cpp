@@ -19,7 +19,7 @@ namespace {
 
 constexpr double radius = 115'000.0;
 constexpr double earth = BendSettings{}.faked_radius;
-constexpr double blended_out = BendSettings{}.blended_out;
+const double blended_out = hog::terrain::blended_out(radius);
 constexpr DVec3 up{0.0, 0.0, 1.0};
 constexpr DVec3 east{1.0, 0.0, 0.0};
 
@@ -162,9 +162,27 @@ TEST_CASE("climbing through the blend, the ground drawn moves smoothly", "[terra
 }
 
 TEST_CASE("while bending, the far side stays well below the horizon", "[terrain][bend]") {
-    const double far_side = std::numbers::pi * radius;
-    for (int over = 0; over <= static_cast<int>(blended_out); over += 10) {
-        const auto height = static_cast<double>(over);
-        CHECK(horizon_on(faked_radius(radius, height), height) < far_side / 2.0);
+    // However small the planet, as one shrunk to a few kilometres across.
+    for (const double planet : {radius, 11'500.0, 2'000.0}) {
+        const double far_side = std::numbers::pi * planet;
+        const double out = hog::terrain::blended_out(planet);
+        for (double height = 0.0; height <= out; height += out / 1'000.0) {
+            CHECK(horizon_on(faked_radius(planet, height), height) < far_side / 2.0);
+        }
     }
+}
+
+TEST_CASE("while bending, ground about the far side's middle is told to fold over",
+          "[terrain][bend]") {
+    const Bend low = bend_at(100.0);
+    REQUIRE(low.faked > radius);
+    const DVec3 opposite = -up * radius;
+    CHECK(hog::terrain::folds_over(low, opposite, 10.0));
+    // A ball beside it reaching just over it, and one falling just short.
+    const DVec3 beside = DVec3{std::sin(0.01), 0.0, -std::cos(0.01)} * radius;
+    CHECK(hog::terrain::folds_over(low, beside, 0.0101 * radius));
+    CHECK_FALSE(hog::terrain::folds_over(low, beside, 0.0099 * radius));
+    CHECK_FALSE(hog::terrain::folds_over(low, east * radius, 1'000.0));
+    // Drawn unbent, nothing folds.
+    CHECK_FALSE(hog::terrain::folds_over(bend_at(blended_out + 1.0), opposite, 10.0));
 }

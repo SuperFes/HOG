@@ -87,7 +87,7 @@ Stripes stripes(DVec3 cells, DVec3 across, DVec3 up, std::uint64_t seed) noexcep
                 };
                 const double turning = spread(0) * turned;
                 const DVec3 way = ((across * maths::cos(turning)) + (aside * maths::sin(turning))) *
-                                  std::exp2(spread(16) * spaced);
+                                  maths::exp2(spread(16) * spaced);
                 const double weight = (1.0 - near) * (1.0 - near);
                 const DVec3 weight_gradient = off * (-4.0 * (1.0 - near) / (reach * reach));
                 const glm::dmat3 weight_curve =
@@ -112,7 +112,7 @@ Stripes stripes(DVec3 cells, DVec3 across, DVec3 up, std::uint64_t seed) noexcep
             }
         }
     }
-    Stripes made{.phase = maths::atan2(imaginary, real), .strength = std::hypot(real, imaginary)};
+    Stripes made{.phase = maths::atan2(imaginary, real), .strength = maths::hypot(real, imaginary)};
     if (made.strength > 0.0) {
         const double power = made.strength * made.strength;
         const DVec3 share = (imaginary_gradient * real) - (real_gradient * imaginary);
@@ -224,7 +224,7 @@ Winding wind(DVec3 metres, DVec3 direction, const Gullies& gullies, double lod) 
 // a cell off would swing about faster than they run.
 DVec3 gully_across(DVec3 direction, const Undissected& ground, DVec3 fall, double slope,
                    double wavelength, double longest) noexcept {
-    const double broad = std::clamp(std::log2(wavelength * 8.0 / longest) / 2.0, 0.0, 1.0);
+    const double broad = std::clamp(maths::log2(wavelength * 8.0 / longest) / 2.0, 0.0, 1.0);
     const DVec3 led = (ground.fall * (1.0 - broad)) + (ground.broad_fall * broad);
     const double leading = glm::length(led);
     return leading > 0.0 ? glm::cross(direction, led) / leading

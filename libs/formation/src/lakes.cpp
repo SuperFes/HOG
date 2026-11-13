@@ -100,9 +100,10 @@ Lakes lakes_on(const Sphere& sphere, const Rivers& rivers, const Climate& climat
 
     // Higher hollows first: what they keep back never reaches the ones below.
     std::vector<Hollow> hollows = find_hollows(sphere, rivers, body);
-    std::ranges::sort(hollows, [](const Hollow& a, const Hollow& b) { return a.spill > b.spill; });
+    std::ranges::stable_sort(hollows,
+                             [](const Hollow& a, const Hollow& b) { return a.spill > b.spill; });
     for (Hollow& hollow : hollows) {
-        std::ranges::sort(hollow.points, [&](std::uint32_t a, std::uint32_t b) {
+        std::ranges::stable_sort(hollow.points, [&](std::uint32_t a, std::uint32_t b) {
             return rivers.ground[a] < rivers.ground[b];
         });
         std::vector<double> ground(hollow.points.size());

@@ -82,8 +82,8 @@ void Bot::update(MonotonicClock::time_point now, double seconds) {
     }
     Walked walked = walk(wander_, player_->feet(), planet_radius_, seconds, settings_);
     if (!walked.heading) {
-        wander_ =
-            pick(glm::normalize(player_->feet().metres()), planet_radius_, random_, settings_);
+        wander_ = pick(glm::normalize(player_->feet().metres()), planet_radius_, random_, settings_,
+                       walked.held);
         return;
     }
     wander_ = walked.wander;

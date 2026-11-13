@@ -1,4 +1,5 @@
 #include <hog/globe/material.hpp>
+#include <hog/globe/maths.hpp>
 
 #include <algorithm>
 #include <array>
@@ -322,9 +323,9 @@ double holding_slope(Material grain, Material bed, double wetness, double depth,
             gripped = std::min(gripped, loose.bed_friction);
         }
     }
-    const double held = std::tan(inside);
+    const double held = maths::tan(inside);
     const double share = coating / (coating + std::max(depth, 0.0));
-    const double slope = held - (share * (held - std::tan(gripped)));
+    const double slope = held - (share * (held - maths::tan(gripped)));
     if (loose.cohesion <= 0.0) {
         return slope;
     }

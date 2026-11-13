@@ -82,3 +82,22 @@ TEST_CASE("held up and getting no nearer, it soon asks for somewhere new", "[bot
     CHECK_FALSE(heading);
     CHECK(waited == Catch::Approx(settings.stuck).margin(0.2));
 }
+
+TEST_CASE("held up, it says which way, and tries anywhere but that way next", "[bot][wander]") {
+    std::mt19937_64 random{7};
+    const WanderSettings settings{};
+    const Wander wander = pick(up, radius, random, settings);
+    const WorldPosition feet{up * radius};
+    Walked walked{.wander = wander, .heading = std::nullopt, .held = std::nullopt};
+    for (double waited = 0.0; waited <= settings.stuck + 0.1; waited += 0.1) {
+        walked = walk(walked.wander, feet, radius, 0.1, settings);
+    }
+    REQUIRE(walked.held);
+    const DVec3 held = walked.held.value_or(DVec3{});
+    CHECK(glm::dot(held, wander.target - up) > 0.0);
+    for (int draw = 0; draw < 200; ++draw) {
+        const Wander next = pick(up, radius, random, settings, held);
+        CHECK(glm::dot(next.target - up, held) <= 0.0);
+        CHECK(along_ground(up, next.target) >= settings.nearest - 0.001);
+    }
+}

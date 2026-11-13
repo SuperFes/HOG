@@ -1078,12 +1078,24 @@ static const float shallowest_fetch = 0.01;
 // ground, which hides it.
 public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
                        out float4 reach, float ago = 0.0) {
+    return water_floor_at(waves, depths, fetches, rest, reach, ago, true);
+}
+
+// As floor_at, but for water known to be the sea's, which stands at the sea's level wherever the
+// grids, made from coarser ground than it, find none: never lifted to a lake's kept out near it.
+public float4 sea_floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
+                           out float4 reach) {
+    return water_floor_at(waves, depths, fetches, rest, reach, 0.0, false);
+}
+
+float4 water_floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
+                      out float4 reach, float ago, bool still_too) {
     const float3 offshore = shore_offshore(fetches, waves.shore_anchor, waves.shore_east,
                                            waves.shore_north, waves.count_left_radius.z, rest);
     const float3 seaward = (waves.shore_east.xyz * offshore.y) + (waves.shore_north.xyz * offshore.z);
     reach = float4(0.0, offshore.x, dot(seaward, waves.first.xyz), dot(seaward, waves.second.xyz));
     const float3 floor = shore_floor(waves, depths, rest);
-    if (sea_reached(floor.x) <= 0.0) {
+    if (still_too && sea_reached(floor.x) <= 0.0) {
         const float level = still_water_at(waves, depths, rest).x;
         const float3 still = still_floor(waves, depths, rest);
         // Low ground nothing covers has its level kept under it, a lake's above the sea.

@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/drainage.hpp>
+#include <hog/globe/maths.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -22,9 +23,9 @@ struct Waiting {
     float height;
     std::uint32_t cell;
 
-    // Lowest first.
+    // Lowest first; ties by cell, as standard libraries order equal keys differently.
     friend bool operator<(const Waiting& a, const Waiting& b) noexcept {
-        return a.height > b.height;
+        return a.height != b.height ? a.height > b.height : a.cell > b.cell;
     }
 };
 
@@ -109,7 +110,7 @@ std::vector<float> erode(std::span<const float> ground, int level, double radius
                                       ? static_cast<double>(drained.filled[receiver])
                                       : static_cast<double>(now[receiver]);
             const double power =
-                erosion.rate * std::pow(drained.catchment[cell], erosion.area_power) / apart;
+                erosion.rate * maths::pow(drained.catchment[cell], erosion.area_power) / apart;
             const double lowered =
                 (static_cast<double>(now[cell]) + (power * target)) / (1.0 + power);
             now[cell] = static_cast<float>(std::min(static_cast<double>(now[cell]), lowered));

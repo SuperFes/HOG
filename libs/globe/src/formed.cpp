@@ -293,9 +293,8 @@ Formed::Formed(const Planet& planet)
       smooth_{world_.sphere, 2.0}, radius_{planet.body.radius}, voxel_{planet.voxel},
       // The widest gullies half the points' spacing apart, the finest down to a few voxels.
       gullies_{.longest = world_.sphere.spacing() * planet.body.radius / 2.0,
-               .octaves = 1 + static_cast<int>(std::floor(
-                                  std::log2(world_.sphere.spacing() * planet.body.radius / 2.0 /
-                                            (3.0 * planet.voxel)))),
+               .octaves = 1 + maths::floor_log2(world_.sphere.spacing() * planet.body.radius / 2.0 /
+                                                (3.0 * planet.voxel)),
                .seed = hash_values(planet.body.seed, 0x6775'6c6c'6965'73ULL)},
       // As far apart as the widest gullies cut deep, so they fade over their own width at least.
       fall_blend_{gullies_.longest * rock_steepest / 2.0},
@@ -384,8 +383,8 @@ void Formed::fill_walls() {
         double steepest = 0.0;
         for (const std::uint32_t next : world.sphere.neighbors(point)) {
             const double run =
-                std::acos(std::clamp(glm::dot(world.sphere.point(point), world.sphere.point(next)),
-                                     -1.0, 1.0)) *
+                maths::acos(std::clamp(
+                    glm::dot(world.sphere.point(point), world.sphere.point(next)), -1.0, 1.0)) *
                 radius_;
             steepest = std::max(steepest, std::abs(top_[next] - top_[point]) / std::max(run, 1.0));
         }
@@ -429,7 +428,7 @@ void Formed::fill_lakes() {
     for (std::uint32_t point = 0; point < size; ++point) {
         if (const std::uint32_t lake = lake_at(point); lake != none) {
             const double dot = glm::dot(sphere.point(point), sphere.point(floor[lake]));
-            reach[lake] = std::max(reach[lake], std::acos(std::clamp(dot, -1.0, 1.0)));
+            reach[lake] = std::max(reach[lake], maths::acos(std::clamp(dot, -1.0, 1.0)));
             lake_share_[point] = 1.0;
             lake_cap_[point] = world.lakes.lakes[lake].level;
         }

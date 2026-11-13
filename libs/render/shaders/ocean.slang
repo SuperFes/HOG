@@ -210,7 +210,7 @@ Surface vertex_still(StillVertex vertex) {
     const bool sea = (vertex.tiles.w & sea_corner) != 0u;
     if (sea) {
         // The sea's own surface: its floor, tide and fetch as the disc has them there.
-        surface.floor = floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.reach);
+        surface.floor = sea_floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.reach);
     } else {
         // Too deep for any wave to feel its floor, and held at its own level, not the sea's.
         surface.floor = float4(deep_floor(), 0.0);

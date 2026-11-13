@@ -200,7 +200,7 @@ int fall_level(const Planet& planet, double lod) noexcept {
 }
 
 double across(const std::array<double, 3>& sides) noexcept {
-    return std::hypot(sides[0], sides[1]);
+    return maths::hypot(sides[0], sides[1]);
 }
 
 // The sides, longest first, of a block drawn by `seed` from somewhere along the joints of the
@@ -276,7 +276,7 @@ std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fa
     // Too wide for the coarsest cells, it breaks across its long side.
     std::array<double, 3> sides =
         sides_of(context, fallen, fits * width_of(planet, coarsest_of(planet, cell)), seed);
-    const auto across = [&] { return std::hypot(sides[0], sides[1]); };
+    const auto across = [&] { return maths::hypot(sides[0], sides[1]); };
     // It lies in the finest cells it fits.
     const double room = fits * width_of(planet, cell);
     const bool finest = cell.level == rock_level(planet) + rock_sizes - 1;
@@ -359,7 +359,7 @@ public:
                 std::ranges::any_of(std::span{kept}.first(lying), [&](const Rock& rock) {
                     return glm::length(glm::normalize(rock.middle) - center(at)) *
                                planet.body.radius <
-                           std::hypot(rock.axes.x, rock.axes.y) + (0.75 * width_of(planet, at));
+                           maths::hypot(rock.axes.x, rock.axes.y) + (0.75 * width_of(planet, at));
                 });
             if (covered) {
                 continue;
@@ -379,7 +379,7 @@ public:
             const std::optional<Rock> rock = in(cell_under(direction, level));
             if (rock && glm::length(glm::normalize(rock->middle) - direction) *
                                 context_->planet->body.radius <=
-                            std::hypot(rock->axes.x, rock->axes.y)) {
+                            maths::hypot(rock->axes.x, rock->axes.y)) {
                 return rock;
             }
         }
@@ -459,8 +459,7 @@ private:
 } // namespace
 
 int rock_level(const Planet& planet) noexcept {
-    return std::max(0, static_cast<int>(std::ceil(
-                           std::log2(std::numbers::pi / 2.0 * planet.body.radius / rock_cell))));
+    return std::max(0, maths::ceil_log2(std::numbers::pi / 2.0 * planet.body.radius / rock_cell));
 }
 
 double fallen_cover(const Context& context, Cell coarsest) noexcept {

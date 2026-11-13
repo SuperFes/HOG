@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -181,6 +182,39 @@ struct Reduced {
 // A positive base to any power.
 [[nodiscard]] inline double pow(double base, double power) noexcept {
     return exp(power * log(base));
+}
+
+[[nodiscard]] inline double exp2(double x) noexcept {
+    // The whole doublings split off exactly, so ln 2's rounding scales only the rest.
+    const double doublings = std::nearbyint(std::clamp(x, -1100.0, 1100.0));
+    return std::ldexp(exp((x - doublings) * std::numbers::ln2), static_cast<int>(doublings));
+}
+
+[[nodiscard]] inline double log2(double x) noexcept {
+    return log(x) * std::numbers::log2e;
+}
+
+// Whole powers of two at or under, and at or over, a positive number: exact, as libraries' log2
+// rounded to an integer need not be.
+[[nodiscard]] inline int floor_log2(double x) noexcept {
+    return std::ilogb(x);
+}
+
+[[nodiscard]] inline int ceil_log2(double x) noexcept {
+    const int under = std::ilogb(x);
+    return std::ldexp(1.0, under) == x ? under : under + 1;
+}
+
+[[nodiscard]] inline double asin(double x) noexcept {
+    return atan2(x, std::sqrt(std::max(0.0, 1.0 - (x * x))));
+}
+
+[[nodiscard]] inline double acos(double x) noexcept {
+    return atan2(std::sqrt(std::max(0.0, 1.0 - (x * x))), x);
+}
+
+[[nodiscard]] inline double hypot(double x, double y) noexcept {
+    return std::sqrt((x * x) + (y * y));
 }
 
 } // namespace hog::maths

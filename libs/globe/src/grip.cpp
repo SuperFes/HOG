@@ -1,4 +1,5 @@
 #include <hog/globe/grip.hpp>
+#include <hog/globe/maths.hpp>
 #include <hog/globe/surface.hpp>
 
 #include <glm/geometric.hpp>
@@ -40,7 +41,7 @@ std::optional<double> grip_at(const World& world, DVec3 feet) {
     if (!surface) {
         return std::nullopt;
     }
-    return std::atan(surface->holds(layers.thickness, world.planet().body.gravity));
+    return maths::atan(surface->holds(layers.thickness, world.planet().body.gravity));
 }
 
 } // namespace hog::globe

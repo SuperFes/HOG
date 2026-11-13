@@ -160,7 +160,7 @@ RiverSand river_sand(const Sphere& sphere, const Rivers& rivers, const Bedrock& 
         const std::uint32_t down = rivers.receiver[point];
         // Glassy grains break down to mud as they go.
         const double hop =
-            std::acos(std::clamp(glm::dot(sphere.point(point), sphere.point(down)), -1.0, 1.0)) *
+            maths::acos(std::clamp(glm::dot(sphere.point(point), sphere.point(down)), -1.0, 1.0)) *
             body.radius;
         const double broken = volcanic[point] * (1.0 - lasting(hop, body.volcanic_reach));
         grains[down] += grains[point] - broken;

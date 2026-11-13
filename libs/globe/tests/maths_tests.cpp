@@ -43,6 +43,30 @@ TEST_CASE("the portable functions agree with libm to a few ulps", "[globe][maths
     CHECK(std::abs(maths::pow(2.0, 0.5) - std::numbers::sqrt2) < 1e-15);
 }
 
+TEST_CASE("the portable inverse sines, base-two powers and hypotenuse agree with libm",
+          "[globe][maths]") {
+    for (int k = -999; k <= 999; ++k) {
+        const double x = k * 0.001;
+        CHECK(std::abs(maths::asin(x) - std::asin(x)) < 1e-15);
+        CHECK(std::abs(maths::acos(x) - std::acos(x)) < 1e-15);
+        CHECK(std::abs((maths::exp2(x * 20.0) / std::exp2(x * 20.0)) - 1.0) < 1e-15);
+        const double positive = (std::abs(x) * 1'000.0) + 1e-3;
+        CHECK(near(maths::log2(positive), std::log2(positive)));
+        CHECK(near(maths::hypot(x, 1.0 - x), std::hypot(x, 1.0 - x)));
+    }
+    CHECK(maths::acos(-1.0) == std::numbers::pi);
+    CHECK(maths::asin(1.0) == std::numbers::pi / 2.0);
+}
+
+TEST_CASE("whole powers of two around a number are exact", "[globe][maths]") {
+    CHECK(maths::floor_log2(8.0) == 3);
+    CHECK(maths::floor_log2(15.999) == 3);
+    CHECK(maths::floor_log2(0.5) == -1);
+    CHECK(maths::ceil_log2(8.0) == 3);
+    CHECK(maths::ceil_log2(8.001) == 4);
+    CHECK(maths::ceil_log2(0.3) == -1);
+}
+
 TEST_CASE("the portable functions give the same bits forever", "[globe][maths]") {
     std::uint64_t digest = 0;
     for (int k = -500; k <= 500; ++k) {

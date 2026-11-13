@@ -94,6 +94,31 @@ static const float cloud_albedo = 0.99;
 static const float wander_tile = 32000.0;
 static const float wander = 8000.0;
 static const float lift = 0.25;
+
+// The noise's sizes. Billows wider than the weather's cells leave each cell's cloud a flat slab
+// cut off straight at its edges, so on a planet small enough that its cells are narrower than two
+// billow tiles, all of them halve until they fit; halving keeps a whole number in the period.
+struct Scales {
+    float shape;
+    float detail;
+    float wander_tile;
+    float wander;
+};
+
+Scales scales() {
+    uint across;
+    uint down;
+    weather_before.GetDimensions(across, down);
+    const float cell = push.radii.x * 1.5707963 / float(across);
+    const float halvings = clamp(ceil(log2(shape_tile / (2.0 * cell))), 0.0, 7.0);
+    const float shrunk = exp2(-halvings);
+    Scales made;
+    made.shape = shape_tile * shrunk;
+    made.detail = detail_tile * shrunk;
+    made.wander_tile = wander_tile * shrunk;
+    made.wander = wander * shrunk;
+    return made;
+}
 // As clouds.hpp's. Per metre of rain falling at 1 mm an hour; snow, slower and in larger flakes,
 // hides more.
 static const float rain_extinction = 2.5e-4;
@@ -197,9 +222,10 @@ float4 flowed(Sampler3D noise, float3 at, Flow flow, float tile, float level) {
 
 // The weather at `direction` on a planet of `radius`, its edges wandering and its base uneven.
 Cell wandering_cell_at(float3 direction, float radius) {
+    const Scales sizes = scales();
     const float3 ground = direction * radius;
-    const float4 broad = flowed(shape_noise, ground, flow_at(ground), wander_tile, 1.0);
-    Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * wander)));
+    const float4 broad = flowed(shape_noise, ground, flow_at(ground), sizes.wander_tile, 1.0);
+    Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * sizes.wander)));
     cell.base += (broad.r - 0.5) * lift * (cell.top - cell.base);
     return cell;
 }
@@ -222,9 +248,10 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     const float rounding = lerp(0.1, 0.6, saturate((thickness - 500.0) / 2500.0));
     const float profile = saturate(up / 0.08) * saturate((1.0 - up) / rounding);
 
+    const Scales sizes = scales();
     const Flow flow = flow_at(at);
-    const float4 shape = flowed(shape_noise, at, flow, shape_tile,
-                                max(log2(footprint * shape_texels / shape_tile), 0.0));
+    const float4 shape = flowed(shape_noise, at, flow, sizes.shape,
+                                max(log2(footprint * shape_texels / sizes.shape), 0.0));
     billows = shape.r;
     // The billows are spread evenly, so about as much of the sky's covered as the cover says, and a
     // full cover leaves no gaps. Broken cloud covers less higher up, so it billows into domes.
@@ -235,8 +262,8 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     const float wearing = (shape.g * 0.625) + (shape.b * 0.25) + (shape.a * 0.125);
     cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - cell.cover), 1.0, 0.0, 1.0));
     if (worn && cloud > 0.0) {
-        const float detail = flowed(detail_noise, at, flow, detail_tile,
-                                    max(log2(footprint * detail_texels / detail_tile), 0.0))
+        const float detail = flowed(detail_noise, at, flow, sizes.detail,
+                                    max(log2(footprint * detail_texels / sizes.detail), 0.0))
                                  .a;
         // Wispy below, billowing above; less so the more of the sky's covered, so a full cover
         // keeps no gaps.
