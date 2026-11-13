@@ -288,7 +288,9 @@ TEST_CASE("ground is kept from tiles held alone, and kept anew when coarser ones
     constexpr auto side = static_cast<std::uint32_t>(globe::Volume::tile_side);
     globe::HeldTiles held;
     for (const globe::Site corner : made.volume().columns()) {
-        for (const auto& [k, tree] : made.volume().column(corner).value().tiles) {
+        const auto column = made.volume().column(corner);
+        REQUIRE(column.has_value());
+        for (const auto& [k, tree] : column.value().tiles) {
             held.put({.level = 0,
                       .face = corner.face,
                       .i = corner.i / side,

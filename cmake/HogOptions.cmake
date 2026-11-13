@@ -29,7 +29,8 @@ function(hog_target_defaults target)
         if(HOG_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE /WX)
         endif()
-        target_compile_definitions(${target} PRIVATE _MSVC_STL_HARDENING=1)
+        # getenv is only read before threads start; the CRT's _dupenv_s buys nothing there.
+        target_compile_definitions(${target} PRIVATE _MSVC_STL_HARDENING=1 _CRT_SECURE_NO_WARNINGS)
     else()
         target_compile_options(${target} PRIVATE
             -Wall -Wextra -Wpedantic
