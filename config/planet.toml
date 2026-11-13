@@ -1,13 +1,9 @@
-# The working world: a 115 km planet of water and air that turns in four hours, locked to real
-# time, through Earth's year and seasons. Every knob of a planet is set here by name, in [planet]
-# and its tables; what's left out keeps the working world's value.
 [planet]
 seed = 1 # 812080951
 radius = 11500.0
 day = 4.0
 tilt = 23.44
-voxel = 0.33333333
-#floor_depth = 500.0
-#sky_height = 2000.0
+voxel = 2.5
+
 # The land formed stage by stage, plates to soil, on a sphere split this many times.
 formed_detail = 7.0
