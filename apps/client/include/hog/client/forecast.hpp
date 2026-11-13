@@ -23,10 +23,9 @@ inline constexpr std::uint32_t weather_map_size = 64;
 using WeatherTexel = std::array<std::uint8_t, 4>;
 
 // A texel of the sky's cube maps, as protocol::CellWeather sends them: the humidity near the ground
-// from 0 to 255 for 0 to 1, the fog's top in steps of `fog_texel_step` metres above sea level, and
-// the cloud's base and top in steps of `height_texel_step`.
+// from 0 to 255 for 0 to 1, the cloud's base and top in steps of `height_texel_step` metres above
+// sea level, and a fourth unused.
 using SkyTexel = std::array<std::uint8_t, 4>;
-inline constexpr double fog_texel_step = 32.0;
 inline constexpr double height_texel_step = 64.0;
 
 // A texel of the drift's cube maps: the m/s the cloud drifts over the ground, in the planet's

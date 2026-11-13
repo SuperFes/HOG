@@ -28,9 +28,8 @@ struct WeatherBindings {
     VkSampler sampler = VK_NULL_HANDLE; // linear
     double faded = 1.0;                 // from the maps before, at 0, to those after, at 1
     bool falling = false;               // whether anything falls anywhere
-    // Metres above sea level anywhere: the highest fog's top, 0 for none, and the lowest and
-    // highest of the cloud's base and the highest of its top.
-    double fog_top = 0.0;
+    // Metres above sea level anywhere: the lowest and highest of the cloud's base and the highest
+    // of its top.
     double lowest_base = 0.0;
     double highest_base = 0.0;
     double highest_top = 0.0;
@@ -44,13 +43,11 @@ struct WeatherBindings {
 };
 
 // Per metre, how much of the light along a view the mist takes at `height` metres above sea level,
-// or at sea level below it, in air of `humidity`, as client::SkyTexel holds it, under fog whose top
-// is at `fog_top`.
-[[nodiscard]] double mist_extinction(double humidity, double fog_top, double height) noexcept;
-// Of light falling straight down from above the mist, how much the mist over `height` takes; and
-// of that, the haze, less any fog.
-[[nodiscard]] double haze_above(double humidity, double fog_top, double height) noexcept;
-[[nodiscard]] double mist_above(double humidity, double fog_top, double height) noexcept;
+// or at sea level below it, in air of `humidity`, as client::SkyTexel holds it. Cloud on the ground
+// is marched as cloud.
+[[nodiscard]] double mist_extinction(double humidity, double height) noexcept;
+// Of light falling straight down from above the mist, how much the mist over `height` takes.
+[[nodiscard]] double mist_above(double humidity, double height) noexcept;
 // The weather's and the sky's cube maps, each before and after, as the server last sent them. Until
 // they're first written they read as a clear, dry sky.
 class WeatherMaps {
@@ -87,10 +84,9 @@ private:
     Image clear_;
     std::uint32_t map_size_ = 0;
     // How far what each side's maps hold reaches: whether anything falls, and the metres above sea
-    // level of the fog's top and of the cloud's lowest and highest base and highest top.
+    // level of the cloud's lowest and highest base and highest top.
     struct Reach {
         bool falling = false;
-        double fog_top = 0.0;
         double lowest_base = 0.0;
         double highest_base = 0.0;
         double highest_top = 0.0;

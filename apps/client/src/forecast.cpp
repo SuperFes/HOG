@@ -59,7 +59,6 @@ protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::C
             .drift = blend(from.drift, to.drift, by),
             .wind = blend(from.wind, to.wind, by),
             .humidity = blend(from.humidity, to.humidity, by),
-            .fog_top = blend(from.fog_top, to.fog_top, by),
             .base = blend(from.base, to.base, by),
             .top = blend(from.top, to.top, by),
             .wind_sea = mixed(from.wind_sea, to.wind_sea, by),
@@ -82,7 +81,6 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             .wind = {field([](const auto& cell) { return static_cast<double>(cell.wind.x); }),
                      field([](const auto& cell) { return static_cast<double>(cell.wind.y); })},
             .humidity = field([](const auto& cell) { return static_cast<double>(cell.humidity); }),
-            .fog_top = field([](const auto& cell) { return static_cast<double>(cell.fog_top); }),
             .base = field([](const auto& cell) { return static_cast<double>(cell.base); }),
             .top = field([](const auto& cell) { return static_cast<double>(cell.top); })};
 }
@@ -145,9 +143,8 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
                      to_byte(static_cast<double>(cell.snow))});
                 maps.sky.push_back(
                     {to_byte(static_cast<double>(cell.humidity)),
-                     to_byte(static_cast<double>(cell.fog_top) / (255.0 * fog_texel_step)),
                      to_byte(static_cast<double>(cell.base) / (255.0 * height_texel_step)),
-                     to_byte(static_cast<double>(cell.top) / (255.0 * height_texel_step))});
+                     to_byte(static_cast<double>(cell.top) / (255.0 * height_texel_step)), 0});
             }
         }
     }
@@ -168,9 +165,6 @@ std::string describe(const protocol::CellWeather& weather) {
         line += std::format(", {} {:.1f} mm/h", falls, static_cast<double>(weather.falling));
     }
     line += std::format(", {:.0f}% humid", 100.0 * static_cast<double>(weather.humidity));
-    if (weather.fog_top > 0.0F) {
-        line += std::format(", fog to {:.0f} m", static_cast<double>(weather.fog_top));
-    }
     return line +
            std::format(", drifting {:.0f} m/s", static_cast<double>(glm::length(weather.drift)));
 }
@@ -325,8 +319,8 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     };
     const protocol::CellWeather there =
         mixed(read(from_, age_before(now)), read(to_, age(now)), static_cast<float>(faded(now)));
-    // The cloud blows on with the wind, with the heights it has; the air's damp, and so its fog,
-    // keep to the slower pace of the air.
+    // The cloud blows on with the wind, with the heights it has; the air's damp keeps to the
+    // slower pace of the air.
     protocol::CellWeather found = here;
     found.cloud = there.cloud;
     found.cover = there.cover;

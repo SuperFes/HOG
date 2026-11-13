@@ -1,19 +1,12 @@
 module weather;
 
 // As client::SkyTexel's steps.
-static const float fog_texel_step = 32.0;
 static const float height_texel_step = 64.0;
 // As weather_maps.cpp's. Haze grows as the air nears forming cloud, from none in dry air to about
-// 4 km seen through at its wettest, and thins with height; fog lets about 260 m be seen through.
+// 4 km seen through at its wettest, and thins with height.
 static const float haze_per_metre = 3e-5;
 static const float haze_height = 1000.0;
 static const float driest_share = 0.97;
-public static const float fog_per_metre = 0.015;
-public static const float fog_edge = 60.0;
-// Fog lies under an inversion, above which the air's drier: the haze over it thins this quickly,
-// fully over fog this deep.
-static const float inversion = 150.0;
-static const float inversion_fog = 100.0;
 // Of light falling on the mist, the share scattered on, and how much of it forwards.
 static const float mist_albedo = 0.95;
 static const float mist_forward = 0.6;
@@ -46,7 +39,6 @@ public float drawn_height(float3 from_eye, float3 up, float eye_height, float fa
 // The sky over a place as client::SkyTexel holds it, heights in metres above sea level.
 public struct SkyCell {
     public float humidity;
-    public float fog_top;
     public float base;
     public float top;
 };
@@ -54,26 +46,21 @@ public struct SkyCell {
 public SkyCell sky_cell(float4 texel) {
     SkyCell cell;
     cell.humidity = texel.r;
-    cell.fog_top = texel.g * 255.0 * fog_texel_step;
-    cell.base = texel.b * 255.0 * height_texel_step;
-    cell.top = texel.a * 255.0 * height_texel_step;
+    cell.base = texel.g * 255.0 * height_texel_step;
+    cell.top = texel.b * 255.0 * height_texel_step;
     return cell;
 }
 
 // As weather_maps.cpp's: per metre at `height` above sea level, or at sea level below it.
 public float haze_extinction(SkyCell cell, float height) {
-    const float above = max(height, 0.0);
-    const float over_fog = lerp(1.0, exp(-max(above - cell.fog_top, 0.0) / inversion),
-                                saturate(cell.fog_top / inversion_fog));
     return haze_per_metre * ((1.0 / (1.0 - (driest_share * saturate(cell.humidity)))) - 1.0) *
-           exp(-above / haze_height) * over_fog;
+           exp(-max(height, 0.0) / haze_height);
 }
 
 // As weather_maps.cpp's: how much of the light falling straight down from above the mist the mist
 // over `height` takes.
 public float mist_above(SkyCell cell, float height) {
-    return (haze_extinction(cell, height) * haze_height) +
-           (fog_per_metre * max(cell.fog_top - max(height, 0.0), 0.0));
+    return haze_extinction(cell, height) * haze_height;
 }
 
 // Of the mist at a point, under `above` of mist_above(), the light it scatters towards the eye for

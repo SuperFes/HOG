@@ -224,7 +224,7 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                        ? static_cast<float>(cloud_shadow_reach(view.bend.eye_height))
                        : 0.0F,
                    static_cast<float>(view.weather.lowest_base), static_cast<float>(view.mist),
-                   static_cast<float>(view.haze)},
+                   0.0F},
         .year = {view.daylight.hours, view.daylight.longest,
                  view.daylight.lengthening ? 1.0F : 0.0F, 0.0F},
         // Without a sea to say otherwise, the eye is out of the water.
@@ -241,7 +241,8 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                     static_cast<float>(view.carried.plankton),
                     static_cast<float>(view.carried.flour)},
         .weather_age = {static_cast<float>(view.weather.age_before),
-                        static_cast<float>(view.weather.age), static_cast<float>(view.weather.flow), 0.0F}};
+                        static_cast<float>(view.weather.age), static_cast<float>(view.weather.flow),
+                        0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

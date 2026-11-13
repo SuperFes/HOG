@@ -44,7 +44,6 @@ constexpr float most_sea_height = 20.0F;
             .drift = column.drift,
             .wind = column.wind,
             .humidity = column.humidity,
-            .fog_top = column.fog_top,
             .base = column.base,
             .top = column.top,
             .wind_sea = wind_sea(column)};
@@ -63,9 +62,8 @@ WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameTime start,
                              WeatherSettings settings)
     : settings_(settings),
       level_(settings.level.value_or(weather_level(generator.planet().body.radius))),
-      calendar_(globe::day_length(generator.planet()), generator.planet().body.tilt),
-      grid_(level_), air_(generator, level_, settings.layers),
-      reached_(start - settings.spin_up) {
+      calendar_(globe::day_length(generator.planet()), generator.planet().body.tilt), grid_(level_),
+      air_(generator, level_, settings.layers), reached_(start - settings.spin_up) {
     placed_.resize(air_.field().grid.columns());
     for (std::size_t column = 0; column < placed_.size(); ++column) {
         const DVec3 up =

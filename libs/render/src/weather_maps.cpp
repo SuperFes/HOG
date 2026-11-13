@@ -15,47 +15,25 @@ constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkFormat drift_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 // A weather texel's channel holding the root of a 256th of mm falling an hour.
 constexpr std::size_t falling_channel = 2;
-// A sky texel's channels holding the fog's top, in steps of `fog_step` metres, and the cloud's
-// base and top, in steps of `height_step`.
-constexpr std::size_t fog_channel = 1;
-constexpr std::size_t base_channel = 2;
-constexpr std::size_t top_channel = 3;
-constexpr double fog_step = 32.0;
+// A sky texel's channels holding the cloud's base and top, in steps of `height_step` metres.
+constexpr std::size_t base_channel = 1;
+constexpr std::size_t top_channel = 2;
 constexpr double height_step = 64.0;
 // As weather.slang's.
 constexpr double haze_per_metre = 3e-5;
 constexpr double haze_height = 1000.0;
 constexpr double driest_share = 0.97;
-constexpr double fog_per_metre = 0.015;
-constexpr double fog_edge = 60.0;
-constexpr double inversion = 150.0;
-constexpr double inversion_fog = 100.0;
-
-double haze_extinction(double humidity, double fog_top, double height) noexcept {
-    const double damp = std::clamp(humidity, 0.0, 1.0);
-    const double above = std::max(height, 0.0);
-    const double inverted = std::clamp(fog_top / inversion_fog, 0.0, 1.0);
-    const double over_fog =
-        1.0 + ((std::exp(-std::max(above - fog_top, 0.0) / inversion) - 1.0) * inverted);
-    return haze_per_metre * ((1.0 / (1.0 - (driest_share * damp))) - 1.0) *
-           std::exp(-above / haze_height) * over_fog;
-}
 
 } // namespace
 
-double mist_extinction(double humidity, double fog_top, double height) noexcept {
-    const double fog =
-        fog_per_metre * std::clamp((fog_top - std::max(height, 0.0)) / fog_edge, 0.0, 1.0);
-    return haze_extinction(humidity, fog_top, height) + fog;
+double mist_extinction(double humidity, double height) noexcept {
+    const double damp = std::clamp(humidity, 0.0, 1.0);
+    return haze_per_metre * ((1.0 / (1.0 - (driest_share * damp))) - 1.0) *
+           std::exp(-std::max(height, 0.0) / haze_height);
 }
 
-double haze_above(double humidity, double fog_top, double height) noexcept {
-    return haze_extinction(humidity, fog_top, height) * haze_height;
-}
-
-double mist_above(double humidity, double fog_top, double height) noexcept {
-    return haze_above(humidity, fog_top, height) +
-           (fog_per_metre * std::max(fog_top - std::max(height, 0.0), 0.0));
+double mist_above(double humidity, double height) noexcept {
+    return mist_extinction(humidity, height) * haze_height;
 }
 
 Result<WeatherMaps> WeatherMaps::create(Device& device, std::uint32_t map_size,
@@ -82,7 +60,7 @@ Result<WeatherMaps> WeatherMaps::create(Device& device, std::uint32_t map_size,
         }
         *map = std::move(made).value();
     }
-    // No cloud, nothing falling, dry air and no fog; and, read as the drift, none.
+    // No cloud, nothing falling and dry air; and, read as the drift, none.
     constexpr std::array<std::byte, std::size_t{6} * 4> clear{};
     auto filled = make_filled_image(device, {.format = map_format, .layers = 6, .cube = true},
                                     std::span{clear});
@@ -139,7 +117,6 @@ Result<> WeatherMaps::update(VkCommandBuffer commands, std::uint32_t frame,
     const auto reach = [&](std::span<const std::byte> weather, std::span<const std::byte> sky) {
         const auto [lowest, highest] = bounds(sky, base_channel);
         return Reach{.falling = falls(weather),
-                     .fog_top = bounds(sky, fog_channel).second * fog_step,
                      .lowest_base = lowest * height_step,
                      .highest_base = highest * height_step,
                      .highest_top = bounds(sky, top_channel).second * height_step};
@@ -165,7 +142,6 @@ WeatherBindings WeatherMaps::bindings(double faded, double age, double age_befor
                 .sampler = linear_.handle(),
                 .faded = faded,
                 .falling = false,
-                .fog_top = 0.0,
                 .lowest_base = 0.0,
                 .highest_base = 0.0,
                 .highest_top = 0.0,
@@ -181,7 +157,6 @@ WeatherBindings WeatherMaps::bindings(double faded, double age, double age_befor
             .sampler = linear_.handle(),
             .faded = faded,
             .falling = (faded < 1.0 && before_.falling) || (faded > 0.0 && after_.falling),
-            .fog_top = std::lerp(before_.fog_top, after_.fog_top, faded),
             .lowest_base = std::lerp(before_.lowest_base, after_.lowest_base, faded),
             .highest_base = std::lerp(before_.highest_base, after_.highest_base, faded),
             .highest_top = std::lerp(before_.highest_top, after_.highest_top, faded),

@@ -105,7 +105,7 @@ const Texel broken{128, 24, 0, 0};
 const Texel raining{255, 64, 26, 0};
 const Texel pouring{255, 64, 80, 0};
 // As client::SkyTexel: dry, with cloud from 1984 m to 3008 m.
-const Texel layer{0, 0, 31, 47};
+const Texel layer{0, 31, 47, 0};
 
 struct Scene {
     double eye_height = 2.0;
@@ -174,7 +174,8 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
             CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
                                scene.sky, scene.sky, scene.drift, scene.drift));
         }));
-        hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.age, scene.age_before);
+        hog::render::WeatherBindings weather =
+            maps->bindings(scene.faded, scene.age, scene.age_before);
         weather.flow = scene.flow;
 
         const WorldPosition eye{up * (radius + scene.eye_height)};
@@ -335,18 +336,15 @@ TEST_CASE("cloud shades the ground the more of it there is", "[render]") {
 TEST_CASE("mist takes the sun's light and scatters most of it on down", "[render]") {
     using hog::render::under_mist;
     const hog::render::CloudShade sunny{.direct = 1.0, .diffuse = 0.0};
-    const hog::render::CloudShade dry = under_mist(sunny, 0.0, 0.0, 10.0, 0.5);
+    const hog::render::CloudShade dry = under_mist(sunny, 0.0, 10.0, 0.5);
     CHECK(dry.direct == 1.0);
     CHECK(dry.diffuse == 0.0);
-    const hog::render::CloudShade hazy = under_mist(sunny, 0.9, 0.0, 10.0, 0.5);
+    const hog::render::CloudShade hazy = under_mist(sunny, 0.9, 10.0, 0.5);
     CHECK(hazy.direct < 1.0);
     CHECK(hazy.diffuse > 0.0);
-    const hog::render::CloudShade lower = under_mist(sunny, 0.9, 0.0, 10.0, 0.2);
+    CHECK(hazy.direct + hazy.diffuse < 1.0);
+    const hog::render::CloudShade lower = under_mist(sunny, 0.9, 10.0, 0.2);
     CHECK(lower.direct < hazy.direct);
-    const hog::render::CloudShade fogged = under_mist(sunny, 0.5, 300.0, 10.0, 0.5);
-    CHECK(fogged.direct < 0.01);
-    CHECK(fogged.diffuse > 0.6);
-    CHECK(fogged.direct + fogged.diffuse < 1.0);
 }
 
 TEST_CASE("rain hides more the heavier it falls, and snow more than rain", "[render]") {
@@ -561,20 +559,21 @@ TEST_CASE("rain is hidden by what's drawn in front of it", "[render][gpu][atmosp
 
 namespace {
 
-// Saturated under fog to 288 m, as client::SkyTexel holds it.
-const Texel foggy{255, 9, 0, 0};
+// Cloud lying on the ground, to 320 m, as client::SkyTexel holds it, holding as little water as fog
+// does.
+const Texel grounded{255, 0, 5, 0};
+const Texel misty{255, 16, 0, 0};
 
 } // namespace
 
-TEST_CASE("fog hides all round the eye but what's drawn nearest, lit by the day",
+TEST_CASE("cloud on the ground hides all round the eye but what's drawn nearest, lit by the day",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
     const VkRect2D covered{.offset = {.x = 10, .y = 2}, .extent = {.width = 8, .height = 6}};
-    const Pixels pixels =
-        draw(*device, {.before = everywhere(clear), .sky = everywhere(foggy), .covered = covered});
-    // But a hair of it, in its thicker wisps.
+    const Pixels pixels = draw(
+        *device, {.before = everywhere(misty), .sky = everywhere(grounded), .covered = covered});
+    // Fading into what's drawn where it meets it.
     CHECK(brightness(pixels, 12, 4) < 8);
-    // Above the horizon: below it the sea's near, and seen through less of the fog.
     std::uint32_t grey = 0;
     int dimmest = 765;
     for (std::uint32_t y = 0; y < extent.height / 2; ++y) {
@@ -583,70 +582,25 @@ TEST_CASE("fog hides all round the eye but what's drawn nearest, lit by the day"
                 continue;
             }
             dimmest = std::min(dimmest, brightness(pixels, x, y));
-            grey += brightness(pixels, x, y) > 300 ? 1U : 0U;
+            grey += brightness(pixels, x, y) > 100 ? 1U : 0U;
         }
     }
     INFO("dimmest " << dimmest);
     CHECK(grey == (extent.width * (extent.height / 2)) - (8 * 6));
 }
 
-TEST_CASE("from over fog, its top lies below and the air over it is clear",
+TEST_CASE("from over cloud on the ground, its top lies below and the air over it is clear",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
     const Scene over{.eye_height = 1'000.0,
                      .forward = glm::normalize(east - (up * 0.3)),
-                     .before = everywhere(clear),
-                     .sky = everywhere(foggy)};
+                     .before = everywhere(misty),
+                     .sky = everywhere(grounded)};
     const Pixels pixels = draw(*device, over);
-    // Looking down below the horizon, at the fog; and up, at nothing.
-    CHECK(brightness(pixels, extent.width / 2, extent.height - 1) > 300);
+    CHECK(brightness(pixels, extent.width / 2, extent.height - 1) > 100);
     CHECK(brightness(pixels, extent.width / 2, 0) == 0);
     Scene dry = over;
-    dry.sky = everywhere(clear);
-    CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
-}
-
-TEST_CASE("fog lies in banks and wisps, drifting with the wind and repeating over its period",
-          "[render][gpu][atmosphere]") {
-    const auto device = test_device();
-    const Scene still{.eye_height = 1'000.0,
-                      .forward = glm::normalize(east - up),
-                      .before = everywhere(clear),
-                      .sky = everywhere(foggy)};
-    Scene around = still;
-    around.moved = DVec3{cloud_period, -2.0 * cloud_period, 0.0};
-    Scene drifted = still;
-    drifted.moved = DVec3{1'500.0, 0.0, 0.0};
-    const Pixels pixels = draw(*device, still);
-    int dimmest = 765;
-    int brightest = 0;
-    for (std::uint32_t y = extent.height / 2; y < extent.height; ++y) {
-        for (std::uint32_t x = 0; x < extent.width; ++x) {
-            dimmest = std::min(dimmest, brightness(pixels, x, y));
-            brightest = std::max(brightest, brightness(pixels, x, y));
-        }
-    }
-    INFO("dimmest " << dimmest << ", brightest " << brightest);
-    CHECK(dimmest > 0);
-    CHECK(brightest > dimmest + 30);
-    CHECK(draw(*device, around) == pixels);
-    CHECK(draw(*device, drifted) != pixels);
-}
-
-TEST_CASE("fog lying low far off is seen, however far past the highest fog's top",
-          "[render][gpu][atmosphere]") {
-    const auto device = test_device();
-    // Fog to 992 m far behind the eye; ahead, to 32 m.
-    const auto sky = map_of([](DVec3 direction) {
-        return glm::dot(direction, east) < -0.5 ? Texel{255, 31, 0, 0} : Texel{255, 1, 0, 0};
-    });
-    const Scene over{.eye_height = 1'500.0,
-                     .forward = glm::normalize(east - (up * 0.15)),
-                     .before = everywhere(clear),
-                     .sky = sky};
-    CHECK(brightness(draw(*device, over), extent.width / 2, extent.height / 2) > 0);
-    Scene dry = over;
-    dry.sky = everywhere(clear);
+    dry.before = everywhere(clear);
     CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
 }
 
@@ -664,7 +618,7 @@ TEST_CASE("flying through cloud, it's grey all round", "[render][gpu][atmosphere
 TEST_CASE("clouds lie between the heights the sky has them at", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     // From 1000 m to 1536 m, seen from over it and from under it.
-    const auto low = everywhere({0, 0, 16, 24});
+    const auto low = everywhere({0, 16, 24, 0});
     const Pixels over =
         draw(*device, {.eye_height = 2'000.0, .before = everywhere(overcast), .sky = low});
     CHECK(lit_pixels(over) == 0);
@@ -678,7 +632,7 @@ TEST_CASE("a storm towers over the thin cloud round it", "[render][gpu][atmosphe
     const auto device = test_device();
     // Cloud to 3008 m, but to 9984 m in the north.
     const auto towering =
-        map_of([](DVec3 direction) { return direction.y > 0.2 ? Texel{0, 0, 31, 156} : layer; });
+        map_of([](DVec3 direction) { return direction.y > 0.2 ? Texel{0, 31, 156, 0} : layer; });
     const Pixels north_view = draw(
         *device,
         {.eye_height = 5'000.0, .forward = north, .before = everywhere(overcast), .sky = towering});
@@ -849,7 +803,7 @@ TEST_CASE("cloud far off keeps its shape, not sliced into layers", "[render][gpu
                        .forward = glm::normalize(-east + (0.1 * up)),
                        .fov = 0.35,
                        .before = everywhere(broken),
-                       .sky = everywhere({0, 0, 19, 55})};
+                       .sky = everywhere({0, 19, 55, 0})};
     const Pixels drawn = draw_frames(*device, std::vector<Scene>(8, towers), nullptr, size).back();
     // Holes: the black behind showing through a gap slit between cloud close above and below it.
     const auto brightness = [&](std::uint32_t x, std::uint32_t y) {
@@ -883,9 +837,9 @@ TEST_CASE("the cloud's shadow reaches further the higher the eye, in steps that 
 
 TEST_CASE("mist lets the light falling on it through, less the more there is", "[render]") {
     using hog::render::mist_through;
-    CHECK(mist_through(0.0, 0.0, 10.0, 0.5) == 1.0);
-    CHECK(mist_through(0.9, 0.0, 10.0, 0.5) < 1.0);
-    CHECK(mist_through(0.5, 300.0, 10.0, 0.5) < 0.01);
+    CHECK(mist_through(0.0, 10.0, 0.5) == 1.0);
+    CHECK(mist_through(0.9, 10.0, 0.5) < 1.0);
+    CHECK(mist_through(0.9, 10.0, 0.2) < mist_through(0.9, 10.0, 0.5));
 }
 
 namespace {
@@ -1097,17 +1051,4 @@ TEST_CASE("at lower quality, the clouds are drawn alike, only coarser",
         CHECK(high > 0);
         CHECK(std::abs(lower - high) < high / 10);
     }
-}
-
-TEST_CASE("fog lies darker in the cloud's shadow", "[render][gpu][atmosphere]") {
-    const auto device = test_device();
-    // The layer's cloud over fog to 288 m.
-    const Texel foggy_layer{255, 9, 31, 47};
-    const Scene shaded{.before = everywhere(overcast), .sky = everywhere(foggy_layer)};
-    Scene lit = shaded;
-    lit.before = everywhere(clear);
-    const long under = total(draw(*device, shaded));
-    const long clear_of = total(draw(*device, lit));
-    INFO("under " << under << ", clear of it " << clear_of);
-    CHECK(under < clear_of * 3 / 4);
 }

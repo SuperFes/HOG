@@ -86,7 +86,7 @@ TEST_CASE("cold ground's rain is snow and warm ground's is rain", "[weather][atm
     CHECK(warm == 0.0F);
 }
 
-TEST_CASE("cloud touching the ground is fog and cloud above it has a base and top",
+TEST_CASE("cloud touching the ground reaches under it, and runs up to the highest above",
           "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
     Atmosphere air{generator, 2, 8};
@@ -103,12 +103,11 @@ TEST_CASE("cloud touching the ground is fog and cloud above it has a base and to
     field.at(column, 4).cloud = 1e-3F;
     const Column shown = air.column(column);
     const Grid& grid = field.grid;
-    const auto depth = [&](int from, int to) {
-        return static_cast<float>(grid.floor_of(to) - grid.floor_of(from));
-    };
-    CHECK(shown.fog_top > 0.0F);
-    CHECK(shown.base == Catch::Approx(shown.fog_top + depth(1, 3)));
-    CHECK(shown.top == Catch::Approx(shown.base + depth(3, 5)));
+    const auto radius = static_cast<float>(generator.planet().body.radius);
+    CHECK(shown.base ==
+          Catch::Approx(static_cast<float>(grid.floor_of(0) - grid.depth_of(0)) - radius));
+    CHECK(shown.top > static_cast<float>(grid.floor_of(3)) - radius);
+    CHECK(shown.top <= static_cast<float>(grid.floor_of(5)) - radius);
     CHECK(shown.cloud > 0.0F);
 }
 

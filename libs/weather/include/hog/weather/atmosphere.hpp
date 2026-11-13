@@ -23,8 +23,9 @@ struct Column {
     Vec2 wind{0.0F};       // (east, north) m/s in the lowest open air
     float humidity = 0.0F; // of the lowest open air, 0 to 1
     bool sea = false;      // whether the sea lies under the air
-    float fog_top = 0.0F;  // top of cloud touching the ground; 0 where there is none
-    float base = 0.0F;     // lowest and highest cloud aloft; 0 where there is none
+    // The lowest and highest cloud; 0 where there is none. Cloud on the ground reaches a layer
+    // under the air's lowest, into the hollows the column's ground is taken over.
+    float base = 0.0F;
     float top = 0.0F;
 };
 

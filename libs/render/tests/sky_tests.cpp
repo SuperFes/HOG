@@ -412,8 +412,6 @@ hog::render::WeatherMaps sky_everywhere(hog::render::Device& device,
 
 constexpr std::array<std::uint8_t, 4> dry{0, 0, 0, 0};
 constexpr std::array<std::uint8_t, 4> humid{255, 0, 0, 0};
-// Saturated under fog to 288 m.
-constexpr std::array<std::uint8_t, 4> foggy{255, 9, 0, 0};
 
 // Of the light from what's drawn `distance` away straight ahead, the share the eye sees.
 double seen_through(hog::render::Device& device, const Atmosphere& atmosphere, SkyView view,
@@ -428,50 +426,30 @@ double seen_through(hog::render::Device& device, const Atmosphere& atmosphere, S
 
 } // namespace
 
-TEST_CASE("mist thickens as the air nears forming cloud and thins with height; fog lies below its "
-          "top",
+TEST_CASE("mist thickens as the air nears forming cloud and thins with height",
           "[render][atmosphere]") {
     using hog::render::mist_extinction;
-    CHECK(mist_extinction(0.0, 0.0, 0.0) == 0.0);
-    CHECK(mist_extinction(0.5, 0.0, 0.0) < mist_extinction(0.9, 0.0, 0.0));
-    CHECK(mist_extinction(0.9, 0.0, 0.0) < mist_extinction(1.0, 0.0, 0.0));
+    CHECK(mist_extinction(0.0, 0.0) == 0.0);
+    CHECK(mist_extinction(0.5, 0.0) < mist_extinction(0.9, 0.0));
+    CHECK(mist_extinction(0.9, 0.0) < mist_extinction(1.0, 0.0));
     // At its wettest, a few kilometres can be seen through.
-    const double seen = 3.912 / mist_extinction(1.0, 0.0, 0.0);
+    const double seen = 3.912 / mist_extinction(1.0, 0.0);
     CHECK(seen > 3'000.0);
     CHECK(seen < 5'000.0);
-    CHECK(mist_extinction(0.9, 0.0, 2'000.0) < 0.5 * mist_extinction(0.9, 0.0, 0.0));
-
-    CHECK(mist_extinction(0.0, 300.0, 100.0) == 0.015);
-    CHECK(mist_extinction(0.0, 300.0, 280.0) > 0.0);
-    CHECK(mist_extinction(0.0, 300.0, 280.0) < 0.015);
-    CHECK(mist_extinction(0.0, 300.0, 400.0) == 0.0);
-    CHECK(mist_extinction(0.0, 300.0, -50.0) == mist_extinction(0.0, 300.0, 0.0));
-    CHECK(mist_extinction(0.0, 0.0, -50.0) == 0.0);
-    // Over fog, the air's drier.
-    CHECK(mist_extinction(1.0, 300.0, 900.0) < 0.05 * mist_extinction(1.0, 0.0, 900.0));
+    CHECK(mist_extinction(0.9, 2'000.0) < 0.5 * mist_extinction(0.9, 0.0));
+    CHECK(mist_extinction(0.9, -50.0) == mist_extinction(0.9, 0.0));
 
     using hog::render::mist_above;
-    CHECK(mist_above(0.0, 0.0, 0.0) == 0.0);
-    CHECK(mist_above(0.9, 0.0, 1'000.0) < mist_above(0.9, 0.0, 0.0));
-    // Deep in fog, under all of it.
-    CHECK(mist_above(0.0, 300.0, 0.0) > 4.0);
-    CHECK(mist_above(0.0, 300.0, 400.0) == 0.0);
-
-    // The haze alone, less the fog.
-    using hog::render::haze_above;
-    CHECK(haze_above(0.0, 300.0, 0.0) == 0.0);
-    CHECK(haze_above(0.9, 300.0, 0.0) > 0.0);
-    CHECK(haze_above(0.9, 300.0, 0.0) < mist_above(0.9, 300.0, 0.0) - 4.0);
+    CHECK(mist_above(0.0, 0.0) == 0.0);
+    CHECK(mist_above(0.9, 1'000.0) < mist_above(0.9, 0.0));
 }
 
-TEST_CASE("humid air hides what's far, but not over fog, where it's drier",
-          "[render][gpu][atmosphere]") {
+TEST_CASE("humid air hides what's far", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     auto atmosphere = Atmosphere::create(*device);
     REQUIRE(atmosphere);
     const hog::render::WeatherMaps dry_maps = sky_everywhere(*device, dry);
     const hog::render::WeatherMaps humid_maps = sky_everywhere(*device, humid);
-    const hog::render::WeatherMaps foggy_maps = sky_everywhere(*device, foggy);
     // Looking a little up, so no view meets the sea.
     const auto raised = [](double height) {
         SkyView view = view_from(height, towards(30.0));
@@ -485,11 +463,6 @@ TEST_CASE("humid air hides what's far, but not over fog, where it's drier",
     const double far_humid = seen_through(*device, *atmosphere, low, humid_maps, 20'000.0);
     CHECK(far_dry > 0.5);
     CHECK(far_humid < 0.05);
-
-    // Over the fog the air's drier.
-    const SkyView over = raised(1'000.0);
-    CHECK(seen_through(*device, *atmosphere, over, foggy_maps, 5'000.0) >
-          0.9 * seen_through(*device, *atmosphere, over, dry_maps, 5'000.0));
     CHECK(device->validation_errors() == 0);
 }
 

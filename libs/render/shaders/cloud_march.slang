@@ -122,12 +122,9 @@ static const float streak_stretch = 10.0;
 static const float shadow_step = 300.0;
 static const uint most_shadow_steps = 64;
 static const uint least_shadow_steps = 8;
-// Fog is cloud lying on the ground: metres across the noise its banks and its wisps are shaped by,
-// and how far they thicken and thin it, as shares of its mean.
-static const float bank_tile = 6000.0;
-static const float wisp_tile = 600.0;
-static const float banked = 0.7;
-static const float wisped = 0.5;
+// Metres along a view over which cloud thins away to nothing where it meets what's drawn, so cloud
+// lying on the ground or against a mountain fades into it rather than being cut off by it.
+static const float meeting_fade = 40.0;
 
 // The weather at a place, as both maps fade between.
 struct Cell {
@@ -135,7 +132,6 @@ struct Cell {
     float mm;
     float base;
     float top;
-    float fog_top; // 0 for none
     // mm an hour, and the share of it as snow.
     float falling;
     float snow;
@@ -144,7 +140,7 @@ struct Cell {
 Cell cell_at(float3 direction) {
     // Where the cloud over it now lay when the maps were taken, by the drift here, so wherever
     // it's seen from it's the same cloud, at the heights it has. The cloud blows on with the wind;
-    // the air's damp, and so its fog, keeps to the air's slower pace.
+    // the air's damp keeps to the air's slower pace.
     // Each weather drifts on from when it came, so a new one's coming moves nothing.
     const float3 from_before = normalize((direction * lighting.weather.x) -
                                          (drift_before.SampleLevel(direction, 0.0).xyz *
@@ -163,7 +159,6 @@ Cell cell_at(float3 direction) {
     cell.mm = weather.g * weather.g * 16.0;
     cell.base = blown.base;
     cell.top = max(blown.top, blown.base);
-    cell.fog_top = sky.fog_top;
     cell.falling = weather.b * weather.b * 256.0;
     cell.snow = weather.a;
     return cell;
@@ -252,32 +247,6 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     return cloud;
 }
 
-// Per metre, how much light the fog in `cell` takes at `height` above sea level, `at` metres in the
-// planet's frame, where a pixel spans `footprint` metres: thickest under its top, in banks with
-// wisps among them, drifting with the wind, both evened out where a pixel spans more than they do.
-float fog_at(float3 at, float height, Cell cell, float footprint) {
-    const float deep = saturate((cell.fog_top - max(height, 0.0)) / fog_edge);
-    if (deep <= 0.0) {
-        return 0.0;
-    }
-    const Flow flow = flow_at(at);
-    const float bank =
-        flowed(shape_noise, at, flow, bank_tile, max(log2(footprint * shape_texels / bank_tile), 0.0))
-            .r;
-    const float wisp =
-        flowed(shape_noise, at, flow, wisp_tile, max(log2(footprint * shape_texels / wisp_tile), 0.0))
-            .r;
-    // The billows are spread evenly, so both average 1.
-    return fog_per_metre * deep * (1.0 + (banked * ((2.0 * bank) - 1.0))) *
-           (1.0 + (wisped * ((2.0 * wisp) - 1.0)));
-}
-
-// How much light the fog in `cell` over `height` takes, on the whole, from light falling straight
-// down onto it.
-float fog_over(Cell cell, float height) {
-    return fog_per_metre * max(cell.fog_top - max(height, 0.0), 0.0);
-}
-
 float thickness_of(Cell cell) {
     return max(cell.top - cell.base, 1.0);
 }
@@ -361,8 +330,9 @@ float raining_from(float3 direction, Cell cell, float footprint) {
 struct Ray {
     float3 view;
     float2 uv;
-    // How far it reaches: to what's drawn, else to the ground.
+    // How far it reaches: to what's drawn, else to the ground; and to what's drawn alone.
     float reach;
+    float drawn;
     // Offsets each step, afresh each frame, so frames blended together fill in between the steps.
     float jitter;
 };
@@ -433,7 +403,7 @@ float4 rain_between(Ray ray, float start, float end, out float distance) {
     return float4((radiance * between.a) + (between.rgb * opacity), opacity);
 }
 
-// The cloud along `ray`, from `start` to `end`, and the fog that's cloud lying on the ground,
+// The cloud along `ray`, from `start` to `end`, fading into what's drawn where it meets it,
 // premultiplied, before tone mapping; `distance` is left as the metres to it, weighed by what it
 // hides.
 float4 cloud_between(Ray ray, float start, float end, out float distance) {
@@ -469,9 +439,8 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
         const float3 point = direction * (radius + point_height);
         const float footprint = along * pixel;
         float billows = 0.0;
-        const float extinction =
-            (cloud_at(point, point_height, cell, footprint, true, billows) * densest_in(cell)) +
-            fog_at(point, point_height, cell, footprint);
+        const float extinction = cloud_at(point, point_height, cell, footprint, true, billows) *
+                                 densest_in(cell) * saturate((ray.drawn - along) / meeting_fade);
         const bool within = extinction > 0.0;
         const float fine = clamp(step_depth / max(extinction, 1e-6),
                                  max(footprint, coarse / most_refined), coarse);
@@ -496,10 +465,8 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
                 const float middle = (before + after) * 0.5;
                 const float3 lit_at = point + (sun * middle);
                 const float lit_height = point_height + (middle * sun_mu);
-                towards_sun += ((cloud_at(lit_at, lit_height, cell, footprint, false, unused) *
-                                 densest_in(cell)) +
-                                fog_at(lit_at, lit_height, cell, footprint)) *
-                               (after - before);
+                towards_sun += cloud_at(lit_at, lit_height, cell, footprint, false, unused) *
+                               densest_in(cell) * (after - before);
                 before = after;
             }
             const float3 sunlight =
@@ -517,9 +484,8 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
             // falls on the top at the top, dimmer deeper down and under where it billows. About as
             // deep as the whole column at the base, as clouds.cpp shades the ground beneath.
             const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
-            const float over = (column * saturate((cell.top - point_height) / thickness_of(cell)) *
-                                (0.5 + billows)) +
-                               fog_over(cell, point_height);
+            const float over = column * saturate((cell.top - point_height) / thickness_of(cell)) *
+                               (0.5 + billows);
             const float let_through = 1.0 / (1.0 + (0.75 * (1.0 - forward) * over));
             const float3 falling = (sunlight * max(sun_mu, 0.0)) + lighting.sky_scale.rgb;
             const float3 lit =
@@ -594,6 +560,7 @@ void march_main(uint3 id: SV_DispatchThreadID) {
         drawn_reach = length(drawn.xyz / drawn.w);
         ray.reach = min(ray.reach, drawn_reach);
     }
+    ray.drawn = drawn_reach;
 
     float4 cloud = float4(0.0);
     float cloud_distance = 0.0;

@@ -105,7 +105,6 @@ Column Atmosphere::column(std::size_t column) const {
     double carried = 0.0;
     Vec3 push{0.0F};
     bool lowest = true;
-    bool grounded = true;
     for (int layer = 0; layer < grid.layers; ++layer) {
         if (field_.solid(column, layer)) {
             continue;
@@ -134,20 +133,13 @@ Column Atmosphere::column(std::size_t column) const {
                                               static_cast<double>(air.vapour) / held, 0.0, 1.0))
                                         : 0.0F;
         }
-        const bool misty = cloud > visible;
-        if (misty && grounded) {
-            shown.fog_top =
-                static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
-        } else {
-            grounded = false;
-            if (misty) {
-                if (shown.top == 0.0F) {
-                    shown.base =
-                        static_cast<float>(edge_below(field_, column, layer) - planet_.body.radius);
-                }
-                shown.top =
-                    static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
+        if (cloud > visible) {
+            if (shown.top == 0.0F) {
+                const double sunk = lowest ? grid.depth_of(layer) : 0.0;
+                shown.base = static_cast<float>(edge_below(field_, column, layer) - sunk -
+                                                planet_.body.radius);
             }
+            shown.top = static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
         }
         lowest = false;
         shown.cloud += static_cast<float>(cloud * mass);

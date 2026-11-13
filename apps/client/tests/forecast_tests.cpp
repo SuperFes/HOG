@@ -99,10 +99,9 @@ TEST_CASE("the weather reads as a line", "[client][forecast]") {
                                  .falling = 2.5F,
                                  .drift = {3.0F, -4.0F},
                                  .humidity = 0.92F,
-                                 .fog_top = 300.0F,
                                  .base = 800.0F,
                                  .top = 2'100.0F}) ==
-          "100% cloud at 800-2100 m, rain 2.5 mm/h, 92% humid, fog to 300 m, drifting 5 m/s");
+          "100% cloud at 800-2100 m, rain 2.5 mm/h, 92% humid, drifting 5 m/s");
     CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F, .falling = 1.0F, .snow = 0.75F}) ==
           "100% cloud at 0-0 m, snow 1.0 mm/h, 0% humid, drifting 0 m/s");
 }
@@ -133,7 +132,6 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
                             .snow = 0.25F,
                             .drift = {3.0F, -1.0F},
                             .humidity = 0.6F,
-                            .fog_top = 320.0F,
                             .base = 1'280.0F,
                             .top = 3'200.0F};
     forecast.receive(everywhere(rainy), start);
@@ -153,13 +151,12 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     CHECK(std::ranges::all_of(forecast.before(),
                               [&](const auto& texel) { return texel == expected; }));
     CHECK_THAT(static_cast<double>(here.humidity), WithinAbs(0.6, 1e-6));
-    CHECK_THAT(static_cast<double>(here.fog_top), WithinAbs(320.0, 1e-3));
     CHECK_THAT(static_cast<double>(here.base), WithinAbs(1'280.0, 1e-3));
     CHECK_THAT(static_cast<double>(here.top), WithinAbs(3'200.0, 1e-3));
     REQUIRE(forecast.sky_before().size() == forecast.before().size());
     CHECK(forecast.sky_after() == forecast.sky_before());
-    // In steps of 32 and 64 metres.
-    const hog::client::SkyTexel sky{153, 10, 20, 50};
+    // In steps of 64 metres.
+    const hog::client::SkyTexel sky{153, 20, 50, 0};
     CHECK(std::ranges::all_of(forecast.sky_before(),
                               [&](const auto& texel) { return texel == sky; }));
 }
@@ -298,7 +295,6 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
         weather.cells[index].cover = static_cast<float>(0.5 + (0.4 * up.x));
         weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
         weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
-        weather.cells[index].fog_top = up.x > 0.0 ? static_cast<float>(400.0 * up.x) : 0.0F;
         weather.cells[index].drift = {static_cast<float>(10.0 * up.x),
                                       static_cast<float>(5.0 + (5.0 * up.z))};
     }
@@ -317,8 +313,7 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
                 const auto& sky =
                     forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
-                CHECK(std::abs(sky[1] - (here.fog_top / 32.0F)) <= 0.51F);
-                CHECK(std::abs(sky[2] - (here.base / 64.0F)) <= 0.51F);
+                CHECK(std::abs(sky[1] - (here.base / 64.0F)) <= 0.51F);
                 // The drift over the ground there, in the planet's frame.
                 const auto& drift =
                     forecast
@@ -393,7 +388,7 @@ TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[cl
                WithinAbs(static_cast<double>(fresh.at(west_of_eye(5'700.0), start).cloud), 0.02));
 }
 
-TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it, with its heights",
+TEST_CASE("the air's damp stays put as the cloud drifts on through it, with its heights",
           "[client][forecast]") {
     Weather weather = drifting_east();
     const hog::sim::CellGrid grid{weather.level};
@@ -401,7 +396,6 @@ TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it, wi
         const auto east = static_cast<float>(grid.frame(index).up.x);
         hog::protocol::CellWeather& cell = weather.cells[index];
         cell.humidity = 0.5F + (0.4F * east);
-        cell.fog_top = 100.0F + (100.0F * east);
         cell.base = 1'000.0F + (500.0F * east);
         cell.top = cell.base + 1'000.0F + (1'000.0F * east);
     }
@@ -411,7 +405,6 @@ TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it, wi
     const hog::protocol::CellWeather was = forecast.at(eye(), start);
     const hog::protocol::CellWeather is = forecast.at(eye(), later);
     CHECK(is.humidity == was.humidity);
-    CHECK(is.fog_top == was.fog_top);
     // The cloud blown here from 2 km upwind, at the heights it had there.
     const hog::protocol::CellWeather upwind = forecast.at(west_of_eye(2'000.0), start);
     CHECK_THAT(static_cast<double>(is.base), WithinAbs(static_cast<double>(upwind.base), 0.5));
@@ -441,9 +434,9 @@ TEST_CASE("a cloud's edge keeps its heights instead of sloping down to the groun
     }
     // The sky's map holds them at every texel too: a byte is 64 metres.
     for (const auto& texel : forecast.sky_after()) {
-        CHECK_THAT(static_cast<double>(texel[2]) * hog::client::height_texel_step,
+        CHECK_THAT(static_cast<double>(texel[1]) * hog::client::height_texel_step,
                    WithinAbs(6'000.0, hog::client::height_texel_step));
-        CHECK_THAT(static_cast<double>(texel[3]) * hog::client::height_texel_step,
+        CHECK_THAT(static_cast<double>(texel[2]) * hog::client::height_texel_step,
                    WithinAbs(8'000.0, hog::client::height_texel_step));
     }
 }

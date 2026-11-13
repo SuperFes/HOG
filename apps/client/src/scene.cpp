@@ -363,7 +363,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const double sun_mu = glm::dot(sun, shot.bend.up);
     const render::CloudShade shade =
         render::under_mist(shade_at_eye(shot.bend, here), static_cast<double>(here.humidity),
-                           static_cast<double>(here.fog_top), shot.bend.eye_height, sun_mu);
+                           shot.bend.eye_height, sun_mu);
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
     flowed_ = std::fmod(flowed_ + shot.seconds, render::flow_period);
@@ -384,11 +384,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts = gusts_.seen();
     sky.mist =
-        render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
-                             shot.bend.eye_height, sun_mu);
-    sky.haze =
-        render::haze_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
-                             shot.bend.eye_height, sun_mu);
+        render::mist_through(static_cast<double>(here.humidity), shot.bend.eye_height, sun_mu);
     if (cloudy) {
         sky.cloud_shadow = clouds_.shadow_image().view();
     }

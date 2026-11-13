@@ -199,17 +199,12 @@ CloudShade cloud_shade(double cover, double water) noexcept {
             .diffuse = covered * (let_through - unscattered)};
 }
 
-double mist_through(double humidity, double fog_top, double height, double sun_mu) noexcept {
-    return std::exp(-mist_above(humidity, fog_top, height) / std::max(sun_mu, least_sun));
+double mist_through(double humidity, double height, double sun_mu) noexcept {
+    return std::exp(-mist_above(humidity, height) / std::max(sun_mu, least_sun));
 }
 
-double haze_through(double humidity, double fog_top, double height, double sun_mu) noexcept {
-    return std::exp(-haze_above(humidity, fog_top, height) / std::max(sun_mu, least_sun));
-}
-
-CloudShade under_mist(CloudShade shade, double humidity, double fog_top, double height,
-                      double sun_mu) noexcept {
-    const double through = mist_through(humidity, fog_top, height, sun_mu);
+CloudShade under_mist(CloudShade shade, double humidity, double height, double sun_mu) noexcept {
+    const double through = mist_through(humidity, height, sun_mu);
     return {.direct = shade.direct * through,
             .diffuse = shade.diffuse + (shade.direct * (1.0 - through) * mist_scattered_down)};
 }
@@ -386,9 +381,8 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
         frames_ = 0;
     }
 
-    // Fog's marched with the cloud, as cloud lying on the ground.
-    const double lowest = view.weather.fog_top > 0.0 ? 0.0 : view.weather.lowest_base;
-    const double highest = std::max(view.weather.highest_top, view.weather.fog_top);
+    const double lowest = view.weather.lowest_base;
+    const double highest = view.weather.highest_top;
     const std::uint32_t scale = march_scale(quality_);
     // Radians across a marched texel.
     const double texel = scale * 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
