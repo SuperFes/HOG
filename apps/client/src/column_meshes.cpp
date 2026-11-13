@@ -46,7 +46,7 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
             // The sea stands at its one level, however much water each voxel at it holds.
             const Vec3 position =
                 (corner & sea_corner) != 0
-                    ? Vec3{(glm::normalize(mesh.origin + DVec3{vertex.position}) * *sea) -
+                    ? Vec3{(glm::normalize(mesh.origin + DVec3{vertex.position}) * sea.value()) -
                            mesh.origin}
                     : vertex.position;
             into.vertices.push_back({.position = position,

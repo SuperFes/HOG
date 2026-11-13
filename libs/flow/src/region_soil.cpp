@@ -69,7 +69,9 @@ std::int64_t Region::weather_column(Site top, std::int64_t ground, std::uint32_t
         }
         if (globe::horizons(here->solid, climate, depth).depth > 0.0) {
             here->solid = weathered;
-            held(globe::brick_of(site))->dirty = true;
+            if (Held* const brick = held(globe::brick_of(site))) {
+                brick->dirty = true;
+            }
             ++changed;
         }
         if (site.layer == 0) {
@@ -181,7 +183,9 @@ void Region::pile_pieces(Site column, std::uint32_t voxels,
         if (std::cmp_not_equal(here->grain_amount, amount) || here->grain != material) {
             here->grain = material;
             here->grain_amount = static_cast<std::uint16_t>(amount);
-            held(globe::brick_of(site))->dirty = true;
+            if (Held* const brick = held(globe::brick_of(site))) {
+                brick->dirty = true;
+            }
         }
         below += amount;
     }

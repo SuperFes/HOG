@@ -306,7 +306,9 @@ void Region::fill_grain(Site column, std::uint32_t voxels, std::int64_t depth, M
             (amount > 0 && here->grain != material)) {
             here->grain = amount > 0 ? material : Material::Air;
             here->grain_amount = static_cast<std::uint16_t>(amount);
-            held(globe::brick_of(site))->dirty = true;
+            if (Held* const brick = held(globe::brick_of(site))) {
+                brick->dirty = true;
+            }
         }
     }
 }
@@ -491,7 +493,9 @@ bool Region::drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j, c
             throw_grain(globe::middle_of(site, layers), {}, here->grain, amount);
             here->grain = Material::Air;
             here->grain_amount = 0;
-            held(globe::brick_of(site))->dirty = true;
+            if (Held* const brick = held(globe::brick_of(site))) {
+                brick->dirty = true;
+            }
             dropped = true;
         }
         gap = gap || amount < full;

@@ -170,7 +170,9 @@ std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, do
         runs.insert(runs.end(), row.begin(), row.end());
     }
     std::vector<std::size_t> parent(runs.size());
-    std::ranges::iota(parent, std::size_t{0});
+    for (std::size_t k = 0; k < parent.size(); ++k) {
+        parent[k] = k;
+    }
     join_overlapping(runs, parent);
     struct Gathered {
         DVec3 total{0.0};

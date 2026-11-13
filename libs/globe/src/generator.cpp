@@ -67,8 +67,8 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     say("laying out the voxel layers");
     // No shell reaches more than halfway to the centre, however deep a small planet's seas run:
     // what lies under its floor is rock.
-    const double depth = std::min(planet_.floor_depth + std::max(0.0, -shape_.lowest),
-                                  planet_.body.radius / 2.0);
+    const double depth =
+        std::min(planet_.floor_depth + std::max(0.0, -shape_.lowest), planet_.body.radius / 2.0);
     layers_ = layers_about(planet_.body.radius, depth,
                            planet_.sky_height + std::max(0.0, shape_.highest), planet_.voxel);
 }

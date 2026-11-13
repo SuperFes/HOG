@@ -170,7 +170,9 @@ void Region::pour(Site site, std::uint16_t amount) {
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
     at->liquid = amount > 0 ? Material::Water : Material::Air;
     at->liquid_amount = amount;
-    held(globe::brick_of(site))->dirty = true;
+    if (Held* const brick = held(globe::brick_of(site))) {
+        brick->dirty = true;
+    }
 }
 
 void Region::pour_lava(Site site, Material rock, std::uint16_t amount, double kelvin) {
@@ -179,7 +181,9 @@ void Region::pour_lava(Site site, Material rock, std::uint16_t amount, double ke
     at->liquid = amount > 0 ? rock : Material::Air;
     at->liquid_amount = amount;
     at->temperature = globe::temperature_in_eighths(kelvin);
-    held(globe::brick_of(site))->dirty = true;
+    if (Held* const brick = held(globe::brick_of(site))) {
+        brick->dirty = true;
+    }
 }
 
 std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, double kelvin) {
@@ -199,7 +203,9 @@ std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, doub
     at->liquid = rock;
     at->liquid_amount = static_cast<std::uint16_t>(at->liquid_amount + added);
     at->temperature = globe::temperature_in_eighths(heat / at->liquid_amount);
-    held(globe::brick_of(site))->dirty = true;
+    if (Held* const brick = held(globe::brick_of(site))) {
+        brick->dirty = true;
+    }
     return added;
 }
 
@@ -221,7 +227,9 @@ void Region::pile(Site site, Material material, std::uint16_t amount) {
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
     at->grain = material;
     set_grain(*at, amount);
-    held(globe::brick_of(site))->dirty = true;
+    if (Held* const brick = held(globe::brick_of(site))) {
+        brick->dirty = true;
+    }
 }
 
 void Region::suspend(Site site, Material material, std::int64_t amount) {
@@ -1040,7 +1048,9 @@ void Region::dig_units(Site bed, std::int64_t units) {
             if (here->solid_amount < half) {
                 here->solid = Material::Air;
             }
-            held(globe::brick_of(site))->dirty = true;
+            if (Held* const brick = held(globe::brick_of(site))) {
+                brick->dirty = true;
+            }
             units -= take;
         }
         if (site.layer == 0) {

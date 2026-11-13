@@ -111,7 +111,9 @@ void Region::quench_at(Site site, double volume, Stepped& stepped) {
             brick->dirty = true;
         }
     }
-    held(globe::brick_of(site))->dirty = true;
+    if (Held* const brick = held(globe::brick_of(site))) {
+        brick->dirty = true;
+    }
 }
 
 int Region::open_faces(Site site) {

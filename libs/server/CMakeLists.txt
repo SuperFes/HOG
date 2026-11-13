@@ -46,5 +46,9 @@ hog_add_tests(hog_server
 
 if(TARGET hog_server_tests)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    # Looks read where to write from the environment before any thread starts.
+    if(MSVC)
+        target_compile_definitions(hog_server_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
     target_link_libraries(hog_server_tests PRIVATE stb_image_write)
 endif()
