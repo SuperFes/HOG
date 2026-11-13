@@ -1,6 +1,7 @@
 #include <hog/client/tile_meshes.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/voxel_mesh.hpp>
+#include <hog/terrain/shore.hpp>
 
 #include <algorithm>
 #include <array>
@@ -204,7 +205,10 @@ void TileMeshes::mesh(globe::TileKey key) {
                      const auto found = near.find(wanted);
                      return found == near.end() ? nullptr : found->second.get();
                  };
-                 return drawn_of(globe::mesh_tile(layers, key, *tree, at), sea, thickness);
+                 // As high as the sea runs up the shore, the sheet runs out over it.
+                 return drawn_of(globe::mesh_tile(layers, key, *tree, at,
+                                                  static_cast<double>(terrain::shore_reach)),
+                                 sea, thickness);
              })});
 }
 

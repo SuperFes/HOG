@@ -16,7 +16,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <ranges>
 #include <vector>
 
 namespace {
@@ -285,19 +284,15 @@ TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where 
     }
 }
 
-TEST_CASE("water's sheet tells its corners how far they lie from its edge, where it meets ground "
-          "standing higher",
+TEST_CASE("water's sheet marks the corners on its edge, where it meets ground standing higher",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
     const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
     const auto shores = [](const VoxelMesh& mesh) {
-        return std::ranges::count(mesh.vertices, 0.0F, &hog::globe::VoxelVertex::from_edge);
+        return std::ranges::count(mesh.vertices, true, &hog::globe::VoxelVertex::shore);
     };
-    // Open water right across: no edge anywhere near.
-    const VoxelMesh open = hog::globe::mesh_tile(layers, key, flat(true).tiles.front().second);
-    CHECK(std::ranges::all_of(open.vertices, [](const hog::globe::VoxelVertex& vertex) {
-        return vertex.from_edge == hog::globe::no_edge;
-    }));
+    // Open water right across: no edge anywhere.
+    CHECK(shores(hog::globe::mesh_tile(layers, key, flat(true).tiles.front().second)) == 0);
 
     // A pool ten columns square sunk a voxel into the rock: its rim's corners are the edge's.
     const VoxelTree pool = VoxelTree::build(Volume::tile_side, [](int x, int y, int z) {
@@ -315,17 +310,43 @@ TEST_CASE("water's sheet tells its corners how far they lie from its edge, where
           4 * 10 * 10);
     // Two corners of each column along its sides, three of each at its corners.
     CHECK(shores(mesh) == (4 * 8 * 2) + (4 * 3));
-    // The middle lies five columns in from every side.
-    const hog::globe::VoxelVertex& first = *std::ranges::find(
-        mesh.vertices, Material::Water, &hog::globe::VoxelVertex::material);
-    const auto wide = static_cast<float>(
-        glm::distance(first.position, (&first)[1].position));
-    const float deepest =
-        std::ranges::max(mesh.vertices | std::views::filter([](const auto& vertex) {
-                             return vertex.material == Material::Water;
-                         }) |
-                         std::views::transform(&hog::globe::VoxelVertex::from_edge));
-    CHECK(deepest == Catch::Approx(5.0F * wide).epsilon(0.02));
+}
+
+TEST_CASE("water's sheet runs on over the shore as far as the sea may rise over it, at its level",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
+    // Sea standing a voxel deep on the rock to the west; to the east, a beach rising a voxel every
+    // three columns from the sea's level.
+    const VoxelTree beach = VoxelTree::build(Volume::tile_side, [](int x, int, int z) {
+        const auto top = static_cast<int>(ground) + 1 + (x < 20 ? 0 : 1 + ((x - 20) / 3));
+        if (std::cmp_less_equal(z, ground) || (x >= 20 && z < top)) {
+            return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+        }
+        if (std::cmp_equal(z, ground + 1)) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return Cube{};
+    });
+    const auto waters = [](const VoxelMesh& mesh) {
+        return std::ranges::count(mesh.vertices, Material::Water,
+                                  &hog::globe::VoxelVertex::material) /
+               4;
+    };
+    CHECK(waters(hog::globe::mesh_tile(layers, key, beach)) == 64 * 20);
+    // Over ground two voxels higher than the sea at most: three columns a voxel.
+    const double voxel = layers.bottom(ground + 2) - layers.bottom(ground + 1);
+    const VoxelMesh run = hog::globe::mesh_tile(layers, key, beach, {}, 2.5 * voxel);
+    CHECK(waters(run) == 64 * (20 + 9));
+    // All of it at the sea's level, under the ground over the shore.
+    const double level = layers.bottom(ground + 2);
+    for (const hog::globe::VoxelVertex& vertex : run.vertices) {
+        if (vertex.material == Material::Water) {
+            CHECK(std::abs(glm::length(run.origin + hog::DVec3{vertex.position}) - level) < 0.01);
+        }
+    }
+    // Its edge is far up the beach, not where the sea stands open.
+    CHECK(std::ranges::count(run.vertices, true, &hog::globe::VoxelVertex::shore) == 2 * 64);
 }
 
 TEST_CASE("a tile at a face's edge reads the tile across it on the next face",

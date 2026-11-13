@@ -57,17 +57,6 @@ TEST_CASE("a tile column's faces are drawn as ground, and water still or the sea
     CHECK(drawn.ground.origin == hog::WorldPosition{mesh.origin});
 }
 
-TEST_CASE("a water vertex is marked with how far it lies from its sheet's edge, over the sea's mark",
-          "[client][columns]") {
-    using hog::client::edge_mark;
-    using hog::client::edge_shift;
-    CHECK(edge_mark(hog::globe::no_edge) == 0);
-    CHECK(edge_mark(0.0F) == 1U << edge_shift);
-    CHECK(edge_mark(2.5F) == 11U << edge_shift);
-    CHECK(edge_mark(40.0F) == 0);
-    CHECK((edge_mark(1.0F) & hog::client::sea_corner) == 0);
-}
-
 TEST_CASE("tile columns are meshed as they're held, and gone once they're let go",
           "[client][columns]") {
     const hog::client::GlobeWorld& made = hog::client::testing::globe();

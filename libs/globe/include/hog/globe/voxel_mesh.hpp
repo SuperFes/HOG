@@ -8,12 +8,10 @@
 
 #include <cstdint>
 #include <functional>
-#include <limits>
+#include <optional>
 #include <vector>
 
 namespace hog::globe {
-
-inline constexpr float no_edge = std::numeric_limits<float>::infinity();
 
 // A corner of a voxel's face: metres from the mesh's origin, the face's outward normal, and what
 // the voxel is made of.
@@ -21,9 +19,9 @@ struct VoxelVertex {
     Vec3 position{0.0F};
     Vec3 normal{0.0F};
     Material material = Material::Air;
-    // Of a water sheet's corner, metres along the ground from the sheet's edge, where it meets
-    // what holds no water as high: waves rise from nothing there. `no_edge` where none's near.
-    float from_edge = no_edge;
+    // A water sheet's corner on its edge, where it meets what holds no water as high: waves
+    // mustn't lift it off what it meets.
+    bool shore = false;
 };
 
 // The faces of voxels, two triangles each, anticlockwise seen from outside.
@@ -47,8 +45,11 @@ using TileAt = std::function<const VoxelTree*(TileKey)>;
 // The faces of the tile at `key`, its voxels `tile`, drawn as mesh_tile_column draws a column's.
 // Past its sides the tiles on its face are read from `beside`, of its level or the finest coarser
 // it has there; else finer, a voxel each read where it meets the tile; elsewhere the tile is taken
-// to go on as its edge does.
+// to go on as its edge does. Given `shore_rise`, water's open top runs on over the shore beside it
+// wherever the ground there is no more than that many metres over it, hidden under the ground at
+// rest, for the sea to run up over.
 [[nodiscard]] VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
-                                  const TileAt& beside = {});
+                                  const TileAt& beside = {},
+                                  std::optional<double> shore_rise = std::nullopt);
 
 } // namespace hog::globe
