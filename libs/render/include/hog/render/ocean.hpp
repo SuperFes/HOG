@@ -83,6 +83,9 @@ struct DrawnWaves {
     glm::vec4 ripple_north{0.0F};
     // Of rain ringing the water: x rain_ring_chance, y seconds, counted round now and then.
     glm::vec4 rain{0.0F};
+    // x how far through the year it is, as a share of it from the March equinox, which lakes and
+    // rivers rise and fall by.
+    glm::vec4 year{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};

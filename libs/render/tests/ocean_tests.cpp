@@ -224,6 +224,37 @@ TEST_CASE("still water placed as a mesh is drawn where it stands, with the sea",
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a lake's water stands at its lowest, risen as far as the year has brought it",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // A sheet a metre over the sea, rising five metres at its highest, which the eye two metres
+    // up sees from under once it's risen: at its peak at the March equinox, as the drawn waves'
+    // year has it, and half a year from it.
+    const auto drawn = [&](std::uint8_t peak) {
+        auto made = std::make_shared<hog::terrain::BlockMesh>();
+        made->origin = WorldPosition{up * (earth + 1.0)};
+        for (const hog::Vec3 corner :
+             {hog::Vec3{3.0F, -300.0F, 0.0F}, hog::Vec3{300.0F, -300.0F, 0.0F},
+              hog::Vec3{300.0F, 300.0F, 0.0F}, hog::Vec3{3.0F, 300.0F, 0.0F}}) {
+            made->vertices.push_back({.position = corner,
+                                      .normal = hog::Vec3{0.0F, 0.0F, 1.0F},
+                                      .tiles = {0, 50, peak},
+                                      .corner = 0});
+        }
+        made->indices = {0, 1, 2, 0, 2, 3};
+        std::vector<float> depths;
+        static_cast<void>(through_air(
+            *device, 160.0, [&](hog::render::Ocean& ocean) { ocean.place_still(1, made); },
+            &depths));
+        return depths;
+    };
+    const std::uint32_t middle = extent.width / 2;
+    const std::uint32_t over_horizon = (extent.height / 2) - 6;
+    CHECK(depth_at(drawn(0), middle, over_horizon) > 0.0F);
+    CHECK(depth_at(drawn(128), middle, over_horizon) == 0.0F);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("through the air, the sun's glint on the sea reddens as it sets",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();

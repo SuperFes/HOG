@@ -2,6 +2,7 @@
 #include <hog/globe/cell.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <iterator>
@@ -18,6 +19,16 @@ std::optional<int> level_held(const globe::World& world, globe::Site corner) {
         return 0;
     }
     return std::nullopt;
+}
+
+// A face's tiles at a corner: its own, or for water, which draws one, how it rises through the
+// year in the other two.
+std::array<std::uint8_t, 3> tiles_of(const globe::VoxelVertex& vertex, std::uint8_t tile,
+                                     bool liquid) {
+    if (liquid) {
+        return {tile, vertex.rise, vertex.peak};
+    }
+    return {tile, tile, tile};
 }
 
 } // namespace
@@ -51,7 +62,7 @@ ColumnDrawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, do
                     : vertex.position;
             into.vertices.push_back({.position = position,
                                      .normal = vertex.normal,
-                                     .tiles = {tile, tile, tile},
+                                     .tiles = tiles_of(vertex, tile, liquid),
                                      .corner = static_cast<std::uint8_t>(
                                          corner | (liquid && vertex.shore ? shore_corner : 0U))});
         }

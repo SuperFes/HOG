@@ -125,6 +125,9 @@ public struct Waves {
     // Of rain ringing the water: x the chance each cell of each layer rings once over a ring's life,
     // as hog::render::rain_ring_chance has it; y seconds, counted round now and then.
     public float4 rain;
+    // x how far through the year it is, as a share of it from the March equinox, which lakes and
+    // rivers rise and fall by.
+    public float4 year;
     // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
     // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
     // none without wind. Then x and y how the sea's height and peak grow by its fetch, as

@@ -10,8 +10,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -62,6 +64,27 @@ TEST_CASE("a tile column's faces are drawn as ground, and water still or the sea
     CHECK(glm::length(mesh.origin + hog::DVec3{drawn.water.vertices[4].position}) ==
           Catch::Approx(1040.0).margin(1e-2));
     CHECK(drawn.ground.origin == hog::WorldPosition{mesh.origin});
+}
+
+TEST_CASE("still water's corners say how it rises through the year; the ground's name its tile",
+          "[client][columns]") {
+    VoxelMesh mesh{.origin = {1000.0, 0.0, 0.0}, .vertices = {}, .indices = {}};
+    add_face(mesh, 1000.0, Material::Granite);
+    add_face(mesh, 1040.0, Material::Water);
+    for (std::size_t k = 4; k < 8; ++k) {
+        mesh.vertices[k].rise = 31;
+        mesh.vertices[k].peak = 140;
+    }
+    const hog::client::ColumnDrawn drawn = hog::client::drawn_of(mesh, std::nullopt, 1.0);
+    const auto granite = static_cast<std::uint8_t>(Material::Granite);
+    CHECK(drawn.ground.vertices.front().tiles ==
+          std::array<std::uint8_t, 3>{granite, granite, granite});
+    REQUIRE(drawn.water.vertices.size() == 4);
+    for (const hog::terrain::BlockVertex& vertex : drawn.water.vertices) {
+        CHECK(vertex.tiles[0] == static_cast<std::uint8_t>(Material::Water));
+        CHECK(vertex.tiles[1] == 31);
+        CHECK(vertex.tiles[2] == 140);
+    }
 }
 
 TEST_CASE("tile columns are meshed as they're held, and gone once they're let go",

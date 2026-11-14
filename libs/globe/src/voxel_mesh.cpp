@@ -33,6 +33,9 @@ struct Held {
     Material liquid = Material::Air;
     double ground_share = 0.0;
     double liquid_share = 0.0;
+    // How its water rises and falls through the year, as voxels hold it.
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
 };
 
 Held held_of(const Voxel& voxel) {
@@ -46,7 +49,9 @@ Held held_of(const Voxel& voxel) {
     return {.ground = solid >= grain ? voxel.solid : voxel.grain,
             .liquid = voxel.liquid,
             .ground_share = std::min(1.0, solid + grain),
-            .liquid_share = std::min(1.0, liquid)};
+            .liquid_share = std::min(1.0, liquid),
+            .rise = voxel.rise,
+            .peak = voxel.peak};
 }
 
 Held held_of(const Cube& cube) {
@@ -55,7 +60,9 @@ Held held_of(const Cube& cube) {
                          .grain_amount = cube.grain_amount,
                          .liquid = cube.liquid,
                          .liquid_amount = cube.liquid_amount,
-                         .solid_amount = cube.solid_amount});
+                         .solid_amount = cube.solid_amount,
+                         .rise = cube.rise,
+                         .peak = cube.peak});
 }
 
 // Part of a voxel's height drawn as one matter, as shares of it from its bottom.
@@ -71,6 +78,9 @@ struct Piece {
 struct Slot {
     Piece ground;
     Piece liquid;
+    // How the liquid rises and falls through the year, as voxels hold it.
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
 };
 
 // A column voxel by voxel from the bottom, as held and as drawn, and which voxels' ground is drawn
@@ -157,6 +167,8 @@ void stand_liquid(Standing& standing) {
         }
         const int first = z;
         const Material material = standing.held(z).liquid;
+        const std::uint8_t rise = standing.held(z).rise;
+        const std::uint8_t peak = standing.held(z).peak;
         double total = 0.0;
         for (; z < count && open(z); ++z) {
             total += standing.held(z).liquid_share +
@@ -173,6 +185,8 @@ void stand_liquid(Standing& standing) {
             }
             const double part = std::min(1.0 - bottom, total);
             standing.slot(k).liquid = {.from = bottom, .to = bottom + part, .material = material};
+            standing.slot(k).rise = rise;
+            standing.slot(k).peak = peak;
             total -= part;
         }
     }
@@ -465,16 +479,24 @@ std::optional<double> ground_top(const Block& block, int x, int y, int z, double
     return std::nullopt;
 }
 
+// Water standing at `level`, in voxels up the layers, and how it rises through the year.
+struct SheetWater {
+    double level = 0.0;
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
+};
+
 // The water's sheet at a layer of voxels, about the tile: where it stands open, and on from there
-// over the shore wherever the ground's no higher over it than the sea may rise, `rise`, as far as
-// the block's apron lets it be told; nowhere for a rise under nothing, so the tide and the swash
-// run up the shore over it rather than lifting its edge off. At rest the ground hides what's over
-// the shore. Heights in voxels up the layers.
+// over the shore wherever the ground's no higher over it than the sea may rise, `rise`, or the
+// water itself through the year, as far as the block's apron lets it be told; nowhere for a rise
+// under nothing, so the tide, the swash and the seasons run up the shore over it rather than
+// lifting its edge off. At rest the ground hides what's over the shore. Heights in voxels up the
+// layers, each `voxel` metres.
 class Sheet {
 public:
-    Sheet(const Block& block, double rise)
-        : block_{&block}, rise_{rise}, apron_{block.apron()}, wide_{block.across() + (2 * apron_)},
-          over_(static_cast<std::size_t>(wide_ * wide_)) {}
+    Sheet(const Block& block, double rise, double voxel)
+        : block_{&block}, rise_{rise}, voxel_{voxel}, apron_{block.apron()},
+          wide_{block.across() + (2 * apron_)}, over_(static_cast<std::size_t>(wide_ * wide_)) {}
 
     // How high the sheet the water at `z` is part of stands over the column: its own water's
     // surface, within a voxel of `z`, or the water's it runs over the shore from.
@@ -482,12 +504,14 @@ public:
         if (const std::optional<double> surface = surface_near(*block_, x, y, z)) {
             return surface;
         }
-        return over(x, y, z);
+        if (const std::optional<SheetWater> water = over(x, y, z)) {
+            return water->level;
+        }
+        return std::nullopt;
     }
 
-    // The level of the water at `z` the sheet runs over the column's shore from; none where it
-    // doesn't.
-    [[nodiscard]] std::optional<double> over(int x, int y, int z) {
+    // The water at `z` the sheet runs over the column's shore from; none where it doesn't.
+    [[nodiscard]] std::optional<SheetWater> over(int x, int y, int z) {
         if (!within(x) || !within(y)) {
             return std::nullopt;
         }
@@ -508,11 +532,8 @@ private:
     void measure(int z) {
         z_ = z;
         std::ranges::fill(over_, std::nullopt);
-        if (rise_ < 0.0) {
-            return;
-        }
         std::vector<std::array<int, 2>> reached;
-        std::vector<double> levels;
+        std::vector<SheetWater> waters;
         const int last = block_->across() + apron_;
         for (int y = -apron_; y < last; ++y) {
             for (int x = -apron_; x < last; ++x) {
@@ -520,7 +541,8 @@ private:
                 if (!here.liquid.empty() &&
                     !end_hidden(here.liquid, true, here, block_->at(x, y, z + 1), 1)) {
                     reached.push_back({x, y});
-                    levels.push_back(z + here.liquid.to);
+                    waters.push_back(
+                        {.level = z + here.liquid.to, .rise = here.rise, .peak = here.peak});
                 }
             }
         }
@@ -528,7 +550,12 @@ private:
         constexpr double held = 1e-6;
         for (std::size_t next = 0; next < reached.size(); ++next) {
             const auto [x, y] = reached[next];
-            const double level = levels[next];
+            const SheetWater water = waters[next];
+            const double rises =
+                std::max(rise_, water.rise > 0 ? water.rise / (10.0 * voxel_) : -1.0);
+            if (rises < 0.0) {
+                continue;
+            }
             for (const auto [by_x, by_y] :
                  {std::array{1, 0}, std::array{-1, 0}, std::array{0, 1}, std::array{0, -1}}) {
                 const int to_x = x + by_x;
@@ -537,25 +564,26 @@ private:
                     surface_near(*block_, to_x, to_y, z)) {
                     continue;
                 }
-                const auto from = static_cast<int>(std::floor(level - held));
+                const auto from = static_cast<int>(std::floor(water.level - held));
                 const std::optional<double> top =
-                    ground_top(*block_, to_x, to_y, from, level + rise_);
-                if (!top || *top < level - held) {
+                    ground_top(*block_, to_x, to_y, from, water.level + rises);
+                if (!top || *top < water.level - held) {
                     continue;
                 }
-                over_[index(to_x, to_y)] = level;
+                over_[index(to_x, to_y)] = water;
                 reached.push_back({to_x, to_y});
-                levels.push_back(level);
+                waters.push_back(water);
             }
         }
     }
 
     const Block* block_;
     double rise_;
+    double voxel_;
     int apron_;
     int wide_;
     int z_ = std::numeric_limits<int>::min();
-    std::vector<std::optional<double>> over_;
+    std::vector<std::optional<SheetWater>> over_;
 };
 
 // The open top of the water in the voxel at `x`, `y`, `z` of the block, or the sheet run on from it
@@ -567,12 +595,16 @@ void add_sheet(VoxelMesh& mesh, const Block& block, Sheet& sheet, const Layers& 
     const Slot& here = block.at(x, y, z);
     double own = 0.0;
     Material material = here.liquid.material;
+    std::uint8_t rise = here.rise;
+    std::uint8_t peak = here.peak;
     if (!here.liquid.empty() && !end_hidden(here.liquid, true, here, block.at(x, y, z + 1), 1)) {
         own = z + here.liquid.to;
-    } else if (const std::optional<double> over = sheet.over(x, y, z);
+    } else if (const std::optional<SheetWater> over = sheet.over(x, y, z);
                here.liquid.empty() && over) {
-        own = *over;
+        own = over->level;
         material = Material::Water;
+        rise = over->rise;
+        peak = over->peak;
     } else {
         return;
     }
@@ -628,7 +660,9 @@ void add_sheet(VoxelMesh& mesh, const Block& block, Sheet& sheet, const Layers& 
         mesh.vertices.push_back({.position = Vec3{points.at(k) - mesh.origin},
                                  .normal = unit,
                                  .material = material,
-                                 .shore = shore.at(k)});
+                                 .shore = shore.at(k),
+                                 .rise = rise,
+                                 .peak = peak});
     }
     for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
                                            : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {
@@ -873,7 +907,7 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile, co
         stand_ring(block, near, stood_to, 2, block.apron());
     }
     const double voxel = layers.bottom((base + 1) * size) - layers.bottom(base * size);
-    Sheet sheet{block, shore_rise ? *shore_rise / voxel : -1.0};
+    Sheet sheet{block, shore_rise ? *shore_rise / voxel : -1.0, voxel};
     for (int z = base; z < top; ++z) {
         const double low = layers.bottom(z * size);
         const double high = layers.bottom((z + 1) * size);
@@ -909,7 +943,8 @@ VoxelMesh mesh_tile_column(const World& world, Site corner, int level) {
     // A voxel under the floor, all rock, and one over the top, all air.
     Block block{across, span->lowest - 1, span->highest - span->lowest + 2};
     fill(world, block, first, size);
-    Sheet sheet{block, -1.0};
+    Sheet sheet{block, -1.0,
+                layers.bottom((span->lowest + 1) * size) - layers.bottom(span->lowest * size)};
     for (int z = span->lowest; z < span->highest; ++z) {
         const double low = layers.bottom(z * size);
         const double high = layers.bottom((z + 1) * size);

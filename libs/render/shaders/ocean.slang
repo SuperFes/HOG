@@ -220,6 +220,13 @@ Surface vertex_still(StillVertex vertex) {
     const WaveSurface water =
         wave_surface(waves, surface.rest, still_between, surface.floor.xyz, surface.reach);
     float3 moved = water.moved + (up * surface.floor.w);
+    if (!sea) {
+        // A lake or river stands at its lowest, rising as its water does through the year: as
+        // voxels hold it, decimetres at its highest and when, in 256ths of the year.
+        const float rise = float(vertex.tiles.y) / 10.0;
+        const float from_peak = waves.year.x - (float(vertex.tiles.z) / 256.0);
+        moved += up * (rise * 0.5 * (1.0 + cos(2.0 * pi * from_peak)));
+    }
     if ((vertex.tiles.w & shore_corner) != 0u) {
         // On the sheet's edge, waves and the tide may lower the water from what it meets, which
         // reads as the tide going out, but never lift it off; nor sway it away sideways.

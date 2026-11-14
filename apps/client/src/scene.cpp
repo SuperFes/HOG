@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <format>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -497,6 +498,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     drawn_waves.rain = {
         static_cast<float>(render::rain_ring_chance(falling, static_cast<double>(here.snow))),
         static_cast<float>(render::rain_ring_seconds(shot.time)), 0.0F, 0.0F};
+    drawn_waves.year = {
+        static_cast<float>(sim::Calendar::solar_longitude(shot.time) / (2.0 * std::numbers::pi)),
+        0.0F, 0.0F, 0.0F};
     // Where every chunk round the eye is drawn, its own surface is the sea, meeting the ground
     // they mesh exactly.
     const render::OceanView sea{.camera = shot.camera,

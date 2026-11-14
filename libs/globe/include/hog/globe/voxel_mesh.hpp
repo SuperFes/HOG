@@ -22,6 +22,9 @@ struct VoxelVertex {
     // A water sheet's corner on its edge, where it meets what holds no water as high: waves
     // mustn't lift it off what it meets.
     bool shore = false;
+    // How a water sheet's water rises through the year, as voxels hold it, to be lifted by.
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
 };
 
 // The faces of voxels, two triangles each, anticlockwise seen from outside.

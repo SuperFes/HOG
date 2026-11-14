@@ -379,6 +379,37 @@ TEST_CASE("water's sheet runs on over the shore as far as the sea may rise over 
     CHECK(std::ranges::count(run.vertices, true, &hog::globe::VoxelVertex::shore) == 2 * 64);
 }
 
+TEST_CASE("a lake's sheet runs on over the shore as far as its water rises through the year, "
+          "saying how",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Layers& layers = earth().layers();
+    const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
+    const double voxel = layers.bottom(ground + 2) - layers.bottom(ground + 1);
+    const auto rise = static_cast<std::uint8_t>(std::lround(25.0 * voxel));
+    // As the sea's beach above, its water rising two and a half voxels at its highest.
+    const VoxelTree beach = VoxelTree::build(Volume::tile_side, [&](int x, int, int z) {
+        const auto top = static_cast<int>(ground) + 1 + (x < 20 ? 0 : 1 + ((x - 20) / 3));
+        if (std::cmp_less_equal(z, ground) || (x >= 20 && z < top)) {
+            return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+        }
+        if (std::cmp_equal(z, ground + 1)) {
+            return Cube{
+                .liquid = Material::Water, .liquid_amount = Voxel::full, .rise = rise, .peak = 77};
+        }
+        return Cube{};
+    });
+    const VoxelMesh run = hog::globe::mesh_tile(layers, key, beach);
+    std::size_t waters = 0;
+    for (const hog::globe::VoxelVertex& vertex : run.vertices) {
+        if (vertex.material == Material::Water) {
+            ++waters;
+            CHECK(vertex.rise == rise);
+            CHECK(vertex.peak == 77);
+        }
+    }
+    CHECK(waters == std::size_t{4} * 64 * (20 + 9));
+}
+
 TEST_CASE("a tile at a face's edge reads the tile across it on the next face",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
