@@ -519,7 +519,8 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     WorldPosition matt_at = standing(server->generator(), 100.0);
     int stage = 0;
     std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 30s;
+    // A sanitized server's ticks stall for seconds at a time as players arrive.
+    const auto give_up = MonotonicClock::now() + 90s;
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
         anna->look(Whereabouts{.at = anna_at}, now);

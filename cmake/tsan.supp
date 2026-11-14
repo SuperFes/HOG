@@ -4,3 +4,7 @@ race:SteamNetworkingSocketsLib::CSteamNetworkConnectionBase::AllocateNewRecvMess
 # It takes a connection's lock then the tables lock when accepting a connection, and the other way
 # round when destroying a poll group, but always under its global lock, so the two never interleave.
 deadlock:SteamNetworkingSocketsLib::CSteamNetworkConnectionBase::BInitConnection
+# LMDB reads and writes its reader table and meta pages without locks by design: readers publish
+# their slot and transaction id, and the writer only ever reads them to find the oldest reader.
+race:mdb_txn_renew0
+race:mdb_find_oldest
