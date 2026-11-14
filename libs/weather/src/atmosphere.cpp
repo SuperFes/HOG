@@ -128,10 +128,13 @@ Column Atmosphere::column(std::size_t column) const {
     double carried = 0.0;
     Vec3 push{0.0F};
     bool lowest = true;
+    shown.layers.resize(static_cast<std::size_t>(grid.layers));
+    int first_open = grid.layers;
     for (int layer = 0; layer < grid.layers; ++layer) {
         if (field_.solid(column, layer)) {
             continue;
         }
+        first_open = std::min(first_open, layer);
         const Air& air = field_.at(column, layer);
         const double height = grid.radius_of(layer) - planet_.body.radius;
         const double pressure = pressure_at(planet_, surface, height);
@@ -161,9 +164,15 @@ Column Atmosphere::column(std::size_t column) const {
             shown.top = static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
         }
         lowest = false;
+        shown.layers[static_cast<std::size_t>(layer)] = {.cover = static_cast<float>(covered),
+                                                         .cloud = static_cast<float>(cloud * mass)};
         shown.cloud += static_cast<float>(cloud * mass);
         carried += cloud * mass;
         push += Vec3{static_cast<float>(cloud * mass)} * air.wind;
+    }
+    for (int layer = 0; layer < first_open; ++layer) {
+        shown.layers[static_cast<std::size_t>(layer)] =
+            shown.layers[static_cast<std::size_t>(std::min(first_open, grid.layers - 1))];
     }
     shown.cover = static_cast<float>(1.0 - (clear * (1.0 - run)));
     if (carried > 0.0) {

@@ -9,8 +9,15 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <vector>
 
 namespace hog::weather {
+
+// The cloud in one layer of a column of air.
+struct LayerCloud {
+    float cover = 0.0F; // share of the sky it covers, 0 to 1
+    float cloud = 0.0F; // mm of condensed water
+};
 
 // What a column of air shows from the ground and from afar. Heights are metres over the
 // reference level.
@@ -27,6 +34,9 @@ struct Column {
     // under the air's lowest, into the hollows the column's ground is taken over.
     float base = 0.0F;
     float top = 0.0F;
+    // Each of the grid's layers, bottom up; those under the ground hold what the lowest open one
+    // does, so cloud on the ground fills the hollows the column's ground is taken over.
+    std::vector<LayerCloud> layers;
 };
 
 // The air of a whole planet, stepped on in game time.

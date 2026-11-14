@@ -206,3 +206,35 @@ TEST_CASE("cover is how much of the sky cloud closes over, by what the air could
     field.at(column, 9).cloud = 1e-4F;
     CHECK(cover() > one);
 }
+
+TEST_CASE("a column keeps each layer's cloud, those under the ground the lowest open one's",
+          "[weather][atmosphere]") {
+    const hog::globe::Generator generator{small_earth()};
+    Atmosphere air{generator, 2, 10};
+    Field& field = air.field();
+    const Grid& grid = field.grid;
+    // A column whose ground takes in its lowest layer.
+    std::size_t column = 0;
+    while (column < grid.columns() && (!field.solid(column, 0) || field.solid(column, 1))) {
+        ++column;
+    }
+    REQUIRE(column < grid.columns());
+    for (int layer = 1; layer < grid.layers; ++layer) {
+        field.at(column, layer).cloud = 0.0F;
+    }
+    field.at(column, 1).cloud = 1e-4F;
+    field.at(column, 6).cloud = 2e-4F;
+    const Column shown = air.column(column);
+    REQUIRE(shown.layers.size() == static_cast<std::size_t>(grid.layers));
+    float total = 0.0F;
+    for (int layer = 1; layer < grid.layers; ++layer) {
+        const LayerCloud& here = shown.layers[static_cast<std::size_t>(layer)];
+        CHECK((here.cloud > 0.0F) == (layer == 1 || layer == 6));
+        CHECK((here.cover > 0.0F) == (layer == 1 || layer == 6));
+        CHECK(here.cover <= 1.0F);
+        total += here.cloud;
+    }
+    CHECK(total == Catch::Approx(shown.cloud));
+    CHECK(shown.layers[0].cloud == shown.layers[1].cloud);
+    CHECK(shown.layers[0].cover == shown.layers[1].cover);
+}
