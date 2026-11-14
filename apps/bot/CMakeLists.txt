@@ -21,4 +21,7 @@ if(TARGET hog_bot_tests)
     # The server, and ground built for it, for a bot to walk on.
     target_link_libraries(hog_bot_tests PRIVATE hog::app hog::build_world hog::store
                                                 hog::test_world)
+    if(HOG_SANITIZE)
+        target_compile_definitions(hog_bot_tests PRIVATE HOG_SANITIZED)
+    endif()
 endif()

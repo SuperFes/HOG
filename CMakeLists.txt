@@ -186,7 +186,8 @@ function(hog_add_tests lib)
     if(HOG_SHARD_TESTS)
         foreach(shard RANGE 3)
             add_test(NAME ${lib}_tests-${shard}
-                COMMAND ${lib}_tests --shard-count 4 --shard-index ${shard} --allow-running-no-tests)
+                COMMAND ${lib}_tests --shard-count 4 --shard-index ${shard} --order decl
+                        --allow-running-no-tests)
             set_tests_properties(${lib}_tests-${shard} PROPERTIES SKIP_RETURN_CODE 4)
         endforeach()
     else()

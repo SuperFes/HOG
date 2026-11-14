@@ -83,7 +83,8 @@ TEST_CASE("a page stores alike nodes and cubes once", "[baked]") {
     // Two halves alike, each split the same way: one node for both.
     const VoxelTree striped =
         VoxelTree::build(4, [](int x, int, int) { return x % 2 == 0 ? rock() : Cube{}; });
-    const auto striped_page = Page::view(encode_tree(striped, 2, 0, 0));
+    const std::vector<std::byte> striped_bytes = encode_tree(striped, 2, 0, 0);
+    const auto striped_page = Page::view(striped_bytes);
     REQUIRE(striped_page.has_value());
     CHECK(striped_page->nodes() == 2);
     CHECK(striped_page->cubes() == 2);
@@ -94,7 +95,8 @@ TEST_CASE("a page keeps its leaves' marks", "[baked]") {
     // The corner eighth known finely.
     tree.graft(0, 0, 0, VoxelTree{2, rock(), 0}, 2, 0);
     REQUIRE(tree.coarsest(4, 4, 4, 4) == 4);
-    const auto page = Page::view(encode_tree(tree, 3, 0, 0));
+    const std::vector<std::byte> bytes = encode_tree(tree, 3, 0, 0);
+    const auto page = Page::view(bytes);
     REQUIRE(page.has_value());
     CHECK(page->at(0, 0, 0).open == 0);
     CHECK(page->at(7, 7, 7).open == 4);
@@ -120,7 +122,8 @@ TEST_CASE("a part of a page reads as that part of it", "[baked]") {
     const std::vector<std::byte> coarse = encode_tree(tree, 7, 2, 0);
     const auto coarse_page = Page::view(coarse);
     REQUIRE(coarse_page.has_value());
-    const auto fine = Page::view(encode_part(*coarse_page, 4, 8, 12, 1));
+    const std::vector<std::byte> fine_bytes = encode_part(*coarse_page, 4, 8, 12, 1);
+    const auto fine = Page::view(fine_bytes);
     REQUIRE(fine.has_value());
     CHECK(fine->voxel() == 1);
     CHECK(fine->at(1, 1, 1).cube == tree.at(1, 2, 3));

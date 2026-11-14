@@ -47,6 +47,8 @@ public:
     Page() = default;
     // Fails, saying why, on bytes that aren't a page.
     [[nodiscard]] static Result<Page> view(std::span<const std::byte> bytes);
+    // A page only views its bytes; they must outlive it.
+    static Result<Page> view(std::vector<std::byte>&& bytes) = delete;
 
     // log2 of its side, and of each of its voxels' sides, in the finest voxels.
     [[nodiscard]] std::uint8_t size() const noexcept { return size_; }

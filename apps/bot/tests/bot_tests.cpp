@@ -89,6 +89,10 @@ private:
 } // namespace
 
 TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
+#ifdef HOG_SANITIZED
+    // Cutting the view the server sends takes sanitized builds tens of minutes of real time.
+    SKIP("too slow to stream ground in real time under sanitizers");
+#endif
     const hog::testing::TemporaryDirectory directory;
     DVec3 middle{0.0};
     {
