@@ -9,6 +9,7 @@
 #include <hog/formation/landforms.hpp>
 #include <hog/formation/ores.hpp>
 #include <hog/formation/plates.hpp>
+#include <hog/formation/regimes.hpp>
 #include <hog/formation/rivers.hpp>
 #include <hog/formation/sediment.hpp>
 #include <hog/formation/shores.hpp>
@@ -39,6 +40,7 @@ struct World {
     Rivers rivers; // over the land as ice left it
     Outcrop outcrop;
     Lakes lakes;
+    Regimes regimes;
     Sediment sediment;
     Shores shores;
     Drifts drifts;

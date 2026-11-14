@@ -8,6 +8,7 @@ add_library(hog_formation
     src/drifts.cpp
     src/ores.cpp
     src/plates.cpp
+    src/regimes.cpp
     src/rivers.cpp
     src/sediment.cpp
     src/shores.cpp
@@ -31,6 +32,7 @@ hog_add_tests(hog_formation
     tests/drifts_tests.cpp
     tests/ores_tests.cpp
     tests/plates_tests.cpp
+    tests/regimes_tests.cpp
     tests/rivers_tests.cpp
     tests/sediment_tests.cpp
     tests/shores_tests.cpp
