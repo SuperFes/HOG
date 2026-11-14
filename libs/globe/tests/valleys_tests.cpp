@@ -116,6 +116,27 @@ TEST_CASE("a valley's river stands in its channel, deepening along it to the nex
     CHECK_THAT(wall_at(river, at(1'000.0, 0.0), radius).water, WithinAbs(80.0, 0.01));
 }
 
+TEST_CASE("a valley's water rises through the year as it does along it, at its own peak",
+          "[globe][valleys]") {
+    Valley river = falling();
+    river.belt = 10.0;
+    river.channel_width = 20.0;
+    river.channel_depth = 2.0;
+    river.channel_depth_to = 2.0;
+    river.water_depth = 1.0;
+    river.water_depth_to = 1.0;
+    river.rise = 0.5;
+    river.rise_to = 1.5;
+    river.peak = 0.3;
+    river.length = 1'000.0;
+    for (const double east : {0.0, 500.0, 1'000.0}) {
+        CAPTURE(east);
+        const hog::globe::Season season = wall_at(river, at(east, 0.0), radius).season;
+        CHECK_THAT(season.rise, WithinAbs(0.5 + (east / 1'000.0), 1e-3));
+        CHECK(season.peak == 0.3);
+    }
+}
+
 TEST_CASE("ways the ground could stand that run alike merge without digging under either",
           "[globe][valleys]") {
     Lowered lowered{50.0, 50.0};

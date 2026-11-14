@@ -215,11 +215,13 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     if (shape_.sea) {
         column.water_ = planet_.body.radius;
     }
-    if (derived_.liquid && made.lake) {
-        column.water_ = std::max(column.water_, planet_.body.radius + *made.lake);
-    }
-    if (derived_.liquid && made.river) {
-        column.water_ = std::max(column.water_, planet_.body.radius + *made.river);
+    // A lake or river standing over the sea rises and falls with the year as it does; the sea's
+    // tide is its own.
+    const std::optional<double> inland = made.lake ? made.lake : made.river;
+    if (derived_.liquid && inland && planet_.body.radius + *inland > column.water_) {
+        column.water_ = planet_.body.radius + *inland;
+        column.water_rise_ = made.water_rise;
+        column.water_peak_ = made.water_peak;
     }
     column.slope_ = slope;
     column.surface_temperature_ = made.surface_temperature;
@@ -391,6 +393,8 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     const double filled = std::clamp(((water - radius) / thickness) + 0.5, 0.0, 1.0);
     if (water > 0.0 && filled > 0.0) {
         sample.liquid = Material::Water;
+        sample.rise = water_rise_;
+        sample.peak = water_peak_;
         if (sample.distance < 0.0) {
             // The pores of the ground under the level, and over the ground as much of the voxel
             // as lies under it, where the ground's surface crosses the voxel.
@@ -509,6 +513,8 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     if (here.river) {
         made.river = here.river->level;
     }
+    made.water_rise = here.season.rise;
+    made.water_peak = here.season.peak;
     made.rise = tangential(here.top.gradient, direction);
     made.loosening = here.weathering.loosening;
     made.weathering = here.weathering.rate;

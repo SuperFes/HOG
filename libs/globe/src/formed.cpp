@@ -61,11 +61,14 @@ struct OnCube {
 // Maddock's hydraulic geometry down rivers), cut out to hold the floods that overtop its banks
 // every year or two, `bankfull` times that mean (the same at one place as its flow rises),
 // bending a bend every eleven widths (Leopold and Wolman), more the gentler its fall and the
-// looser its banks, its floor as wide as it wanders. The water passing it stands `water` deep.
+// looser its banks, its floor as wide as it wanders. The water passing it stands `water` deep in
+// its lowest month, and `rise` deeper in its highest: a river's stage goes as its flow to the
+// 0.4, as its depth down rivers does.
 struct Channel {
     double width = 0.0;
     double depth = 0.0;
     double water = 0.0;
+    double rise = 0.0;
     double meander = 0.0;
     double meander_length = 0.0;
     double belt = 0.0;
@@ -73,8 +76,10 @@ struct Channel {
 
 constexpr double bankfull = 4.0;
 
-// From cubic metres a year wearing it and passing it.
-Channel channel_of(double wearing, double passing, double fall, bool loose, double reach) noexcept {
+// From cubic metres a year wearing it and passing it, its lowest and highest months' flow `low`
+// and `high` times its mean.
+Channel channel_of(double wearing, double passing, double fall, bool loose, double reach,
+                   double low, double high) noexcept {
     constexpr double seconds_a_year = 31'557'600.0;
     constexpr double gentle = 0.01; // falls under which rivers wander freely
     const double mean = wearing / seconds_a_year;
@@ -82,8 +87,10 @@ Channel channel_of(double wearing, double passing, double fall, bool loose, doub
     Channel channel{.width = 3.0 * std::sqrt(mean) * maths::pow(bankfull, 0.26),
                     .depth = mean_depth * maths::pow(bankfull, 0.4)};
     if (wearing > 0.0) {
-        channel.water =
-            std::min(channel.depth, mean_depth * maths::pow(std::max(passing, 0.0) / wearing, 0.4));
+        const double stage = mean_depth * maths::pow(std::max(passing, 0.0) / wearing, 0.4);
+        channel.water = std::min(channel.depth, stage * maths::pow(std::max(low, 0.0), 0.4));
+        channel.rise =
+            std::max(0.0, (stage * maths::pow(std::max(high, 0.0), 0.4)) - channel.water);
     }
     channel.meander_length = 11.0 * channel.width;
     channel.meander = std::min(0.3 * channel.meander_length * (loose ? 1.0 : 0.3) *
@@ -99,6 +106,8 @@ void add_weighted(Wall& sum, const Wall& one, double weight) noexcept {
     sum.floor += weight * one.floor;
     sum.water += weight * one.water;
     sum.bank += weight * one.bank;
+    sum.season.rise += weight * one.season.rise;
+    sum.season.peak += weight * one.season.peak;
     sum.fall += weight * one.fall;
     sum.reaching += weight * one.reaching;
     sum.steep += weight * one.steep;
@@ -115,6 +124,8 @@ void divide(Wall& sum, double total) noexcept {
     sum.floor /= total;
     sum.water /= total;
     sum.bank /= total;
+    sum.season.rise /= total;
+    sum.season.peak /= total;
     sum.fall /= total;
     sum.reaching /= total;
     sum.steep /= total;
@@ -152,6 +163,7 @@ struct ValleyRiver {
     double ground = 0.0;
     double water = 0.0;
     double bank = 0.0;
+    Season season;
 };
 
 // How high a valley's ground stands over its floor at a place, and where it stands.
@@ -162,12 +174,14 @@ struct ValleyFloor {
 };
 
 // Metres of a river's water over the ground standing at `top`, the year round and in flood; and
-// the level its water stands at either way, metres over the sea, the deepest river's.
+// the level its water stands at either way, metres over the sea, and how that rises through the
+// year: the deepest river's.
 struct RiverDepths {
     double river = 0.0;
     double flood = 0.0;
     double level = 0.0;
     double flood_level = 0.0;
+    Season season;
 };
 
 // A river's water stands only in the channel of the valley the ground lies in. Where another
@@ -189,6 +203,7 @@ RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top, dou
             depths.river = deep;
             depths.level = river.water;
             depths.flood_level = std::max(river.bank, river.water);
+            depths.season = river.season;
         }
         depths.flood =
             std::max(depths.flood, faded(river.ground, flood_spread) * (river.bank - river.ground));
@@ -993,7 +1008,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     const formation::World& world = world_;
     const formation::Sphere& sphere = world.sphere;
     const formation::Smooth::Read smooth = formation::Smooth::read(top_, weights);
-    Carved carved{.top = smooth, .fall = smooth.gradient, .above_floor = 1e30};
+    Carved carved{.top = smooth, .fall = smooth.gradient, .above_floor = 1e30, .season = {}};
     // The ways the ground could stand here, the lowest of which it does, and how each falls.
     thread_local std::vector<GroundWay> ways;
     ways.clear();
@@ -1077,7 +1092,10 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         };
         // Its water too, fading out as its floor rises over the ground about it.
         rivers.push_back(
-            {.ground = fade(wall.standing), .water = fade(wall.water), .bank = fade(wall.bank)});
+            {.ground = fade(wall.standing),
+             .water = fade(wall.water),
+             .bank = fade(wall.bank),
+             .season = {.rise = reaching * wall.season.rise, .peak = wall.season.peak}});
         banks = std::min(banks, fade(wall.standing + wall.cut));
         if (wall.standing < smooth.value) {
             const double faded = fade(wall.standing);
@@ -1121,6 +1139,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     carved.flood = depths.flood;
     carved.river_level = depths.level;
     carved.flood_level = depths.flood_level;
+    carved.season = depths.season;
     const FloorHold hold = floor_hold(floors, carved.top.value, spread);
     carved.above_floor = hold.above;
     carved.above_floor_gradient = hold.gradient;
@@ -1159,11 +1178,13 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const double fall = metres > 0.0 ? (top_[point] - floor_to) / metres : 0.0;
     const auto channel_at = [&](std::uint32_t at, double falling) {
         Channel made = channel_of(world.rivers.flood[at], world.lakes.discharge[at], falling,
-                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep, reach);
+                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep, reach,
+                                  world.regimes.low[at], world.regimes.high[at]);
         // Channels too narrow for the detail asked fade out with their water, as gullies do.
         const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
         made.depth *= shown;
         made.water *= shown;
+        made.rise *= shown;
         return made;
     };
     const Channel channel = channel_at(point, fall);
@@ -1172,6 +1193,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     Channel next = channel;
     if (mouth) {
         next.water = channel.depth;
+        next.rise = 0.0;
     } else {
         next = channel_at(down, fall);
     }
@@ -1183,6 +1205,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                                            lake_levels_[lake].has_value()) {
         least_water = lake_levels_[lake].value();
         next.water = std::clamp(least_water - floor_to + next.depth, 0.0, next.depth);
+        next.rise = world.regimes.lake_rise[lake];
     }
     // Its walls stand less steep than their rock lets them in places, as each has been worn,
     // so where they meet another valley's the crest between runs ragged.
@@ -1247,7 +1270,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // The line's chord and arc differ by far less than this, so none is missed by their
     // difference.
     constexpr double slack = 0.01;
-    Wall wall{.height = 0.0, .reaching = 0.0};
+    Wall wall{.height = 0.0, .season = {}, .reaching = 0.0};
     double stretches = 0.0;
     Lowest lowest_of{rounding, blend};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
@@ -1275,6 +1298,9 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .water_depth = channel.water,
                                   .water_depth_to = next.water,
                                   .least_water = least_water,
+                                  .rise = channel.rise,
+                                  .rise_to = next.rise,
+                                  .peak = world.regimes.peak[point],
                                   .meander = channel.meander,
                                   .meander_length = std::max(channel.meander_length, 1.0),
                                   .seed = hash_values(rock_seed_, point),
@@ -1404,6 +1430,7 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
                 .flood = ground.flood,
                 .river_level = ground.river_level,
                 .flood_level = ground.flood_level,
+                .season = ground.season,
                 .bed = dissected.top.value,
                 .settled = 1.0,
                 .bedforms = Noise{}};
@@ -1504,6 +1531,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
         if (water.pool.at(cell(water.east), cell(water.north)) != Pool::Cell::Dry &&
             water.pool.level > top.top.value + 0.01) {
             here.lake = water.pool.level;
+            here.season = {.rise = world.regimes.lake_rise[lake],
+                           .peak = world.regimes.lake_peak[lake]};
             break;
         }
     }
@@ -1602,6 +1631,9 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     if (!here.lake) {
         here.river = river_over(here.top.value - here.crag, under.river, under.river_level,
                                 under.flood_level);
+        if (here.river) {
+            here.season = under.season;
+        }
     }
     // Soil forms again on whatever's at the top, but creeps off the faster the nearer the slope
     // comes to the steepest it holds (Roering's critical slope), none lying past it.

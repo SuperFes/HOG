@@ -4,6 +4,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/voxel.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/testing/world.hpp>
 
@@ -479,6 +480,54 @@ TEST_CASE("a formed lake stands level, no higher than formed, over lower ground 
         }
     }
     CHECK(paired > 0);
+}
+
+TEST_CASE("lakes and rivers stand at their lowest and rise through the year as their regimes "
+          "have them, and the water voxels made under them say so",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double radius = generator.planet().body.radius;
+    int lakes = 0;
+    int rising = 0;
+    int made = 0;
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        const DVec3 direction = world.sphere.point(point);
+        const Formed::Here here = formed.at(direction, 0.5);
+        if (here.lake) {
+            // The season of the lake standing there, which may be one beside the point's own.
+            bool found = false;
+            for (std::size_t lake = 0; lake < world.regimes.lake_rise.size(); ++lake) {
+                found = found || (here.season.rise == world.regimes.lake_rise[lake] &&
+                                  here.season.peak == world.regimes.lake_peak[lake]);
+            }
+            CHECK(found);
+            ++lakes;
+        } else if (here.river) {
+            CHECK(here.season.rise >= 0.0);
+            CHECK(here.season.peak >= 0.0);
+            CHECK(here.season.peak < 1.0);
+        } else {
+            CHECK(here.season.rise == 0.0);
+            continue;
+        }
+        if (here.season.rise <= 0.0) {
+            continue;
+        }
+        ++rising;
+        const double level = here.lake.value_or(here.river ? here.river->level : 0.0);
+        const hog::globe::Sample under = generator.sample(direction * (radius + level - 0.1), 0.5);
+        if (under.liquid == hog::globe::Material::Water && under.distance > 0.0) {
+            const hog::globe::Voxel voxel = hog::globe::voxel_from(under, 0.5);
+            CHECK(voxel.rise == hog::globe::rise_of(here.season.rise));
+            CHECK(voxel.peak == hog::globe::peak_of(here.season.peak));
+            ++made;
+        }
+    }
+    CHECK(lakes > 0);
+    CHECK(rising > 0);
+    CHECK(made > 0);
 }
 
 TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too",

@@ -44,8 +44,12 @@ struct Ground {
     double surface_temperature = 0.0; // kelvin, at the reference level
     Layering layers;
     std::optional<double> lake;  // a lake's water, over the radius
-    std::optional<double> river; // a river's, the year round
-    DVec3 rise{0.0};             // which way it climbs and how steeply, metres up per metre along
+    std::optional<double> river; // a river's, at its lowest in the year
+    // How far either's water rises over that through the year, and when it's highest, as a share
+    // of the year from the March equinox.
+    double water_rise = 0.0;
+    double water_peak = 0.0;
+    DVec3 rise{0.0}; // which way it climbs and how steeply, metres up per metre along
     // The rock at its top: metres a year of it coming loose in blocks, metres a year it breaks up
     // where bare and the ground wears down, the years it has had, how well it stands, 0 to 1, and
     // the share standing bare.

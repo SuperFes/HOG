@@ -10,6 +10,13 @@
 
 namespace hog::globe {
 
+// How water rises and falls through the year: metres its highest stands over the level it's told
+// at, which is its lowest, and when it's highest, as a share of the year from the March equinox.
+struct Season {
+    double rise = 0.0;
+    double peak = 0.0;
+};
+
 // A valley along the line between two directions from the planet's centre: its floor's height
 // at each end, how steeply its walls rise from it, as metres up per metre across, and how many
 // metres from it they reach, past half of which they rise out of the way of all else.
@@ -40,6 +47,10 @@ struct Valley {
     double water_depth_to = 0.0;
     // The lowest its water stands, as where it runs into a lake that holds it up.
     double least_water = -1e300;
+    // How far its water rises through the year, changing along it as its depth does, and when.
+    double rise = 0.0;
+    double rise_to = 0.0;
+    double peak = 0.0;
     double meander = 0.0;
     double meander_length = 1.0;
     std::uint64_t seed = 0;
@@ -64,6 +75,7 @@ struct Wall {
     // and the banks it rises to in flood.
     double water = 0.0;
     double bank = 0.0;
+    Season season; // the water's through the year
     DVec3 fall{0.0};
     double reaching = 1.0;
     // How much of a wall the ground standing is, from none across the floor to all up the walls.
@@ -149,6 +161,7 @@ private:
         double standing = 0.0;
         double water = 0.0;
         double bank = 0.0;
+        Season season;
     };
     double blend_ = 0.0;
     Lowered lowered_;

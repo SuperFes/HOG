@@ -92,6 +92,8 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
               .floor = floor - cut,
               .water = std::max(floor - depth + water_depth, valley.least_water),
               .bank = floor,
+              .season = {.rise = valley.rise + ((valley.rise_to - valley.rise) * whole),
+                         .peak = valley.peak},
               .fall = DVec3{0.0},
               .reaching = 1.0 - (past * past * (3.0 - (2.0 * past))),
               .steep = valley.wall > 0.0 ? climbing / valley.wall : 0.0,
@@ -282,7 +284,8 @@ void Lowest::add(const Wall& one) noexcept {
     }
     lowered_.add({.value = one.standing, .gradient = one.standing_gradient}, one.steep, one.floor);
     if (count_ < stretches_.size()) {
-        stretches_[count_] = {.standing = one.standing, .water = one.water, .bank = one.bank};
+        stretches_[count_] = {
+            .standing = one.standing, .water = one.water, .bank = one.bank, .season = one.season};
     }
     ++count_;
 }
@@ -297,6 +300,7 @@ void Lowest::lower(Wall& wall) const noexcept {
     double flooded = 0.0;
     double water = -std::numeric_limits<double>::infinity();
     double bank = -std::numeric_limits<double>::infinity();
+    Season season;
     for (const Stretch& one :
          std::span<const Stretch>{stretches_.data(), std::min(count_, stretches_.size())}) {
         const double over = std::max(0.0, one.standing - lowest_) / handing_over;
@@ -307,6 +311,7 @@ void Lowest::lower(Wall& wall) const noexcept {
         if (const double deep = in * (one.water - one.standing); deep > deepest) {
             deepest = deep;
             water = one.water;
+            season = one.season;
         }
         if (const double deep = in * (one.bank - one.standing); deep > flooded) {
             flooded = deep;
@@ -320,6 +325,7 @@ void Lowest::lower(Wall& wall) const noexcept {
     wall.floor = floor_;
     wall.water = std::max(water, wall.standing);
     wall.bank = std::max({bank, water, wall.standing});
+    wall.season = season;
     wall.cut = cut_;
     wall.cut_gradient = cut_gradient_;
     // Water runs off the stretch the ground stands as, turning only where the ground does.

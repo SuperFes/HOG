@@ -36,6 +36,8 @@ public:
             double flood = 0.0;
         };
         std::optional<River> river;
+        // How the lake's or river's water rises over its level through the year.
+        Season season;
         Strata layers;
         double light = 0.0;   // share of light crust
         double folding = 0.0; // how folded the beds are, 0 to 1
@@ -90,6 +92,7 @@ private:
         double flood = 0.0;
         double river_level = 0.0;
         double flood_level = 0.0;
+        Season season; // the river's
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const;
@@ -116,6 +119,7 @@ private:
         double flood = 0.0;
         double river_level = 0.0;
         double flood_level = 0.0;
+        Season season;
         // Where the ground stood as cut, before what was carried settled on it.
         double bed = 0.0;
         // The share of the points' sand, alluvium, lake beds and till that settled here.

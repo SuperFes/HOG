@@ -114,6 +114,9 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
         [[nodiscard]] double water() const noexcept { return water_; }
+        // How a lake's or river's water rises over that through the year, as Sample has it.
+        [[nodiscard]] double water_rise() const noexcept { return water_rise_; }
+        [[nodiscard]] double water_peak() const noexcept { return water_peak_; }
         // Kelvin, the mean the year round at the planet's reference level.
         [[nodiscard]] double surface_temperature() const noexcept { return surface_temperature_; }
         // Rise per metre across the ground.
@@ -153,9 +156,11 @@ public:
         const Generator* generator_ = nullptr;
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
-        double ground_ = 0.0; // metres from the centre
-        double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
-        double slope_ = 0.0;  // across the ground, at the radius
+        double ground_ = 0.0;     // metres from the centre
+        double water_ = 0.0;      // metres from the centre to where open water stands; 0 none
+        double water_rise_ = 0.0; // as Sample's
+        double water_peak_ = 0.0;
+        double slope_ = 0.0;               // across the ground, at the radius
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
         std::optional<Rock> rock_; // lying on this column, if one does

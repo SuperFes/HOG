@@ -42,6 +42,8 @@ Cube deep(const Generator::Column& column, const Layers& layers, int layer) {
     if (column.water() > 0.0 && radius < column.water()) {
         sample.liquid = Material::Water;
         sample.water = properties(sample.material).porosity;
+        sample.rise = column.water_rise();
+        sample.peak = column.water_peak();
     }
     const Voxel voxel = voxel_from(sample, layers.thickness);
     return cube_of(voxel, voxel.temperature / 8.0);
