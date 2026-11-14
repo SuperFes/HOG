@@ -112,7 +112,8 @@ public:
     static constexpr VkFormat shadow_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     // Records mapping the cloud's shadow round the eye into shadow_image(), a storage image, as
-    // far as the Lighting of `view.air` reaches, which must be written before this is submitted.
+    // far as the Lighting of `view.air` reaches, which must be written before this is submitted;
+    // spread the further it falls from the cloud.
     void shadow(VkCommandBuffer commands, const CloudsView& view) const noexcept;
     [[nodiscard]] const Image& shadow_image() const noexcept { return shadow_map_; }
 
@@ -150,6 +151,7 @@ private:
     CloudQuality quality_ = CloudQuality::High;
     Pipeline march_;
     Pipeline shadow_;
+    Pipeline soften_;
     Pipeline resolve_;
     Pipeline pipeline_;
     Sampler nearest_;
@@ -157,6 +159,7 @@ private:
     Sampler tiling_;
     CloudNoise noise_;
     Image shadow_map_;
+    Image sharp_shadow_; // as marched, before it's softened into shadow_map_
     // Frames blended in turn: the last's, read, and the next's, written.
     std::array<Image, 2> blends_;
     std::uint32_t blended_ = 0; // which of blends_ was last written

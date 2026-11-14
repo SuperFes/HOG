@@ -109,6 +109,10 @@ constexpr std::array shadow_descriptors{binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BU
                                         binding(17, sampled, compute),
                                         binding(18, sampled, compute)};
 
+constexpr std::array soften_descriptors{binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
+                                        binding(14, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
+                                        binding(19, sampled, compute)};
+
 constexpr std::array resolve_descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                          binding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                          binding(2, sampled, compute),
@@ -268,11 +272,24 @@ Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobS
         return std::unexpected(std::move(shadow).error());
     }
     clouds.shadow_ = std::move(shadow).value();
+    auto soften = make_compute_pipeline(device, {.spirv = shaders::cloud_march,
+                                                 .entry = "soften_main",
+                                                 .push_constant_bytes = sizeof(MarchPush),
+                                                 .descriptors = soften_descriptors});
+    if (!soften) {
+        return std::unexpected(std::move(soften).error());
+    }
+    clouds.soften_ = std::move(soften).value();
     auto shadow_map = make_shadow_map(device, quality);
     if (!shadow_map) {
         return std::unexpected(std::move(shadow_map).error());
     }
     clouds.shadow_map_ = std::move(shadow_map).value();
+    auto sharp_shadow = make_shadow_map(device, quality);
+    if (!sharp_shadow) {
+        return std::unexpected(std::move(sharp_shadow).error());
+    }
+    clouds.sharp_shadow_ = std::move(sharp_shadow).value();
     auto pipeline = make_pipeline(device, {.spirv = shaders::clouds,
                                            .colour_format = colour_format,
                                            .blend = Blend::Premultiplied,
@@ -330,10 +347,22 @@ void Clouds::shadow(VkCommandBuffer commands, const CloudsView& view) const noex
     push_sampled_image(commands, shadow_, 18, view.weather.layers_after, view.weather.sampler);
     push_sampled_image(commands, shadow_, 9, noise_.shape.view(), tiling_.handle());
     push_sampled_image(commands, shadow_, 10, noise_.detail.view(), tiling_.handle());
-    push_storage_image(commands, shadow_, 14, shadow_map_.view());
+    push_storage_image(commands, shadow_, 14, sharp_shadow_.view());
     vkCmdPushConstants(commands, shadow_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
                        &push);
     const std::uint32_t size = shadow_map_.desc().extent.width;
+    transition(commands, sharp_shadow_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+               image_use::storage);
+    vkCmdDispatch(commands, (size + 7) / 8, (size + 7) / 8, 1);
+    transition(commands, sharp_shadow_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
+               image_use::sampled);
+
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, soften_.handle());
+    push_uniform_buffer(commands, soften_, 1, view.air.lighting);
+    push_storage_image(commands, soften_, 14, shadow_map_.view());
+    push_sampled_image(commands, soften_, 19, sharp_shadow_.view(), linear_.handle());
+    vkCmdPushConstants(commands, soften_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
     vkCmdDispatch(commands, (size + 7) / 8, (size + 7) / 8, 1);
 }
 
@@ -353,6 +382,11 @@ Result<> Clouds::set_quality(CloudQuality quality) {
             return std::unexpected(std::move(shadow_map).error());
         }
         shadow_map_ = std::move(shadow_map).value();
+        auto sharp_shadow = make_shadow_map(*device_, quality);
+        if (!sharp_shadow) {
+            return std::unexpected(std::move(sharp_shadow).error());
+        }
+        sharp_shadow_ = std::move(sharp_shadow).value();
     }
     quality_ = quality;
     return {};

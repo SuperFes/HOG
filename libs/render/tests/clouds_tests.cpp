@@ -957,6 +957,28 @@ TEST_CASE("the cloud's shadow lies beneath it, and over the ground it leaves cle
     }
 }
 
+TEST_CASE("the cloud's shadow is spread as it falls, never sharp from one texel to the next",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    Shadow shadow;
+    static_cast<void>(draw_frames(*device, {{.before = everywhere(broken)}}, &shadow));
+    const auto size = static_cast<std::size_t>(std::lround(std::sqrt(shadow.size())));
+    float steepest = 0.0F;
+    float least = 1.0F;
+    for (std::size_t y = 1; y < size; ++y) {
+        for (std::size_t x = 1; x < size; ++x) {
+            const float here = shadow.at((y * size) + x).r;
+            steepest = std::max({steepest, std::abs(here - shadow.at((y * size) + x - 1).r),
+                                 std::abs(here - shadow.at(((y - 1) * size) + x).r)});
+            least = std::min(least, here);
+        }
+    }
+    // Some of it well shaded, but none of it falling off all at once.
+    CHECK(least < 0.2F);
+    CHECK(steepest < 0.75F);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("broken cloud drifts downwind, its shadow with it", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     // The map's rows run east, as mean_between lays it out; each texel 125 m across.

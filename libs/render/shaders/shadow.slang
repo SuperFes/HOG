@@ -8,7 +8,7 @@ static const float mist_scattered_down = 0.7;
 // Of the map's width, the share at each edge over which it fades to the shade over the eye.
 static const float shadow_edge = 0.1;
 // The sun's light is followed down to the map as if from no lower than this.
-static const float least_sun = 0.05;
+public static const float least_sun = 0.05;
 // Metres below the top of the cloud over a place over which it comes out of the cloud's shade.
 static const float shadow_fade = 300.0;
 

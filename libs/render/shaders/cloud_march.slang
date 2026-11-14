@@ -25,13 +25,15 @@ import weather;
 // Premultiplied, before tone mapping; and the metres to the cloud, weighed by what it hides.
 [[vk::binding(11, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> marched;
 [[vk::binding(12, 0)]] [[vk::image_format("rg32f")]] RWTexture2D<float2> distances;
-// The cloud's shadow, as shadow_main() leaves it in `shadow_map`: of the light along the sun's to
+// The cloud's shadow, as soften_main() leaves it in `shadow_map`: of the light along the sun's to
 // the ground through each texel at the height the map's laid at, r the share let straight through
 // the cloud; g and b, of the light falling on the cloud over the ground there, as clouds.hpp's
 // cloud_shade has it, the shares let straight through and scattered through; and a the metres
 // above sea level of the top of the cloud the sun's light goes through, or over the ground.
 [[vk::binding(13, 0)]] Sampler2D cloud_shadow;
 [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> shadow_map;
+// The shadow as shadow_main() marches it, before soften_main() spreads it into `shadow_map`.
+[[vk::binding(19, 0)]] Sampler2D sharp_shadow;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -154,6 +156,13 @@ static const float streak_stretch = 10.0;
 static const float shadow_step = 300.0;
 static const uint most_shadow_steps = 64;
 static const uint least_shadow_steps = 8;
+// Radians the sun's light reaching the ground under cloud spreads from its way: the sun's disc,
+// and the few degrees the cloud's droplets scatter it forward; and taps round each texel it's
+// spread over, on a golden-angle spiral.
+static const float sun_radius_angle = 0.00465;
+static const float forward_spread = 0.05;
+static const uint soften_taps = 16;
+static const float golden_angle = 2.39996323;
 // Metres along a view over which cloud thins away to nothing where it meets what's drawn, so cloud
 // lying on the ground or against a mountain fades into it rather than being cut off by it.
 static const float meeting_fade = 40.0;
@@ -772,4 +781,32 @@ void shadow_main(uint3 id: SV_DispatchThreadID) {
         }
     }
     shadow_map[id.xy] = float4(exp(-depth), shade.x, shade.y, top);
+}
+
+// The shadow spread as it falls from the cloud to the height the map's laid at: each texel the
+// mean over a disc the wider the further the cloud above, never narrower than a texel so the
+// texels read round, not square.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void soften_main(uint3 id: SV_DispatchThreadID) {
+    uint width;
+    uint height;
+    shadow_map.GetDimensions(width, height);
+    if (id.x >= width || id.y >= height) {
+        return;
+    }
+    const float2 size = float2(width, height);
+    const float2 uv = (float2(id.xy) + 0.5) / size;
+    const float4 here = sharp_shadow.SampleLevel(uv, 0.0);
+    const float texel = 2.0 * lighting.shadow.x / size.x;
+    const float sun_mu = max(dot(push.up_height.xyz, lighting.sun_exposure.xyz), least_sun);
+    const float fall = max(here.a - lighting.shadow.y, 0.0) / sun_mu;
+    const float radius = max(fall * (sun_radius_angle + forward_spread) / texel, 1.0);
+    float3 sum = float3(0.0);
+    for (uint tap = 0; tap < soften_taps; ++tap) {
+        const float out = radius * sqrt((float(tap) + 0.5) / float(soften_taps));
+        const float turn = float(tap) * golden_angle;
+        sum += sharp_shadow.SampleLevel(uv + (out * float2(cos(turn), sin(turn)) / size), 0.0).rgb;
+    }
+    shadow_map[id.xy] = float4(sum / float(soften_taps), here.a);
 }
