@@ -108,7 +108,8 @@ struct Rubble {
     Material of = Material::Gravel;
 };
 // Whether the column under `direction` shows its rubble at its top: as many of the columns about
-// as the share its blocks cover, scattered, so coarse ground looks as fine ground does on the whole.
+// as the share its blocks cover, scattered, so coarse ground looks as fine ground does on the
+// whole.
 [[nodiscard]] bool rubble_shows(const Context& context, DVec3 direction, double lod,
                                 double share) noexcept;
 // The block lying across a column, with the rubble of those too small to show.
