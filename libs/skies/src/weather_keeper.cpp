@@ -73,6 +73,7 @@ WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameTime start,
 }
 
 WeatherKeeper::~WeatherKeeper() {
+    stopping_ = true;
     if (job_.valid()) {
         job_.wait();
     }
@@ -119,10 +120,18 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
     reached_ += run;
     running_ = run;
     job_ = std::async(std::launch::async, [this, from, run] {
-        air_.advance(seconds(run), [&](double elapsed) {
-            return calendar_.sun_direction(from + std::chrono::duration_cast<GameDuration>(
-                                                      std::chrono::duration<double>{elapsed}));
-        });
+        // A step at a time, so a keeper let go needn't wait out the whole run.
+        const double total = seconds(run);
+        double done = 0.0;
+        while (done < total && !stopping_) {
+            const double step = std::min(weather::Atmosphere::longest_step, total - done);
+            air_.advance(step, [&](double elapsed) {
+                return calendar_.sun_direction(from +
+                                               std::chrono::duration_cast<GameDuration>(
+                                                   std::chrono::duration<double>{done + elapsed}));
+            });
+            done += step;
+        }
     });
     return made;
 }

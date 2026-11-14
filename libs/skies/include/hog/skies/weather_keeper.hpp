@@ -9,6 +9,7 @@
 #include <hog/sim/cell_grid.hpp>
 #include <hog/weather/atmosphere.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -99,6 +100,8 @@ private:
     GameDuration running_{}; // game time the job in flight runs on
     GameDuration ran_{};     // game time the air has run since it started or was restored
     bool live_ = false;      // whether the air is shown
+    // A job in flight stops at its next step once set.
+    std::atomic<bool> stopping_ = false;
     std::chrono::steady_clock::time_point last_made_; // real time of the last weather made
     std::optional<protocol::Weather> latest_;
     std::vector<std::byte> saved_;
