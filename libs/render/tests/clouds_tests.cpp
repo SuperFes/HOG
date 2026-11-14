@@ -107,6 +107,46 @@ const Texel pouring{255, 64, 80, 0};
 // As client::SkyTexel: dry, with cloud from 1984 m to 3008 m.
 const Texel layer{0, 31, 47, 0};
 
+// The air's layers the tests lay their cloud in, from sea level to about 15 km, thin near the
+// ground and deeper aloft as the weather's are.
+constexpr hog::render::AirShape air{
+    .count = hog::render::most_cloud_layers, .bottom = 0.0, .thickness = 128.0, .ratio = 1.12};
+
+// The cloud of a weather's map, as client::WeatherTexel holds it, lying from the base to the top a
+// sky's map, as client::SkyTexel, holds: in each layer as much of its cover as of the layer it
+// fills, and as much of its water as of its depth.
+std::vector<std::byte> layers_of(const std::vector<std::byte>& weather,
+                                 const std::vector<std::byte>& sky) {
+    const std::size_t texels = weather.size() / 4;
+    std::vector<std::byte> bytes(texels * 2 * air.count);
+    for (std::size_t texel = 0; texel < texels; ++texel) {
+        const auto part = [&](const std::vector<std::byte>& map, std::size_t channel) {
+            return static_cast<double>(std::to_integer<std::uint8_t>(map[(texel * 4) + channel]));
+        };
+        const double cover = part(weather, 0) / 255.0;
+        const double root = part(weather, 1) / 255.0;
+        const double water = root * root * 16.0;
+        const double base = part(sky, 1) * 64.0;
+        const double top = part(sky, 2) * 64.0;
+        if (top <= base) {
+            continue;
+        }
+        double floor = air.bottom;
+        for (std::uint32_t index = 0; index < air.count; ++index) {
+            const double depth = air.thickness * std::pow(air.ratio, index);
+            const double filled =
+                std::max(0.0, std::min(top, floor + depth) - std::max(base, floor));
+            floor += depth;
+            const double share = filled / depth;
+            const double held = water * filled / (top - base);
+            const std::size_t at = ((index * texels) + texel) * 2;
+            bytes[at] = static_cast<std::byte>(std::lround(cover * share * 255.0));
+            bytes[at + 1] = static_cast<std::byte>(std::lround(std::sqrt(held / 16.0) * 255.0));
+        }
+    }
+    return bytes;
+}
+
 struct Scene {
     double eye_height = 2.0;
     DVec3 forward = east;
@@ -170,6 +210,9 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
     std::vector<Pixels> frames;
     for (const Scene& scene : scenes) {
         CHECK(maps->map_bytes() == scene.before.size());
+        const std::vector<std::byte> layers_before = layers_of(scene.before, scene.sky);
+        const std::vector<std::byte> layers_after =
+            layers_of(scene.after.value_or(scene.before), scene.sky);
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
             CHECK(maps->update(commands, 0,
                                {.weather_before = scene.before,
@@ -178,9 +221,9 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
                                 .sky_after = scene.sky,
                                 .drift_before = scene.drift,
                                 .drift_after = scene.drift,
-                                .layers_before = {},
-                                .layers_after = {},
-                                .air = {}}));
+                                .layers_before = layers_before,
+                                .layers_after = layers_after,
+                                .air = air}));
         }));
         hog::render::WeatherBindings weather =
             maps->bindings(scene.faded, scene.age, scene.age_before);

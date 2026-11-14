@@ -92,7 +92,9 @@ constexpr std::array march_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUF
                                        binding(12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                        binding(13, sampled, compute),
                                        binding(15, sampled, compute),
-                                       binding(16, sampled, compute)};
+                                       binding(16, sampled, compute),
+                                       binding(17, sampled, compute),
+                                       binding(18, sampled, compute)};
 
 constexpr std::array shadow_descriptors{binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
                                         binding(5, sampled, compute),
@@ -103,7 +105,9 @@ constexpr std::array shadow_descriptors{binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BU
                                         binding(10, sampled, compute),
                                         binding(14, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                         binding(15, sampled, compute),
-                                        binding(16, sampled, compute)};
+                                        binding(16, sampled, compute),
+                                        binding(17, sampled, compute),
+                                        binding(18, sampled, compute)};
 
 constexpr std::array resolve_descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                          binding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
@@ -322,6 +326,8 @@ void Clouds::shadow(VkCommandBuffer commands, const CloudsView& view) const noex
     push_sampled_image(commands, shadow_, 8, view.weather.sky_after, view.weather.sampler);
     push_sampled_image(commands, shadow_, 15, view.weather.drift_before, view.weather.sampler);
     push_sampled_image(commands, shadow_, 16, view.weather.drift_after, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 17, view.weather.layers_before, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 18, view.weather.layers_after, view.weather.sampler);
     push_sampled_image(commands, shadow_, 9, noise_.shape.view(), tiling_.handle());
     push_sampled_image(commands, shadow_, 10, noise_.detail.view(), tiling_.handle());
     push_storage_image(commands, shadow_, 14, shadow_map_.view());
@@ -408,6 +414,8 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
     push_sampled_image(commands, march_, 8, view.weather.sky_after, view.weather.sampler);
     push_sampled_image(commands, march_, 15, view.weather.drift_before, view.weather.sampler);
     push_sampled_image(commands, march_, 16, view.weather.drift_after, view.weather.sampler);
+    push_sampled_image(commands, march_, 17, view.weather.layers_before, view.weather.sampler);
+    push_sampled_image(commands, march_, 18, view.weather.layers_after, view.weather.sampler);
     push_sampled_image(commands, march_, 9, noise_.shape.view(), tiling_.handle());
     push_sampled_image(commands, march_, 10, noise_.detail.view(), tiling_.handle());
     push_storage_image(commands, march_, 11, marched);

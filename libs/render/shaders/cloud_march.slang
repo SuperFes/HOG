@@ -15,6 +15,10 @@ import weather;
 // m/s the cloud drifts over the ground, in the planet's frame.
 [[vk::binding(15, 0)]] SamplerCube drift_before;
 [[vk::binding(16, 0)]] SamplerCube drift_after;
+// The cloud in each of the air's layers, bottom up, as client::LayerTexel: its cover, and the root
+// of a sixteenth of its water's millimetres. Lighting's air_layers says how the layers lie.
+[[vk::binding(17, 0)]] SamplerCubeArray layers_before;
+[[vk::binding(18, 0)]] SamplerCubeArray layers_after;
 // As render::shape_noise and render::detail_noise.
 [[vk::binding(9, 0)]] Sampler3D shape_noise;
 [[vk::binding(10, 0)]] Sampler3D detail_noise;
@@ -89,11 +93,10 @@ static const float backward = -0.3;
 static const float backward_share = 0.25;
 static const float cloud_albedo = 0.99;
 // The weather's looked up a little off from where it's wanted, by a broad noise, so the edges of
-// what the cells hold wander, not run straight across them; the noise lifts and lowers the base too.
-// A whole number of tiles fits in clouds.hpp's cloud_period.
+// what the cells hold wander, not run straight across them. A whole number of tiles fits in
+// clouds.hpp's cloud_period.
 static const float wander_tile = 32000.0;
 static const float wander = 8000.0;
-static const float lift = 0.25;
 
 // The noise's sizes. Billows wider than the weather's cells leave each cell's cloud a flat slab
 // cut off straight at its edges, so on a planet small enough that its cells are narrower than two
@@ -130,10 +133,11 @@ static const float snow_albedo = 0.9;
 static const uint rain_steps = 16;
 // Metres along the view what falls is seen through, at most.
 static const float rain_reach = 40000.0;
-// Rain falls from the cloud as it is this far up it, as a share of its depth, and from within its
-// edges: where its density, as a share of its cover, is past the least, fully past the most. It
-// thickens over this many metres below the base, so the shafts have no flat tops.
-static const float rain_from = 0.1;
+// Rain falls from wherever the cloud billows over it, a quarter, a half and three quarters of the way
+// up, as much of the sky as its whole column covers, and from within its edges: where its density,
+// as a share of its cover, is past the least, fully past the most. It thickens over this many
+// metres below the base, so the shafts have no flat tops.
+static const uint rain_from = 3;
 static const float rain_least = 0.15;
 static const float rain_most = 0.6;
 static const float rain_top = 300.0;
@@ -162,17 +166,27 @@ struct Cell {
     float snow;
 };
 
-Cell cell_at(float3 direction) {
-    // Where the cloud over it now lay when the maps were taken, by the drift here, so wherever
-    // it's seen from it's the same cloud, at the heights it has. The cloud blows on with the wind;
-    // the air's damp keeps to the air's slower pace.
-    // Each weather drifts on from when it came, so a new one's coming moves nothing.
-    const float3 from_before = normalize((direction * lighting.weather.x) -
-                                         (drift_before.SampleLevel(direction, 0.0).xyz *
-                                          lighting.weather_age.x));
-    const float3 from_after = normalize((direction * lighting.weather.x) -
-                                        (drift_after.SampleLevel(direction, 0.0).xyz *
-                                         lighting.weather_age.y));
+// Where the cloud over a direction now lay when the maps before and after were taken, by the drift
+// there, so wherever it's seen from it's the same cloud. The cloud blows on with the wind; the
+// air's damp keeps to the air's slower pace. Each weather drifts on from when it came, so a new
+// one's coming moves nothing.
+struct Blown {
+    float3 before;
+    float3 after;
+};
+
+Blown blown_from(float3 direction) {
+    Blown blown;
+    blown.before = normalize((direction * lighting.weather.x) -
+                             (drift_before.SampleLevel(direction, 0.0).xyz * lighting.weather_age.x));
+    blown.after = normalize((direction * lighting.weather.x) -
+                            (drift_after.SampleLevel(direction, 0.0).xyz * lighting.weather_age.y));
+    return blown;
+}
+
+Cell cell_at(float3 direction, Blown from) {
+    const float3 from_before = from.before;
+    const float3 from_after = from.after;
     const float4 weather = lerp(weather_before.SampleLevel(from_before, 0.0),
                                 weather_after.SampleLevel(from_after, 0.0), push.radii.z);
     const SkyCell blown = sky_cell(lerp(sky_before.SampleLevel(from_before, 0.0),
@@ -220,69 +234,117 @@ float4 flowed(Sampler3D noise, float3 at, Flow flow, float tile, float level) {
                 noise.SampleLevel((at - flow.first) / tile, level), flow.share);
 }
 
-// The weather at `direction` on a planet of `radius`, its edges wandering and its base uneven.
-Cell wandering_cell_at(float3 direction, float radius) {
+// Where the weather's read for `direction` on a planet of `radius`, its edges wandering, and where
+// the cloud there was blown from.
+struct Place {
+    float3 direction;
+    Blown from;
+};
+
+Place wandered(float3 direction, float radius) {
     const Scales sizes = scales();
     const float3 ground = direction * radius;
     const float4 broad = flowed(shape_noise, ground, flow_at(ground), sizes.wander_tile, 1.0);
-    Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * sizes.wander)));
-    // Lifted as much as the noise is shrunk across, so the base is no steeper on a small planet.
-    cell.base += (broad.r - 0.5) * lift * (sizes.wander / wander) * (cell.top - cell.base);
-    return cell;
+    Place place;
+    place.direction = normalize(ground + ((broad.gba - 0.5) * sizes.wander));
+    place.from = blown_from(place.direction);
+    return place;
+}
+
+Cell wandering_cell_at(float3 direction, float radius) {
+    const Place place = wandered(direction, radius);
+    return cell_at(place.direction, place.from);
+}
+
+// The cloud at a height in the air's layers: how much of the sky it covers, and per metre how much
+// light it takes where it's as thick as it gets.
+struct Layered {
+    float cover;
+    float density;
+};
+
+// Of the layer `index`, its cover and density at the place.
+Layered layer_at(Place place, float index) {
+    const float2 texel = lerp(layers_before.SampleLevel(float4(place.from.before, index), 0.0).rg,
+                              layers_after.SampleLevel(float4(place.from.after, index), 0.0).rg,
+                              push.radii.z);
+    const float4 air_layers = lighting.air_layers;
+    const float depth = air_layers.z * pow(air_layers.w, index);
+    const float water = texel.g * texel.g * 16.0;
+    Layered layer;
+    layer.cover = texel.r;
+    // The billows fill about half of what it covers, so where they're thickest they're twice as
+    // dense as its water spread through it all.
+    layer.density = min(2.0 * depth_per_mm * water / (max(texel.r, least_cover) * depth), densest);
+    return layer;
+}
+
+// The cloud `height` metres above sea level at the place: the layers' about it, blended from each
+// one's middle to the next, so the cloud runs on smoothly up through them and across.
+Layered layered_at(Place place, float height) {
+    const float4 air_layers = lighting.air_layers;
+    const float count = air_layers.x;
+    Layered none;
+    none.cover = 0.0;
+    none.density = 0.0;
+    if (count < 1.0) {
+        return none;
+    }
+    // How many layers up from the bottom, as weather::Grid lays them.
+    const float over = max(height - air_layers.y, 0.0);
+    const float ratio = air_layers.w;
+    const float up = ratio > 1.0001 ? log2(1.0 + (over * (ratio - 1.0) / air_layers.z)) / log2(ratio)
+                                    : over / air_layers.z;
+    if (up >= count) {
+        return none;
+    }
+    const float between = clamp(up - 0.5, 0.0, count - 1.0);
+    const float lower = floor(between);
+    const Layered below = layer_at(place, lower);
+    const Layered above = layer_at(place, min(lower + 1.0, count - 1.0));
+    Layered layered;
+    layered.cover = lerp(below.cover, above.cover, between - lower);
+    layered.density = lerp(below.density, above.density, between - lower);
+    return layered;
 }
 
 float remap(float value, float from_low, float from_high, float to_low, float to_high) {
     return to_low + ((value - from_low) * (to_high - to_low) / (from_high - from_low));
 }
 
-// How much cloud there is, from none to 1, at `height` above sea level in `cell`, `at` metres in
-// the planet's frame; with its edges worn finely when `worn`. `footprint` is the metres a pixel
-// spans there. `billows` is left as how much the cloud billows there, from 0 to 1 evenly.
-float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, out float billows) {
+// How much of the cloud `here` there is, from none to 1, `at` metres in the planet's frame; with its
+// edges worn finely when `worn`. `footprint` is the metres a pixel spans there. `billows` is left
+// as how much the cloud billows there, from 0 to 1 evenly.
+float cloud_at(float3 at, Layered here, float footprint, bool worn, out float billows) {
     billows = 0.0;
-    if (cell.cover < 1.0 / 255.0 || height <= cell.base || height >= cell.top) {
+    if (here.cover < 1.0 / 255.0) {
         return 0.0;
     }
-    const float thickness = cell.top - cell.base;
-    const float up = (height - cell.base) / thickness;
-    // Flat layers keep flat; deep clouds round towards their tops.
-    const float rounding = lerp(0.1, 0.6, saturate((thickness - 500.0) / 2500.0));
-    const float profile = saturate(up / 0.08) * saturate((1.0 - up) / rounding);
-
     const Scales sizes = scales();
     const Flow flow = flow_at(at);
     const float4 shape = flowed(shape_noise, at, flow, sizes.shape,
                                 max(log2(footprint * shape_texels / sizes.shape), 0.0));
     billows = shape.r;
     // The billows are spread evenly, so about as much of the sky's covered as the cover says, and a
-    // full cover leaves no gaps. Broken cloud covers less higher up, so it billows into domes.
-    const float doming = (1.0 - cell.cover) * smoothstep(0.3, 1.0, up) * 0.9;
-    const float covering = cell.cover * (1.0 - doming) * overfill;
-    float cloud = saturate(remap(shape.r * profile, 1.0 - covering, 1.0, 0.0, 1.0)) * cell.cover;
+    // full cover leaves no gaps. Each layer covering less than the one under it, broken cloud
+    // billows up into domes.
+    float cloud = saturate(remap(shape.r, 1.0 - (here.cover * overfill), 1.0, 0.0, 1.0));
     // Broken cloud's worn by the cells, where it's thin.
     const float wearing = (shape.g * 0.625) + (shape.b * 0.25) + (shape.a * 0.125);
-    cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - cell.cover), 1.0, 0.0, 1.0));
+    cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - here.cover), 1.0, 0.0, 1.0));
     if (worn && cloud > 0.0) {
         const float detail = flowed(detail_noise, at, flow, sizes.detail,
                                     max(log2(footprint * detail_texels / sizes.detail), 0.0))
                                  .a;
-        // Wispy below, billowing above; less so the more of the sky's covered, so a full cover
-        // keeps no gaps.
-        const float eroding = lerp(detail, 1.0 - detail, saturate(up * 4.0));
+        // Billowing; less so the more of the sky's covered, so a full cover keeps no gaps.
         cloud = saturate(
-            remap(cloud, eroding * 0.3 * (1.0 - (0.8 * cell.cover)), 1.0, 0.0, 1.0));
+            remap(cloud, (1.0 - detail) * 0.3 * (1.0 - (0.8 * here.cover)), 1.0, 0.0, 1.0));
     }
     return cloud;
 }
 
 float thickness_of(Cell cell) {
     return max(cell.top - cell.base, 1.0);
-}
-
-// Per metre, how much light the cloud in `cell` takes where it's as thick as it gets.
-float densest_in(Cell cell) {
-    const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
-    return min(2.0 * column / thickness_of(cell), densest);
 }
 
 float phase(float cos_angle) {
@@ -346,12 +408,17 @@ float rain_beneath(float cover, float presence) {
 // How much the cloud in `cell` is there over `direction`, from 0 in its gaps to 1 under its
 // billows, as rain falls from it.
 float raining_from(float3 direction, Cell cell, float footprint) {
-    const float height = lerp(cell.base, cell.top, rain_from);
-    float unused = 0.0;
-    const float cloud = cloud_at(direction * (push.radii.x + height), height, cell,
-                                 max(footprint, rain_footprint), false, unused);
-    return saturate(
-        remap(cloud / max(cell.cover, 1.0 / 255.0), rain_least, rain_most, 0.0, 1.0));
+    Layered column;
+    column.cover = cell.cover;
+    column.density = 0.0;
+    float cloud = 0.0;
+    for (uint at = 1; at <= rain_from; ++at) {
+        const float height = lerp(cell.base, cell.top, float(at) / float(rain_from + 1));
+        float unused = 0.0;
+        cloud = max(cloud, cloud_at(direction * (push.radii.x + height), column,
+                                    max(footprint, rain_footprint), false, unused));
+    }
+    return saturate(remap(cloud, rain_least, rain_most, 0.0, 1.0));
 }
 
 // The view's way through the sky, and the picture's texel it's for.
@@ -463,12 +530,13 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
         const float3 from_eye = view * along;
         const float point_height = drawn_height(from_eye, up, eye_height, faked);
         const float3 direction = on_planet(from_eye, up, centre_to_eye, faked, radius);
-        const Cell cell = wandering_cell_at(direction, radius);
+        const Place place = wandered(direction, radius);
+        const Layered here = layered_at(place, point_height);
         const float3 point = direction * (radius + point_height);
         const float footprint = along * pixel;
         float billows = 0.0;
-        const float extinction = cloud_at(point, point_height, cell, footprint, true, billows) *
-                                 densest_in(cell) * saturate((ray.drawn - along) / meeting_fade);
+        const float extinction = cloud_at(point, here, footprint, true, billows) * here.density *
+                                 saturate((ray.drawn - along) / meeting_fade);
         const bool within = extinction > 0.0;
         const float fine = clamp(step_depth / max(extinction, 1e-6),
                                  max(footprint, coarse / most_refined), coarse);
@@ -492,9 +560,9 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
                 const float after = light_reach * share * share;
                 const float middle = (before + after) * 0.5;
                 const float3 lit_at = point + (sun * middle);
-                const float lit_height = point_height + (middle * sun_mu);
-                towards_sun += cloud_at(lit_at, lit_height, cell, footprint, false, unused) *
-                               densest_in(cell) * (after - before);
+                const Layered lit = layered_at(place, point_height + (middle * sun_mu));
+                towards_sun +=
+                    cloud_at(lit_at, lit, footprint, false, unused) * lit.density * (after - before);
                 before = after;
             }
             const float3 sunlight =
@@ -511,6 +579,7 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
             // layer of strongly forward scattering droplets lets it through: as bright as what
             // falls on the top at the top, dimmer deeper down and under where it billows. About as
             // deep as the whole column at the base, as clouds.cpp shades the ground beneath.
+            const Cell cell = cell_at(place.direction, place.from);
             const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
             const float over = column * saturate((cell.top - point_height) / thickness_of(cell)) *
                                (0.5 + billows);
@@ -664,12 +733,13 @@ void shadow_main(uint3 id: SV_DispatchThreadID) {
             const float3 point = start + (sun * ((float(at) + jitter) * step));
             const float distance = length(point);
             const float point_height = distance - radius;
-            const Cell cell = wandering_cell_at(point / distance, radius);
+            const Place place = wandered(point / distance, radius);
+            const Layered here = layered_at(place, point_height);
             float billows = 0.0;
-            const float cloud = cloud_at(point, point_height, cell, texel, true, billows);
+            const float cloud = cloud_at(point, here, texel, true, billows);
             if (cloud > 0.0) {
-                depth += cloud * densest_in(cell) * step;
-                top = max(top, cell.top);
+                depth += cloud * here.density * step;
+                top = max(top, point_height);
             }
         }
         if (depth <= 0.0) {

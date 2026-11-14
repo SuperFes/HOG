@@ -47,6 +47,7 @@ struct Lighting {
     glm::vec4 downwind;
     glm::vec4 carried;
     glm::vec4 weather_age;
+    glm::vec4 air_layers;
 };
 
 static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
@@ -242,7 +243,11 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                     static_cast<float>(view.carried.flour)},
         .weather_age = {static_cast<float>(view.weather.age_before),
                         static_cast<float>(view.weather.age), static_cast<float>(view.weather.flow),
-                        0.0F}};
+                        0.0F},
+        .air_layers = {static_cast<float>(view.weather.air.count),
+                       static_cast<float>(view.weather.air.bottom),
+                       static_cast<float>(view.weather.air.thickness),
+                       static_cast<float>(view.weather.air.ratio)}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

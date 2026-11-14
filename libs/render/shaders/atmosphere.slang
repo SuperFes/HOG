@@ -349,6 +349,9 @@ public struct Lighting {
     // x the seconds since the weather's maps before were taken, y those after, z how long the
     // billows have flowed, within clouds.hpp's flow_period.
     public float4 weather_age;
+    // How the air's layers of cloud lie, as render::AirShape: x how many, y the metres above sea
+    // level of the lowest's floor, z its depth, w how many times deeper each is than the one below.
+    public float4 air_layers;
 };
 
 // The gusts' field as `lighting` lays it.
