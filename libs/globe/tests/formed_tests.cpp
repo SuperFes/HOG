@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -1017,6 +1018,32 @@ void print_profile(const Probe& probe, std::span<const double> line, double spac
     }
 }
 
+// The layers along (x, y, dx, dy), and the matter the top voxel shows at each lod.
+void print_layers(const Probe& probe, std::span<const double> line, double spacing) {
+    const double length = std::hypot(line[2], line[3]);
+    const double radius = probe.generator.planet().body.radius;
+    for (int k = -24; k <= 24; ++k) {
+        const double t = k * spacing;
+        const double x = line[0] + (line[2] / length * t);
+        const double y = line[1] + (line[3] / length * t);
+        const Formed::Here here = probe.at(x, y);
+        const hog::globe::Strata& l = here.layers;
+        std::string shown;
+        for (const double lod : {probe.lod, 4.0 * probe.lod, 16.0 * probe.lod, 64.0 * probe.lod}) {
+            const DVec3 direction =
+                glm::normalize(probe.centre + (((probe.east * x) + (probe.north * y)) / radius));
+            const Generator::Column column = probe.generator.column(direction, lod);
+            shown += std::format(" {:3}", static_cast<int>(
+                                              column.sample(column.ground() - (lod / 4.0)).material));
+        }
+        std::println("{:7.1f}: org {:5.2f} top {:5.2f} sub {:5.2f} loess {:5.2f} sand {:5.2f} "
+                     "alluv {:5.2f} till {:5.2f} sap {:5.2f} rubble {:5.2f} beach {:5.2f} crag "
+                     "{:5.2f} |{}",
+                     t, l.organic, l.topsoil, l.subsoil, l.loess, l.sand, l.alluvium, l.till,
+                     l.saprolite, l.rubble, l.beach, here.crag, shown);
+    }
+}
+
 // Every column within `reach` standing over all four about it by more than a metre.
 void print_spikes(const Probe& probe, int reach) {
     constexpr double step = 0.5;
@@ -1057,7 +1084,12 @@ TEST_CASE("what stands out of the ground round a place", "[.probe_spikes]") {
     probe.lod = from_environment("HOG_PROBE_LOD").value_or(probe.generator.planet().voxel);
     if (const std::vector<double> line = numbers_from_environment("HOG_PROBE_ACROSS");
         line.size() == 4) {
-        print_profile(probe, line, from_environment("HOG_PROBE_STEP").value_or(0.25));
+        const double step = from_environment("HOG_PROBE_STEP").value_or(0.25);
+        if (from_environment("HOG_PROBE_LAYERS")) {
+            print_layers(probe, line, step);
+        } else {
+            print_profile(probe, line, step);
+        }
     } else {
         print_spikes(probe, 120);
     }

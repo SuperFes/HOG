@@ -247,6 +247,7 @@ Rubble rubble_in(const Context& context, Cell cell, const Fallen& fallen, double
                               : coarsest_of(planet, cell);
     const double widest = fits * width_of(planet, coarsest);
     double deep = 0.0;
+    int small = 0;
     for (int draw = 0; draw < rubble_draws; ++draw) {
         const std::array<double, 3> sides =
             sides_of(context, fallen, widest,
@@ -254,12 +255,15 @@ Rubble rubble_in(const Context& context, Cell cell, const Fallen& fallen, double
                                  0x7275'6262'6c65ULL));
         if (sides[0] < lod) {
             deep += sides[2] * (1.0 - sunk);
+            ++small;
         }
     }
     if (deep <= 0.0) {
         return {};
     }
-    return {.depth = std::min(fallen.cover, 1.0) * deep / rubble_draws,
+    const double cover = std::min(fallen.cover, 1.0);
+    return {.depth = cover * deep / rubble_draws,
+            .share = cover * small / rubble_draws,
             .of = material_of(context, fallen)};
 }
 
@@ -393,20 +397,24 @@ public:
             place_under(direction, fall_level(*context_->planet, lod_));
         const int di = off_i < 0.0 ? -1 : 1;
         const int dj = off_j < 0.0 ? -1 : 1;
-        const auto depth_at = [&](int i, int j, double weight) {
-            if (weight <= 0.0) {
-                return 0.0;
-            }
-            const std::optional<Cell> cell = next_to(held, i, j);
-            return weight * rubble_of(cell.value_or(held)).depth;
-        };
         const double across_i = std::abs(off_i);
         const double across_j = std::abs(off_j);
         Rubble blended = rubble_of(held);
-        blended.depth = ((1.0 - across_j) * (1.0 - across_i) * blended.depth) +
-                        depth_at(di, 0, (1.0 - across_j) * across_i) +
-                        depth_at(0, dj, across_j * (1.0 - across_i)) +
-                        depth_at(di, dj, across_j * across_i);
+        const auto blend = [&](double Rubble::* of) {
+            const auto at = [&](int i, int j, double weight) {
+                if (weight <= 0.0) {
+                    return 0.0;
+                }
+                const std::optional<Cell> cell = next_to(held, i, j);
+                return weight * (rubble_of(cell.value_or(held)).*of);
+            };
+            return ((1.0 - across_j) * (1.0 - across_i) * (blended.*of)) +
+                   at(di, 0, (1.0 - across_j) * across_i) +
+                   at(0, dj, across_j * (1.0 - across_i)) + at(di, dj, across_j * across_i);
+        };
+        const double depth = blend(&Rubble::depth);
+        blended.share = blend(&Rubble::share);
+        blended.depth = depth;
         return blended;
     }
 
@@ -487,6 +495,18 @@ std::vector<std::optional<Rock>> rockfall(const Context& context, std::span<cons
         found.push_back(rocks.under(center(cell)));
     }
     return found;
+}
+
+bool rubble_shows(const Context& context, DVec3 direction, double lod, double share) noexcept {
+    if (share <= 0.0 || lod <= 0.0) {
+        return false;
+    }
+    // One draw a voxel, on a lattice as fine as the detail read.
+    const DVec3 at = glm::floor(direction * (context.planet->body.radius / lod));
+    const std::uint64_t seed =
+        hash_values(context.seed(Term::Rockfall), static_cast<std::int64_t>(at.x),
+                    static_cast<std::int64_t>(at.y), static_cast<std::int64_t>(at.z));
+    return unit(seed, 0x7368'6f77'73ULL) < share;
 }
 
 Fall fallen(const Context& context, DVec3 direction, double lod) {

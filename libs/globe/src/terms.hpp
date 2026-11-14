@@ -100,11 +100,17 @@ inline constexpr int rock_sizes = 4;
 [[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod);
 [[nodiscard]] std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod);
 // What the blocks too small for `lod` to resolve make of the ground they lie on, spread evenly
-// over it as every level coarser holds them: metres of rubble of their rock.
+// over it as every level coarser holds them: metres of rubble of their rock, and the share of the
+// ground they cover.
 struct Rubble {
     double depth = 0.0;
+    double share = 0.0;
     Material of = Material::Gravel;
 };
+// Whether the column under `direction` shows its rubble at its top: as many of the columns about
+// as the share its blocks cover, scattered, so coarse ground looks as fine ground does on the whole.
+[[nodiscard]] bool rubble_shows(const Context& context, DVec3 direction, double lod,
+                                double share) noexcept;
 // The block lying across a column, with the rubble of those too small to show.
 struct Fall {
     std::optional<Rock> rock;

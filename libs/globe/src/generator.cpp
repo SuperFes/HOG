@@ -224,8 +224,11 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.slope_ = slope;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
-    column.strata_.rubble = fall.rubble.depth;
-    column.strata_.rubble_of = fall.rubble.of;
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    if (terms::rubble_shows(context, down, lod, fall.rubble.share)) {
+        column.strata_.rubble = fall.rubble.depth;
+        column.strata_.rubble_of = fall.rubble.of;
+    }
     column.strata_.cover += fall.rubble.depth;
     column.rock_ = fall.rock;
     return column;

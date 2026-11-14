@@ -210,7 +210,36 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     const auto bare = hog::globe::terms::ground(setup.context, down, every_block);
     CHECK(std::abs(column.ground() - (setup.generator.planet().body.radius + bare.height + last)) <
           1e-6);
-    CHECK(column.sample(column.ground() - (0.5 * last)).material == rock.material);
+    // It shows at the top of as many columns about as its blocks cover: where fine ground shows
+    // soil between the blocks, so does coarse.
+    const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, down));
+    const DVec3 north = glm::cross(down, east);
+    const double radius = setup.generator.planet().body.radius;
+    // A column a voxel apart, so each draws apart.
+    double expected = 0.0;
+    int shown = 0;
+    int columns = 0;
+    for (int i = -12; i <= 12; ++i) {
+        for (int j = -12; j <= 12; ++j) {
+            const DVec3 direction =
+                glm::normalize(down + (((east * static_cast<double>(i)) +
+                                        (north * static_cast<double>(j))) *
+                                       (every_block / radius)));
+            const hog::globe::terms::Rubble rubble =
+                hog::globe::terms::fallen(setup.context, direction, every_block).rubble;
+            CHECK(rubble.share <= 1.0);
+            expected += rubble.share;
+            const auto here = setup.generator.column(direction, every_block);
+            const bool rocky =
+                here.sample(here.ground() - (0.5 * rubble.depth)).material == rubble.of;
+            shown += rubble.depth > 0.0 && rocky ? 1 : 0;
+            ++columns;
+        }
+    }
+    expected /= columns;
+    REQUIRE(expected > 0.05);
+    CHECK(shown < columns);
+    CHECK(std::abs((static_cast<double>(shown) / columns) - expected) < 0.1);
 }
 
 TEST_CASE("rubble runs on from one coarsest cell to the next without steps", "[globe][rockfall]") {
