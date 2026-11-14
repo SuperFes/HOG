@@ -123,12 +123,25 @@ public:
     // image, from the last march() and its `distances`, ready to sample.
     void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView distances,
               const CloudsView& view) const noexcept;
+    // As march() and draw(), but marched afresh with nothing blended from frames before: for
+    // pictures drawn now and then, as a probe's faces are. `marched` and `distances` are storage
+    // images of march_extent() to march into, then sampled images of it to draw from.
+    void march_once(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                    VkImageView marched, VkImageView distances,
+                    const CloudsView& view) const noexcept;
+    void draw_marched(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                      VkImageView marched, VkImageView distances,
+                      const CloudsView& view) const noexcept;
     // What the last march() left, as draw() draws it, ready to sample: premultiplied, before tone
     // mapping, its alpha the share of the view hidden.
     [[nodiscard]] VkImageView marched() const noexcept { return blends_.at(blended_).view(); }
 
 private:
     Clouds() = default;
+    // Records marching into `marched` and `distances`, its jitter as `frames` since the eye jumped.
+    void dispatch_march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                        VkImageView marched, VkImageView distances, const CloudsView& view,
+                        std::uint32_t frames) const noexcept;
 
     const Device* device_ = nullptr;
     CloudQuality quality_ = CloudQuality::High;

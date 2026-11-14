@@ -74,6 +74,7 @@ DVec3 probe_direction(DVec3 direction, DVec3 up, DVec3 east) {
 Result<EnvironmentProbe> EnvironmentProbe::create(const Device& device, VkFormat colour_format,
                                                   VkFormat depth_format, std::uint32_t size) {
     EnvironmentProbe probe;
+    probe.device_ = &device;
     probe.size_ = size;
     probe.levels_ = static_cast<std::uint32_t>(std::bit_width(size));
     VkFormatProperties properties{};
@@ -95,12 +96,13 @@ Result<EnvironmentProbe> EnvironmentProbe::create(const Device& device, VkFormat
         return std::unexpected(std::move(colour).error());
     }
     probe.colour_ = std::move(colour).value();
-    auto depth = make_image(device, {.format = depth_format,
-                                     .extent = {.width = size, .height = size},
-                                     .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                     .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
-                                     .layers = probe_faces,
-                                     .layer_views = true});
+    auto depth = make_image(
+        device, {.format = depth_format,
+                 .extent = {.width = size, .height = size},
+                 .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+                 .layers = probe_faces,
+                 .layer_views = true});
     if (!depth) {
         return std::unexpected(std::move(depth).error());
     }
@@ -153,21 +155,80 @@ Result<> EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
         if (!cleared.at(face)) {
             continue;
         }
-        begin_rendering(commands, colour_.layer_view(face), extent,
-                        face == probe_down ? nothing : black, {.view = depth_.layer_view(face)});
-        if (drawn.at(face)) {
-            VkImageView aerial = aerial_.at(face).view();
-            sky.draw(commands, extent, frame, atmosphere, skies.at(face), aerial);
-            if (view.around) {
-                if (Result<> stood = view.around(commands, skies.at(face).camera, extent); !stood) {
-                    vkCmdEndRendering(commands);
-                    return stood;
-                }
-            }
+        if (!drawn.at(face)) {
+            begin_rendering(commands, colour_.layer_view(face), extent, nothing,
+                            {.view = depth_.layer_view(face)});
+            vkCmdEndRendering(commands);
+            continue;
         }
-        vkCmdEndRendering(commands);
+        if (Result<> made =
+                record_face(commands, frame, face, atmosphere, sky, skies.at(face), view);
+            !made) {
+            return made;
+        }
     }
     shrink(commands);
+    return {};
+}
+
+Result<> EnvironmentProbe::record_face(VkCommandBuffer commands, std::uint32_t frame,
+                                       std::uint32_t face, const Atmosphere& atmosphere,
+                                       const Sky& sky, const SkyView& seen, const ProbeView& view) {
+    const VkExtent2D extent{.width = size_, .height = size_};
+    begin_rendering(commands, colour_.layer_view(face), extent, black,
+                    {.view = depth_.layer_view(face)});
+    sky.draw(commands, extent, frame, atmosphere, seen, aerial_.at(face).view());
+    if (view.around) {
+        if (Result<> stood = view.around(commands, seen.camera, extent); !stood) {
+            vkCmdEndRendering(commands);
+            return stood;
+        }
+    }
+    vkCmdEndRendering(commands);
+    if (view.clouds != nullptr) {
+        return record_clouds(commands, face, view, seen.camera);
+    }
+    return {};
+}
+
+Result<> EnvironmentProbe::record_clouds(VkCommandBuffer commands, std::uint32_t face,
+                                         const ProbeView& view, const Camera& camera) {
+    const VkExtent2D extent{.width = size_, .height = size_};
+    const VkExtent2D marching = view.clouds->march_extent(extent);
+    if (marched_.desc().extent.width != marching.width ||
+        marched_.desc().extent.height != marching.height) {
+        for (auto [image, format] : {std::pair{&marched_, Clouds::marched_format},
+                                     std::pair{&distances_, Clouds::distances_format}}) {
+            auto made = make_image(
+                *device_, {.format = format,
+                           .extent = marching,
+                           .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+            if (!made) {
+                return std::unexpected(std::move(made).error());
+            }
+            *image = std::move(made).value();
+        }
+    }
+    CloudsView seen = view.clouds_view;
+    seen.camera = camera;
+    seen.air.aerial = aerial_.at(face).view();
+    VkImageView depth = depth_.layer_view(face);
+    transition(commands, depth_.handle(), VK_IMAGE_ASPECT_DEPTH_BIT, image_use::depth_target,
+               image_use::sampled);
+    for (const Image* image : {&marched_, &distances_}) {
+        transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+                   image_use::storage);
+    }
+    view.clouds->march_once(commands, extent, depth, marched_.view(), distances_.view(), seen);
+    for (const Image* image : {&marched_, &distances_}) {
+        transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
+                   image_use::sampled);
+    }
+    begin_rendering(commands, colour_.layer_view(face), extent, std::nullopt);
+    view.clouds->draw_marched(commands, extent, depth, marched_.view(), distances_.view(), seen);
+    vkCmdEndRendering(commands);
+    transition(commands, depth_.handle(), VK_IMAGE_ASPECT_DEPTH_BIT, image_use::sampled,
+               image_use::depth_target);
     return {};
 }
 

@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/clouds.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
@@ -20,10 +21,15 @@ class Device;
 
 // What a probe takes in: the sky as the frame's view has it, seen from its camera's eye, and
 // whatever else stands round it, which `around` draws over the sky into each face as seen by
-// that face's camera. Only the camera's eye is taken; each face turns its own way.
+// that face's camera; then the clouds `clouds` marches, if given, as `clouds_view` has them but
+// seen from each face, through its own air. Only the camera's eye is taken; each face turns its
+// own way.
 struct ProbeView {
     SkyView sky;
     std::function<Result<>(VkCommandBuffer, const Camera&, VkExtent2D)> around;
+    const Clouds* clouds = nullptr;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    CloudsView clouds_view = {};
 };
 
 // The cube's faces, as Vulkan orders them, laid out by the ground's frame at the eye: x east,
@@ -73,9 +79,22 @@ private:
                     const std::array<bool, probe_faces>& drawn) const;
     // Blurs each mip from the one before, and leaves the cube to be sampled.
     void shrink(VkCommandBuffer commands) const;
+    // Records drawing `face`, seen as `seen` has it: the sky, what stands round, and the clouds.
+    Result<> record_face(VkCommandBuffer commands, std::uint32_t frame, std::uint32_t face,
+                         const Atmosphere& atmosphere, const Sky& sky, const SkyView& seen,
+                         const ProbeView& view);
+    // Records marching the clouds as seen from `face` and drawing them over it, its colour and
+    // depth drawn and left as targets.
+    Result<> record_clouds(VkCommandBuffer commands, std::uint32_t face, const ProbeView& view,
+                           const Camera& camera);
 
+    const Device* device_ = nullptr;
     Image colour_;
     Image depth_;
+    // What the clouds are marched into, as Clouds::march_once() has them, made as they're first
+    // marched.
+    Image marched_;
+    Image distances_;
     std::vector<Image> aerial_; // a face each
     std::uint32_t size_ = 0;
     std::uint32_t levels_ = 1;

@@ -158,10 +158,12 @@ private:
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
     // From under the water, as the sea last found the eye in `frame`'s slot, adds the pass
-    // taking what's out of it all round, seen as `sky` has it; whether it did.
+    // taking what's out of it all round, seen as `sky` has it, with the clouds as `clouds` has
+    // them if there are any; whether it did.
     [[nodiscard]] bool take_probe(render::RenderGraph& graph, const render::Frame& frame,
                                   const Shot& shot, const render::SkyView& sky,
-                                  std::span<const render::GraphUse> through_air);
+                                  std::span<const render::GraphUse> through_air,
+                                  std::optional<render::CloudsView> clouds);
     // Adds the sea pass over what's drawn to `target` and `depth`, seeing through to what's
     // behind it.
     void add_water(render::RenderGraph& graph, const render::Frame& frame,

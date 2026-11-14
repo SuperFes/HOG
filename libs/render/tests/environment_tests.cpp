@@ -1,13 +1,16 @@
 #include "test_device.hpp"
 
+#include <hog/jobs/job_system.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/blocks.hpp>
+#include <hog/render/clouds.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/environment_probe.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/weather_maps.hpp>
 #include <hog/shaders/cube_probe.hpp>
 #include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
@@ -17,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -173,6 +177,88 @@ TEST_CASE("a probe's cube holds the sky each way round the eye, laid out by the 
     // The sky overhead is drawn into its face, and towards the sun brighter.
     CHECK(brightness(found[4]) > 0.0);
     CHECK(brightness(found[5]) > brightness(found[4]));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a probe's cube holds the clouds over the eye, for water to mirror and be seen out of",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    auto atmosphere = hog::render::Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(*device, colour_format, depth_format);
+    REQUIRE(sky);
+    hog::jobs::JobSystem jobs{2};
+    auto clouds =
+        hog::render::Clouds::create(*device, colour_format, jobs, hog::render::CloudQuality::Low);
+    REQUIRE(clouds);
+    constexpr std::uint32_t map_size = 16;
+    auto maps = hog::render::WeatherMaps::create(*device, map_size);
+    REQUIRE(maps);
+    // Overcast from 2 km to 3 km: a full cover holding 1 mm, in layers 250 m deep.
+    const auto filled = [](std::size_t size, std::array<std::uint8_t, 4> texel, std::size_t span) {
+        std::vector<std::byte> bytes(size);
+        for (std::size_t at = 0; at < size; ++at) {
+            bytes[at] = static_cast<std::byte>(texel.at(at % span));
+        }
+        return bytes;
+    };
+    const std::vector<std::byte> weather = filled(maps->map_bytes(), {255, 64, 0, 0}, 4);
+    const std::vector<std::byte> dry = filled(maps->map_bytes(), {0, 31, 47, 0}, 4);
+    const std::vector<std::byte> still(maps->drift_bytes());
+    std::vector<std::byte> layers(maps->layer_bytes() * hog::render::most_cloud_layers);
+    for (std::size_t layer = 8; layer < 12; ++layer) {
+        const std::vector<std::byte> one = filled(maps->layer_bytes(), {255, 32, 0, 0}, 2);
+        std::ranges::copy(one, layers.begin() + static_cast<std::ptrdiff_t>(layer * one.size()));
+    }
+    REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+        CHECK(maps->update(commands, 0,
+                           {.weather_before = weather,
+                            .weather_after = weather,
+                            .sky_before = dry,
+                            .sky_after = dry,
+                            .drift_before = still,
+                            .drift_after = still,
+                            .layers_before = layers,
+                            .layers_after = layers,
+                            .air = {.count = hog::render::most_cloud_layers,
+                                    .bottom = 0.0,
+                                    .thickness = 250.0,
+                                    .ratio = 1.0}}));
+    }));
+
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 east{1.0, 0.0, 0.0};
+    const hog::render::SkyView view{
+        .camera = {.eye = hog::WorldPosition{up * (earth + 10.0)}, .forward = east, .up = up},
+        .sun = glm::normalize(east + up),
+        .bend = {.up = up, .eye_height = 10.0, .radius = earth, .faked = earth},
+        .exposure = 1.0,
+        .weather = maps->bindings(1.0)};
+    // Overhead, as the clear sky and as the clouds have it.
+    const auto overhead = [&](bool clouded) {
+        auto probe =
+            hog::render::EnvironmentProbe::create(*device, colour_format, depth_format, 64);
+        REQUIRE(probe);
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
+            const hog::render::CloudsView seen{.camera = view.camera,
+                                               .bend = view.bend,
+                                               .air = sky->bindings(0, *atmosphere, VK_NULL_HANDLE),
+                                               .weather = view.weather};
+            CHECK(probe->record(commands, 0, *atmosphere, *sky,
+                                {.sky = view,
+                                 .around = {},
+                                 .clouds = clouded ? &*clouds : nullptr,
+                                 .clouds_view = seen}));
+        }));
+        return sampled(*device, *probe, {hog::render::probe_direction(up, up, east)}).front();
+    };
+    const std::array<float, 4> clear = overhead(false);
+    const std::array<float, 4> clouded = overhead(true);
+    CAPTURE(clear[0], clear[1], clear[2], clouded[0], clouded[1], clouded[2]);
+    // The clear sky's blue; the cloud over it grey, as red nearly as it's blue.
+    CHECK(clear[2] > 1.5F * clear[0]);
+    CHECK(clouded[2] < 1.3F * clouded[0]);
     CHECK(device->validation_errors() == 0);
 }
 

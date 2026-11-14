@@ -327,7 +327,8 @@ bool Scene::settled() const {
 }
 
 bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
-                       const render::SkyView& sky, std::span<const render::GraphUse> through_air) {
+                       const render::SkyView& sky, std::span<const render::GraphUse> through_air,
+                       std::optional<render::CloudsView> clouds) {
     // From under the water, from just over it, so all it draws is out of the water; else from
     // the eye, for what the water round it mirrors.
     const std::optional<double> above = sky_.eye_above_water(frame.slot);
@@ -335,22 +336,28 @@ bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, c
     render::SkyView high = sky;
     high.camera.eye += shot.bend.up * raised;
     high.bend.eye_height += raised;
-    graph.add({.name = "probe",
-               .uses = {through_air.begin(), through_air.end()},
-               .targets = std::nullopt},
-              [this, slot = frame.slot, high](VkCommandBuffer commands) {
-                  // The ground readied for this frame, seen from the probe.
-                  const auto ground = [this, slot, &high](VkCommandBuffer drawing,
-                                                          const render::Camera& camera,
-                                                          VkExtent2D extent) -> Result<> {
-                      blocks_.draw_prepared(drawing, extent,
-                                            {.camera = camera, .sun = high.sun, .bend = high.bend},
-                                            slot);
-                      return {};
-                  };
-                  return probes_.at(slot).record(commands, slot, atmosphere_, sky_,
-                                                 {.sky = high, .around = ground});
-              });
+    if (clouds) {
+        clouds->bend = high.bend;
+    }
+    graph.add(
+        {.name = "probe",
+         .uses = {through_air.begin(), through_air.end()},
+         .targets = std::nullopt},
+        [this, slot = frame.slot, high, clouds](VkCommandBuffer commands) {
+            // The ground readied for this frame, seen from the probe.
+            const auto ground = [this, slot, &high](VkCommandBuffer drawing,
+                                                    const render::Camera& camera,
+                                                    VkExtent2D extent) -> Result<> {
+                blocks_.draw_prepared(drawing, extent,
+                                      {.camera = camera, .sun = high.sun, .bend = high.bend}, slot);
+                return {};
+            };
+            return probes_.at(slot).record(commands, slot, atmosphere_, sky_,
+                                           {.sky = high,
+                                            .around = ground,
+                                            .clouds = clouds ? &clouds_ : nullptr,
+                                            .clouds_view = clouds.value_or(render::CloudsView{})});
+        });
     return true;
 }
 
@@ -515,7 +522,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
 
     // What's round the eye first, for the ground's puddles and the water to mirror, and to be
     // seen out of the water from under it.
-    probing_ = take_probe(graph, frame, shot, sky, through_air);
+    probing_ = take_probe(graph, frame, shot, sky, through_air,
+                          cloudy ? std::optional{clouds_view()} : std::nullopt);
     add_ground(graph, frame, shot, sea, through_air, drawn);
     if (!shot.others.empty()) {
         graph.add({.name = "others", .uses = through_air, .targets = drawn},

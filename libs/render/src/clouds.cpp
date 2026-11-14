@@ -358,6 +358,49 @@ Result<> Clouds::set_quality(CloudQuality quality) {
     return {};
 }
 
+void Clouds::dispatch_march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                            VkImageView marched, VkImageView distances, const CloudsView& view,
+                            std::uint32_t frames) const noexcept {
+    const VkExtent2D size = march_extent(extent);
+    const double lowest = view.weather.lowest_base;
+    const double highest = view.weather.highest_top;
+    const std::uint32_t scale = march_scale(quality_);
+    // Radians across a marched texel.
+    const double texel = scale * 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
+    const Mat4 from_clip = eye_from_clip(view.camera, extent);
+    const MarchPush push{
+        .eye_from_clip = from_clip,
+        .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+        .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                  static_cast<float>(view.weather.faded), static_cast<float>(texel)},
+        .moved = {Vec3{within_period(view.moved)}, static_cast<float>(scale)},
+        .bounds = {static_cast<float>(lowest), static_cast<float>(highest),
+                   static_cast<float>(frames),
+                   view.weather.falling ? static_cast<float>(view.weather.highest_base) : -1.0F}};
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, march_.handle());
+    push_uniform_buffer(commands, march_, 0, view.air.air);
+    push_uniform_buffer(commands, march_, 1, view.air.lighting);
+    push_sampled_image(commands, march_, 2, view.air.transmittance, view.air.sampler);
+    push_sampled_image(commands, march_, 3, view.air.aerial, view.air.sampler);
+    push_sampled_image(commands, march_, 4, depth, nearest_.handle());
+    push_sampled_image(commands, march_, 5, view.weather.weather_before, view.weather.sampler);
+    push_sampled_image(commands, march_, 6, view.weather.weather_after, view.weather.sampler);
+    push_sampled_image(commands, march_, 7, view.weather.sky_before, view.weather.sampler);
+    push_sampled_image(commands, march_, 8, view.weather.sky_after, view.weather.sampler);
+    push_sampled_image(commands, march_, 15, view.weather.drift_before, view.weather.sampler);
+    push_sampled_image(commands, march_, 16, view.weather.drift_after, view.weather.sampler);
+    push_sampled_image(commands, march_, 17, view.weather.layers_before, view.weather.sampler);
+    push_sampled_image(commands, march_, 18, view.weather.layers_after, view.weather.sampler);
+    push_sampled_image(commands, march_, 9, noise_.shape.view(), tiling_.handle());
+    push_sampled_image(commands, march_, 10, noise_.detail.view(), tiling_.handle());
+    push_storage_image(commands, march_, 11, marched);
+    push_storage_image(commands, march_, 12, distances);
+    push_sampled_image(commands, march_, 13, view.air.cloud_shadow, view.air.sampler);
+    vkCmdPushConstants(commands, march_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
+    vkCmdDispatch(commands, (size.width + 7) / 8, (size.height + 7) / 8, 1);
+}
+
 Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
                        VkImageView marched, VkImageView distances, const CloudsView& view) {
     if (extent.width == 0 || extent.height == 0) {
@@ -387,43 +430,8 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
         frames_ = 0;
     }
 
-    const double lowest = view.weather.lowest_base;
-    const double highest = view.weather.highest_top;
-    const std::uint32_t scale = march_scale(quality_);
-    // Radians across a marched texel.
-    const double texel = scale * 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
+    dispatch_march(commands, extent, depth, marched, distances, view, frames_);
     const Mat4 from_clip = eye_from_clip(view.camera, extent);
-    const MarchPush push{
-        .eye_from_clip = from_clip,
-        .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-        .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
-                  static_cast<float>(view.weather.faded), static_cast<float>(texel)},
-        .moved = {Vec3{within_period(view.moved)}, static_cast<float>(scale)},
-        .bounds = {static_cast<float>(lowest), static_cast<float>(highest),
-                   static_cast<float>(frames_),
-                   view.weather.falling ? static_cast<float>(view.weather.highest_base) : -1.0F}};
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, march_.handle());
-    push_uniform_buffer(commands, march_, 0, view.air.air);
-    push_uniform_buffer(commands, march_, 1, view.air.lighting);
-    push_sampled_image(commands, march_, 2, view.air.transmittance, view.air.sampler);
-    push_sampled_image(commands, march_, 3, view.air.aerial, view.air.sampler);
-    push_sampled_image(commands, march_, 4, depth, nearest_.handle());
-    push_sampled_image(commands, march_, 5, view.weather.weather_before, view.weather.sampler);
-    push_sampled_image(commands, march_, 6, view.weather.weather_after, view.weather.sampler);
-    push_sampled_image(commands, march_, 7, view.weather.sky_before, view.weather.sampler);
-    push_sampled_image(commands, march_, 8, view.weather.sky_after, view.weather.sampler);
-    push_sampled_image(commands, march_, 15, view.weather.drift_before, view.weather.sampler);
-    push_sampled_image(commands, march_, 16, view.weather.drift_after, view.weather.sampler);
-    push_sampled_image(commands, march_, 17, view.weather.layers_before, view.weather.sampler);
-    push_sampled_image(commands, march_, 18, view.weather.layers_after, view.weather.sampler);
-    push_sampled_image(commands, march_, 9, noise_.shape.view(), tiling_.handle());
-    push_sampled_image(commands, march_, 10, noise_.detail.view(), tiling_.handle());
-    push_storage_image(commands, march_, 11, marched);
-    push_storage_image(commands, march_, 12, distances);
-    push_sampled_image(commands, march_, 13, view.air.cloud_shadow, view.air.sampler);
-    vkCmdPushConstants(commands, march_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
-                       &push);
-    vkCmdDispatch(commands, (size.width + 7) / 8, (size.height + 7) / 8, 1);
 
     // What was just marched, read back by the blend; the marched images are the graph's, so a
     // barrier on all of memory rather than on them.
@@ -474,20 +482,37 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
     return {};
 }
 
+void Clouds::march_once(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                        VkImageView marched, VkImageView distances,
+                        const CloudsView& view) const noexcept {
+    if (extent.width == 0 || extent.height == 0) {
+        return;
+    }
+    HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "marching clouds without the air");
+    HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE, "marching clouds without weather");
+    dispatch_march(commands, extent, depth, marched, distances, view, 0);
+}
+
 void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
                   VkImageView distances, const CloudsView& view) const noexcept {
+    HOG_ASSERT(blend_extent_.width > 0, "drawing clouds before marching them");
+    draw_marched(commands, extent, depth, blends_.at(blended_).view(), distances, view);
+}
+
+void Clouds::draw_marched(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                          VkImageView marched, VkImageView distances,
+                          const CloudsView& view) const noexcept {
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing clouds without the air");
-    HOG_ASSERT(blend_extent_.width > 0, "drawing clouds before marching them");
     const Push push{.eye_from_clip = eye_from_clip(view.camera, extent),
                     .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
                     .radii = {0.0F, static_cast<float>(view.bend.faked), 0.0F, 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, view.air.lighting);
     push_sampled_image(commands, pipeline_, 1, depth, nearest_.handle());
-    push_sampled_image(commands, pipeline_, 2, blends_.at(blended_).view(), linear_.handle());
+    push_sampled_image(commands, pipeline_, 2, marched, linear_.handle());
     push_sampled_image(commands, pipeline_, 3, distances, nearest_.handle());
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
