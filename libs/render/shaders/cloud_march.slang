@@ -84,6 +84,9 @@ static const float shortest_step = 40.0;
 static const float longest_step = 2000.0;
 // Metres along the view clouds are marched over at most.
 static const float march_reach = 100000.0;
+// Metres a march goes through cloud before it reads afresh the column of weather that lights it
+// from above, which changes far more slowly than the cloud's billows.
+static const float lit_afresh = 300.0;
 // Where the light reaching each step is found, towards the sun, in metres.
 static const uint light_steps = 6;
 static const float light_reach = 2000.0;
@@ -525,6 +528,10 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
     bool was_clear = true;
     float stepping_to = 0.0;
     float refined = 0.0;
+    // The column lighting the cloud from above, as last read and where; read before it's first
+    // used, as the first step through cloud always reads it.
+    Cell lit_cell = (Cell)0;
+    float lit_at_along = -1e30;
     for (uint at = 0; at < most_steps && along < end && seen_through > least_seen_through; ++at) {
         const float coarse = clamp(along * step_growth, shortest_step, longest);
         const float3 from_eye = view * along;
@@ -551,16 +558,37 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
         if (within) {
             const float3 point_up = normalize((up * centre_to_eye) + from_eye);
             const float sun_mu = dot(point_up, sun);
-            // What the cloud towards the sun takes, as if the weather there were the same.
+            if (abs(along - lit_at_along) > lit_afresh) {
+                lit_cell = cell_at(place.direction, place.from);
+                lit_at_along = along;
+            }
+            // What the cloud towards the sun takes, as if the weather there were the same: its layers
+            // read at every other step's middle, from here, and blended for the steps between.
             float towards_sun = 0.0;
             float before = 0.0;
             float unused = 0.0;
+            Layered lower = here;
+            float lower_middle = 0.0;
+            Layered upper = here;
+            float upper_middle = 0.0;
             for (uint light = 0; light < light_steps; ++light) {
                 const float share = float(light + 1) / float(light_steps);
                 const float after = light_reach * share * share;
                 const float middle = (before + after) * 0.5;
                 const float3 lit_at = point + (sun * middle);
-                const Layered lit = layered_at(place, point_height + (middle * sun_mu));
+                if (light % 2 == 0) {
+                    const float next_share = float(light + 2) / float(light_steps);
+                    const float next_middle =
+                        0.5 * (after + (light_reach * next_share * next_share));
+                    lower = upper;
+                    lower_middle = upper_middle;
+                    upper = layered_at(place, point_height + (next_middle * sun_mu));
+                    upper_middle = next_middle;
+                }
+                const float blend = saturate((middle - lower_middle) / (upper_middle - lower_middle));
+                Layered lit;
+                lit.cover = lerp(lower.cover, upper.cover, blend);
+                lit.density = lerp(lower.density, upper.density, blend);
                 towards_sun +=
                     cloud_at(lit_at, lit, footprint, false, unused) * lit.density * (after - before);
                 before = after;
@@ -579,9 +607,9 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
             // layer of strongly forward scattering droplets lets it through: as bright as what
             // falls on the top at the top, dimmer deeper down and under where it billows. About as
             // deep as the whole column at the base, as clouds.cpp shades the ground beneath.
-            const Cell cell = cell_at(place.direction, place.from);
-            const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
-            const float over = column * saturate((cell.top - point_height) / thickness_of(cell)) *
+            const float column = depth_per_mm * lit_cell.mm / max(lit_cell.cover, least_cover);
+            const float over = column *
+                               saturate((lit_cell.top - point_height) / thickness_of(lit_cell)) *
                                (0.5 + billows);
             const float let_through = 1.0 / (1.0 + (0.75 * (1.0 - forward) * over));
             const float3 falling = (sunlight * max(sun_mu, 0.0)) + lighting.sky_scale.rgb;
