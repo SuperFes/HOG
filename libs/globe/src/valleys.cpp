@@ -199,32 +199,56 @@ void Lowered::add(const formation::Smooth::Read& ground, double wall, double flo
 
 formation::Smooth::Read Lowered::lowest() const noexcept {
     const std::span<const Ground> all{grounds_.data(), count_};
-    // Each crest rounded down from the lower of the two walls meeting at it, wherever another
-    // ground stands lowest: one lying low between them, but over the rounded crest, mustn't take
-    // the rounding away where it lies.
-    formation::Smooth::Read best = grounds_[lowest_].read;
-    for (const Ground& low : all) {
-        if (low.read.value - (blend_ / 4.0) >= best.value) {
-            continue;
+    // Each ground alone, and rounded down by each crest it meets with one standing over it, never
+    // past halfway down to its floor; those that can't come within the hand-over of `bound`
+    // skipped.
+    const auto ways = [&](const double& bound, const auto& each) {
+        for (const Ground& low : all) {
+            if (low.read.value - (blend_ / 4.0) >= bound + handing_over) {
+                continue;
+            }
+            each(low.read.value, low.read.gradient);
+            const double sinking = std::max(0.0, low.read.value - floor_under(low)) / 2.0;
+            for (const Ground& one : all) {
+                const double apart = one.read.value - low.read.value;
+                if (apart < 0.0 || &one == &low) {
+                    continue;
+                }
+                const double width = std::min(blend_, rounding_ * glm::length(one.read.gradient -
+                                                                              low.read.gradient)) *
+                                     one.wall * low.wall;
+                if (width <= 0.0 || apart >= width) {
+                    continue;
+                }
+                const double share = (width - apart) / width;
+                each(low.read.value - std::min(share * share * width / 4.0, sinking),
+                     (low.read.gradient * (1.0 - (share / 2.0))) +
+                         (one.read.gradient * (share / 2.0)));
+            }
         }
-        const formation::Smooth::Read rounded = rounded_from(low);
-        if (rounded.value < best.value) {
-            best = rounded;
+    };
+    double lowest = std::numeric_limits<double>::infinity();
+    ways(lowest, [&](double value, DVec3) { lowest = std::min(lowest, value); });
+    // Turning as each way comes lowest over the hand-over, so what's rounded from it never steps.
+    DVec3 gradient{0.0};
+    double weights = 0.0;
+    ways(lowest, [&](double value, DVec3 way) {
+        const double near = 1.0 - ((value - lowest) / handing_over);
+        if (near <= 0.0) {
+            return;
         }
-    }
-    return best;
+        const double weight = near * near * (3.0 - (2.0 * near));
+        gradient += way * weight;
+        weights += weight;
+    });
+    return {.value = lowest, .gradient = gradient / weights};
 }
 
-formation::Smooth::Read Lowered::rounded_from(const Ground& low) const noexcept {
-    const std::span<const Ground> all{grounds_.data(), count_};
-    double dip = 0.0;
-    formation::Smooth::Read rounded = low.read;
-    // The floor it stands over, handed over from its own to those coming as low over the blend,
-    // so none breaks where another comes lowest.
+double Lowered::floor_under(const Ground& low) const noexcept {
     const double over = std::max(blend_, handing_over);
     double floors = 0.0;
     double weights = 0.0;
-    for (const Ground& one : all) {
+    for (const Ground& one : std::span<const Ground>{grounds_.data(), count_}) {
         const double apart = one.read.value - low.read.value;
         if (apart < 0.0) {
             continue;
@@ -233,22 +257,8 @@ formation::Smooth::Read Lowered::rounded_from(const Ground& low) const noexcept 
         const double weight = near * near * (3.0 - (2.0 * near));
         floors += weight * one.floor;
         weights += weight;
-        const double width =
-            std::min(blend_, rounding_ * glm::length(one.read.gradient - low.read.gradient)) *
-            one.wall * low.wall;
-        if (width <= 0.0 || apart >= width) {
-            continue;
-        }
-        const double share = (width - apart) / width;
-        if (const double sunk = share * share * width / 4.0; sunk > dip) {
-            dip = sunk;
-            rounded.gradient =
-                (low.read.gradient * (1.0 - (share / 2.0))) + (one.read.gradient * (share / 2.0));
-        }
     }
-    const double floor = floors / weights;
-    rounded.value = low.read.value - std::min(dip, std::max(0.0, low.read.value - floor) / 2.0);
-    return rounded;
+    return floors / weights;
 }
 
 void Lowest::add(const Wall& one) noexcept {

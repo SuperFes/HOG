@@ -4,6 +4,7 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -102,8 +103,7 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
     // what's measured is the estimate, not the ground curving under it.
     constexpr double lod = 16.0;
     constexpr double h = 0.25;
-    for (const World kind : worlds) {
-        const Generator world = generator_for(kind);
+    const auto check = [&](const Generator& world) {
         double worst = 0.0;
         double total = 0.0;
         constexpr int count = 300;
@@ -124,11 +124,14 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
             worst = std::max(worst, error);
             total += error / count;
         }
-        UNSCOPED_INFO(static_cast<int>(kind) << " distance slope off by " << total
-                                             << " on average, " << worst << " at worst");
+        UNSCOPED_INFO("distance slope off by " << total << " on average, " << worst << " at worst");
         CHECK(total < 0.01);
         // Sharp edges are the worst: the estimate is a slope's, and an edge has two.
         CHECK(worst < 0.08);
+    };
+    check(hog::testing::small_world());
+    for (const World kind : {World::Frozen, World::Airless}) {
+        check(generator_for(kind));
     }
 }
 
@@ -161,7 +164,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x7430'0b51'dad1'da2cULL);
+    CHECK(digest == 0xb219'7cf3'9c86'73a8ULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {

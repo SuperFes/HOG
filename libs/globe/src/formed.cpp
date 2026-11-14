@@ -1085,7 +1085,12 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
                 ((wall.standing_gradient * radius_) * reaching) +
                 (smooth.gradient * (1.0 - reaching)) +
                 ((wall.reaching_gradient * radius_) * present * (wall.standing - smooth.value));
-            lowered.add({.value = faded, .gradient = fading}, reaching, fade(wall.floor));
+            // It's a wall to round a crest against only as far as it sinks below the ground about,
+            // which is none.
+            const double sunk =
+                blend > 0.0 ? std::min(1.0, (smooth.value - wall.standing) / blend) : 1.0;
+            lowered.add({.value = faded, .gradient = fading},
+                        reaching * sunk * sunk * (3.0 - (2.0 * sunk)), fade(wall.floor));
         }
         if (reaching > 0.0) {
             ways.push_back(

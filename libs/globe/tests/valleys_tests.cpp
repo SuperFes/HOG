@@ -148,6 +148,37 @@ TEST_CASE("many walls meeting round the lowest no more than the one it meets mos
     CHECK_THAT(lowered.lowest().value, WithinAbs(90.0, 1e-9));
 }
 
+TEST_CASE("the lowest turns smoothly where another way comes lowest, so a crest rounded from it "
+          "never steps",
+          "[globe][valleys]") {
+    // A rounded crest handing over to a plane below it, then that lowest rounded again against
+    // a wall it meets: as wide as their gradients part, so a turn the first told as a kink would
+    // step the second.
+    const auto inner = [](double x) {
+        Lowered lowered{40.0, 40.0};
+        lowered.add({.value = 100.0 + (0.5 * x), .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
+        lowered.add({.value = 100.0 - (0.5 * x), .gradient = {-0.5, 0.0, 0.0}}, 1.0, 0.0);
+        lowered.add({.value = 93.0 + (0.05 * x), .gradient = {0.05, 0.0, 0.0}}, 1.0, 0.0);
+        return lowered.lowest();
+    };
+    const auto outer = [&](double x) {
+        Lowered lowered{40.0, 40.0};
+        lowered.add(inner(x), 1.0, 0.0);
+        lowered.add({.value = 100.0, .gradient = {0.0, 0.8, 0.0}}, 1.0, 0.0);
+        return lowered.lowest().value;
+    };
+    constexpr double step = 0.01;
+    double turning = 0.0;
+    double stepping = 0.0;
+    for (int k = -3'000; k < 3'000; ++k) {
+        const double x = k * step;
+        turning = std::max(turning, glm::length(inner(x + step).gradient - inner(x).gradient));
+        stepping = std::max(stepping, std::abs(outer(x + step) - outer(x)));
+    }
+    CHECK(turning < 0.02);
+    CHECK(stepping < 0.05);
+}
+
 TEST_CASE("rounding a crest never sinks it past halfway down to its floor", "[globe][valleys]") {
     Lowered lowered{40.0, 40.0};
     lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 96.0);

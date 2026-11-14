@@ -99,7 +99,8 @@ constexpr double out_of_the_way = 1e5;
 // `blend`, as walls meeting head on part. Rounded by the one crest the lowest meets most, never by
 // every one at once, which would sink it far below them all; and never lower than halfway down to
 // its floor, handed over between floors as the ground is: what creeps off a crest never digs a
-// floor out.
+// floor out. It turns as each way comes lowest over `handing_over`, never at once, so a crest
+// rounded from it, as wide as their gradients part, never steps.
 class Lowered {
 public:
     Lowered(double rounding, double blend) noexcept : rounding_{rounding}, blend_{blend} {}
@@ -115,8 +116,9 @@ private:
         double wall = 0.0;
         double floor = 0.0;
     };
-    // `low` rounded by the one crest it meets most among those standing over it.
-    [[nodiscard]] formation::Smooth::Read rounded_from(const Ground& low) const noexcept;
+    // The floor `low` stands over, handed over from its own to those coming as low over the blend,
+    // so none breaks where another comes lowest.
+    [[nodiscard]] double floor_under(const Ground& low) const noexcept;
     double rounding_ = 0.0;
     double blend_ = 0.0;
     std::array<Ground, 32> grounds_{};
