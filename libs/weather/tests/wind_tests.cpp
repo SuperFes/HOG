@@ -314,9 +314,7 @@ TEST_CASE("ground warmed by the sun draws air in and lifts it", "[weather][wind]
     warm_and_lift(false);
 }
 
-// Known wrong: where three faces of the cube meet, a warmed column's middle sinks fast.
-TEST_CASE("ground warmed by the sun at a corner of the cube lifts its air too",
-          "[weather][wind][!mayfail]") {
+TEST_CASE("ground warmed by the sun at a corner of the cube lifts its air too", "[weather][wind]") {
     warm_and_lift(true);
 }
 

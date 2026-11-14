@@ -274,30 +274,6 @@ Value reconstruct(const Field& field, const Stencil& stencil, std::size_t cell, 
     return glm::clamp(centre + change, low, high);
 }
 
-Departure trace(const Field& field, const Stencil& stencil, std::size_t cell, double seconds) {
-    const Vec3 here = middle_of(field, stencil, cell);
-    const auto wind_at = [&](std::size_t at, Vec3 offset) {
-        return reconstruct<Vec3>(field, stencil, at, offset,
-                                 [&](std::size_t i) { return field.air[i].wind; });
-    };
-    const DVec3 start{here};
-    const DVec3 half = start - (0.5 * seconds * DVec3{field.air[cell].wind});
-    const auto midway = locate(field, half);
-    if (!midway) {
-        return {.cell = cell};
-    }
-    const Vec3 offset{half - DVec3{middle_of(field, stencil, *midway)}};
-    const DVec3 back = start - (seconds * DVec3{wind_at(*midway, offset)});
-    const auto there = locate(field, back);
-    if (!there) {
-        return {.cell = cell};
-    }
-    return {.cell = *there,
-            .offset = Vec3{back - DVec3{middle_of(field, stencil, *there)}},
-            .up = Vec3{glm::normalize(back)},
-            .moved = true};
-}
-
 // Turns a vector at one place on the sphere to lie as it did there at another.
 Vec3 carry(Vec3 v, Vec3 from, Vec3 to) {
     const Vec3 axis = glm::cross(from, to);
@@ -308,6 +284,41 @@ Vec3 carry(Vec3 v, Vec3 from, Vec3 to) {
     const Vec3 k = axis / sine;
     const float cosine = glm::dot(from, to);
     return (v * cosine) + (glm::cross(k, v) * sine) + (k * glm::dot(k, v) * (1.0F - cosine));
+}
+
+// The wind at a point near a cell's middle, as reconstruct has it, made in the cell's own frame:
+// each neighbour's turned to lie as it would here, and kept between theirs across and up apart,
+// so winds along the ground about it never sum to one rising or sinking wherever the cell is.
+Vec3 wind_near(const Field& field, const Stencil& stencil, std::size_t cell, Vec3 offset) {
+    const auto layers = static_cast<std::size_t>(field.grid.layers);
+    const Vec3 up = stencil.up(cell / layers);
+    const Vec3 first = stencil.links(cell)[0].direction;
+    const Vec3 second = glm::cross(up, first);
+    const Vec3 made = reconstruct<Vec3>(field, stencil, cell, offset, [&](std::size_t at) {
+        const Vec3 wind = carry(field.air[at].wind, stencil.up(at / layers), up);
+        return Vec3{glm::dot(wind, first), glm::dot(wind, second), glm::dot(wind, up)};
+    });
+    return (first * made.x) + (second * made.y) + (up * made.z);
+}
+
+Departure trace(const Field& field, const Stencil& stencil, std::size_t cell, double seconds) {
+    const Vec3 here = middle_of(field, stencil, cell);
+    const DVec3 start{here};
+    const DVec3 half = start - (0.5 * seconds * DVec3{field.air[cell].wind});
+    const auto midway = locate(field, half);
+    if (!midway) {
+        return {.cell = cell};
+    }
+    const Vec3 offset{half - DVec3{middle_of(field, stencil, *midway)}};
+    const DVec3 back = start - (seconds * DVec3{wind_near(field, stencil, *midway, offset)});
+    const auto there = locate(field, back);
+    if (!there) {
+        return {.cell = cell};
+    }
+    return {.cell = *there,
+            .offset = Vec3{back - DVec3{middle_of(field, stencil, *there)}},
+            .up = Vec3{glm::normalize(back)},
+            .moved = true};
 }
 
 } // namespace
@@ -477,9 +488,8 @@ void advect(Field& field, const Stencil& stencil, const globe::Planet& planet, d
         air.vapour = scalar(&Air::vapour);
         air.cloud = scalar(&Air::cloud);
         air.rain = scalar(&Air::rain);
-        const Vec3 wind = reconstruct<Vec3>(field, stencil, from.cell, from.offset,
-                                            [&](std::size_t i) { return field.air[i].wind; });
-        air.wind = carry(wind, from.up, stencil.up(cell / layers));
+        air.wind = carry(wind_near(field, stencil, from.cell, from.offset), from.up,
+                         stencil.up(cell / layers));
     }
     const std::vector<double> mass = masses(field, planet);
     keep_total(field, next, mass, &Air::vapour);
