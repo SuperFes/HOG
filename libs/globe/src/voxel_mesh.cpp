@@ -26,7 +26,8 @@ constexpr double least_liquid = 1.0 / 16.0;
 // The share of a voxel its ground must fill for the voxel to be ground right through.
 constexpr double half = 0.5;
 
-// What a voxel holds, as shares of it: its ground, shaped matter and grain together, and liquid.
+// What a voxel holds, as shares of it: its ground, shaped matter and grain together, and liquid
+// standing in its open part, past what fills the ground's pores.
 struct Held {
     Material ground = Material::Air; // the most of its ground
     Material liquid = Material::Air;
@@ -38,7 +39,10 @@ Held held_of(const Voxel& voxel) {
     constexpr double full = Voxel::full;
     const double solid = voxel.solid == Material::Air ? 0.0 : voxel.solid_amount / full;
     const double grain = voxel.grain == Material::Air ? 0.0 : voxel.grain_amount / full;
-    const double liquid = voxel.liquid == Material::Air ? 0.0 : voxel.liquid_amount / full;
+    const double pores =
+        (solid * properties(voxel.solid).porosity) + (grain * properties(voxel.grain).porosity);
+    const double liquid =
+        voxel.liquid == Material::Air ? 0.0 : std::max(0.0, (voxel.liquid_amount / full) - pores);
     return {.ground = solid >= grain ? voxel.solid : voxel.grain,
             .liquid = voxel.liquid,
             .ground_share = std::min(1.0, solid + grain),

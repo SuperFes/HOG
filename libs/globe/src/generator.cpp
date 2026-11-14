@@ -389,9 +389,11 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     if (water > 0.0 && filled > 0.0) {
         sample.liquid = Material::Water;
         if (sample.distance < 0.0) {
-            if (radius < water) {
-                sample.water = properties(sample.material).porosity;
-            }
+            // The pores of the ground under the level, and over the ground as much of the voxel
+            // as lies under it, where the ground's surface crosses the voxel.
+            const double ground = std::clamp(0.5 - (sample.distance / thickness), 0.0, 1.0);
+            sample.water = (std::min(ground, filled) * properties(sample.material).porosity) +
+                           std::clamp(filled - ground, 0.0, 1.0 - ground);
         } else if (sample.liquid != Material::Air) {
             sample.material = sample.liquid;
             sample.water = filled;

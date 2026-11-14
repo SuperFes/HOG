@@ -1,10 +1,13 @@
 #include "bed.hpp"
 
 #include <hog/globe/cell.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/globe/volume.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -16,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -508,4 +512,86 @@ TEST_CASE("the sea meets itself level across a tile held a level coarser beside 
         }
     }
     CHECK(tops == std::size_t{tile} * tile);
+}
+
+TEST_CASE("water over ground part of a voxel stands at its level, its pores' water unseen",
+          "[globe][voxel_mesh]") {
+    // Sand up to 0.7 of a voxel, the water over it filling the rest and 0.4 of the voxel above;
+    // the sand's pores full.
+    const double pores = hog::globe::properties(Material::Sand).porosity;
+    const auto amount = [](double share) { return hog::globe::amount_of(share); };
+    const auto margin = VoxelTree::build(Volume::tile_side, [&](int x, int, int z) {
+        // Half the tile lower: sand standing 0.95 up its voxel, over the water, which stays out.
+        const double top = x < 32 ? 0.7 : 0.95;
+        if (z < 10) {
+            return Cube{.solid = Material::Sand,
+                        .solid_amount = Voxel::full,
+                        .liquid = Material::Water,
+                        .liquid_amount = amount(pores)};
+        }
+        if (z == 10) {
+            return Cube{.solid = Material::Sand,
+                        .solid_amount = amount(top),
+                        .liquid = Material::Water,
+                        .liquid_amount = amount((top * pores) + std::max(0.0, 0.9 - top))};
+        }
+        return Cube{};
+    });
+    const hog::globe::Layers& layers = earth().layers();
+    const VoxelMesh mesh =
+        hog::globe::mesh_tile(layers, {.level = 4, .face = 1, .i = 3, .j = 3}, margin);
+    const double level = layers.bottom(10 * 16) + (0.9 * layers.thickness * 16.0);
+    int tops = 0;
+    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
+        const hog::DVec3 at = mesh.origin + hog::DVec3{vertex.position};
+        if (vertex.material == Material::Water &&
+            glm::dot(hog::DVec3{vertex.normal}, glm::normalize(at)) > 0.99) {
+            ++tops;
+            CHECK(glm::length(at) < level + 0.01);
+        }
+    }
+    CHECK(tops > 0);
+}
+
+TEST_CASE("generated water at a gentle shore is drawn no higher than its level",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::globe::Layers& layers = generator.layers();
+    const double lod = hog::globe::voxel_lod(generator);
+    // A place where water stands within a voxel of the ground, over gentle ground.
+    std::optional<hog::DVec3> shore;
+    for (std::uint64_t k = 0; k < 6'144 && !shore; ++k) {
+        const hog::DVec3 up = hog::globe::center(hog::globe::cell_at_index(5, k));
+        const hog::globe::Generator::Column column = generator.column(up, lod);
+        const double over = column.water() - column.ground();
+        if (column.water() > 0.0 && over > 0.0 && over < layers.thickness && column.slope() < 0.1) {
+            shore = up;
+        }
+    }
+    REQUIRE(shore);
+    const hog::DVec3 up = shore.value_or(hog::DVec3{});
+    const double level = generator.column(up, lod).water();
+    const hog::globe::Cell cell = hog::globe::cell_under(up, layers.level);
+    const int layer = layers.layer_at(level);
+    const hog::globe::TileKey key{.face = cell.face,
+                                  .i = cell.i / tile,
+                                  .j = cell.j / tile,
+                                  .k = static_cast<std::uint32_t>(layer) / tile};
+    const VoxelMesh mesh =
+        hog::globe::mesh_tile(layers, key, hog::globe::generate_tile(generator, key));
+    int tops = 0;
+    for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
+        const hog::DVec3 at = mesh.origin + hog::DVec3{vertex.position};
+        if (vertex.material != Material::Water ||
+            glm::dot(hog::DVec3{vertex.normal}, glm::normalize(at)) < 0.99) {
+            continue;
+        }
+        const double here = generator.column(glm::normalize(at), lod).water();
+        if (std::abs(here - level) > 0.01) {
+            continue;
+        }
+        ++tops;
+        CHECK(glm::length(at) < level + 0.01);
+    }
+    CHECK(tops > 100);
 }
