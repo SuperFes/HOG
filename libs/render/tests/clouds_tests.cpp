@@ -171,8 +171,16 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
     for (const Scene& scene : scenes) {
         CHECK(maps->map_bytes() == scene.before.size());
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
-            CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
-                               scene.sky, scene.sky, scene.drift, scene.drift));
+            CHECK(maps->update(commands, 0,
+                               {.weather_before = scene.before,
+                                .weather_after = scene.after.value_or(scene.before),
+                                .sky_before = scene.sky,
+                                .sky_after = scene.sky,
+                                .drift_before = scene.drift,
+                                .drift_after = scene.drift,
+                                .layers_before = {},
+                                .layers_after = {},
+                                .air = {}}));
         }));
         hog::render::WeatherBindings weather =
             maps->bindings(scene.faded, scene.age, scene.age_before);

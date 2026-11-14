@@ -22,6 +22,7 @@ std::optional<std::uint32_t> texel_bytes(VkFormat format) noexcept {
     case VK_FORMAT_R32G32B32A32_SFLOAT:
         return 16;
     case VK_FORMAT_R16_SFLOAT:
+    case VK_FORMAT_R8G8_UNORM:
         return 2;
     default:
         return std::nullopt;

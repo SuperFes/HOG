@@ -10,7 +10,7 @@ namespace {
 
 VkImageViewType view_type(const ImageDesc& desc) noexcept {
     if (desc.cube) {
-        return VK_IMAGE_VIEW_TYPE_CUBE;
+        return desc.layers > 6 ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE;
     }
     if (desc.depth > 1) {
         return VK_IMAGE_VIEW_TYPE_3D;
@@ -168,8 +168,9 @@ bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept {
 }
 
 Result<Image> make_image(const Device& device, const ImageDesc& desc) {
-    if (desc.cube && (desc.layers != 6 || desc.extent.width != desc.extent.height)) {
-        return make_error(ErrorCode::InvalidArgument, "a cube needs six square layers");
+    if (desc.cube &&
+        (desc.layers == 0 || desc.layers % 6 != 0 || desc.extent.width != desc.extent.height)) {
+        return make_error(ErrorCode::InvalidArgument, "a cube needs six square layers each");
     }
     if (desc.depth == 0 || (desc.depth > 1 && (desc.layers != 1 || desc.cube))) {
         return make_error(ErrorCode::InvalidArgument, "a 3D image has depth and one layer");

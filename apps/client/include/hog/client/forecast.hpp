@@ -32,6 +32,11 @@ inline constexpr double height_texel_step = 64.0;
 // frame, as half floats x, y and z, and a fourth unused.
 using DriftTexel = std::array<std::uint16_t, 4>;
 
+// A texel of a layer of the cloud's cube maps, each part from 0 to 255 for 0 to 1: the share of the
+// sky that layer's cloud covers, and its water as the square root of a sixteenth of its
+// millimetres.
+using LayerTexel = std::array<std::uint8_t, 2>;
+
 // The unit direction through the middle of texel (x, y), counted from the top left, of `face` of a
 // cube map `size` texels a side, as Vulkan samples it; faces go +x, -x, +y, -y, +z, -z.
 [[nodiscard]] DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
@@ -49,7 +54,8 @@ public:
 
     // Takes `weather` to fade to once the fade under way is done, so what's shown never jumps: at
     // most one waits, the newest. Each weather's cloud drifts on from when it came, wherever it's
-    // shown. The first weather, or weather at another level from what's shown, is shown at once.
+    // shown. The first weather, or weather at another level or in other layers from what's shown,
+    // is shown at once.
     void receive(const protocol::Weather& weather, MonotonicClock::time_point now);
     // Starts the fade to the weather waiting when the one under way is done; called as time goes.
     void update(MonotonicClock::time_point now);
@@ -85,6 +91,16 @@ public:
     [[nodiscard]] const std::vector<DriftTexel>& drift_after() const noexcept {
         return drift_after_;
     }
+    // As before() and after(), of the cloud in each of the air's layers: each layer's cube in turn,
+    // bottom up.
+    [[nodiscard]] const std::vector<LayerTexel>& layers_before() const noexcept {
+        return layers_before_;
+    }
+    [[nodiscard]] const std::vector<LayerTexel>& layers_after() const noexcept {
+        return layers_after_;
+    }
+    // How the air's layers lie, as the last weather said.
+    [[nodiscard]] const protocol::AirLayers& air() const noexcept { return air_; }
     // How many times weather has come, so the maps need only be taken when it changes.
     [[nodiscard]] std::uint64_t received() const noexcept { return received_; }
 
@@ -104,6 +120,9 @@ private:
     std::vector<SkyTexel> sky_after_;
     std::vector<DriftTexel> drift_before_;
     std::vector<DriftTexel> drift_after_;
+    std::vector<LayerTexel> layers_before_;
+    std::vector<LayerTexel> layers_after_;
+    protocol::AirLayers air_;
     // Weather that came while a fade was under way, to be faded to next.
     struct Waiting {
         std::vector<protocol::CellWeather> cells;

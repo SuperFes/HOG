@@ -41,7 +41,7 @@ private:
     std::vector<Buffer> staging_;
 };
 
-// A cube takes six square layers, the faces in Vulkan's order.
+// A cube takes six square layers, the faces in Vulkan's order; an array of cubes, six for each.
 [[nodiscard]] Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
                                                         VkExtent2D extent, std::uint32_t slots,
                                                         std::uint32_t layers = 1,

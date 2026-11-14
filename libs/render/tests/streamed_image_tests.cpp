@@ -175,6 +175,15 @@ TEST_CASE("a streamed image is a cube of six square layers", "[render][gpu]") {
     REQUIRE(device->submit_now(
         [&](VkCommandBuffer commands) { CHECK(cube->update(commands, 0, texels)); }));
     CHECK(cube->ready());
+    // Cubes in an array, six layers each.
+    CHECK(make_streamed_image(*device, VK_FORMAT_R8G8_UNORM, square, 1, 9, true).error().code ==
+          hog::ErrorCode::InvalidArgument);
+    auto cubes = make_streamed_image(*device, VK_FORMAT_R8G8_UNORM, square, 1, 18, true);
+    REQUIRE(cubes);
+    const std::vector<std::byte> layered = filled(std::size_t{2} * 2 * 2 * 18, 3);
+    REQUIRE(device->submit_now(
+        [&](VkCommandBuffer commands) { CHECK(cubes->update(commands, 0, layered)); }));
+    CHECK(cubes->ready());
     CHECK(device->validation_errors() == 0);
 }
 

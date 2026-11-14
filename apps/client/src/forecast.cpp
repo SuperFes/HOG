@@ -119,18 +119,42 @@ struct Maps {
     std::vector<WeatherTexel> weather;
     std::vector<SkyTexel> sky;
     std::vector<DriftTexel> drift;
+    std::vector<LayerTexel> layers;
 };
 
-Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
+Maps maps_of(const sim::CellGrid& grid, const Cells& cells, std::size_t layers) {
     constexpr std::uint32_t size = weather_map_size;
+    constexpr std::size_t face_texels = std::size_t{size} * size;
     Maps maps;
-    maps.weather.reserve(std::size_t{6} * size * size);
-    maps.sky.reserve(std::size_t{6} * size * size);
-    maps.drift.reserve(std::size_t{6} * size * size);
+    maps.weather.reserve(6 * face_texels);
+    maps.sky.reserve(6 * face_texels);
+    maps.drift.reserve(6 * face_texels);
+    maps.layers.resize(6 * face_texels * layers);
+    // Each layer's cover and water, summed by how much each cell counts.
+    std::vector<double> cover(layers);
+    std::vector<double> water(layers);
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < size; ++y) {
             for (std::uint32_t x = 0; x < size; ++x) {
                 const DVec3 direction = cube_direction(face, x, y, size);
+                const sim::CellGrid::Shares around = grid.shares(direction);
+                std::ranges::fill(cover, 0.0);
+                std::ranges::fill(water, 0.0);
+                for (std::size_t k = 0; k < around.cells.size(); ++k) {
+                    const double weight = around.weights.at(k) / around.total;
+                    const std::vector<protocol::CloudLayer>& held =
+                        cells[around.cells.at(k)].layers;
+                    for (std::size_t layer = 0; layer < std::min(layers, held.size()); ++layer) {
+                        cover[layer] += weight * static_cast<double>(held[layer].cover);
+                        water[layer] += weight * static_cast<double>(held[layer].cloud);
+                    }
+                }
+                const std::size_t texel = (((face * size) + y) * size) + x;
+                for (std::size_t layer = 0; layer < layers; ++layer) {
+                    maps.layers[(layer * 6 * face_texels) + texel] = {
+                        to_byte(cover[layer]),
+                        to_byte(std::sqrt(std::max(water[layer], 0.0) / 16.0))};
+                }
                 const protocol::CellWeather cell = interpolated(grid, cells, direction);
                 const Vec3 drift{planet::tangent_frame(direction).to_world(
                     {static_cast<double>(cell.drift.x), static_cast<double>(cell.drift.y), 0.0})};
@@ -202,8 +226,9 @@ void carry_at_pace(std::vector<protocol::CellWeather>& cells, float pace) {
 } // namespace
 
 void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_point now) {
-    if (!grid_ || grid_->level() != weather.level) {
+    if (!grid_ || grid_->level() != weather.level || weather.air != air_) {
         grid_.emplace(weather.level);
+        air_ = weather.air;
         to_ = weather.cells;
         carry_at_pace(to_, weather.pace);
         fill_heights(to_);
@@ -256,14 +281,17 @@ void Forecast::take_maps() {
         return;
     }
     ++received_;
-    Maps before = maps_of(*grid_, from_);
-    Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_) : before;
+    const std::size_t layers = air_.count;
+    Maps before = maps_of(*grid_, from_, layers);
+    Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_, layers) : before;
     before_ = std::move(before.weather);
     sky_before_ = std::move(before.sky);
     drift_before_ = std::move(before.drift);
     after_ = std::move(after.weather);
     sky_after_ = std::move(after.sky);
     drift_after_ = std::move(after.drift);
+    layers_before_ = std::move(before.layers);
+    layers_after_ = std::move(after.layers);
 }
 
 double Forecast::faded(MonotonicClock::time_point now) const noexcept {

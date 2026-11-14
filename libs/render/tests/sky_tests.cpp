@@ -405,7 +405,16 @@ hog::render::WeatherMaps sky_everywhere(hog::render::Device& device,
         texels[at] = std::byte{sky.at(at % 4)};
     }
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
-        CHECK(maps->update(commands, 0, clear, clear, texels, texels, still, still));
+        CHECK(maps->update(commands, 0,
+                           {.weather_before = clear,
+                            .weather_after = clear,
+                            .sky_before = texels,
+                            .sky_after = texels,
+                            .drift_before = still,
+                            .drift_after = still,
+                            .layers_before = {},
+                            .layers_after = {},
+                            .air = {}}));
     }));
     return std::move(maps).value();
 }

@@ -222,6 +222,8 @@ render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
             .daylight = daylight_at(calendar_, shot.time, shot.bend.up)};
 }
 
+static_assert(render::most_cloud_layers == protocol::most_cloud_layers);
+
 namespace {
 
 // What's drawn before the sea, copied for it to see through.
@@ -429,13 +431,22 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     graph.add({.name = "uploads", .uses = {}, .targets = std::nullopt},
               [&](VkCommandBuffer commands) -> Result<> {
                   if (new_weather) {
+                      const client::Forecast& forecast = *shot.forecast;
+                      const protocol::AirLayers& air = forecast.air();
                       return weather_.update(
-                          commands, frame.slot, std::as_bytes(std::span{shot.forecast->before()}),
-                          std::as_bytes(std::span{shot.forecast->after()}),
-                          std::as_bytes(std::span{shot.forecast->sky_before()}),
-                          std::as_bytes(std::span{shot.forecast->sky_after()}),
-                          std::as_bytes(std::span{shot.forecast->drift_before()}),
-                          std::as_bytes(std::span{shot.forecast->drift_after()}));
+                          commands, frame.slot,
+                          {.weather_before = std::as_bytes(std::span{forecast.before()}),
+                           .weather_after = std::as_bytes(std::span{forecast.after()}),
+                           .sky_before = std::as_bytes(std::span{forecast.sky_before()}),
+                           .sky_after = std::as_bytes(std::span{forecast.sky_after()}),
+                           .drift_before = std::as_bytes(std::span{forecast.drift_before()}),
+                           .drift_after = std::as_bytes(std::span{forecast.drift_after()}),
+                           .layers_before = std::as_bytes(std::span{forecast.layers_before()}),
+                           .layers_after = std::as_bytes(std::span{forecast.layers_after()}),
+                           .air = {.count = air.count,
+                                   .bottom = static_cast<double>(air.bottom),
+                                   .thickness = static_cast<double>(air.thickness),
+                                   .ratio = static_cast<double>(air.ratio)}});
                   }
                   return {};
               });

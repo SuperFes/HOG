@@ -125,6 +125,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     features_11.shaderDrawParameters = VK_TRUE;
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
+    features.imageCubeArray = VK_TRUE;
     VkPhysicalDeviceVulkan13Features features_13{};
     features_13.dynamicRendering = VK_TRUE;
     features_13.synchronization2 = VK_TRUE;

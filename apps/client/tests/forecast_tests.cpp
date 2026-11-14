@@ -32,7 +32,8 @@ namespace {
 constexpr MonotonicClock::time_point start{};
 constexpr double radius = 115'000.0;
 
-Weather everywhere(CellWeather cell, std::chrono::milliseconds fade = 10s, std::uint8_t level = 2) {
+Weather everywhere(const CellWeather& cell, std::chrono::milliseconds fade = 10s,
+                   std::uint8_t level = 2) {
     return {.level = level,
             .fade = fade,
             .cells = std::vector<CellWeather>(hog::protocol::weather_cells(level), cell)};
@@ -329,6 +330,54 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
             }
         }
     }
+}
+
+TEST_CASE("the cloud's maps hold each layer's cloud at each texel's direction",
+          "[client][forecast]") {
+    // Low cloud thickening east, and a deck aloft over the north; the air's top layer clear.
+    const hog::sim::CellGrid grid{2};
+    Weather weather = everywhere({}, 0ms);
+    weather.air = {.count = 4, .bottom = 0.0F, .thickness = 500.0F, .ratio = 1.0F};
+    const auto low = [](const DVec3& up) { return 0.5 + (0.4 * up.x); };
+    const auto aloft = [](const DVec3& up) { return up.z > 0.0 ? up.z : 0.0; };
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const DVec3 up = grid.frame(index).up;
+        weather.cells[index].layers = {
+            {.cover = static_cast<float>(low(up)), .cloud = static_cast<float>(4.0 * low(up))},
+            {},
+            {.cover = static_cast<float>(aloft(up)), .cloud = 0.0F}};
+    }
+    Forecast forecast{radius};
+    forecast.receive(weather, start);
+    constexpr std::size_t face_texels = std::size_t{weather_map_size} * weather_map_size;
+    REQUIRE(forecast.layers_before().size() == std::size_t{4} * 6 * face_texels);
+    for (std::uint32_t face = 0; face < 6; ++face) {
+        for (std::uint32_t y = 0; y < weather_map_size; y += 7) {
+            for (std::uint32_t x = 0; x < weather_map_size; x += 7) {
+                CAPTURE(face, x, y);
+                const DVec3 direction = cube_direction(face, x, y, weather_map_size);
+                const std::size_t texel = (((face * weather_map_size) + y) * weather_map_size) + x;
+                const auto layer = [&](std::size_t at) {
+                    return forecast.layers_before()[(at * 6 * face_texels) + texel];
+                };
+                const auto cell = [&](const auto& field) {
+                    return grid.interpolate(direction, [&](std::uint32_t index) {
+                        return field(grid.frame(index).up);
+                    });
+                };
+                CHECK(std::abs(layer(0)[0] - (cell(low) * 255.0)) <= 0.51);
+                CHECK(std::abs(layer(0)[1] - (std::sqrt(4.0 * cell(low) / 16.0) * 255.0)) <= 0.51);
+                CHECK(layer(1) == hog::client::LayerTexel{0, 0});
+                CHECK(std::abs(layer(2)[0] - (cell(aloft) * 255.0)) <= 0.51);
+                CHECK(layer(3) == hog::client::LayerTexel{0, 0});
+            }
+        }
+    }
+    // Weather in other layers is shown at once, in them.
+    weather.air.count = 3;
+    forecast.receive(weather, start + 1s);
+    CHECK(forecast.layers_before().size() == std::size_t{3} * 6 * face_texels);
+    CHECK(forecast.air() == weather.air);
 }
 
 namespace {
