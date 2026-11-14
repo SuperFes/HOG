@@ -100,7 +100,9 @@ Leaf Page::leaf(std::uint32_t entry, std::uint8_t size) const noexcept {
                      .liquid = static_cast<globe::Material>(byte(2)),
                      .liquid_amount = read16(bytes_, at + 8),
                      .condition = byte(3),
-                     .heat = byte(10)},
+                     .heat = byte(10),
+                     .rise = byte(11),
+                     .peak = byte(12)},
             .open = static_cast<std::uint8_t>((entry & ~leaf_bit) >> open_shift),
             .size = size};
 }
@@ -130,14 +132,16 @@ std::optional<Leaf> Page::whole(std::uint32_t x, std::uint32_t y, std::uint32_t 
 }
 
 std::size_t PageBuilder::CubeHash::operator()(const globe::Cube& cube) const noexcept {
-    const std::array<std::uint16_t, 8> parts{static_cast<std::uint16_t>(cube.solid),
-                                             cube.solid_amount,
-                                             static_cast<std::uint16_t>(cube.grain),
-                                             cube.grain_amount,
-                                             static_cast<std::uint16_t>(cube.liquid),
-                                             cube.liquid_amount,
-                                             cube.condition,
-                                             cube.heat};
+    const std::array<std::uint16_t, 10> parts{static_cast<std::uint16_t>(cube.solid),
+                                              cube.solid_amount,
+                                              static_cast<std::uint16_t>(cube.grain),
+                                              cube.grain_amount,
+                                              static_cast<std::uint16_t>(cube.liquid),
+                                              cube.liquid_amount,
+                                              cube.condition,
+                                              cube.heat,
+                                              cube.rise,
+                                              cube.peak};
     return static_cast<std::size_t>(hash_bytes(std::as_bytes(std::span{parts})));
 }
 
@@ -189,7 +193,8 @@ std::vector<std::byte> PageBuilder::finish(std::uint32_t root, std::uint8_t size
         write16(out, cube.grain_amount);
         write16(out, cube.liquid_amount);
         out.push_back(std::byte{cube.heat});
-        out.push_back(std::byte{0});
+        out.push_back(std::byte{cube.rise});
+        out.push_back(std::byte{cube.peak});
     }
     for (const auto& node : nodes_) {
         for (const std::uint32_t entry : node) {

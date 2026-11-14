@@ -26,6 +26,8 @@ struct Cube {
     std::uint16_t liquid_amount = 0;
     std::uint8_t condition = Voxel::sound;
     std::uint8_t heat = 0; // steps over the baseline temperature
+    std::uint8_t rise = 0; // as Voxel's, none where it holds no liquid
+    std::uint8_t peak = 0;
 
     friend constexpr bool operator==(const Cube&, const Cube&) noexcept = default;
 };

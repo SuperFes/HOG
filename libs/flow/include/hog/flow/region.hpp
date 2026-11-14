@@ -167,8 +167,9 @@ public:
                           double kelvin);
     // Whether the brick has lava in it, which keeps cooling for as long as it does.
     [[nodiscard]] bool hot(globe::BrickSite site) const;
-    // Sets the voxel's liquid to `amount` of the world's own.
-    void pour(globe::Site site, std::uint16_t amount);
+    // Sets the voxel's liquid to `amount` of the world's own, rising and falling through the year
+    // as a voxel holds it.
+    void pour(globe::Site site, std::uint16_t amount, std::uint8_t rise = 0, std::uint8_t peak = 0);
     // Sets the voxel's grain, piled on whatever is under it.
     void pile(globe::Site site, globe::Material material, std::uint16_t amount);
     // Adds `amount` of `material` to what the liquid at the site carries.
@@ -238,7 +239,11 @@ private:
         std::int64_t amount = 0;
         globe::Material liquid = globe::Material::Air;
         std::int64_t heat = 0; // of a molten liquid: its amount times its temperature, in eighths
-        bool moving = false;   // liquid ran in or out of it this step
+        // How its water rises through the year, as voxels hold it: its amount times its rise, and
+        // when it peaks, carried with it.
+        std::int64_t risen = 0;
+        std::uint8_t peak = 0;
+        bool moving = false; // liquid ran in or out of it this step
         std::int64_t bed = 0;
         std::int64_t load = 0;
         globe::Material carried = globe::Material::Air;

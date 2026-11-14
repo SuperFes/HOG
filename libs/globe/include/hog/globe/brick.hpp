@@ -139,6 +139,8 @@ private:
         Packed<std::uint16_t> liquid_amount;
         Packed<std::uint16_t> temperature;
         Packed<std::uint16_t> solid_amount;
+        Packed<std::uint8_t> rise;
+        Packed<std::uint8_t> peak;
 
         friend bool operator==(const Parts&, const Parts&) = default;
     };

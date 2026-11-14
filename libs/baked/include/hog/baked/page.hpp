@@ -31,14 +31,14 @@ struct Leaf {
 // from the root to the leaf holding a point, one step a level.
 //
 // Little-endian: a 16-byte header (version, size, voxel, flags; root entry; cube and node
-// counts), then the cubes, 12 bytes each, then the inner nodes, eight 4-byte entries each. An
+// counts), then the cubes, 13 bytes each, then the inner nodes, eight 4-byte entries each. An
 // entry is either an inner node's index or, top bit set, a leaf: its mark in bits 23 to 30 and its
 // cube's index under them. Nodes and cubes alike are stored once.
 class Page {
 public:
-    static constexpr std::uint8_t version = 1;
+    static constexpr std::uint8_t version = 2;
     static constexpr std::size_t header_bytes = 16;
-    static constexpr std::size_t cube_bytes = 12;
+    static constexpr std::size_t cube_bytes = 13;
     static constexpr std::size_t node_bytes = 32;
     // Nothing of it shows from outside at any level: buried, or all one with no surface near.
     static constexpr std::uint8_t hidden = 1;

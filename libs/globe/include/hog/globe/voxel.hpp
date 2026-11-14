@@ -49,9 +49,33 @@ struct Voxel {
     // How much of the voxel's volume is shaped matter, of `full`: all of it deep in the ground,
     // none in open air, between across the surface. The surface lies where it is half.
     std::uint16_t solid_amount = 0;
+    // Where it holds water, how that rises and falls through the year: `rise` decimetres higher at
+    // its highest than the lowest it holds, highest `peak` 256ths of the year from the March
+    // equinox.
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
 
     friend constexpr bool operator==(const Voxel&, const Voxel&) noexcept = default;
 };
+
+// How the water several voxels hold together rises and falls through the year: their rises
+// weighed by how much each holds, their peaks by that and how far each rises, about the year.
+class Seasons {
+public:
+    void add(std::uint32_t amount, std::uint8_t rise, std::uint8_t peak) noexcept;
+    [[nodiscard]] std::uint8_t rise() const noexcept;
+    [[nodiscard]] std::uint8_t peak() const noexcept;
+
+private:
+    double held_ = 0.0;
+    double risen_ = 0.0;
+    double x_ = 0.0;
+    double y_ = 0.0;
+};
+
+// A rise in metres and a peak as a share of the year, as a voxel holds them.
+[[nodiscard]] std::uint8_t rise_of(double metres) noexcept;
+[[nodiscard]] std::uint8_t peak_of(double share) noexcept;
 
 // Rounded to the nearest step, clamped to what fits.
 [[nodiscard]] std::uint16_t amount_of(double share) noexcept;

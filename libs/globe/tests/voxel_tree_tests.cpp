@@ -211,6 +211,29 @@ TEST_CASE("a tree's bytes read back as the same tree, and the same voxels are th
     CHECK(VoxelTree::decode(layered.encode())->same_as(layered));
 }
 
+TEST_CASE("water's leaves keep how it rises through the year; dry ones spend no bytes on it",
+          "[globe][voxel_tree]") {
+    const auto water = [](int x, int y, int z) {
+        return z < 3 ? rock()
+                     : Cube{.liquid = Material::Water,
+                            .liquid_amount = Voxel::full,
+                            .rise = static_cast<std::uint8_t>(x * 3),
+                            .peak = static_cast<std::uint8_t>(y * 11)};
+    };
+    const VoxelTree tree = VoxelTree::build(8, water);
+    const auto back = VoxelTree::decode(tree.encode());
+    REQUIRE(back.has_value());
+    for (int z = 0; z < 8; ++z) {
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                CHECK(back->at(x, y, z) == water(x, y, z));
+            }
+        }
+    }
+    const Cube still{.liquid = Material::Water, .liquid_amount = Voxel::full};
+    CHECK(VoxelTree{8, still}.encode().size() == VoxelTree{8, rock()}.encode().size() + 2);
+}
+
 TEST_CASE("bytes that aren't a tree are refused", "[globe][voxel_tree]") {
     const std::vector<std::byte> bytes = VoxelTree::build(8, scattered).encode();
     // Cut short anywhere.

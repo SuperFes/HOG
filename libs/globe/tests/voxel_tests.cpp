@@ -9,6 +9,9 @@
 #include <cstdint>
 
 using hog::globe::Material;
+using hog::globe::peak_of;
+using hog::globe::rise_of;
+using hog::globe::Seasons;
 using hog::globe::Voxel;
 
 TEST_CASE("voxels hold amounts and temperature in fixed steps", "[globe][voxel]") {
@@ -101,4 +104,31 @@ TEST_CASE("a solid amount and the surface's distance it says go back and forth",
     }
     CHECK(hog::globe::amount_at(-1.0, 0.5) == Voxel::full);
     CHECK(hog::globe::amount_at(1.0, 0.5) == 0);
+}
+
+TEST_CASE("water held together rises as each does for how much it holds, and peaks between "
+          "them about the year",
+          "[globe][voxel]") {
+    Seasons one;
+    one.add(2, 20, 10);
+    one.add(1, 50, 10);
+    CHECK(one.rise() == 30);
+    CHECK(one.peak() == 10);
+    // Peaks either side of the year's turn meet at it, not halfway round.
+    Seasons turning;
+    turning.add(Voxel::full, 10, 250);
+    turning.add(Voxel::full, 10, 6);
+    CHECK(turning.peak() == 0);
+    // What doesn't rise says nothing of when.
+    Seasons still;
+    still.add(Voxel::full, 0, 100);
+    still.add(Voxel::full, 10, 30);
+    CHECK(still.rise() == 5);
+    CHECK(still.peak() == 30);
+    CHECK(Seasons{}.rise() == 0);
+    CHECK(rise_of(1.24) == 12);
+    CHECK(rise_of(40.0) == 255);
+    CHECK(peak_of(0.25) == 64);
+    CHECK(peak_of(-0.25) == 192);
+    CHECK(peak_of(0.999) == 0);
 }

@@ -34,7 +34,11 @@ struct Sample {
     // the ground is soaked through, under the sea.
     double water = 0.0;
     Material liquid = Material::Air; // what that liquid is
-    double temperature = 0.0;        // kelvin
+    // Where it's water, metres higher it stands at its highest in the year than it does here, and
+    // when, as a share of the year from the March equinox.
+    double rise = 0.0;
+    double peak = 0.0;
+    double temperature = 0.0; // kelvin
 };
 
 // What lies under the ground in one column, top down: sedimentary beds, then the crust's own rock.

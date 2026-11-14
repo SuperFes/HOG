@@ -35,6 +35,12 @@ Voxel averaged(std::span<const Voxel> layers) {
     share(&Voxel::solid, &Voxel::solid_amount);
     share(&Voxel::grain, &Voxel::grain_amount);
     share(&Voxel::liquid, &Voxel::liquid_amount);
+    Seasons seasons;
+    for (const Voxel& voxel : layers) {
+        seasons.add(voxel.liquid_amount, voxel.rise, voxel.peak);
+    }
+    out.rise = out.liquid_amount > 0 ? seasons.rise() : 0;
+    out.peak = out.liquid_amount > 0 ? seasons.peak() : 0;
     return out;
 }
 

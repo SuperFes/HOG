@@ -37,6 +37,8 @@ Voxels surface() {
         } else if (site.layer < 5) {
             voxel.liquid = Material::Water;
             voxel.liquid_amount = Voxel::full;
+            voxel.rise = static_cast<std::uint8_t>(site.i);
+            voxel.peak = static_cast<std::uint8_t>(site.j * 9);
         }
         voxel.temperature = static_cast<std::uint16_t>(2'300 + site.layer);
     }
@@ -154,4 +156,25 @@ TEST_CASE("a brick written when voxels kept a distance and a normal still reads"
     CHECK(read->is_uniform());
     CHECK(read->at(0) ==
           Voxel{.solid = Material::Basalt, .temperature = 2'400, .solid_amount = Voxel::full});
+}
+
+TEST_CASE("a brick written before water rose and fell with the year reads with none",
+          "[globe][brick]") {
+    hog::ByteWriter out;
+    out.write(std::uint8_t{2}); // a whole brick of that kind
+    out.write(static_cast<std::uint8_t>(Material::Air));
+    out.write(std::uint8_t{Voxel::sound});
+    out.write(static_cast<std::uint8_t>(Material::Air));
+    out.write(std::uint16_t{0});
+    out.write(static_cast<std::uint8_t>(Material::Water));
+    out.write(std::uint16_t{Voxel::full});
+    out.write(std::uint16_t{2'300});
+    out.write(std::uint16_t{0});
+    const std::vector<std::byte> bytes = std::move(out).take();
+    hog::ByteReader in{bytes};
+    const auto read = Brick::read(in);
+    REQUIRE(read);
+    CHECK(in.remaining() == 0);
+    CHECK(read->at(0) ==
+          Voxel{.liquid = Material::Water, .liquid_amount = Voxel::full, .temperature = 2'300});
 }

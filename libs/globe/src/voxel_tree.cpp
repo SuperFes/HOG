@@ -54,6 +54,7 @@ Cube summed(const std::array<Cube, 8>& eight) {
     Share liquid;
     std::uint32_t heat = 0;
     std::uint8_t condition = Voxel::sound;
+    Seasons seasons;
     for (std::size_t k = 0; k < eight.size(); ++k) {
         const Cube& cube = eight.at(k);
         // Children 4 to 7 are the upper layer.
@@ -63,6 +64,7 @@ Cube summed(const std::array<Cube, 8>& eight) {
         liquid.add(cube.liquid, cube.liquid_amount, upper);
         heat += cube.heat;
         condition = std::min(condition, cube.condition);
+        seasons.add(cube.liquid_amount, cube.rise, cube.peak);
     }
     Cube out;
     std::tie(out.solid, out.solid_amount) = solid.taken();
@@ -70,6 +72,10 @@ Cube summed(const std::array<Cube, 8>& eight) {
     std::tie(out.liquid, out.liquid_amount) = liquid.taken();
     out.heat = static_cast<std::uint8_t>((heat + 4) / 8);
     out.condition = out.solid == Material::Air ? Voxel::sound : condition;
+    if (out.liquid_amount > 0) {
+        out.rise = seasons.rise();
+        out.peak = seasons.peak();
+    }
     return out;
 }
 
@@ -80,7 +86,7 @@ std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
         const Cube& v = node.voxel;
         return hash_values(1, static_cast<int>(v.solid), v.solid_amount, static_cast<int>(v.grain),
                            v.grain_amount, static_cast<int>(v.liquid), v.liquid_amount, v.condition,
-                           v.heat, node.open);
+                           v.heat, v.rise, v.peak, node.open);
     }
     return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3], node.child[4],
                        node.child[5], node.child[6], node.child[7]);
@@ -485,6 +491,18 @@ std::optional<Cube> read_cube(ByteReader& in) {
         !condition || !heat) {
         return std::nullopt;
     }
+    // Only what holds a liquid says how it rises.
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
+    if (*liquid != Material::Air) {
+        const auto risen = in.read<std::uint8_t>();
+        const auto peaked = in.read<std::uint8_t>();
+        if (!risen || !peaked) {
+            return std::nullopt;
+        }
+        rise = *risen;
+        peak = *peaked;
+    }
     return Cube{.solid = *solid,
                 .solid_amount = *solid_amount,
                 .grain = *grain,
@@ -492,7 +510,9 @@ std::optional<Cube> read_cube(ByteReader& in) {
                 .liquid = *liquid,
                 .liquid_amount = *liquid_amount,
                 .condition = *condition,
-                .heat = *heat};
+                .heat = *heat,
+                .rise = rise,
+                .peak = peak};
 }
 
 // What's wrong with a tree's side and node count, if anything.
@@ -588,6 +608,10 @@ std::vector<std::byte> VoxelTree::encode() const {
             out.write(v.liquid_amount);
             out.write(v.condition);
             out.write(v.heat);
+            if (v.liquid != Material::Air) {
+                out.write(v.rise);
+                out.write(v.peak);
+            }
         } else {
             out.write(cube_tag);
             for (const Id child : node.child) {

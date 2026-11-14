@@ -53,6 +53,30 @@ TEST_CASE("liquid poured into the air falls to the floor, and nothing is lost", 
     CHECK(block.region().flux(0, block.at(12, 12, 0).i, block.at(12, 12, 0).j).along_i > 0);
 }
 
+TEST_CASE("water carries how it rises through the year wherever it runs", "[flow][region]") {
+    Block block{floor_above_sea(100.0)};
+    for (int layer = 0; layer < 6; ++layer) {
+        block.pour(12, 12, layer, full, 23, 140);
+    }
+    for (int step = 0; step < 6; ++step) {
+        block.region().step(tick);
+    }
+    int wet = 0;
+    for (std::uint32_t j = 0; j < Block::side; ++j) {
+        for (std::uint32_t i = 0; i < Block::side; ++i) {
+            const hog::globe::Voxel voxel = block.voxel(i, j, 0);
+            if (voxel.liquid_amount > 0) {
+                ++wet;
+                CHECK(voxel.rise == 23);
+                CHECK(voxel.peak == 140);
+            } else {
+                CHECK(voxel.rise == 0);
+            }
+        }
+    }
+    CHECK(wet > 1);
+}
+
 TEST_CASE("a column of liquid spreads the same way along each side and lies flat at last",
           "[flow][region]") {
     Block block{floor_above_sea(100.0)};
@@ -381,7 +405,7 @@ TEST_CASE("a tall heap of sand on level ground slumps wider, losing none, and th
     CHECK(block.grain(13, 12, 0) > 0);
     CHECK(block.grain(13, 13, 0) > 0);
     // Spread the same way along an axis and across a diagonal, to a voxel or two.
-    auto reach = [&](int di, int dj) {
+    const auto reach = [&](int di, int dj) {
         int steps = 0;
         while (block.grain(static_cast<std::uint32_t>(12 + ((steps + 1) * di)),
                            static_cast<std::uint32_t>(12 + ((steps + 1) * dj)), 0) > 0) {

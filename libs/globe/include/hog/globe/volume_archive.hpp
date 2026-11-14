@@ -105,7 +105,7 @@ private:
         columns_;
 };
 
-inline constexpr std::uint16_t volume_format = 3;
+inline constexpr std::uint16_t volume_format = 4;
 
 // What a volume is made from: the planet's seed and its layers. Other planet settings aren't told
 // apart yet.

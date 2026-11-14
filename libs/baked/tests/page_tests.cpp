@@ -38,7 +38,10 @@ VoxelTree slope(int side) {
             return rock();
         }
         if (z < side / 2) {
-            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+            return Cube{.liquid = Material::Water,
+                        .liquid_amount = Voxel::full,
+                        .rise = static_cast<std::uint8_t>(x),
+                        .peak = static_cast<std::uint8_t>(y * 7)};
         }
         return Cube{};
     });

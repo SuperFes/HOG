@@ -165,11 +165,13 @@ Voxel Region::at(Site site) const {
     return brick->voxels[static_cast<std::size_t>(globe::index_in_brick(site))];
 }
 
-void Region::pour(Site site, std::uint16_t amount) {
+void Region::pour(Site site, std::uint16_t amount, std::uint8_t rise, std::uint8_t peak) {
     Voxel* at = voxel(site);
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
     at->liquid = amount > 0 ? Material::Water : Material::Air;
     at->liquid_amount = amount;
+    at->rise = amount > 0 ? rise : 0;
+    at->peak = amount > 0 ? peak : 0;
     if (Held* const brick = held(globe::brick_of(site))) {
         brick->dirty = true;
     }
@@ -422,7 +424,9 @@ void Region::gather(std::vector<Column>& columns) {
                 run->bed += voxel.grain_amount;
                 if (voxel.liquid_amount > 0 && run->liquid == Material::Air) {
                     run->liquid = voxel.liquid;
+                    run->peak = voxel.peak;
                 }
+                run->risen += std::int64_t{voxel.liquid_amount} * voxel.rise;
                 if (molten(voxel.liquid)) {
                     run->heat += std::int64_t{voxel.liquid_amount} * voxel.temperature;
                 }
@@ -702,6 +706,9 @@ void Region::fill(const Section& section, const OpenRun& run, double seconds,
         left -= amount;
         const Material liquid = amount > 0 ? section.liquid : Material::Air;
         const auto held_amount = static_cast<std::uint16_t>(amount);
+        const auto rise = static_cast<std::uint8_t>(
+            amount > 0 && section.amount > 0 ? section.risen / section.amount : 0);
+        const std::uint8_t peak = amount > 0 ? section.peak : 0;
         const std::int64_t before = voxel->liquid_amount;
         stepped.changed += std::abs(amount - before);
         if (amount > 0 && molten(liquid)) {
@@ -711,9 +718,12 @@ void Region::fill(const Section& section, const OpenRun& run, double seconds,
                            .kelvin = before > 0 ? globe::kelvin(voxel->temperature) : mean,
                            .amount = amount});
         }
-        if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
+        if (voxel->liquid_amount != held_amount || voxel->liquid != liquid || voxel->rise != rise ||
+            voxel->peak != peak) {
             voxel->liquid_amount = held_amount;
             voxel->liquid = liquid;
+            voxel->rise = rise;
+            voxel->peak = peak;
             brick->dirty = true;
         }
         // Only liquid on the move would run on; what stands still needs nothing.
@@ -859,6 +869,12 @@ Stepped Region::step(double seconds) {
         const std::int64_t heat = from.heat * transfer.amount / from.amount;
         from.heat -= heat;
         to.heat += heat;
+        const std::int64_t risen = from.risen * transfer.amount / from.amount;
+        from.risen -= risen;
+        to.risen += risen;
+        if (to.amount == 0) {
+            to.peak = from.peak;
+        }
         from.amount -= transfer.amount;
         to.amount += transfer.amount;
         from.moving = true;

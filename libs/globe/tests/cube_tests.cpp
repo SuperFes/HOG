@@ -60,3 +60,18 @@ TEST_CASE("heat is kept only over the baseline, in steps", "[globe][cube]") {
     hotter.temperature = temperature_in_eighths(5'000.0);
     CHECK(cube_of(hotter, 280.0).heat == 255);
 }
+
+TEST_CASE("water keeps how it rises through the year; what holds none keeps nothing of it",
+          "[globe][cube]") {
+    Voxel water;
+    water.liquid = Material::Water;
+    water.liquid_amount = Voxel::full;
+    water.rise = 34;
+    water.peak = 200;
+    const Voxel back = voxel_of(cube_of(water, 280.0), 280.0);
+    CHECK(back.rise == 34);
+    CHECK(back.peak == 200);
+    Voxel drained = water;
+    drained.liquid_amount = 0;
+    CHECK(cube_of(drained, 280.0) == cube_of(Voxel{}, 280.0));
+}

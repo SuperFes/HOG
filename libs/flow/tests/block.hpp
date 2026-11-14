@@ -128,8 +128,9 @@ public:
         }
         return total;
     }
-    void pour(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount) {
-        region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount));
+    void pour(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount,
+              std::uint8_t rise = 0, std::uint8_t peak = 0) {
+        region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount), rise, peak);
     }
     void pour_lava(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount,
                    double kelvin) {

@@ -249,6 +249,8 @@ Brick Brick::pack(std::span<const Voxel, brick_voxels> voxels) {
         .liquid_amount = channel(&Voxel::liquid_amount),
         .temperature = channel(&Voxel::temperature),
         .solid_amount = channel(&Voxel::solid_amount),
+        .rise = channel(&Voxel::rise),
+        .peak = channel(&Voxel::peak),
     });
     return brick;
 }
@@ -276,7 +278,9 @@ Voxel Brick::at(int index) const noexcept {
             .liquid = parts_->liquid.at(index),
             .liquid_amount = parts_->liquid_amount.at(index),
             .temperature = parts_->temperature.at(index),
-            .solid_amount = parts_->solid_amount.at(index)};
+            .solid_amount = parts_->solid_amount.at(index),
+            .rise = parts_->rise.at(index),
+            .peak = parts_->peak.at(index)};
 }
 
 void Brick::unpack(std::span<Voxel, brick_voxels> into) const noexcept {
@@ -292,7 +296,7 @@ std::size_t Brick::bytes() const noexcept {
     return sizeof(Brick) + sizeof(Parts) + parts_->solid.bytes() + parts_->condition.bytes() +
            parts_->grain.bytes() + parts_->grain_amount.bytes() + parts_->liquid.bytes() +
            parts_->liquid_amount.bytes() + parts_->temperature.bytes() +
-           parts_->solid_amount.bytes();
+           parts_->solid_amount.bytes() + parts_->rise.bytes() + parts_->peak.bytes();
 }
 
 namespace {
@@ -300,8 +304,11 @@ namespace {
 // Bricks kept a distance and a normal for each voxel once; those are read past.
 constexpr std::uint8_t old_whole_brick = 0;
 constexpr std::uint8_t old_parted_brick = 1;
-constexpr std::uint8_t whole_brick = 2;
-constexpr std::uint8_t parted_brick = 3;
+// Then without how the water held rises and falls through the year.
+constexpr std::uint8_t unseasoned_whole_brick = 2;
+constexpr std::uint8_t unseasoned_parted_brick = 3;
+constexpr std::uint8_t whole_brick = 4;
+constexpr std::uint8_t parted_brick = 5;
 
 } // namespace
 
@@ -316,6 +323,8 @@ void Brick::write(ByteWriter& out) const {
         write_value(out, whole_.liquid_amount);
         write_value(out, whole_.temperature);
         write_value(out, whole_.solid_amount);
+        write_value(out, whole_.rise);
+        write_value(out, whole_.peak);
         return;
     }
     out.write(parted_brick);
@@ -327,6 +336,8 @@ void Brick::write(ByteWriter& out) const {
     parts_->liquid_amount.write(out);
     parts_->temperature.write(out);
     parts_->solid_amount.write(out);
+    parts_->rise.write(out);
+    parts_->peak.write(out);
 }
 
 namespace {
@@ -377,23 +388,33 @@ Result<Brick> Brick::read(ByteReader& in) {
         static_cast<void>(field.packed<std::int16_t>());
         static_cast<void>(field.packed<std::uint16_t>());
     }
-    if (*kind == whole_brick || *kind == old_whole_brick) {
-        const Voxel voxel{.solid = field.value<Material>(),
-                          .condition = field.value<std::uint8_t>(),
-                          .grain = field.value<Material>(),
-                          .grain_amount = field.value<std::uint16_t>(),
-                          .liquid = field.value<Material>(),
-                          .liquid_amount = field.value<std::uint16_t>(),
-                          .temperature = field.value<std::uint16_t>(),
-                          .solid_amount = field.value<std::uint16_t>()};
+    if (*kind == whole_brick || *kind == unseasoned_whole_brick || *kind == old_whole_brick) {
+        Voxel voxel{.solid = field.value<Material>(),
+                    .condition = field.value<std::uint8_t>(),
+                    .grain = field.value<Material>(),
+                    .grain_amount = field.value<std::uint16_t>(),
+                    .liquid = field.value<Material>(),
+                    .liquid_amount = field.value<std::uint16_t>(),
+                    .temperature = field.value<std::uint16_t>(),
+                    .solid_amount = field.value<std::uint16_t>()};
+        if (*kind == whole_brick) {
+            voxel.rise = field.value<std::uint8_t>();
+            voxel.peak = field.value<std::uint8_t>();
+        }
         if (field.error()) {
             return std::unexpected(*field.error());
         }
         return Brick{voxel};
     }
-    if (*kind != parted_brick && *kind != old_parted_brick) {
+    if (*kind != parted_brick && *kind != unseasoned_parted_brick && *kind != old_parted_brick) {
         return make_error(ErrorCode::Parse, std::format("no brick kind {}", *kind));
     }
+    // Bricks written before water kept its seasons hold none.
+    const auto season = [&] {
+        return *kind == parted_brick
+                   ? field.packed<std::uint8_t>()
+                   : Packed<std::uint8_t>::pack(std::array<std::uint8_t, brick_voxels>{});
+    };
     Parts parts{.solid = field.packed<Material>(),
                 .condition = field.packed<std::uint8_t>(),
                 .grain = field.packed<Material>(),
@@ -401,7 +422,9 @@ Result<Brick> Brick::read(ByteReader& in) {
                 .liquid = field.packed<Material>(),
                 .liquid_amount = field.packed<std::uint16_t>(),
                 .temperature = field.packed<std::uint16_t>(),
-                .solid_amount = field.packed<std::uint16_t>()};
+                .solid_amount = field.packed<std::uint16_t>(),
+                .rise = season(),
+                .peak = season()};
     if (field.error()) {
         return std::unexpected(*field.error());
     }
@@ -413,7 +436,8 @@ Result<Brick> Brick::read(ByteReader& in) {
                        brick.parts_->grain.is_uniform(), brick.parts_->grain_amount.is_uniform(),
                        brick.parts_->liquid.is_uniform(), brick.parts_->liquid_amount.is_uniform(),
                        brick.parts_->temperature.is_uniform(),
-                       brick.parts_->solid_amount.is_uniform()},
+                       brick.parts_->solid_amount.is_uniform(), brick.parts_->rise.is_uniform(),
+                       brick.parts_->peak.is_uniform()},
             std::identity{})) {
         return Brick{brick.at(0)};
     }
