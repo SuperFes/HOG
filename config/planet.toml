@@ -1,9 +1,12 @@
 [planet]
-seed = 1 # 812080951
-radius = 11500.0
+seed = 81206095
+radius = 28800.0
+#seed = 1 # 812080951
 day = 4.0
+#radius = 11500.0
 tilt = 23.44
-voxel = 0.3333333
-
+voxel = 0.33333333
+floor_depth = 500.0
+sky_height = 3000.0
 # The land formed stage by stage, plates to soil, on a sphere split this many times.
 formed_detail = 7.0
