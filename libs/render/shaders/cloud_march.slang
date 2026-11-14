@@ -226,7 +226,8 @@ Cell wandering_cell_at(float3 direction, float radius) {
     const float3 ground = direction * radius;
     const float4 broad = flowed(shape_noise, ground, flow_at(ground), sizes.wander_tile, 1.0);
     Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * sizes.wander)));
-    cell.base += (broad.r - 0.5) * lift * (cell.top - cell.base);
+    // Lifted as much as the noise is shrunk across, so the base is no steeper on a small planet.
+    cell.base += (broad.r - 0.5) * lift * (sizes.wander / wander) * (cell.top - cell.base);
     return cell;
 }
 
