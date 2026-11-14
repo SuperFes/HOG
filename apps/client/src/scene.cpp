@@ -78,15 +78,19 @@ DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
         {static_cast<double>(weather.drift.x), static_cast<double>(weather.drift.y), 0.0});
 }
 
-double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) noexcept {
-    return bend.eye_height < static_cast<double>(weather.base)
-               ? static_cast<double>(weather.falling)
-               : 0.0;
+protocol::AirLayers air_at_eye(const Shot& shot) {
+    return shot.forecast != nullptr ? shot.forecast->air() : protocol::AirLayers{};
 }
 
-render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) {
-    const auto base = static_cast<double>(weather.base);
-    const auto top = static_cast<double>(weather.top);
+double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather,
+                      const CloudSpan& span) noexcept {
+    return bend.eye_height < span.base ? static_cast<double>(weather.falling) : 0.0;
+}
+
+render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather,
+                                const CloudSpan& span) {
+    const double base = span.base;
+    const double top = span.top;
     if (bend.eye_height >= top) {
         return {};
     }
@@ -361,13 +365,14 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
 
     const protocol::CellWeather here = weather_at_eye(shot);
+    const CloudSpan span = cloud_span(here.layers, air_at_eye(shot));
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
     const render::CloudShade shade =
-        render::under_mist(shade_at_eye(shot.bend, here), static_cast<double>(here.humidity),
+        render::under_mist(shade_at_eye(shot.bend, here, span), static_cast<double>(here.humidity),
                            shot.bend.eye_height, sun_mu);
     const DVec3 drift = drift_at(shot.bend.up, here);
-    const double falling = falling_at_eye(shot.bend, here);
+    const double falling = falling_at_eye(shot.bend, here, span);
     flowed_ = std::fmod(flowed_ + shot.seconds, render::flow_period);
     gusts_.blow(shot.camera.eye, drift * surface_wind, shot.bend.up, shot.seconds);
     falling_for_ += shot.seconds;

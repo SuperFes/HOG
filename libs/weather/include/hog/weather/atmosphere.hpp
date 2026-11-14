@@ -30,10 +30,6 @@ struct Column {
     Vec2 wind{0.0F};       // (east, north) m/s in the lowest open air
     float humidity = 0.0F; // of the lowest open air, 0 to 1
     bool sea = false;      // whether the sea lies under the air
-    // The lowest and highest cloud; 0 where there is none. Cloud on the ground reaches a layer
-    // under the air's lowest, into the hollows the column's ground is taken over.
-    float base = 0.0F;
-    float top = 0.0F;
     // Each of the grid's layers, bottom up; those under the ground hold what the lowest open one
     // does, so cloud on the ground fills the hollows the column's ground is taken over.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it

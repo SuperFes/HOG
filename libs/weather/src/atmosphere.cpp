@@ -7,10 +7,6 @@
 namespace hog::weather {
 namespace {
 
-// Condensate that makes air visibly cloud, per kilogram of dry air; a layer holding twice that is
-// cloud through and through.
-constexpr double visible = 5e-5;
-constexpr double full = 2.0 * visible;
 // Cloud water, as a share of what the air could hold as vapour, at which most of a layer's sky
 // is covered: warm air holds far more, so it needs far more cloud to close over than cold.
 constexpr double cover_spread = 0.03;
@@ -34,49 +30,6 @@ Vec2 along(const Frame& frame, Vec3 wind) {
     const DVec3 w{wind};
     return {static_cast<float>(glm::dot(w, frame.east)),
             static_cast<float>(glm::dot(w, frame.north))};
-}
-
-// How much of a layer is cloud, from 0 to 1, taking it as filling the layer evenly once it holds
-// `full`; none in the ground.
-double filling(const Field& field, std::size_t column, int layer) {
-    if (layer < 0 || layer >= field.grid.layers || field.solid(column, layer)) {
-        return 0.0;
-    }
-    return std::clamp(static_cast<double>(field.at(column, layer).cloud) / full, 0.0, 1.0);
-}
-
-// Where a cloud's edge lies, metres from the centre, between the middles of a layer that's cloud
-// (half filled or more) and one beside it that isn't, as a straight line between how filled they
-// are crosses a half: a thin cloud's edges close in on its middle, and a thick one's fall at the
-// layers' edges.
-double edge_between(const Grid& grid, int inside, int outside, double inner, double outer) {
-    const double across = inner > outer ? (inner - 0.5) / (inner - outer) : 0.5;
-    // Half way across is the shared edge whatever the layers' depths, so each half of the span is
-    // scaled by its own layer's.
-    const auto sign = static_cast<double>(outside - inside);
-    const double inner_half = 0.5 * grid.depth_of(inside);
-    const double outer_half = 0.5 * grid.depth_of(outside);
-    const double reach = across <= 0.5 ? 2.0 * across * inner_half
-                                       : inner_half + (2.0 * (across - 0.5) * outer_half);
-    return grid.radius_of(inside) + (sign * reach);
-}
-
-double edge_above(const Field& field, std::size_t column, int layer) {
-    const Grid& grid = field.grid;
-    if (layer + 1 >= grid.layers) {
-        return grid.top();
-    }
-    return edge_between(grid, layer, layer + 1, filling(field, column, layer),
-                        filling(field, column, layer + 1));
-}
-
-double edge_below(const Field& field, std::size_t column, int layer) {
-    const Grid& grid = field.grid;
-    if (layer == 0 || field.solid(column, layer - 1)) {
-        return grid.floor_of(layer);
-    }
-    return edge_between(grid, layer, layer - 1, filling(field, column, layer),
-                        filling(field, column, layer - 1));
 }
 
 // How much of a layer's sky its cloud covers, from 0 to 1, as a share of the vapour its air could
@@ -154,14 +107,6 @@ Column Atmosphere::column(std::size_t column) const {
             shown.wind = along(frame, air.wind);
             const double held = saturation_ratio(temperature, pressure);
             shown.humidity = humidity_of(static_cast<double>(air.vapour), held);
-        }
-        if (cloud > visible) {
-            if (shown.top == 0.0F) {
-                const double sunk = lowest ? grid.depth_of(layer) : 0.0;
-                shown.base = static_cast<float>(edge_below(field_, column, layer) - sunk -
-                                                planet_.body.radius);
-            }
-            shown.top = static_cast<float>(edge_above(field_, column, layer) - planet_.body.radius);
         }
         lowest = false;
         shown.layers[static_cast<std::size_t>(layer)] = {.cover = static_cast<float>(covered),

@@ -76,8 +76,6 @@ Weather weather(std::uint8_t level) {
                              .snow = step == 0.0F ? 1.0F : 0.0F,
                              .drift = {-step, static_cast<float>(index) - 12.0F},
                              .humidity = step / 255.0F,
-                             .base = step * 640.0F,
-                             .top = (step + 1.0F) * 1'280.0F,
                              .layers = layers});
     }
     return out;
@@ -279,9 +277,6 @@ TEST_CASE("weather is sent near enough to draw", "[protocol]") {
     CHECK(as_sent({.wind = {12.4F, -3.6F}}).wind == hog::Vec2{12.5F, -3.5F});
     CHECK_THAT(as_sent({.humidity = 0.83F}).humidity,
                Catch::Matchers::WithinAbs(0.83, 0.5 / 255.0));
-    const CellWeather heights = as_sent({.base = 1'210.0F, .top = 9'000.0F});
-    CHECK_THAT(heights.base, Catch::Matchers::WithinAbs(1'210.0, 32.0));
-    CHECK_THAT(heights.top, Catch::Matchers::WithinAbs(9'000.0, 32.0));
 }
 
 TEST_CASE("the sea's waves and current are sent near enough to draw", "[protocol]") {
@@ -322,8 +317,6 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                                       .drift = {500.0F, -500.0F},
                                       .wind = {500.0F, -500.0F},
                                       .humidity = 3.0F,
-                                      .base = 20'000.0F,
-                                      .top = 20'000.0F,
                                       .wind_sea = {.height = 40.0F, .peak = 0.01F},
                                       .swells = {},
                                       .current = {9.0F, -9.0F}});
@@ -337,8 +330,6 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
     CHECK(over.drift == hog::Vec2{127.0F, -127.0F});
     CHECK(over.wind == hog::Vec2{63.5F, -63.5F});
     CHECK(over.humidity == 1.0F);
-    CHECK(over.base == 16'320.0F);
-    CHECK(over.top == 16'320.0F);
     CHECK(over.wind_sea.height < 20.8F);
     CHECK(over.wind_sea.height > 20.6F);
     CHECK_THAT(over.wind_sea.peak, Catch::Matchers::WithinAbs(2.0 * std::numbers::pi / 25.5, 1e-6));
@@ -349,26 +340,24 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                    .drift = {nan, nan},
                    .wind = {nan, nan},
                    .humidity = nan,
-                   .base = nan,
-                   .top = -1.0F,
                    .wind_sea = {.height = nan, .peak = nan, .heading = {nan, nan}},
                    .swells = {CellWaves{.height = -1.0F, .peak = -1.0F}, CellWaves{}},
                    .current = {nan, nan}}) == CellWeather{});
 }
 
-TEST_CASE("the planet's weather takes twenty-three bytes a clear cell, two more a cloud layer",
+TEST_CASE("the planet's weather takes twenty-one bytes a clear cell, two more a cloud layer",
           "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
     constexpr std::size_t head = 2 + 1 + 4 + 4 + 1 + 12;
     Weather clear{.level = most_weather_level,
                   .air = {.count = most_cloud_layers, .thickness = 100.0F},
                   .cells = std::vector<CellWeather>(6'144, CellWeather{})};
-    CHECK(encode(clear).size() == head + (std::size_t{23} * 6'144));
+    CHECK(encode(clear).size() == head + (std::size_t{21} * 6'144));
     // Clear layers on top of the highest cloud aren't sent.
     for (CellWeather& cell : clear.cells) {
         cell.layers = {CloudLayer{}, CloudLayer{.cover = 0.5F}, CloudLayer{}};
     }
-    CHECK(encode(clear).size() == head + (std::size_t{27} * 6'144));
+    CHECK(encode(clear).size() == head + (std::size_t{25} * 6'144));
     // Cloudy all the way up, it still fits in a message the network carries.
     for (CellWeather& cell : clear.cells) {
         cell.layers.assign(most_cloud_layers, CloudLayer{.cover = 1.0F, .cloud = 1.0F});

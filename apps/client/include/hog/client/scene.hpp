@@ -83,13 +83,16 @@ struct Shot {
 [[nodiscard]] waves::SeaState sea_at_eye(const Shot& shot);
 // The weather's drift at the eye in the planet's frame, m/s.
 [[nodiscard]] DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather);
-// mm an hour falling round the eye: none above the cloud it falls from.
-[[nodiscard]] double falling_at_eye(const terrain::Bend& bend,
-                                    const protocol::CellWeather& weather) noexcept;
-// What cloud over the eye lets through of the light falling on it: all of it above the cloud, and
-// within it, what the cloud over the eye lets through.
+// The air's layers as the shot's weather lays them: none while no weather's known.
+[[nodiscard]] protocol::AirLayers air_at_eye(const Shot& shot);
+// mm an hour falling round the eye from the cloud lying across `span`: none above it.
+[[nodiscard]] double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather,
+                                    const CloudSpan& span) noexcept;
+// What cloud over the eye lets through of the light falling on it, the cloud lying across `span`:
+// all of it above the cloud, and within it, what the cloud over the eye lets through.
 [[nodiscard]] render::CloudShade shade_at_eye(const terrain::Bend& bend,
-                                              const protocol::CellWeather& weather);
+                                              const protocol::CellWeather& weather,
+                                              const CloudSpan& span);
 
 // The planet as the client draws it: the globe's surfaces meshed round the eye, the sea, the air
 // lit by the sun at the planet's time, other players, whoever flies along, the weather's clouds

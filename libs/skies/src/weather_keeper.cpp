@@ -56,8 +56,6 @@ constexpr float most_sea_height = 20.0F;
             .drift = column.drift,
             .wind = column.wind,
             .humidity = column.humidity,
-            .base = column.base,
-            .top = column.top,
             .wind_sea = wind_sea(column),
             .layers = layers_of(column)};
 }

@@ -190,8 +190,7 @@ struct CloudLayer {
 // The weather over a cell, as much of it as is drawn. It's sent a byte each, so only near what's
 // given: cloud and falling as their square roots to the nearest 64th and 16th, so the lightest keep
 // their detail; snow and humidity to a 255th; drift to the metre a second and the wind to half
-// of one; the cloud's base and top to 64 metres; the sea's current to a
-// 32nd of a metre a second; each clamped to its byte.
+// of one; the sea's current to a 32nd of a metre a second; each clamped to its byte.
 struct CellWeather {
     float cloud = 0.0F;    // mm of condensed water, under 16
     float cover = 0.0F;    // share of the sky the cloud covers, 0 to 1, to a 255th
@@ -200,9 +199,6 @@ struct CellWeather {
     Vec2 drift{0.0F};      // (east, north) m/s the weather moves over the ground, within ±127
     Vec2 wind{0.0F};       // (east, north) m/s ten metres up, within ±63.5
     float humidity = 0.0F; // as sim::Sky's
-    // Metres above sea level, as sim::Sky's; cloud on the ground has its base under it.
-    float base = 0.0F; // under 16320
-    float top = 0.0F;
     // The sea's wind sea, its two strongest swells and its current, (east, north) m/s within ±4.
     CellWaves wind_sea{};
     std::array<CellWaves, 2> swells{};

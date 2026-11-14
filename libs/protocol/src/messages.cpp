@@ -51,13 +51,12 @@ constexpr float falling_steps = 16.0F; // to the root of a millimetre an hour
 constexpr float snow_steps = 255.0F;
 constexpr float fastest_drift = 127.0F;
 constexpr float humidity_steps = 255.0F;
-constexpr float height_step = 64.0F;
 constexpr float wave_steps = 56.0F;     // to the root of a metre
 constexpr float period_steps = 10.0F;   // to the second
 constexpr float heading_steps = 256.0F; // to the turn
 constexpr float current_steps = 32.0F;  // to the metre a second
 constexpr float wind_steps = 2.0F;
-constexpr std::size_t weather_cell_bytes = 22;
+constexpr std::size_t weather_cell_bytes = 20;
 
 [[nodiscard]] std::uint8_t to_byte(float value) noexcept {
     // Also NaN to 0.
@@ -128,8 +127,6 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             finer(cell.wind.x, wind_steps),
             finer(cell.wind.y, wind_steps),
             to_byte(cell.humidity * humidity_steps),
-            to_byte(cell.base / height_step),
-            to_byte(cell.top / height_step),
             wind_sea[0],
             wind_sea[1],
             wind_sea[2],
@@ -146,18 +143,16 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
 
 [[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
     return {.cloud = squared(bytes[0], cloud_steps),
-            .cover = static_cast<float>(bytes[21]) / cover_steps,
+            .cover = static_cast<float>(bytes[19]) / cover_steps,
             .falling = squared(bytes[1], falling_steps),
             .snow = static_cast<float>(bytes[2]) / snow_steps,
             .drift = {speed_of(bytes[3]), speed_of(bytes[4])},
             .wind = {speed_of(bytes[5]) / wind_steps, speed_of(bytes[6]) / wind_steps},
             .humidity = static_cast<float>(bytes[7]) / humidity_steps,
-            .base = static_cast<float>(bytes[8]) * height_step,
-            .top = static_cast<float>(bytes[9]) * height_step,
-            .wind_sea = decoded_waves(bytes[10], bytes[11], bytes[12]),
-            .swells = {decoded_waves(bytes[13], bytes[14], bytes[15]),
-                       decoded_waves(bytes[16], bytes[17], bytes[18])},
-            .current = {speed_of(bytes[19]) / current_steps, speed_of(bytes[20]) / current_steps}};
+            .wind_sea = decoded_waves(bytes[8], bytes[9], bytes[10]),
+            .swells = {decoded_waves(bytes[11], bytes[12], bytes[13]),
+                       decoded_waves(bytes[14], bytes[15], bytes[16])},
+            .current = {speed_of(bytes[17]) / current_steps, speed_of(bytes[18]) / current_steps}};
 }
 
 using CodedLayer = std::array<std::uint8_t, 2>;

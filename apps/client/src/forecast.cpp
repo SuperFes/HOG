@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace hog::client {
 
@@ -50,8 +52,21 @@ protocol::CellWaves mixed(const protocol::CellWaves& from, const protocol::CellW
             .heading = glm::length(heading) > 1e-6F ? glm::normalize(heading) : stronger};
 }
 
+std::vector<protocol::CloudLayer> mixed(const std::vector<protocol::CloudLayer>& from,
+                                        const std::vector<protocol::CloudLayer>& to, float by) {
+    std::vector<protocol::CloudLayer> layers(std::max(from.size(), to.size()));
+    for (std::size_t layer = 0; layer < layers.size(); ++layer) {
+        const protocol::CloudLayer before =
+            layer < from.size() ? from[layer] : protocol::CloudLayer{};
+        const protocol::CloudLayer after = layer < to.size() ? to[layer] : protocol::CloudLayer{};
+        layers[layer] = {.cover = blend(before.cover, after.cover, by),
+                         .cloud = blend(before.cloud, after.cloud, by)};
+    }
+    return layers;
+}
+
 protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::CellWeather& to,
-                            float by) noexcept {
+                            float by) {
     return {.cloud = blend(from.cloud, to.cloud, by),
             .cover = blend(from.cover, to.cover, by),
             .falling = blend(from.falling, to.falling, by),
@@ -59,12 +74,26 @@ protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::C
             .drift = blend(from.drift, to.drift, by),
             .wind = blend(from.wind, to.wind, by),
             .humidity = blend(from.humidity, to.humidity, by),
-            .base = blend(from.base, to.base, by),
-            .top = blend(from.top, to.top, by),
             .wind_sea = mixed(from.wind_sea, to.wind_sea, by),
             .swells = {mixed(from.swells[0], to.swells[0], by),
                        mixed(from.swells[1], to.swells[1], by)},
-            .current = blend(from.current, to.current, by)};
+            .current = blend(from.current, to.current, by),
+            .layers = mixed(from.layers, to.layers, by)};
+}
+
+// Each layer's cloud, summed by how much each of the cells `around` counts.
+std::vector<protocol::CloudLayer> layered(const sim::CellGrid::Shares& around, const Cells& cells) {
+    std::vector<protocol::CloudLayer> layers;
+    for (std::size_t k = 0; k < around.cells.size(); ++k) {
+        const auto weight = static_cast<float>(around.weights.at(k) / around.total);
+        const std::vector<protocol::CloudLayer>& held = cells[around.cells.at(k)].layers;
+        layers.resize(std::max(layers.size(), held.size()));
+        for (std::size_t layer = 0; layer < held.size(); ++layer) {
+            layers[layer].cover += weight * held[layer].cover;
+            layers[layer].cloud += weight * held[layer].cloud;
+        }
+    }
+    return layers;
 }
 
 protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells, DVec3 direction) {
@@ -81,32 +110,31 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             .wind = {field([](const auto& cell) { return static_cast<double>(cell.wind.x); }),
                      field([](const auto& cell) { return static_cast<double>(cell.wind.y); })},
             .humidity = field([](const auto& cell) { return static_cast<double>(cell.humidity); }),
-            .base = field([](const auto& cell) { return static_cast<double>(cell.base); }),
-            .top = field([](const auto& cell) { return static_cast<double>(cell.top); })};
+            .layers = layered(grid.shares(direction), cells)};
 }
 
-// Cells with no cloud aloft have no base or top, which blending a cloud's edge with them would
-// pull to the ground as a tent: they take the heights the cloud keeps over the planet, as
-// much as each cell has of it, so what lies between is cloud at those heights, only thinner.
-void fill_heights(Cells& cells) {
+// Texels with no cloud aloft have no base or top, which blending a cloud's edge with them would
+// pull to the ground as a tent: they take the heights the cloud keeps over the planet, as much as
+// each texel has of it, so what lies between is cloud at those heights, only thinner.
+void fill_heights(std::vector<SkyTexel>& sky, const std::vector<WeatherTexel>& weather) {
     double base = 0.0;
     double top = 0.0;
     double weight = 0.0;
-    for (const protocol::CellWeather& cell : cells) {
-        if (cell.top > cell.base && cell.cloud > 0.0F) {
-            const auto mass = static_cast<double>(cell.cloud);
-            base += mass * static_cast<double>(cell.base);
-            top += mass * static_cast<double>(cell.top);
+    for (std::size_t texel = 0; texel < sky.size(); ++texel) {
+        if (sky[texel][2] > sky[texel][1]) {
+            const auto mass = static_cast<double>(weather[texel][1]);
+            base += mass * sky[texel][1];
+            top += mass * sky[texel][2];
             weight += mass;
         }
     }
     if (weight <= 0.0) {
         return;
     }
-    for (protocol::CellWeather& cell : cells) {
-        if (!(cell.top > cell.base) || !(cell.cloud > 0.0F)) {
-            cell.base = static_cast<float>(base / weight);
-            cell.top = static_cast<float>(top / weight);
+    for (SkyTexel& texel : sky) {
+        if (texel[2] <= texel[1]) {
+            texel[1] = static_cast<std::uint8_t>(std::lround(base / weight));
+            texel[2] = static_cast<std::uint8_t>(std::lround(top / weight));
         }
     }
 }
@@ -122,7 +150,8 @@ struct Maps {
     std::vector<LayerTexel> layers;
 };
 
-Maps maps_of(const sim::CellGrid& grid, const Cells& cells, std::size_t layers) {
+Maps maps_of(const sim::CellGrid& grid, const Cells& cells, const protocol::AirLayers& air) {
+    const std::size_t layers = air.count;
     constexpr std::uint32_t size = weather_map_size;
     constexpr std::size_t face_texels = std::size_t{size} * size;
     Maps maps;
@@ -133,6 +162,7 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells, std::size_t layers) 
     // Each layer's cover and water, summed by how much each cell counts.
     std::vector<double> cover(layers);
     std::vector<double> water(layers);
+    std::vector<protocol::CloudLayer> here(layers);
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < size; ++y) {
             for (std::uint32_t x = 0; x < size; ++x) {
@@ -154,7 +184,10 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells, std::size_t layers) 
                     maps.layers[(layer * 6 * face_texels) + texel] = {
                         to_byte(cover[layer]),
                         to_byte(std::sqrt(std::max(water[layer], 0.0) / 16.0))};
+                    here[layer] = {.cover = static_cast<float>(cover[layer]),
+                                   .cloud = static_cast<float>(water[layer])};
                 }
+                const CloudSpan span = cloud_span(here, air);
                 const protocol::CellWeather cell = interpolated(grid, cells, direction);
                 const Vec3 drift{planet::tangent_frame(direction).to_world(
                     {static_cast<double>(cell.drift.x), static_cast<double>(cell.drift.y), 0.0})};
@@ -165,24 +198,47 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells, std::size_t layers) 
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.cloud), 0.0) / 16.0)),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.falling), 0.0) / 256.0)),
                      to_byte(static_cast<double>(cell.snow))});
-                maps.sky.push_back(
-                    {to_byte(static_cast<double>(cell.humidity)),
-                     to_byte(static_cast<double>(cell.base) / (255.0 * height_texel_step)),
-                     to_byte(static_cast<double>(cell.top) / (255.0 * height_texel_step)), 0});
+                maps.sky.push_back({to_byte(static_cast<double>(cell.humidity)),
+                                    to_byte(span.base / (255.0 * height_texel_step)),
+                                    to_byte(span.top / (255.0 * height_texel_step)), 0});
             }
         }
     }
+    fill_heights(maps.sky, maps.weather);
     return maps;
 }
 
 } // namespace
 
-std::string describe(const protocol::CellWeather& weather) {
+CloudSpan cloud_span(std::span<const protocol::CloudLayer> layers,
+                     const protocol::AirLayers& air) noexcept {
+    // Less cover than this, a layer's cloud is too thin to show.
+    constexpr float least = 0.02F;
+    CloudSpan span;
+    auto floor = static_cast<double>(air.bottom);
+    const std::size_t count = std::min<std::size_t>(layers.size(), air.count);
+    bool found = false;
+    for (std::size_t layer = 0; layer < count; ++layer) {
+        const double depth = static_cast<double>(air.thickness) *
+                             std::pow(static_cast<double>(air.ratio), static_cast<double>(layer));
+        if (layers[layer].cover >= least) {
+            if (!found) {
+                span.base = layer == 0 ? floor - depth : floor;
+                found = true;
+            }
+            span.top = floor + depth;
+        }
+        floor += depth;
+    }
+    return span;
+}
+
+std::string describe(const protocol::CellWeather& weather, const protocol::AirLayers& air) {
     const double cover = 100.0 * static_cast<double>(weather.cover);
     std::string line = std::format("{:.0f}% cloud", cover);
     if (cover >= 0.5) {
-        line += std::format(" at {:.0f}-{:.0f} m", static_cast<double>(weather.base),
-                            static_cast<double>(weather.top));
+        const CloudSpan span = cloud_span(weather.layers, air);
+        line += std::format(" at {:.0f}-{:.0f} m", span.base, span.top);
     }
     if (weather.falling > 0.0F) {
         const char* falls = weather.snow >= 0.5F ? "snow" : "rain";
@@ -231,7 +287,6 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
         air_ = weather.air;
         to_ = weather.cells;
         carry_at_pace(to_, weather.pace);
-        fill_heights(to_);
         from_ = to_;
         fade_ = {};
         waiting_.reset();
@@ -253,7 +308,6 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
     last_came_ = now;
     waiting_ = Waiting{.cells = weather.cells, .came = now, .fade = fade};
     carry_at_pace(waiting_->cells, weather.pace);
-    fill_heights(waiting_->cells);
     update(now);
 }
 
@@ -281,9 +335,8 @@ void Forecast::take_maps() {
         return;
     }
     ++received_;
-    const std::size_t layers = air_.count;
-    Maps before = maps_of(*grid_, from_, layers);
-    Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_, layers) : before;
+    Maps before = maps_of(*grid_, from_, air_);
+    Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_, air_) : before;
     before_ = std::move(before.weather);
     sky_before_ = std::move(before.sky);
     drift_before_ = std::move(before.drift);
@@ -354,8 +407,7 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     found.cover = there.cover;
     found.falling = there.falling;
     found.snow = there.snow;
-    found.base = there.base;
-    found.top = there.top;
+    found.layers = there.layers;
     return found;
 }
 

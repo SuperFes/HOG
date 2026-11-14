@@ -1121,8 +1121,9 @@ std::vector<render::Capsule> capsules_shown(const client::Session* session,
 // The weather over the eye in words, while timings are shown and the weather's known.
 std::string weather_words(bool timings, const client::Forecast& forecast,
                           const client::Shot& shot) {
-    return timings && forecast.known() ? client::describe(client::weather_at_eye(shot))
-                                       : std::string{};
+    return timings && forecast.known()
+               ? client::describe(client::weather_at_eye(shot), client::air_at_eye(shot))
+               : std::string{};
 }
 
 // Draws the frame, saving it to `capture` if given, and sends what the chat box finished; idles a

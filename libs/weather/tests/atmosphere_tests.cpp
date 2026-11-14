@@ -4,7 +4,6 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -58,7 +57,6 @@ TEST_CASE("a day's weather is finite and a column's cloud, rain and wind are rea
         REQUIRE(shown.humidity >= 0.0F);
         REQUIRE(shown.humidity <= 1.0F);
         REQUIRE(std::isfinite(shown.wind.x));
-        REQUIRE(shown.top >= shown.base);
         cloud += shown.cloud;
     }
     CHECK(cloud > 0.0F);
@@ -86,31 +84,6 @@ TEST_CASE("cold ground's rain is snow and warm ground's is rain", "[weather][atm
     CHECK(warm == 0.0F);
 }
 
-TEST_CASE("cloud touching the ground reaches under it, and runs up to the highest above",
-          "[weather][atmosphere]") {
-    const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 2, 8};
-    Field& field = air.field();
-    std::size_t column = 0;
-    while (field.solid(column, 0) || field.over_sea[column] == 0) {
-        ++column;
-    }
-    for (Air& cell : std::span{field.air}.subspan(field.grid.index(column, 0), 8)) {
-        cell.cloud = 0.0F;
-    }
-    field.at(column, 0).cloud = 1e-3F;
-    field.at(column, 3).cloud = 1e-3F;
-    field.at(column, 4).cloud = 1e-3F;
-    const Column shown = air.column(column);
-    const Grid& grid = field.grid;
-    const auto radius = static_cast<float>(generator.planet().body.radius);
-    CHECK(shown.base ==
-          Catch::Approx(static_cast<float>(grid.floor_of(0) - grid.depth_of(0)) - radius));
-    CHECK(shown.top > static_cast<float>(grid.floor_of(3)) - radius);
-    CHECK(shown.top <= static_cast<float>(grid.floor_of(5)) - radius);
-    CHECK(shown.cloud > 0.0F);
-}
-
 TEST_CASE("a column says whether the sea lies under it", "[weather][atmosphere]") {
     const hog::globe::Generator generator{small_earth()};
     const Atmosphere air{generator, 2, 8};
@@ -122,46 +95,6 @@ TEST_CASE("a column says whether the sea lies under it", "[weather][atmosphere]"
     }
     CHECK(seas > 0);
     CHECK(seas < air.field().grid.columns());
-}
-
-TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on layer edges",
-          "[weather][atmosphere]") {
-    const hog::globe::Generator generator{small_earth()};
-    Atmosphere air{generator, 2, 10};
-    const Grid& grid = air.field().grid;
-    std::size_t open = air.field().grid.columns();
-    for (std::size_t column = 0; column < grid.columns(); ++column) {
-        if (!air.field().solid(column, 0)) {
-            open = column;
-            break;
-        }
-    }
-    REQUIRE(open < grid.columns());
-    constexpr int layer = 5;
-    const auto heights = [&](float cloud) {
-        for (int i = 0; i < grid.layers; ++i) {
-            air.field().at(open, i).cloud = i == layer ? cloud : 0.0F;
-        }
-        const Column shown = air.column(open);
-        const double sea = air.planet().body.radius;
-        return std::pair{static_cast<double>(shown.base) - (grid.floor_of(layer) - sea),
-                         static_cast<double>(shown.top) - (grid.floor_of(layer) - sea)};
-    };
-    // Full, a layer's cloud runs from its floor to its ceiling.
-    const double depth = grid.depth_of(layer);
-    const auto [full_base, full_top] = heights(1e-4F);
-    CHECK_THAT(full_base, Catch::Matchers::WithinAbs(0.0, 1.0));
-    CHECK_THAT(full_top, Catch::Matchers::WithinAbs(depth, 1.0));
-    // Thinner, it closes in on the layer's middle.
-    const auto [thin_base, thin_top] = heights(0.8e-4F);
-    CHECK_THAT(thin_base, Catch::Matchers::WithinAbs(0.125 * depth, 1.0));
-    CHECK_THAT(thin_top, Catch::Matchers::WithinAbs(0.875 * depth, 1.0));
-    // And a layer with too little to show has no cloud at all.
-    for (int i = 0; i < grid.layers; ++i) {
-        air.field().at(open, i).cloud = i == layer ? 0.4e-4F : 0.0F;
-    }
-    CHECK(air.column(open).top == 0.0F);
-    CHECK(air.column(open).base == 0.0F);
 }
 
 TEST_CASE("cover is how much of the sky cloud closes over, by what the air could hold",

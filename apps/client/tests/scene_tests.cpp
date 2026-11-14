@@ -66,7 +66,7 @@ double over_ground(const hog::globe::World& world, hog::DVec3 up, double altitud
     return std::max(altitude, hog::globe::ground_height(world, up) + headroom);
 }
 
-hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
+hog::client::Forecast everywhere(const hog::protocol::CellWeather& cell) {
     hog::client::Forecast forecast{hog::client::testing::planet().body.radius};
     forecast.receive(
         {.level = 2,
@@ -102,26 +102,26 @@ TEST_CASE("the weather drifts along the ground, east and north as it says", "[cl
 }
 
 TEST_CASE("rain falls round the eye only under the cloud", "[client][scene]") {
-    const hog::protocol::CellWeather raining{
-        .cloud = 2.0F, .falling = 5.0F, .base = 1'500.0F, .top = 3'000.0F};
+    const hog::protocol::CellWeather raining{.cloud = 2.0F, .falling = 5.0F};
+    constexpr hog::client::CloudSpan span{.base = 1'500.0, .top = 3'000.0};
     hog::terrain::Bend bend{.eye_height = 1'400.0};
-    CHECK(hog::client::falling_at_eye(bend, raining) == 5.0);
+    CHECK(hog::client::falling_at_eye(bend, raining, span) == 5.0);
     bend.eye_height = 1'600.0;
-    CHECK(hog::client::falling_at_eye(bend, raining) == 0.0);
+    CHECK(hog::client::falling_at_eye(bend, raining, span) == 0.0);
 }
 
 TEST_CASE("cloud shades the eye from above, less from within it", "[client][scene]") {
-    const hog::protocol::CellWeather overcast{
-        .cloud = 2.0F, .cover = 1.0F, .base = 1'500.0F, .top = 3'000.0F};
+    const hog::protocol::CellWeather overcast{.cloud = 2.0F, .cover = 1.0F};
+    constexpr hog::client::CloudSpan span{.base = 1'500.0, .top = 3'000.0};
     hog::terrain::Bend bend{.eye_height = 1'400.0};
-    CHECK(hog::client::shade_at_eye(bend, overcast).direct < 0.01);
-    CHECK(hog::client::shade_at_eye(bend, {}).direct == 1.0);
+    CHECK(hog::client::shade_at_eye(bend, overcast, span).direct < 0.01);
+    CHECK(hog::client::shade_at_eye(bend, {}, {}).direct == 1.0);
     bend.eye_height = 2'990.0;
-    const double near_top = hog::client::shade_at_eye(bend, overcast).direct;
+    const double near_top = hog::client::shade_at_eye(bend, overcast, span).direct;
     CHECK(near_top > 0.01);
     CHECK(near_top < 1.0);
     bend.eye_height = 3'100.0;
-    CHECK(hog::client::shade_at_eye(bend, overcast).direct == 1.0);
+    CHECK(hog::client::shade_at_eye(bend, overcast, span).direct == 1.0);
 }
 
 TEST_CASE("the globe's voxels, to look at", "[.look]") {

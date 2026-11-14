@@ -94,17 +94,41 @@ TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][fore
 }
 
 TEST_CASE("the weather reads as a line", "[client][forecast]") {
-    CHECK(hog::client::describe({}) == "0% cloud, 0% humid, drifting 0 m/s");
+    const hog::protocol::AirLayers air{.count = 4, .bottom = 0.0F, .thickness = 700.0F};
+    CHECK(hog::client::describe({}, air) == "0% cloud, 0% humid, drifting 0 m/s");
     CHECK(hog::client::describe({.cloud = 16.0F,
                                  .cover = 1.0F,
                                  .falling = 2.5F,
                                  .drift = {3.0F, -4.0F},
                                  .humidity = 0.92F,
-                                 .base = 800.0F,
-                                 .top = 2'100.0F}) ==
-          "100% cloud at 800-2100 m, rain 2.5 mm/h, 92% humid, drifting 5 m/s");
-    CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F, .falling = 1.0F, .snow = 0.75F}) ==
+                                 .layers = {{}, {.cover = 1.0F}, {.cover = 0.5F}}},
+                                air) ==
+          "100% cloud at 700-2100 m, rain 2.5 mm/h, 92% humid, drifting 5 m/s");
+    CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F, .falling = 1.0F, .snow = 0.75F},
+                                air) ==
           "100% cloud at 0-0 m, snow 1.0 mm/h, 0% humid, drifting 0 m/s");
+}
+
+TEST_CASE("cloud lies from its lowest layer's floor to its highest's ceiling",
+          "[client][forecast]") {
+    using hog::client::cloud_span;
+    using hog::client::CloudSpan;
+    // Layers 100, 200, 400 and 800 m deep.
+    const hog::protocol::AirLayers air{
+        .count = 4, .bottom = -50.0F, .thickness = 100.0F, .ratio = 2.0F};
+    CHECK(cloud_span({}, air) == CloudSpan{});
+    CHECK(cloud_span(std::vector<hog::protocol::CloudLayer>{{}, {.cover = 0.01F}}, air) ==
+          CloudSpan{});
+    CHECK(
+        cloud_span(std::vector<hog::protocol::CloudLayer>{{}, {.cover = 0.5F}, {}, {.cover = 1.0F}},
+                   air) == CloudSpan{.base = 50.0, .top = 1'450.0});
+    // Cloud in the lowest layer reaches a layer's depth under it.
+    CHECK(cloud_span(std::vector<hog::protocol::CloudLayer>{{.cover = 1.0F}}, air) ==
+          CloudSpan{.base = -150.0, .top = 50.0});
+    // No more layers than the air has.
+    CHECK(cloud_span(std::vector<hog::protocol::CloudLayer>(6, {.cover = 1.0F}),
+                     {.count = 2, .bottom = 0.0F, .thickness = 100.0F, .ratio = 1.0F})
+              .top == 200.0);
 }
 
 TEST_CASE("cloud is carried as fast as the weather ran", "[client][forecast]") {
@@ -127,15 +151,17 @@ TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
 
 TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     Forecast forecast{radius};
-    const CellWeather rainy{.cloud = 2.0F,
-                            .cover = 0.6F,
-                            .falling = 4.0F,
-                            .snow = 0.25F,
-                            .drift = {3.0F, -1.0F},
-                            .humidity = 0.6F,
-                            .base = 1'280.0F,
-                            .top = 3'200.0F};
-    forecast.receive(everywhere(rainy), start);
+    const CellWeather rainy{
+        .cloud = 2.0F,
+        .cover = 0.6F,
+        .falling = 4.0F,
+        .snow = 0.25F,
+        .drift = {3.0F, -1.0F},
+        .humidity = 0.6F,
+        .layers = {{}, {.cover = 0.6F, .cloud = 1.0F}, {.cover = 0.6F, .cloud = 1.0F}}};
+    Weather weather = everywhere(rainy);
+    weather.air = {.count = 4, .bottom = 0.0F, .thickness = 640.0F, .ratio = 1.0F};
+    forecast.receive(weather, start);
     CHECK(forecast.known());
     CHECK(forecast.received() == 1);
     CHECK(forecast.faded(start) == 1.0);
@@ -152,12 +178,13 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     CHECK(std::ranges::all_of(forecast.before(),
                               [&](const auto& texel) { return texel == expected; }));
     CHECK_THAT(static_cast<double>(here.humidity), WithinAbs(0.6, 1e-6));
-    CHECK_THAT(static_cast<double>(here.base), WithinAbs(1'280.0, 1e-3));
-    CHECK_THAT(static_cast<double>(here.top), WithinAbs(3'200.0, 1e-3));
+    REQUIRE(here.layers.size() == 3);
+    CHECK_THAT(static_cast<double>(here.layers[1].cover), WithinAbs(0.6, 1e-5));
+    CHECK_THAT(static_cast<double>(here.layers[2].cloud), WithinAbs(1.0, 1e-5));
     REQUIRE(forecast.sky_before().size() == forecast.before().size());
     CHECK(forecast.sky_after() == forecast.sky_before());
-    // In steps of 64 metres.
-    const hog::client::SkyTexel sky{153, 20, 50, 0};
+    // From 640 m to 1920 m, in steps of 64 metres.
+    const hog::client::SkyTexel sky{153, 10, 30, 0};
     CHECK(std::ranges::all_of(forecast.sky_before(),
                               [&](const auto& texel) { return texel == sky; }));
 }
@@ -295,7 +322,6 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
         weather.cells[index].cloud = static_cast<float>(1.5 + up.x + (0.5 * up.z));
         weather.cells[index].cover = static_cast<float>(0.5 + (0.4 * up.x));
         weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
-        weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
         weather.cells[index].drift = {static_cast<float>(10.0 * up.x),
                                       static_cast<float>(5.0 + (5.0 * up.z))};
     }
@@ -312,9 +338,6 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.at(cube_direction(face, x, y, weather_map_size), start);
                 CHECK(std::abs(texel[0] - (here.cover * 255.0F)) <= 0.51F);
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
-                const auto& sky =
-                    forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
-                CHECK(std::abs(sky[1] - (here.base / 64.0F)) <= 0.51F);
                 // The drift over the ground there, in the planet's frame.
                 const auto& drift =
                     forecast
@@ -437,7 +460,7 @@ TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[cl
                WithinAbs(static_cast<double>(fresh.at(west_of_eye(5'700.0), start).cloud), 0.02));
 }
 
-TEST_CASE("the air's damp stays put as the cloud drifts on through it, with its heights",
+TEST_CASE("the air's damp stays put as the cloud drifts on through it, with its layers",
           "[client][forecast]") {
     Weather weather = drifting_east();
     const hog::sim::CellGrid grid{weather.level};
@@ -445,8 +468,7 @@ TEST_CASE("the air's damp stays put as the cloud drifts on through it, with its 
         const auto east = static_cast<float>(grid.frame(index).up.x);
         hog::protocol::CellWeather& cell = weather.cells[index];
         cell.humidity = 0.5F + (0.4F * east);
-        cell.base = 1'000.0F + (500.0F * east);
-        cell.top = cell.base + 1'000.0F + (1'000.0F * east);
+        cell.layers = {{.cover = 0.5F + (0.4F * east)}, {}, {.cover = 0.3F - (0.2F * east)}};
     }
     Forecast forecast{radius};
     forecast.receive(weather, start);
@@ -454,21 +476,25 @@ TEST_CASE("the air's damp stays put as the cloud drifts on through it, with its 
     const hog::protocol::CellWeather was = forecast.at(eye(), start);
     const hog::protocol::CellWeather is = forecast.at(eye(), later);
     CHECK(is.humidity == was.humidity);
-    // The cloud blown here from 2 km upwind, at the heights it had there.
+    // The cloud blown here from 2 km upwind, in the layers it had there.
     const hog::protocol::CellWeather upwind = forecast.at(west_of_eye(2'000.0), start);
-    CHECK_THAT(static_cast<double>(is.base), WithinAbs(static_cast<double>(upwind.base), 0.5));
-    CHECK_THAT(static_cast<double>(is.top), WithinAbs(static_cast<double>(upwind.top), 0.5));
-    CHECK(is.top - is.base < was.top - was.base - 5.0F);
+    REQUIRE(is.layers.size() == 3);
+    REQUIRE(upwind.layers.size() == 3);
+    for (const std::size_t layer : {std::size_t{0}, std::size_t{2}}) {
+        CHECK_THAT(static_cast<double>(is.layers[layer].cover),
+                   WithinAbs(static_cast<double>(upwind.layers[layer].cover), 1e-4));
+    }
+    CHECK(is.layers[0].cover < was.layers[0].cover - 1e-3F);
 }
 
 TEST_CASE("a cloud's edge keeps its heights instead of sloping down to the ground",
           "[client][forecast]") {
     Weather weather = everywhere({}, 0ms);
+    weather.air = {.count = 5, .bottom = 0.0F, .thickness = 2'000.0F, .ratio = 1.0F};
     // Cloud 6 to 8 km up over a third of the cells, none over the rest.
     for (std::size_t index = 0; index < weather.cells.size(); index += 3) {
         weather.cells[index].cloud = 2.0F;
-        weather.cells[index].base = 6'000.0F;
-        weather.cells[index].top = 8'000.0F;
+        weather.cells[index].layers = {{}, {}, {}, {.cover = 1.0F, .cloud = 2.0F}};
     }
     Forecast forecast{radius};
     forecast.receive(weather, start);
@@ -477,9 +503,12 @@ TEST_CASE("a cloud's edge keeps its heights instead of sloping down to the groun
     for (int sample = 0; sample < 2'000; ++sample) {
         const DVec3 direction =
             glm::normalize(DVec3{normal(random), normal(random), normal(random)});
-        const CellWeather here = forecast.at(direction, start);
-        CHECK_THAT(static_cast<double>(here.base), WithinAbs(6'000.0, 1.0));
-        CHECK_THAT(static_cast<double>(here.top), WithinAbs(8'000.0, 1.0));
+        const hog::client::CloudSpan span =
+            hog::client::cloud_span(forecast.at(direction, start).layers, forecast.air());
+        if (span.top > span.base) {
+            CHECK_THAT(span.base, WithinAbs(6'000.0, 1.0));
+            CHECK_THAT(span.top, WithinAbs(8'000.0, 1.0));
+        }
     }
     // The sky's map holds them at every texel too: a byte is 64 metres.
     for (const auto& texel : forecast.sky_after()) {

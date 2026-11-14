@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -22,9 +23,9 @@ inline constexpr std::uint32_t weather_map_size = 64;
 // the square root of a 256th of its millimetres an hour, and the share of that falling as snow.
 using WeatherTexel = std::array<std::uint8_t, 4>;
 
-// A texel of the sky's cube maps, as protocol::CellWeather sends them: the humidity near the ground
-// from 0 to 255 for 0 to 1, the cloud's base and top in steps of `height_texel_step` metres above
-// sea level, and a fourth unused.
+// A texel of the sky's cube maps: the humidity near the ground from 0 to 255 for 0 to 1, the
+// cloud's base and top as cloud_span() has them in steps of `height_texel_step` metres above sea
+// level, and a fourth unused.
 using SkyTexel = std::array<std::uint8_t, 4>;
 inline constexpr double height_texel_step = 64.0;
 
@@ -42,8 +43,21 @@ using LayerTexel = std::array<std::uint8_t, 2>;
 [[nodiscard]] DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
                                    std::uint32_t size) noexcept;
 
-// The weather as a line for people to read.
-[[nodiscard]] std::string describe(const protocol::CellWeather& weather);
+// Where cloud lies in a column, metres above sea level: from the floor of the lowest layer with any
+// to the ceiling of the highest, both 0 with none. Cloud in the air's lowest layer reaches a
+// layer's depth under it, into the hollows its columns' ground is taken over.
+struct CloudSpan {
+    double base = 0.0;
+    double top = 0.0;
+
+    friend bool operator==(const CloudSpan&, const CloudSpan&) = default;
+};
+[[nodiscard]] CloudSpan cloud_span(std::span<const protocol::CloudLayer> layers,
+                                   const protocol::AirLayers& air) noexcept;
+
+// The weather in air laid as `air` as a line for people to read.
+[[nodiscard]] std::string describe(const protocol::CellWeather& weather,
+                                   const protocol::AirLayers& air);
 
 // The weather the server last sent, faded to from what was shown when it came, and its cloud
 // drifted on with the weather since, until the next comes.
