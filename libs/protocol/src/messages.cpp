@@ -3,8 +3,8 @@
 #include <hog/protocol/messages.hpp>
 
 #include <algorithm>
-#include <bit>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -714,7 +714,8 @@ struct Ball {
             return make_error(ErrorCode::Parse, "weather's cells cut short");
         }
         if (*cloudy > *layers) {
-            return make_error(ErrorCode::OutOfRange, "a weather cell with more layers than the air");
+            return make_error(ErrorCode::OutOfRange,
+                              "a weather cell with more layers than the air");
         }
         CodedCell coded_cell{};
         std::ranges::transform(*bytes, coded_cell.begin(), as_bytes);
@@ -725,8 +726,8 @@ struct Ball {
         }
         cell.layers.reserve(*cloudy);
         for (std::size_t at = 0; at < layered->size(); at += 2) {
-            cell.layers.push_back(decoded_layer(as_bytes((*layered)[at]),
-                                                as_bytes((*layered)[at + 1])));
+            cell.layers.push_back(
+                decoded_layer(as_bytes((*layered)[at]), as_bytes((*layered)[at + 1])));
         }
         weather.cells.push_back(std::move(cell));
     }

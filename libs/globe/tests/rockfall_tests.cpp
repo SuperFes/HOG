@@ -221,10 +221,9 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     int columns = 0;
     for (int i = -12; i <= 12; ++i) {
         for (int j = -12; j <= 12; ++j) {
-            const DVec3 direction =
-                glm::normalize(down + (((east * static_cast<double>(i)) +
-                                        (north * static_cast<double>(j))) *
-                                       (every_block / radius)));
+            const DVec3 direction = glm::normalize(
+                down + (((east * static_cast<double>(i)) + (north * static_cast<double>(j))) *
+                        (every_block / radius)));
             const hog::globe::terms::Rubble rubble =
                 hog::globe::terms::fallen(setup.context, direction, every_block).rubble;
             CHECK(rubble.share <= 1.0);

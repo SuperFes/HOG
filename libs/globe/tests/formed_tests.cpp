@@ -1033,8 +1033,8 @@ void print_layers(const Probe& probe, std::span<const double> line, double spaci
             const DVec3 direction =
                 glm::normalize(probe.centre + (((probe.east * x) + (probe.north * y)) / radius));
             const Generator::Column column = probe.generator.column(direction, lod);
-            shown += std::format(" {:3}", static_cast<int>(
-                                              column.sample(column.ground() - (lod / 4.0)).material));
+            shown += std::format(
+                " {:3}", static_cast<int>(column.sample(column.ground() - (lod / 4.0)).material));
         }
         std::println("{:7.1f}: org {:5.2f} top {:5.2f} sub {:5.2f} loess {:5.2f} sand {:5.2f} "
                      "alluv {:5.2f} till {:5.2f} sap {:5.2f} rubble {:5.2f} beach {:5.2f} crag "

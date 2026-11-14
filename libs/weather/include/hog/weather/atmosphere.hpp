@@ -36,7 +36,8 @@ struct Column {
     float top = 0.0F;
     // Each of the grid's layers, bottom up; those under the ground hold what the lowest open one
     // does, so cloud on the ground fills the hollows the column's ground is taken over.
-    std::vector<LayerCloud> layers;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::vector<LayerCloud> layers = {};
 };
 
 // The air of a whole planet, stepped on in game time.

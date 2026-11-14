@@ -209,6 +209,6 @@ TEST_CASE("ground wholly behind the horizon is hidden, whatever stands over it s
     }
     // From under sea level, nothing is.
     const Bend under = bend_at(-10.0);
-    CHECK_FALSE(hog::terrain::behind_horizon(under, point_at(under, 0.9 * std::numbers::pi * radius,
-                                                             0.0), 10.0));
+    CHECK_FALSE(hog::terrain::behind_horizon(
+        under, point_at(under, 0.9 * std::numbers::pi * radius, 0.0), 10.0));
 }

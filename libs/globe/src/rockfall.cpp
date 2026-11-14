@@ -409,8 +409,8 @@ public:
                 return weight * (rubble_of(cell.value_or(held)).*of);
             };
             return ((1.0 - across_j) * (1.0 - across_i) * (blended.*of)) +
-                   at(di, 0, (1.0 - across_j) * across_i) +
-                   at(0, dj, across_j * (1.0 - across_i)) + at(di, dj, across_j * across_i);
+                   at(di, 0, (1.0 - across_j) * across_i) + at(0, dj, across_j * (1.0 - across_i)) +
+                   at(di, dj, across_j * across_i);
         };
         const double depth = blend(&Rubble::depth);
         blended.share = blend(&Rubble::share);

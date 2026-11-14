@@ -363,12 +363,12 @@ TEST_CASE("the planet's weather takes twenty-three bytes a clear cell, two more 
     Weather clear{.level = most_weather_level,
                   .air = {.count = most_cloud_layers, .thickness = 100.0F},
                   .cells = std::vector<CellWeather>(6'144, CellWeather{})};
-    CHECK(encode(clear).size() == head + (23 * 6'144));
+    CHECK(encode(clear).size() == head + (std::size_t{23} * 6'144));
     // Clear layers on top of the highest cloud aren't sent.
     for (CellWeather& cell : clear.cells) {
         cell.layers = {CloudLayer{}, CloudLayer{.cover = 0.5F}, CloudLayer{}};
     }
-    CHECK(encode(clear).size() == head + (27 * 6'144));
+    CHECK(encode(clear).size() == head + (std::size_t{27} * 6'144));
     // Cloudy all the way up, it still fits in a message the network carries.
     for (CellWeather& cell : clear.cells) {
         cell.layers.assign(most_cloud_layers, CloudLayer{.cover = 1.0F, .cloud = 1.0F});
@@ -378,9 +378,10 @@ TEST_CASE("the planet's weather takes twenty-three bytes a clear cell, two more 
 
 TEST_CASE("a cell's layers are sent as near as a byte each holds, none over the highest cloud",
           "[protocol]") {
-    const CellWeather sent =
-        as_sent({.layers = {{.cover = 0.301F, .cloud = 0.0101F}, {.cover = 0.0F, .cloud = 0.0F},
-                            {.cover = 1.0F, .cloud = 2.0F}, {.cover = 0.0F, .cloud = 0.0F}}});
+    const CellWeather sent = as_sent({.layers = {{.cover = 0.301F, .cloud = 0.0101F},
+                                                 {.cover = 0.0F, .cloud = 0.0F},
+                                                 {.cover = 1.0F, .cloud = 2.0F},
+                                                 {.cover = 0.0F, .cloud = 0.0F}}});
     REQUIRE(sent.layers.size() == 3);
     CHECK_THAT(sent.layers[0].cover, Catch::Matchers::WithinAbs(0.301, 0.5 / 255.0));
     CHECK_THAT(std::sqrt(sent.layers[0].cloud),

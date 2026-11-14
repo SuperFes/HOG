@@ -63,7 +63,8 @@ constexpr float most_sea_height = 20.0F;
 }
 
 [[nodiscard]] protocol::AirLayers air_layers(const weather::Grid& grid, double radius) {
-    HOG_ASSERT(grid.layers <= protocol::most_cloud_layers, "air in too many layers to send");
+    HOG_ASSERT(std::cmp_less_equal(grid.layers, protocol::most_cloud_layers),
+               "air in too many layers to send");
     return {.count = static_cast<std::uint8_t>(grid.layers),
             .bottom = static_cast<float>(grid.bottom - radius),
             .thickness = static_cast<float>(grid.thickness),
