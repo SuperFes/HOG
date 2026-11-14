@@ -166,7 +166,9 @@ TEST_CASE("while bending, the far side stays well below the horizon", "[terrain]
     for (const double planet : {radius, 11'500.0, 2'000.0}) {
         const double far_side = std::numbers::pi * planet;
         const double out = hog::terrain::blended_out(planet);
-        for (double height = 0.0; height <= out; height += out / 1'000.0) {
+        constexpr int steps = 1'000;
+        for (int step = 0; step <= steps; ++step) {
+            const double height = out * step / steps;
             CHECK(horizon_on(faked_radius(planet, height), height) < far_side / 2.0);
         }
     }

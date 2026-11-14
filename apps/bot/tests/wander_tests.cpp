@@ -89,7 +89,9 @@ TEST_CASE("held up, it says which way, and tries anywhere but that way next", "[
     const Wander wander = pick(up, radius, random, settings);
     const WorldPosition feet{up * radius};
     Walked walked{.wander = wander, .heading = std::nullopt, .held = std::nullopt};
-    for (double waited = 0.0; waited <= settings.stuck + 0.1; waited += 0.1) {
+    // A tenth of a second at a time until a tenth past held up.
+    const auto ticks = static_cast<int>(std::lround(settings.stuck / 0.1)) + 1;
+    for (int tick = 0; tick <= ticks; ++tick) {
         walked = walk(walked.wander, feet, radius, 0.1, settings);
     }
     REQUIRE(walked.held);
