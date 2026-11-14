@@ -1,4 +1,5 @@
 #include <hog/core/text_file.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/server/server_config.hpp>
 
 #include <toml++/toml.hpp>
@@ -278,7 +279,7 @@ private:
         return known;
     }
     const auto on = weather.boolean("on");
-    const auto layers = weather.integer("layers", 8, 64);
+    const auto layers = weather.integer("layers", 8, protocol::most_cloud_layers);
     const auto spin_up = weather.integer("spin_up_hours", 0, 240);
     for (const Error* error : {on ? nullptr : &on.error(), layers ? nullptr : &layers.error(),
                                spin_up ? nullptr : &spin_up.error()}) {

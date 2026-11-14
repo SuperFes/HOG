@@ -62,6 +62,23 @@ TEST_CASE("the weather it makes has a cell for each of the level's, in the grid'
     CHECK(made.fade == 500ms);
     REQUIRE(made.cells.size() == protocol::weather_cells(level));
     CHECK(keeper.latest() == found);
+    // The air's layers as its grid lays them, and each cell's cloud in them.
+    CHECK(made.air.count == 6);
+    CHECK(made.air.thickness > 0.0F);
+    CHECK(made.air.ratio >= 1.0F);
+    double layered = 0.0;
+    double total = 0.0;
+    for (const protocol::CellWeather& cell : made.cells) {
+        REQUIRE(cell.layers.size() == 6);
+        for (const protocol::CloudLayer& layer : cell.layers) {
+            REQUIRE(layer.cover >= 0.0F);
+            REQUIRE(layer.cover <= 1.0F);
+            layered += static_cast<double>(layer.cloud);
+        }
+        total += static_cast<double>(cell.cloud);
+    }
+    // Layers under the ground repeat the lowest open one's, so they hold at least the column's.
+    CHECK(layered >= 0.999 * total);
 
     // Cold polar cells come out as snow and warm equatorial ones mostly as rain, wherever they're
     // placed; mountains make some equatorial ground cold.

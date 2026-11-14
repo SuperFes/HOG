@@ -56,9 +56,20 @@ Snapshot delta() {
 
 // Each cell different, with values a byte holds exactly.
 Weather weather(std::uint8_t level) {
-    Weather out{.level = level, .fade = std::chrono::minutes{10}, .pace = 850.5F, .cells = {}};
+    Weather out{.level = level,
+                .fade = std::chrono::minutes{10},
+                .pace = 850.5F,
+                .air = {.count = 8, .bottom = -120.0F, .thickness = 150.0F, .ratio = 1.125F},
+                .cells = {}};
     for (std::size_t index = 0; index < weather_cells(level); ++index) {
         const auto step = static_cast<float>(index % 4);
+        // Up to the highest layer with cloud, some with none below it.
+        std::vector<CloudLayer> layers;
+        for (std::size_t layer = 0; layer < index % 8; ++layer) {
+            const auto part = static_cast<float>((index + layer) % 3);
+            layers.push_back({.cover = part / 255.0F, .cloud = part * part / 4'096.0F});
+        }
+        layers.push_back({.cover = 1.0F, .cloud = 0.25F});
         out.cells.push_back({.cloud = step * step / 16.0F,
                              .cover = step / 3.0F,
                              .falling = step * step,
@@ -66,7 +77,8 @@ Weather weather(std::uint8_t level) {
                              .drift = {-step, static_cast<float>(index) - 12.0F},
                              .humidity = step / 255.0F,
                              .base = step * 640.0F,
-                             .top = (step + 1.0F) * 1'280.0F});
+                             .top = (step + 1.0F) * 1'280.0F,
+                             .layers = layers});
     }
     return out;
 }
@@ -344,9 +356,49 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                    .current = {nan, nan}}) == CellWeather{});
 }
 
-TEST_CASE("the planet's weather takes twenty-two bytes a cell", "[protocol]") {
+TEST_CASE("the planet's weather takes twenty-three bytes a clear cell, two more a cloud layer",
+          "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + 4 + (22 * 6'144));
+    constexpr std::size_t head = 2 + 1 + 4 + 4 + 1 + 12;
+    Weather clear{.level = most_weather_level,
+                  .air = {.count = most_cloud_layers, .thickness = 100.0F},
+                  .cells = std::vector<CellWeather>(6'144, CellWeather{})};
+    CHECK(encode(clear).size() == head + (23 * 6'144));
+    // Clear layers on top of the highest cloud aren't sent.
+    for (CellWeather& cell : clear.cells) {
+        cell.layers = {CloudLayer{}, CloudLayer{.cover = 0.5F}, CloudLayer{}};
+    }
+    CHECK(encode(clear).size() == head + (27 * 6'144));
+    // Cloudy all the way up, it still fits in a message the network carries.
+    for (CellWeather& cell : clear.cells) {
+        cell.layers.assign(most_cloud_layers, CloudLayer{.cover = 1.0F, .cloud = 1.0F});
+    }
+    CHECK(encode(clear).size() < std::size_t{512} * 1'024);
+}
+
+TEST_CASE("a cell's layers are sent as near as a byte each holds, none over the highest cloud",
+          "[protocol]") {
+    const CellWeather sent =
+        as_sent({.layers = {{.cover = 0.301F, .cloud = 0.0101F}, {.cover = 0.0F, .cloud = 0.0F},
+                            {.cover = 1.0F, .cloud = 2.0F}, {.cover = 0.0F, .cloud = 0.0F}}});
+    REQUIRE(sent.layers.size() == 3);
+    CHECK_THAT(sent.layers[0].cover, Catch::Matchers::WithinAbs(0.301, 0.5 / 255.0));
+    CHECK_THAT(std::sqrt(sent.layers[0].cloud),
+               Catch::Matchers::WithinAbs(std::sqrt(0.0101), 0.5 / 64.0));
+    CHECK(sent.layers[1] == CloudLayer{});
+    CHECK(sent.layers[2].cover == 1.0F);
+    CHECK_THAT(sent.layers[2].cloud, Catch::Matchers::WithinAbs(2.0, 0.05));
+}
+
+TEST_CASE("weather in more layers than allowed is refused", "[protocol]") {
+    auto more = encode(weather(1));
+    // The layer count follows the kind, the level, the fade and the pace.
+    more[11] = std::byte{most_cloud_layers + 1};
+    CHECK(decode(more).error().code == hog::ErrorCode::OutOfRange);
+    // A cell with more layers than the air has.
+    auto deeper = encode(weather(1));
+    deeper[11] = std::byte{0};
+    CHECK_FALSE(decode(deeper).has_value());
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

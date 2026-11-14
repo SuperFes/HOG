@@ -96,7 +96,7 @@ struct ServerConfig {
 //     [weather]                  # optional
 //     on = true
 //     level = 4                  # 1 to 5: the cube-sphere level of the air's columns
-//     layers = 24                # 8 to 64
+//     layers = 24                # 8 to 24
 //     spin_up_hours = 48         # game time a new world's air is run on first
 //
 //     [wildlife]                 # optional

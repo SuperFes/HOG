@@ -3,6 +3,7 @@
 #include <hog/protocol/messages.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cmath>
 #include <format>
@@ -157,6 +158,26 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             .swells = {decoded_waves(bytes[13], bytes[14], bytes[15]),
                        decoded_waves(bytes[16], bytes[17], bytes[18])},
             .current = {speed_of(bytes[19]) / current_steps, speed_of(bytes[20]) / current_steps}};
+}
+
+using CodedLayer = std::array<std::uint8_t, 2>;
+
+// Each layer's cover and water, up to the highest with any cloud sent.
+[[nodiscard]] std::vector<CodedLayer> coded_layers(const CellWeather& cell) {
+    std::vector<CodedLayer> layers;
+    std::size_t cloudy = 0;
+    for (const CloudLayer& layer : cell.layers) {
+        layers.push_back({to_byte(layer.cover * cover_steps), rooted(layer.cloud, cloud_steps)});
+        if (layers.back() != CodedLayer{0, 0}) {
+            cloudy = layers.size();
+        }
+    }
+    layers.resize(cloudy);
+    return layers;
+}
+
+[[nodiscard]] CloudLayer decoded_layer(std::uint8_t cover, std::uint8_t cloud) noexcept {
+    return {.cover = static_cast<float>(cover) / cover_steps, .cloud = squared(cloud, cloud_steps)};
 }
 
 template <typename T>
@@ -663,21 +684,51 @@ struct Ball {
                           std::format("weather at level {} is finer than the {} allowed", *level,
                                       most_weather_level));
     }
+    const auto layers = read<std::uint8_t>(in, "weather");
+    const auto bottom = read<std::uint32_t>(in, "weather");
+    const auto thickness = read<std::uint32_t>(in, "weather");
+    const auto ratio = read<std::uint32_t>(in, "weather");
+    if (!layers || !bottom || !thickness || !ratio) {
+        return make_error(ErrorCode::Parse, "weather's air cut short");
+    }
+    if (*layers > most_cloud_layers) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("weather in {} layers, more than the {} allowed", *layers,
+                                      most_cloud_layers));
+    }
     Weather weather{.level = *level,
                     .fade = std::chrono::milliseconds{*fade},
                     .pace = static_cast<float>(*pace) / pace_steps,
+                    .air = {.count = *layers,
+                            .bottom = std::bit_cast<float>(*bottom),
+                            .thickness = std::bit_cast<float>(*thickness),
+                            .ratio = std::bit_cast<float>(*ratio)},
                     .cells = {}};
     const std::size_t count = weather_cells(*level);
-    const auto bytes = in.read_bytes(count * weather_cell_bytes);
-    if (!bytes) {
-        return make_error(ErrorCode::Parse, "weather's cells cut short");
-    }
     weather.cells.reserve(count);
-    for (std::size_t first = 0; first < bytes->size(); first += weather_cell_bytes) {
-        CodedCell cell{};
-        std::ranges::transform(bytes->subspan(first, weather_cell_bytes), cell.begin(),
-                               [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
-        weather.cells.push_back(decoded(cell));
+    const auto as_bytes = [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); };
+    for (std::size_t k = 0; k < count; ++k) {
+        const auto bytes = in.read_bytes(weather_cell_bytes);
+        const auto cloudy = read<std::uint8_t>(in, "weather's cells");
+        if (!bytes || !cloudy) {
+            return make_error(ErrorCode::Parse, "weather's cells cut short");
+        }
+        if (*cloudy > *layers) {
+            return make_error(ErrorCode::OutOfRange, "a weather cell with more layers than the air");
+        }
+        CodedCell coded_cell{};
+        std::ranges::transform(*bytes, coded_cell.begin(), as_bytes);
+        CellWeather cell = decoded(coded_cell);
+        const auto layered = in.read_bytes(std::size_t{2} * *cloudy);
+        if (!layered) {
+            return make_error(ErrorCode::Parse, "weather's layers cut short");
+        }
+        cell.layers.reserve(*cloudy);
+        for (std::size_t at = 0; at < layered->size(); at += 2) {
+            cell.layers.push_back(decoded_layer(as_bytes((*layered)[at]),
+                                                as_bytes((*layered)[at + 1])));
+        }
+        weather.cells.push_back(std::move(cell));
     }
     return finished(in, std::move(weather));
 }
@@ -693,9 +744,22 @@ void write_weather(ByteWriter& out, const Weather& weather) {
     out.write(
         static_cast<std::uint32_t>(std::clamp(std::lround(weather.pace * pace_steps), 0L,
                                               long{std::numeric_limits<std::int32_t>::max()})));
+    HOG_ASSERT(weather.air.count <= most_cloud_layers, "weather in too many layers to send");
+    out.write(weather.air.count);
+    out.write(std::bit_cast<std::uint32_t>(weather.air.bottom));
+    out.write(std::bit_cast<std::uint32_t>(weather.air.thickness));
+    out.write(std::bit_cast<std::uint32_t>(weather.air.ratio));
     for (const CellWeather& cell : weather.cells) {
+        HOG_ASSERT(cell.layers.size() <= weather.air.count,
+                   "a weather cell with more layers than the air");
         for (const std::uint8_t byte : coded(cell)) {
             out.write(byte);
+        }
+        const std::vector<CodedLayer> layers = coded_layers(cell);
+        out.write(static_cast<std::uint8_t>(layers.size()));
+        for (const CodedLayer& layer : layers) {
+            out.write(layer[0]);
+            out.write(layer[1]);
         }
     }
 }
@@ -787,8 +851,12 @@ void write_grains(ByteWriter& out, const Grains& grains) {
 
 } // namespace
 
-CellWeather as_sent(const CellWeather& cell) noexcept {
-    return decoded(coded(cell));
+CellWeather as_sent(const CellWeather& cell) {
+    CellWeather sent = decoded(coded(cell));
+    for (const CodedLayer& layer : coded_layers(cell)) {
+        sent.layers.push_back(decoded_layer(layer[0], layer[1]));
+    }
+    return sent;
 }
 
 Millimetres to_millimetres(WorldPosition position) noexcept {

@@ -1,3 +1,4 @@
+#include <hog/core/assert.hpp>
 #include <hog/core/bytes.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/planet/projection.hpp>
@@ -8,8 +9,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 #include <utility>
+#include <vector>
 
 namespace hog::skies {
 namespace {
@@ -36,6 +39,15 @@ constexpr float most_sea_height = 20.0F;
             .heading = column.wind / static_cast<float>(speed)};
 }
 
+[[nodiscard]] std::vector<protocol::CloudLayer> layers_of(const weather::Column& column) {
+    std::vector<protocol::CloudLayer> layers;
+    layers.reserve(column.layers.size());
+    for (const weather::LayerCloud& layer : column.layers) {
+        layers.push_back({.cover = layer.cover, .cloud = layer.cloud});
+    }
+    return layers;
+}
+
 [[nodiscard]] protocol::CellWeather shown(const weather::Column& column) {
     return {.cloud = column.cloud,
             .cover = column.cover,
@@ -46,7 +58,16 @@ constexpr float most_sea_height = 20.0F;
             .humidity = column.humidity,
             .base = column.base,
             .top = column.top,
-            .wind_sea = wind_sea(column)};
+            .wind_sea = wind_sea(column),
+            .layers = layers_of(column)};
+}
+
+[[nodiscard]] protocol::AirLayers air_layers(const weather::Grid& grid, double radius) {
+    HOG_ASSERT(grid.layers <= protocol::most_cloud_layers, "air in too many layers to send");
+    return {.count = static_cast<std::uint8_t>(grid.layers),
+            .bottom = static_cast<float>(grid.bottom - radius),
+            .thickness = static_cast<float>(grid.thickness),
+            .ratio = static_cast<float>(grid.ratio)};
 }
 
 } // namespace
@@ -176,6 +197,7 @@ protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade, float pace)
     protocol::Weather weather{.level = static_cast<std::uint8_t>(level_),
                               .fade = fade,
                               .pace = pace,
+                              .air = air_layers(air_.field().grid, air_.planet().body.radius),
                               .cells = std::vector<protocol::CellWeather>(placed_.size())};
     for (std::size_t column = 0; column < placed_.size(); ++column) {
         weather.cells[placed_[column]] = shown(air_.column(column));

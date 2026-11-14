@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 38;
+inline constexpr std::uint32_t version = 39;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -31,6 +31,8 @@ inline constexpr std::size_t most_name = 32;
 inline constexpr std::size_t most_said = 256;
 // The finest cube-sphere level the weather is sent at, which keeps it to tens of kilobytes.
 inline constexpr std::uint8_t most_weather_level = 5;
+// The most layers the air's cloud is sent in.
+inline constexpr std::uint8_t most_cloud_layers = 24;
 // Real time between the snapshots a client is sent, whatever the server's tick rate.
 inline constexpr std::chrono::milliseconds snapshot_interval{50};
 
@@ -176,6 +178,15 @@ struct CellWaves {
     friend bool operator==(const CellWaves&, const CellWaves&) = default;
 };
 
+// The cloud in one of the air's layers over a cell: its cover to a 255th, and its water as its
+// square root to the nearest 64th.
+struct CloudLayer {
+    float cover = 0.0F; // share of the sky it covers, 0 to 1
+    float cloud = 0.0F; // mm of condensed water, under 16
+
+    friend bool operator==(const CloudLayer&, const CloudLayer&) = default;
+};
+
 // The weather over a cell, as much of it as is drawn. It's sent a byte each, so only near what's
 // given: cloud and falling as their square roots to the nearest 64th and 16th, so the lightest keep
 // their detail; snow and humidity to a 255th; drift to the metre a second and the wind to half
@@ -196,8 +207,22 @@ struct CellWeather {
     CellWaves wind_sea{};
     std::array<CellWaves, 2> swells{};
     Vec2 current{0.0F};
+    // The air's layers bottom up, as Weather's `air` lays them, up to the highest with cloud.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::vector<CloudLayer> layers = {};
 
     friend bool operator==(const CellWeather&, const CellWeather&) = default;
+};
+
+// How the air's layers lie: `count` of them from `bottom` metres above the reference level, the
+// lowest `thickness` deep and each above `ratio` times the one below, as weather::Grid's.
+struct AirLayers {
+    std::uint8_t count = 0; // at most most_cloud_layers
+    float bottom = 0.0F;
+    float thickness = 0.0F;
+    float ratio = 1.0F;
+
+    friend bool operator==(const AirLayers&, const AirLayers&) = default;
 };
 
 // Server to client: the weather over the whole planet, a cell for each cube-sphere cell at
@@ -209,6 +234,8 @@ struct Weather {
     // Game seconds the weather ran for each real second since the last, to a thousandth: how much
     // faster than the wind's own speed the cloud is carried, as the clock is hurried.
     float pace = 1.0F;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    AirLayers air = {};
     std::vector<CellWeather> cells; // 6 × 4^level of them
 
     friend bool operator==(const Weather&, const Weather&) = default;
@@ -316,7 +343,7 @@ struct Grains {
 }
 
 // As a cell's weather reads back once sent.
-[[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
+[[nodiscard]] CellWeather as_sent(const CellWeather& cell);
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
                              Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles>;
