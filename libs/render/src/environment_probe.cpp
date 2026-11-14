@@ -211,6 +211,7 @@ Result<> EnvironmentProbe::record_clouds(VkCommandBuffer commands, std::uint32_t
     }
     CloudsView seen = view.clouds_view;
     seen.camera = camera;
+    seen.frame_eye = false;
     seen.air.aerial = aerial_.at(face).view();
     VkImageView depth = depth_.layer_view(face);
     transition(commands, depth_.handle(), VK_IMAGE_ASPECT_DEPTH_BIT, image_use::depth_target,

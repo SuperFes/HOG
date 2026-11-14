@@ -40,6 +40,9 @@ struct CloudsView {
     WeatherBindings weather = {};
     // Metres the clouds have drifted with the wind, in the planet's frame.
     DVec3 moved{0.0};
+    // Seen from the frame's own eye, as its lighting has it, so hidden where that's in the water;
+    // not from another's, as a probe's.
+    bool frame_eye = true;
 };
 
 // `moved` within the clouds' period, so their shapes are the same and its precision kept.

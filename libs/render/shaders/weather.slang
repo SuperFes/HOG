@@ -88,6 +88,17 @@ public float to_layer(float mu, float centre_to_eye, float eye_height, float bas
     return hits.x > 0.0 ? hits.x : hits.y;
 }
 
+// The distance along `view` to the ground, as the drawn sphere of radius `faked` stands for it
+// where nothing's drawn, or 1e30 for none; level with the eye where that's below it, as under
+// water standing above it.
+public float to_ground(float mu, float centre_to_eye, float eye_height, float faked) {
+    if (eye_height <= 0.0) {
+        return mu < 0.0 ? 0.0 : 1e30;
+    }
+    const float2 hits = sphere_hits(mu, centre_to_eye, eye_height, 0.0, faked);
+    return hits.x > 0.0 ? hits.x : 1e30;
+}
+
 // Where `view` meets the drawn sphere of radius `faked` + `height` about the drawn planet's centre,
 // `centre_to_eye` below the eye: x the nearer and y the further, each negative if behind; both
 // negative for none.

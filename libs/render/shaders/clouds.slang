@@ -13,7 +13,8 @@ struct Push {
     float4x4 eye_from_clip;
     // xyz up through the eye, w its height above sea level.
     float4 up_height;
-    // y the faked radius drawing bends it onto.
+    // y the faked radius drawing bends it onto; z 1 if drawn from the frame's own eye, so none
+    // drawn where that's in the water.
     float4 radii;
 };
 
@@ -42,7 +43,7 @@ Layer vertex_main(uint id: SV_VertexID) {
 [shader("fragment")]
 float4 fragment_main(Layer layer) : SV_Target {
     // From in the water, the sea's pass has laid it over all that's seen.
-    if (seen_from_water(lighting, layer.clip)) {
+    if (push.radii.z > 0.5 && seen_from_water(lighting, layer.clip)) {
         discard;
     }
     const float4 far = mul(push.eye_from_clip, float4(layer.clip, 1.0, 1.0));
@@ -54,10 +55,7 @@ float4 fragment_main(Layer layer) : SV_Target {
     const float mu = dot(view, up);
 
     // How far the view reaches: to what's drawn, else to the ground.
-    float reach = to_layer(mu, centre_to_eye, eye_height, 0.0, faked);
-    if (reach <= 0.0) {
-        reach = 1e30;
-    }
+    float reach = to_ground(mu, centre_to_eye, eye_height, faked);
     const float depth = depth_image.Load(int3(int2(layer.position.xy), 0));
     float drawn_reach = 1e30;
     if (depth > sky_depth) {

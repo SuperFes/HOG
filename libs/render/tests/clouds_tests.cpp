@@ -440,6 +440,13 @@ TEST_CASE("an overcast sky is covered in grey cloud", "[render][gpu][atmosphere]
     CHECK(pixels[first + 2] < 2 * pixels[first]);
 }
 
+TEST_CASE("from under the sphere the ground's drawn on, as under water, the sky is still clouded",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Pixels pixels = draw(*device, {.eye_height = -0.5});
+    CHECK(lit_pixels(pixels) == extent.width * (extent.height / 2));
+}
+
 TEST_CASE("clouds are hidden by what's drawn in front of them", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     const VkRect2D covered{.offset = {.x = 10, .y = 2}, .extent = {.width = 8, .height = 6}};

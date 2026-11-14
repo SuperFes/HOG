@@ -2,6 +2,7 @@
 
 #include <hog/jobs/job_system.hpp>
 #include <hog/render/atmosphere.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/blocks.hpp>
 #include <hog/render/clouds.hpp>
 #include <hog/render/device.hpp>
@@ -234,8 +235,9 @@ TEST_CASE("a probe's cube holds the clouds over the eye, for water to mirror and
         .bend = {.up = up, .eye_height = 10.0, .radius = earth, .faked = earth},
         .exposure = 1.0,
         .weather = maps->bindings(1.0)};
-    // Overhead, as the clear sky and as the clouds have it.
-    const auto overhead = [&](bool clouded) {
+    // Overhead, as the clear sky and as the clouds have it; with the frame's own eye in the water,
+    // as when the probe is drawn from over it.
+    const auto overhead = [&](bool clouded, bool in_water = false) {
         auto probe =
             hog::render::EnvironmentProbe::create(*device, colour_format, depth_format, 64);
         REQUIRE(probe);
@@ -245,6 +247,14 @@ TEST_CASE("a probe's cube holds the clouds over the eye, for water to mirror and
                                                .bend = view.bend,
                                                .air = sky->bindings(0, *atmosphere, VK_NULL_HANDLE),
                                                .weather = view.weather};
+            if (in_water) {
+                const glm::vec4 drowned{hog::Vec3{up}, -1e9F};
+                vkCmdUpdateBuffer(commands, seen.air.lighting, hog::render::sea_water_at,
+                                  sizeof(drowned), &drowned);
+                hog::render::memory_barrier(
+                    commands, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_UNIFORM_READ_BIT);
+            }
             CHECK(probe->record(commands, 0, *atmosphere, *sky,
                                 {.sky = view,
                                  .around = {},
@@ -255,10 +265,13 @@ TEST_CASE("a probe's cube holds the clouds over the eye, for water to mirror and
     };
     const std::array<float, 4> clear = overhead(false);
     const std::array<float, 4> clouded = overhead(true);
-    CAPTURE(clear[0], clear[1], clear[2], clouded[0], clouded[1], clouded[2]);
+    const std::array<float, 4> from_water = overhead(true, true);
+    CAPTURE(clear[0], clear[1], clear[2], clouded[0], clouded[1], clouded[2], from_water[0],
+            from_water[2]);
     // The clear sky's blue; the cloud over it grey, as red nearly as it's blue.
     CHECK(clear[2] > 1.5F * clear[0]);
     CHECK(clouded[2] < 1.3F * clouded[0]);
+    CHECK(from_water[2] < 1.3F * from_water[0]);
     CHECK(device->validation_errors() == 0);
 }
 

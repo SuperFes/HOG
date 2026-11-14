@@ -665,10 +665,7 @@ void march_main(uint3 id: SV_DispatchThreadID) {
     const float mu = dot(ray.view, up);
 
     // How far the view reaches: to the furthest drawn under this texel, else to the ground.
-    ray.reach = to_layer(mu, centre_to_eye, eye_height, 0.0, faked);
-    if (ray.reach <= 0.0) {
-        ray.reach = 1e30;
-    }
+    ray.reach = to_ground(mu, centre_to_eye, eye_height, faked);
     uint full_width;
     uint full_height;
     depth_image.GetDimensions(full_width, full_height);

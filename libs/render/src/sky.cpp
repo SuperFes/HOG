@@ -173,11 +173,11 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
             return std::unexpected(std::move(volume).error());
         }
         sky.aerial_volumes_.push_back(std::move(volume).value());
-        // Written by the sea too, and read back by tests.
+        // Written by the sea too, and read and written by tests.
         auto lighting =
             make_buffer(device, sizeof(Lighting),
                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         Memory::Upload);
         if (!lighting) {
             return std::unexpected(std::move(lighting).error());

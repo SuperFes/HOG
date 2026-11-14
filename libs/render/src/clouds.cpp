@@ -508,7 +508,8 @@ void Clouds::draw_marched(VkCommandBuffer commands, VkExtent2D extent, VkImageVi
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing clouds without the air");
     const Push push{.eye_from_clip = eye_from_clip(view.camera, extent),
                     .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-                    .radii = {0.0F, static_cast<float>(view.bend.faked), 0.0F, 0.0F}};
+                    .radii = {0.0F, static_cast<float>(view.bend.faked),
+                              view.frame_eye ? 1.0F : 0.0F, 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, view.air.lighting);
     push_sampled_image(commands, pipeline_, 1, depth, nearest_.handle());
