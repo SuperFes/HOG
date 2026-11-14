@@ -65,6 +65,23 @@ DVec3 bent(const Bend& bend, DVec3 from_eye) {
     return rebend(bend, bend.radius, bend.faked, from_eye);
 }
 
+bool behind_horizon(const Bend& bend, DVec3 from_eye, double reach) {
+    const double out = bend.faked + bend.eye_height;
+    if (bend.eye_height <= 0.0) {
+        return false;
+    }
+    // Within the cone the sphere fills, every sight line meets it no further than its horizon.
+    const DVec3 drawn = bent(bend, from_eye);
+    const double away = glm::length(drawn);
+    const double horizon = std::sqrt((out * out) - (bend.faked * bend.faked));
+    if (away - reach <= horizon) {
+        return false;
+    }
+    const double filled = std::asin(bend.faked / out);
+    const double off = std::acos(std::clamp(glm::dot(drawn / away, -bend.up), -1.0, 1.0));
+    return off + std::asin(reach / away) < filled;
+}
+
 DVec3 unbent(const Bend& bend, DVec3 from_eye) {
     return rebend(bend, bend.faked, bend.radius, from_eye);
 }

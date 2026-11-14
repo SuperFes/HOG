@@ -321,13 +321,14 @@ void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const Bl
 
 bool Blocks::seen(const BlockView& view, double aspect, const Placed& placed) {
     const DVec3 middle = placed.origin.metres() + placed.middle;
-    if (terrain::folds_over(view.bend, middle, placed.radius)) {
+    const Camera& camera = view.camera;
+    const DVec3 to = middle - camera.eye.metres();
+    if (terrain::folds_over(view.bend, middle, placed.radius) ||
+        terrain::behind_horizon(view.bend, to, placed.radius)) {
         return false;
     }
     // The ball about the mesh against the view's four sides and what's behind it; generously, as
     // the bend draws far ground lower than it lies.
-    const Camera& camera = view.camera;
-    const DVec3 to = middle - camera.eye.metres();
     const double away = glm::length(to);
     const double radius = placed.radius + (0.1 * away);
     const DVec3 forward = glm::normalize(camera.forward);

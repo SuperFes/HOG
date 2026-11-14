@@ -42,6 +42,9 @@ struct Bend {
 // far side opposite the eye: bending spreads that point round a whole ring, so ground drawn across
 // it folds over everything nearer.
 [[nodiscard]] bool folds_over(const Bend& bend, DVec3 middle, double reach);
+// Whether a ball `reach` metres about the point truly at `from_eye` is drawn wholly behind sea
+// level's sphere as bent, so the planet hides it. Never from under sea level.
+[[nodiscard]] bool behind_horizon(const Bend& bend, DVec3 from_eye, double reach);
 // Where a point drawn at `from_eye` truly is, within the faked sphere's cap the planet bends into.
 [[nodiscard]] DVec3 unbent(const Bend& bend, DVec3 from_eye);
 

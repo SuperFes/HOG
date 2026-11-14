@@ -188,3 +188,27 @@ TEST_CASE("while bending, ground about the far side's middle is told to fold ove
     // Drawn unbent, nothing folds.
     CHECK_FALSE(hog::terrain::folds_over(bend_at(blended_out + 1.0), opposite, 10.0));
 }
+
+TEST_CASE("ground wholly behind the horizon is hidden, whatever stands over it shows",
+          "[terrain][bend]") {
+    for (const double eye_height : {100.0, 3'000.0, blended_out + 1.0}) {
+        const Bend bend = bend_at(eye_height);
+        const double far_side = std::numbers::pi * radius;
+        // Under the eye, and a quarter of the way round, as drawn.
+        CHECK_FALSE(hog::terrain::behind_horizon(bend, point_at(bend, 0.0, 0.0), 10.0));
+        CHECK_FALSE(hog::terrain::behind_horizon(bend, point_at(bend, 50.0, 0.0), 10.0));
+        // Round the far side, sea-level ground is hidden; drawn true, ground a quarter round too.
+        CHECK(hog::terrain::behind_horizon(bend, point_at(bend, 0.9 * far_side, 0.0), 10.0));
+        if (bend.faked == bend.radius) {
+            CHECK(hog::terrain::behind_horizon(bend, point_at(bend, far_side / 2.0, 0.0), 10.0));
+            // A mountain there reaching up over the horizon shows.
+            const double past = horizon_on(radius, eye_height) * 1.05;
+            CHECK(hog::terrain::behind_horizon(bend, point_at(bend, past, 0.0), 1.0));
+            CHECK_FALSE(hog::terrain::behind_horizon(bend, point_at(bend, past, 3'000.0), 1.0));
+        }
+    }
+    // From under sea level, nothing is.
+    const Bend under = bend_at(-10.0);
+    CHECK_FALSE(hog::terrain::behind_horizon(under, point_at(under, 0.9 * std::numbers::pi * radius,
+                                                             0.0), 10.0));
+}
