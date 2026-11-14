@@ -228,10 +228,12 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
                 hog::globe::terms::fallen(setup.context, direction, every_block).rubble;
             CHECK(rubble.share <= 1.0);
             expected += rubble.share;
-            const auto here = setup.generator.column(direction, every_block);
-            const bool rocky =
-                here.sample(here.ground() - (0.5 * rubble.depth)).material == rubble.of;
-            shown += rubble.depth > 0.0 && rocky ? 1 : 0;
+            if (rubble.depth > 0.0 && hog::globe::terms::rubble_shows(setup.context, direction,
+                                                                      every_block, rubble.share)) {
+                const auto here = setup.generator.column(direction, every_block);
+                CHECK(here.sample(here.ground() - (0.5 * rubble.depth)).material == rubble.of);
+                ++shown;
+            }
             ++columns;
         }
     }

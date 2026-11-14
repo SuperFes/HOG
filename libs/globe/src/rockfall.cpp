@@ -226,9 +226,11 @@ std::array<double, 3> sides_of(const Context& context, const Fallen& fallen, dou
 // The rock blocks fell from, from under what was rotted or laid over it.
 Material material_of(const Context& context, const Fallen& fallen) noexcept {
     constexpr double depth = 4.0;
-    const Material rock = material_at(context, fallen.source.layers, depth,
+    const Layering& layers = fallen.source.layers;
+    const Scatter scatter = scatter_at(context, fallen.from, layers);
+    const Material rock = material_at(context, layers, scatter, depth,
                                       context.planet->body.radius + fallen.source.height - depth);
-    return properties(rock).strength < 1.0e6 ? fallen.source.layers.basement : rock;
+    return properties(rock).strength < 1.0e6 ? basement_at(layers, scatter) : rock;
 }
 
 // How many blocks are drawn about a coarsest cell to find the rubble the smallest make there.

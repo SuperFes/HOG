@@ -232,6 +232,7 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.strata_.rubble_of = fall.rubble.of;
     }
     column.strata_.cover += fall.rubble.depth;
+    column.scatter_ = terms::scatter_at(context, down, column.strata_);
     column.rock_ = fall.rock;
     return column;
 }
@@ -247,20 +248,14 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     if (deepest >= top_most || terms::cave_district(context, direction_) <= 0.0) {
         return found;
     }
-    const Planet& planet = generator_->planet_;
-    const auto cover_at = [&](double at) {
-        const double slope = slope_ * planet.body.radius / at;
-        return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
-    };
     // Down by as far as no cave can lie within `within`. Nearer than a voxel's step counts as
     // within, so every step outside a stretch is one no cave lies across.
     const double least = std::max(lod_ / 2.0, 1.0);
     std::optional<double> top;
     double above = top_most;
     for (double radius = top_most; radius > deepest;) {
-        const double away = terms::cave_bound(context, strata_, direction_, radius, ground_,
-                                              cover_at(radius), lod_) -
-                            within;
+        const double away =
+            terms::cave_bound(context, strata_, direction_, radius, ground_, lod_) - within;
         if (away < least) {
             if (!top) {
                 // Back within reach at the next sample: the same stretch.
@@ -311,18 +306,21 @@ std::vector<Generator::Column::Boundary> Generator::Column::boundaries(double lo
     if (water_ > 0.0) {
         add(water_ - (lod_ / 2.0), water_ + (lod_ / 2.0));
     }
-    // A voxel shows the matter at its top, half a lod over its middle.
+    // A voxel shows the matter at its top, half a lod over its middle, each contact wandering
+    // either way of where it was laid.
     const double shown = lod_ / 2.0;
     const double base = ground_ - strata_.cover;
-    add(base - shown, base - shown);
+    add(base - shown - terms::contact_reach, base - shown + terms::contact_reach);
     const double low = std::max(lowest, base);
     const double high = std::min(highest, ground_);
     if (beds && low < high) {
-        const std::int64_t first = terms::bed_at(context, strata_, low + shown);
-        const std::int64_t last = terms::bed_at(context, strata_, high + shown);
+        const std::int64_t first =
+            terms::bed_at(context, strata_, low + shown - terms::contact_reach);
+        const std::int64_t last =
+            terms::bed_at(context, strata_, high + shown + terms::contact_reach);
         for (std::int64_t bed = first; bed <= last + 1; ++bed) {
             const double edge = terms::bed_bottom(context, strata_, bed) - shown;
-            add(edge, edge);
+            add(edge - terms::contact_reach, edge + terms::contact_reach);
         }
     }
     // A cave changes a voxel from half its thickness away, the voxels as coarse as the detail.
@@ -343,7 +341,7 @@ Material Generator::Column::inside(double radius) const noexcept {
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
     const double shown = std::max(0.0, ground_ - radius - (lod_ / 2.0));
-    return terms::material_at(context, strata_, shown, ground_ - shown);
+    return terms::material_at(context, strata_, scatter_, shown, ground_ - shown);
 }
 
 Sample Generator::Column::sample(double radius, bool caves) const noexcept {
@@ -359,11 +357,9 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
 
     // A cave takes its voxels out of the rock, and opens the ground where it reaches it.
     if (caves && sample.distance < cave_surface_reach) {
-        // The rock between the point and the open air over the ground.
-        const double cover = std::max(0.0, -sample.distance);
         sample.distance =
-            std::max(sample.distance, -terms::cave_distance(context, strata_, direction_, radius,
-                                                            ground_, cover, lod_));
+            std::max(sample.distance,
+                     -terms::cave_distance(context, strata_, direction_, radius, ground_, lod_));
     }
     // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
     // ground.
@@ -383,8 +379,9 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
         // ones find it, so the ground looks the same at every detail. Voxels stand half a lod
         // apart.
         const double shown = std::max(0.0, depth - (lod_ / 2.0));
-        sample.material = on_rock ? rock_->material
-                                  : terms::material_at(context, strata_, shown, ground_ - shown);
+        sample.material =
+            on_rock ? rock_->material
+                    : terms::material_at(context, strata_, scatter_, shown, ground_ - shown);
     }
     // The sea fills the open space under its level, and the ground's pores below it. The voxel the
     // surface crosses holds only as much as lies under it, so water shallower than a voxel shows.

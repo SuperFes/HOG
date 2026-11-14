@@ -1,3 +1,5 @@
+#include "../src/terms.hpp"
+
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
@@ -27,6 +29,26 @@ Generator frozen() {
     planet.system.air.pressure = 636.0;
     planet.system.stars.front().luminosity = 0.3;
     return Generator{planet};
+}
+
+// The share of places that show `material` `depth` metres down, with `layers` everywhere.
+double share_of(const hog::globe::terms::Layering& layers, double depth, Material material) {
+    const hog::globe::Planet& planet = wet().planet();
+    const Generator::Shape shape;
+    const hog::globe::terms::Context context{
+        .planet = &planet, .derived = &wet().derived(), .shape = &shape};
+    constexpr int count = 20'000;
+    int shown = 0;
+    for (std::uint64_t k = 0; k < count; ++k) {
+        const DVec3 down = hog::globe::center(
+            hog::globe::cell_at_index(14, (k * 2'654'435'761ULL) % 1'610'612'736ULL));
+        const hog::globe::Scatter scatter = hog::globe::terms::scatter_at(context, down, layers);
+        shown += hog::globe::terms::material_at(context, layers, scatter, depth,
+                                                planet.body.radius - depth) == material
+                     ? 1
+                     : 0;
+    }
+    return static_cast<double>(shown) / count;
 }
 
 DVec3 direction(std::uint64_t k) {
@@ -94,4 +116,73 @@ TEST_CASE("the ground under the sea is soaked to its pores, and dry above it", "
     }
     CHECK(soaked > 50);
     CHECK(dry > 50);
+}
+
+TEST_CASE("softer ground blends further into what it lies on", "[globe][strata]") {
+    using hog::globe::terms::contact_width;
+    CHECK(contact_width(Material::Sand) == hog::globe::terms::widest_contact);
+    CHECK(contact_width(Material::Soil) > contact_width(Material::Clay));
+    CHECK(contact_width(Material::Clay) > contact_width(Material::Ice));
+    CHECK(contact_width(Material::Ice) > contact_width(Material::Shale));
+    CHECK(contact_width(Material::Shale) > contact_width(Material::Granite));
+    CHECK(contact_width(Material::Basalt) > 0.0);
+}
+
+TEST_CASE("a layer thinning out shows in patches, ever fewer, none where it ends",
+          "[globe][strata]") {
+    const double width = hog::globe::terms::contact_width(Material::Soil);
+    const auto soil = [&](double thickness) {
+        return share_of({.cover = thickness, .basement = Material::Granite, .organic = thickness},
+                        0.0, Material::Soil);
+    };
+    // None where it thins to nothing, so no line shows where it ends; its contact wanders up
+    // no more than half way, so it shows at half again its share of the width.
+    CHECK(soil(0.0) == 0.0);
+    CHECK(soil(0.02 * width) < 0.05);
+    double last = 0.0;
+    for (const double part : {0.2, 0.4, 0.6}) {
+        const double share = soil(part * width);
+        CHECK(share > last);
+        CHECK(std::abs(share - (1.5 * part)) < 0.06);
+        last = share;
+    }
+    CHECK(soil(0.7 * width) == 1.0);
+}
+
+TEST_CASE("a contact wanders half its width either way of where it was laid", "[globe][strata]") {
+    const double width = std::max(hog::globe::terms::contact_width(Material::Soil),
+                                  hog::globe::terms::contact_width(Material::Clay));
+    const hog::globe::terms::Layering layers{
+        .cover = 10.0, .basement = Material::Granite, .organic = 2.0, .saprolite = 8.0};
+    CHECK(share_of(layers, 2.0 - (width / 2.0) - 0.01, Material::Soil) == 1.0);
+    const double between = share_of(layers, 2.0, Material::Soil);
+    CHECK(between > 0.4);
+    CHECK(between < 0.6);
+    CHECK(share_of(layers, 2.0 + (width / 2.0) + 0.01, Material::Clay) == 1.0);
+}
+
+TEST_CASE("layers of one material lie as one, with no contact between them", "[globe][strata]") {
+    // Litter over topsoil, both soil, thick enough together that soil always shows at the top.
+    const hog::globe::terms::Layering layers{.cover = 10.0,
+                                             .basement = Material::Granite,
+                                             .organic = 0.6,
+                                             .topsoil = 0.6,
+                                             .saprolite = 8.8};
+    CHECK(share_of(layers, 0.0, Material::Soil) == 1.0);
+}
+
+TEST_CASE("where two basements or beach materials meet, each shows at its share",
+          "[globe][strata]") {
+    const hog::globe::terms::Layering basements{
+        .basement = Material::Granite, .basement_with = Material::Basalt, .basement_share = 0.3};
+    CHECK(std::abs(share_of(basements, 5.0, Material::Basalt) - 0.3) < 0.05);
+    CHECK(share_of({.basement = Material::Granite}, 5.0, Material::Granite) == 1.0);
+    const hog::globe::terms::Layering beach{.cover = 3.0,
+                                            .basement = Material::Granite,
+                                            .beach = 3.0,
+                                            .beach_of = Material::Sand,
+                                            .beach_with = Material::Shingle,
+                                            .beach_share = 0.4};
+    CHECK(std::abs(share_of(beach, 0.0, Material::Shingle) - 0.4) < 0.05);
+    CHECK(std::abs(share_of(beach, 0.0, Material::Sand) - 0.6) < 0.05);
 }

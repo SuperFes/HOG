@@ -2,6 +2,7 @@
 
 #include "courses.hpp"
 #include "joints.hpp"
+#include "terms.hpp"
 #include "valleys.hpp"
 
 #include <hog/core/hash.hpp>
@@ -17,6 +18,7 @@
 #include <numbers>
 #include <span>
 #include <thread>
+#include <utility>
 
 namespace hog::globe {
 
@@ -565,12 +567,23 @@ void share_round(const formation::Sphere& sphere, std::vector<std::uint32_t>& at
     at = std::move(shared);
 }
 
-// The sand there's most of.
-Material most_sand(double quartz, double volcanic, double carbonate) {
-    if (quartz >= volcanic && quartz >= carbonate) {
-        return Material::Sand;
+// The two materials there's most of, by their shares: the first, with the second scattered
+// through it at its share of both.
+template <std::size_t Count>
+void mix_of(const std::array<std::pair<Material, double>, Count>& shares, Material& of,
+            Material& with, double& share) {
+    std::size_t first = 0;
+    for (std::size_t k = 1; k < Count; ++k) {
+        first = shares.at(k).second > shares.at(first).second ? k : first;
     }
-    return volcanic >= carbonate ? Material::VolcanicSand : Material::ShellSand;
+    std::size_t second = first == 0 ? 1 : 0;
+    for (std::size_t k = 0; k < Count; ++k) {
+        second = k != first && shares.at(k).second > shares.at(second).second ? k : second;
+    }
+    const double both = shares.at(first).second + shares.at(second).second;
+    of = shares.at(first).first;
+    with = shares.at(second).first;
+    share = both > 0.0 ? shares.at(second).second / both : 0.0;
 }
 
 } // namespace
@@ -819,15 +832,32 @@ void Formed::lay_beach(DVec3 direction, const formation::Smooth::Weights& weight
         layers.beach_of = Material::Sand;
         return;
     }
-    const double shingle = std::clamp(value(shingle_), 0.0, 1.0);
+    // Each in the share the shore brings it: mud, and of the rest the stones over a line wandering
+    // as wide as their contacts, the sands under it.
+    const double sand = std::max(0.0, value(beach_));
+    const double mud = std::max(0.0, value(mud_));
+    const double muddy = mud / (mud + sand);
     const Profile& profile = beach->profile;
-    if (beach->mud) {
-        layers.beach_of = Material::Sediment;
-    } else if (top.value >= profile.berm - (shingle * (profile.berm + profile.closure))) {
-        layers.beach_of = Material::Shingle;
-    } else {
-        layers.beach_of = most_sand(value(quartz_), value(volcanic_), value(carbonate_));
+    const double line =
+        profile.berm - (std::clamp(value(shingle_), 0.0, 1.0) * (profile.berm + profile.closure));
+    const double stones =
+        beach->mud ? 0.0
+                   : terms::smoothstep(0.5 + ((top.value - line) /
+                                              (2.0 * terms::contact_width(Material::Shingle))));
+    std::array grains{std::max(0.0, value(quartz_)), std::max(0.0, value(volcanic_)),
+                      std::max(0.0, value(carbonate_))};
+    double sands = grains[0] + grains[1] + grains[2];
+    if (sands <= 0.0) {
+        grains = {1.0, 0.0, 0.0};
+        sands = 1.0;
     }
+    const double sandy = (1.0 - muddy) * (1.0 - stones) / sands;
+    mix_of(std::array{std::pair{Material::Sediment, muddy},
+                      std::pair{Material::Shingle, (1.0 - muddy) * stones},
+                      std::pair{Material::Sand, sandy * grains[0]},
+                      std::pair{Material::VolcanicSand, sandy * grains[1]},
+                      std::pair{Material::ShellSand, sandy * grains[2]}},
+           layers.beach_of, layers.beach_with, layers.beach_share);
 }
 
 Formed::Lake Formed::fill_lake(std::uint32_t floor, double reach, double most,
@@ -1647,7 +1677,10 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.cover = layers.ice + layers.beach + layers.organic + layers.topsoil + layers.subsoil +
                    layers.loess + layers.sand + layers.alluvium + layers.lake_beds + layers.till +
                    layers.lava + std::max(rock_cover, layers.saprolite);
-    layers.basement = here.light >= 0.5 ? Material::Granite : Material::Basalt;
+    const double light = std::clamp(here.light, 0.0, 1.0);
+    mix_of(
+        std::array{std::pair{Material::Granite, light}, std::pair{Material::Basalt, 1.0 - light}},
+        layers.basement, layers.basement_with, layers.basement_share);
     return here;
 }
 

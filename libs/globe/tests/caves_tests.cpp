@@ -49,8 +49,8 @@ hog::globe::terms::Layering all_of(Material rock) {
     return {.basement = rock};
 }
 
-// The share of points `depth` metres down in `rock` that lie in a cave.
-double open_share(const Planet& planet, Material rock, double depth) {
+// The share of points `depth` metres down under `layers` that lie in a cave.
+double open_share(const Planet& planet, const hog::globe::terms::Layering& layers, double depth) {
     const hog::globe::Derived derived = hog::globe::derive(planet);
     const Generator::Shape shape;
     const hog::globe::terms::Context context{
@@ -59,13 +59,18 @@ double open_share(const Planet& planet, Material rock, double depth) {
     int open = 0;
     for (std::uint64_t k = 0; k < count; ++k) {
         const double below = depth - static_cast<double>(k % 7);
-        open += hog::globe::terms::cave_distance(context, all_of(rock), direction(k),
+        open += hog::globe::terms::cave_distance(context, layers, direction(k),
                                                  planet.body.radius - below, planet.body.radius,
-                                                 below, 0.5) < 0.0
+                                                 0.5) < 0.0
                     ? 1
                     : 0;
     }
     return static_cast<double>(open) / count;
+}
+
+// The same in `rock` all the way down.
+double open_share(const Planet& planet, Material rock, double depth) {
+    return open_share(planet, all_of(rock), depth);
 }
 
 double floor_of(const Planet& planet) {
@@ -128,8 +133,7 @@ TEST_CASE("the cost of the caves' distance, and how steep the noise gets",
     for (std::uint64_t k = 0; k < count; ++k) {
         const double below = 10.0 + static_cast<double>(k % 500);
         sum += hog::globe::terms::cave_distance(context, all_of(Material::Limestone), direction(k),
-                                                earth.body.radius - below, earth.body.radius, below,
-                                                0.5);
+                                                earth.body.radius - below, earth.body.radius, 0.5);
     }
     const auto took = std::chrono::steady_clock::now() - started;
     std::println("cave_distance: {} us a call ({})",
@@ -162,6 +166,25 @@ TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]
     CHECK(open_share(moon, Material::Limestone, 50.0) == 0.0);
     CHECK(open_share(moon, Material::Basalt, 15.0) > 0.0);
     CHECK(open_share(moon, Material::Basalt, 200.0) == 0.0);
+}
+
+TEST_CASE("where two basements meet, either's caves open, the other's fading with its share",
+          "[globe][caves]") {
+    const Planet earth = wet();
+    const double granite = open_share(earth, Material::Granite, 50.0);
+    const double limestone = open_share(earth, Material::Limestone, 50.0);
+    const auto mixed = [&](double share) {
+        return open_share(earth,
+                          {.basement = Material::Granite,
+                           .basement_with = Material::Limestone,
+                           .basement_share = share},
+                          50.0);
+    };
+    CHECK(mixed(0.0) == granite);
+    const double little = mixed(0.1);
+    CHECK(little > granite);
+    CHECK(little < limestone);
+    CHECK(mixed(0.5) >= limestone);
 }
 
 TEST_CASE("some columns cross solid ground more than once", "[globe][caves]") {
@@ -218,30 +241,31 @@ TEST_CASE("caves keep to their beds, their walls running on across the beds' fac
     CHECK(leaps == 0);
 }
 
-TEST_CASE("chambers shrink away under thin rock, their roofs fallen in", "[globe][caves]") {
+TEST_CASE("limestone opens in passages and chambers right up to open air", "[globe][caves]") {
     const Planet earth = wet();
     const hog::globe::Derived derived = hog::globe::derive(earth);
     const Generator::Shape shape{.sea = true};
     const hog::globe::terms::Context context{
         .planet = &earth, .derived = &derived, .shape = &shape};
-    // Under as much rock as a bed spans and more, then under a few metres; same depth either way.
     // Points further into open space than any passage is wide lie in chambers.
-    const auto open_under = [&](double cover) {
+    const auto open_at = [&](double depth, double within) {
         int open = 0;
         for (std::uint64_t k = 0; k < 40'000; ++k) {
             open += hog::globe::terms::cave_distance(context, all_of(Material::Limestone),
-                                                     direction(k), earth.body.radius - 60.0,
-                                                     earth.body.radius, cover, 0.5) < -4.0
+                                                     direction(k), earth.body.radius - depth,
+                                                     earth.body.radius, 0.5) < within
                         ? 1
                         : 0;
         }
         return open;
     };
-    const int deep = open_under(500.0);
-    const int shallow = open_under(4.0);
-    UNSCOPED_INFO("open under 500 m: " << deep << ", under 4 m: " << shallow);
+    const int deep = open_at(60.0, 0.0);
+    const int shallow = open_at(2.0, 0.0);
+    UNSCOPED_INFO("open 60 m down: " << deep << ", 2 m down: " << shallow);
     CHECK(deep > 0);
-    CHECK(shallow < deep / 10);
+    CHECK(shallow > deep / 2);
+    // Chambers as many under a few metres of rock as deep down.
+    CHECK(open_at(10.0, -4.0) > open_at(60.0, -4.0) / 2);
 }
 
 TEST_CASE("passages close where the stress round them overcomes the rock, deeper in weaker gravity",

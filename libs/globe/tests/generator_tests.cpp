@@ -104,6 +104,12 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
     constexpr double lod = 16.0;
     constexpr double h = 0.25;
     const auto check = [&](const Generator& world) {
+        // The ground's alone: where caves open it, their own estimate takes over.
+        const auto distance = [&](DVec3 point) {
+            return world.column(glm::normalize(point), lod)
+                .sample(glm::length(point), false)
+                .distance;
+        };
         double worst = 0.0;
         double total = 0.0;
         constexpr int count = 300;
@@ -116,9 +122,7 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
             for (glm::length_t axis = 0; axis < 3; ++axis) {
                 DVec3 step{0.0};
                 step[axis] = h;
-                slope[axis] = (world.sample(near + step, lod).distance -
-                               world.sample(near - step, lod).distance) /
-                              (2.0 * h);
+                slope[axis] = (distance(near + step) - distance(near - step)) / (2.0 * h);
             }
             const double error = std::abs(glm::length(slope) - 1.0);
             worst = std::max(worst, error);
@@ -164,7 +168,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0xb219'7cf3'9c86'73a8ULL);
+    CHECK(digest == 0x3c69'bb82'1f1d'fdd9ULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {

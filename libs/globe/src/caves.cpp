@@ -141,38 +141,22 @@ private:
     std::optional<Noise> pool_;
 };
 
-// The widest a chamber's roof spans in `rock`: a bed of it as a beam bearing its own weight,
-// rock bearing a tenth as much pulled as pressed.
-double widest_span(const Planet& planet, Material rock) {
-    const Properties& properties = hog::globe::properties(rock);
-    return std::sqrt(2.0 * (properties.strength / 10.0) * bed_thickness /
-                     (properties.density * planet.body.gravity));
-}
-
 // Metres to the open space of the caves in `rock` as `open` as it is there, were it all that rock.
-double cave_in(Fields& fields, Material rock, double open, bool watered, double cover, double lod,
-               const Planet& planet, bool bound) {
+double cave_in(Fields& fields, Material rock, double open, bool watered, double lod, bool bound) {
     const double presence = open * fields.district();
     const double size = tunnel_radius * presence;
     // Passages too narrow for the detail asked for close up smoothly.
     const double shown = size * smoothstep((size / lod) - 1.0);
     double distance = shown > 0.0 ? fields.across(bound) - shown : cave_reach;
     if (rock == Material::Limestone && watered) {
-        // Limestone the water ran through opens in chambers, not chance passages.
-        distance = cave_reach;
-        // Fewer where passages are fewer: none where there are none.
+        // Where the water pooled it opened chambers along the passages, fewer where passages are
+        // fewer and none where there are none. One nearer open air than its roof spans has
+        // fallen in, open to the sky.
         const double threshold = chamber_threshold + ((1.0 - presence) * 0.6);
-        // A roof arches over a span only under about as much rock again; under less it falls
-        // in, so chambers shrink to nothing toward open air.
-        const double held = smoothstep(cover / widest_span(planet, rock));
-        const double needed = 1.0 - ((1.0 - threshold) * held);
-        const Noise pool = fields.pool(bound);
-        // Bounded, a chamber is wherever the field exceeds the threshold, which `needed` never
-        // falls under, so none lies nearer than that.
-        const double over = bound ? threshold : needed;
-        if (!bound || threshold < 1.0) {
-            distance = std::min(distance,
-                                (over - pool.value) / std::max(glm::length(pool.gradient), 1e-9));
+        if (threshold < 1.0) {
+            const Noise pool = fields.pool(bound);
+            distance = std::min(distance, (threshold - pool.value) /
+                                              std::max(glm::length(pool.gradient), 1e-9));
         }
     }
     return distance;
@@ -207,7 +191,7 @@ double cave_district(const Context& context, DVec3 direction) noexcept {
 namespace {
 
 double cave_nearest(const Context& context, const Layering& layers, DVec3 direction, double radius,
-                    double ground, double cover, double lod, bool bound) noexcept {
+                    double ground, double lod, bool bound) noexcept {
     const Planet& planet = *context.planet;
     const bool watered = context.derived->liquid;
     // Bounded, as open as the rock is a reach higher: it only closes with depth.
@@ -221,11 +205,13 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
     struct Unit {
         Material rock = Material::Air;
         double outside = 0.0;
+        double open = 1.0; // of what its caves open to
     };
     // Bounded, every bed within reach, as a cave in any of them could be the nearest.
     const std::int64_t beds_about =
         bound ? static_cast<std::int64_t>(cave_reach / bed_thickness) + 1 : 1;
-    std::array<Unit, 16> units{};
+    // Up to 15 beds and two basements.
+    std::array<Unit, 17> units{};
     std::size_t count = 0;
     const double base = ground - layers.cover; // beds lie over it, the basement under it
     double nearest = cave_reach;
@@ -234,7 +220,7 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
         for (std::int64_t near = bed - beds_about; near <= bed + beds_about; ++near) {
             const double bottom = bed_bottom(context, layers, near);
             const double top = bottom + bed_thickness;
-            if (top > base && bottom < ground && count < units.size()) {
+            if (top > base && bottom < ground && count + 2 < units.size()) {
                 units.at(count++) = {.rock = bed_rock(context, near),
                                      .outside =
                                          std::max({bottom - radius, radius - top, base - radius})};
@@ -242,16 +228,23 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
         }
     }
     units.at(count++) = {.rock = layers.basement, .outside = radius - base};
+    // Where two basements meet, either's caves open in both, the other's fading as less of it
+    // shows.
+    if (layers.basement_share > 0.0 && layers.basement_with != layers.basement) {
+        units.at(count++) = {.rock = layers.basement_with,
+                             .outside = radius - base,
+                             .open = std::min(1.0, 2.0 * layers.basement_share)};
+    }
 
     Fields fields{context, direction, radius, lod};
     for (const Unit& unit : std::span{units}.first(count)) {
         const double closure = closure_depth(planet, unit.rock);
-        const double open = openness(unit.rock, opening, watered) *
+        const double open = unit.open * openness(unit.rock, opening, watered) *
                             (1.0 - smoothstep((opening - closure) / closure));
         if (open <= 0.0 || unit.outside >= nearest) {
             continue;
         }
-        const double inside = cave_in(fields, unit.rock, open, watered, cover, lod, planet, bound);
+        const double inside = cave_in(fields, unit.rock, open, watered, lod, bound);
         nearest = std::min(nearest, std::max(inside, unit.outside));
     }
     return nearest;
@@ -260,13 +253,13 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
 } // namespace
 
 double cave_distance(const Context& context, const Layering& layers, DVec3 direction, double radius,
-                     double ground, double cover, double lod) noexcept {
-    return cave_nearest(context, layers, direction, radius, ground, cover, lod, false);
+                     double ground, double lod) noexcept {
+    return cave_nearest(context, layers, direction, radius, ground, lod, false);
 }
 
 double cave_bound(const Context& context, const Layering& layers, DVec3 direction, double radius,
-                  double ground, double cover, double lod) noexcept {
-    return cave_nearest(context, layers, direction, radius, ground, cover, lod, true);
+                  double ground, double lod) noexcept {
+    return cave_nearest(context, layers, direction, radius, ground, lod, true);
 }
 
 } // namespace hog::globe::terms

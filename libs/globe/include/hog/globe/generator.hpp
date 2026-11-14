@@ -46,12 +46,18 @@ struct Strata {
     double cover = 0.0; // sedimentary rock's base, metres below the ground
     double fold = 0.0;  // metres the beds are lifted here
     Material basement = Material::Basalt;
+    // Where two basements meet, the other rock, scattered through it at a share of points up to a
+    // half.
+    Material basement_with = Material::Basalt;
+    double basement_share = 0.0;
     // What a formed world laid over its beds, metres each, from the top down; within `cover`.
     double rubble = 0.0; // blocks of `rubble_of` too small for the detail read, spread out
     Material rubble_of = Material::Gravel;
     double ice = 0.0;
     double beach = 0.0; // what the sea's waves laid along the shore, of `beach_of`
     Material beach_of = Material::Sand;
+    Material beach_with = Material::Sand; // the same, scattered through it
+    double beach_share = 0.0;
     double organic = 0.0; // dead plant matter: litter, or peat
     double topsoil = 0.0;
     double subsoil = 0.0;
@@ -62,6 +68,15 @@ struct Strata {
     double till = 0.0;      // what ice laid
     double saprolite = 0.0; // the rock under those rotted in place
     double lava = 0.0;
+};
+
+// Noise from 0 to 1 at a column, spread nearly evenly, in patches a few dozen voxels across and
+// finer: how far through their widths its contacts wander, and under the share of the second of
+// two materials meeting there whether it shows that one.
+struct Scatter {
+    double contacts = 0.5;
+    double beach = 0.5;
+    double basement = 0.5;
 };
 
 // A block of rock fallen from a crag and lying on the ground below it, as the box its joints
@@ -163,6 +178,7 @@ public:
         double slope_ = 0.0;               // across the ground, at the radius
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
+        Scatter scatter_;
         std::optional<Rock> rock_; // lying on this column, if one does
     };
 
