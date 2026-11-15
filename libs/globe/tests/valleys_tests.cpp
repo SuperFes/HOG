@@ -273,6 +273,43 @@ TEST_CASE("where one stretch's floor meets another's wall, the floor the ground 
     }
 }
 
+TEST_CASE("water ends where it meets the ground, never as a wall where a crest is rounded under it",
+          "[globe][valleys]") {
+    // Two stretches meeting at a crest at 0, rounded lower than either; one holds water a little
+    // over its ground there.
+    const auto depth = [](double x) {
+        Wall wet;
+        wet.standing = 100.0 + (0.5 * x);
+        wet.standing_gradient = {0.5, 0.0, 0.0};
+        wet.floor = 96.0;
+        wet.water = 100.2;
+        wet.bank = 100.2;
+        wet.steep = 1.0;
+        Wall dry;
+        dry.standing = 100.0 - (0.5 * x);
+        dry.standing_gradient = {-0.5, 0.0, 0.0};
+        dry.floor = 96.0;
+        dry.water = dry.standing;
+        dry.bank = dry.standing;
+        dry.steep = 1.0;
+        Lowest lowest{40.0, 40.0};
+        lowest.add(wet);
+        lowest.add(dry);
+        Wall out;
+        lowest.lower(out);
+        return out.water - out.standing;
+    };
+    double last = depth(-10.0);
+    double most = last;
+    for (int step = -199; step <= 200; ++step) {
+        const double here = depth(step * 0.05);
+        CHECK(std::abs(here - last) < 0.05);
+        most = std::max(most, here);
+        last = here;
+    }
+    CHECK(most > 0.1);
+}
+
 TEST_CASE("a wall stands within its bounds anywhere in a cap", "[globe][valleys]") {
     using hog::globe::Interval;
     std::mt19937_64 random{5};

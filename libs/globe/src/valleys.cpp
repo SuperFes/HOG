@@ -323,8 +323,9 @@ void Lowest::lower(Wall& wall) const noexcept {
     // What it stands over is the floor of whichever stretch it stands as, handed over as the
     // ground is.
     wall.floor = floor_;
-    wall.water = std::max(water, wall.standing);
-    wall.bank = std::max({bank, water, wall.standing});
+    // Faded, it lies over the ground no deeper than it's faded to, so it never comes in at once.
+    wall.water = std::max(std::min(water, wall.standing + deepest), wall.standing);
+    wall.bank = std::max({std::min(bank, wall.standing + flooded), wall.water, wall.standing});
     wall.season = season;
     wall.cut = cut_;
     wall.cut_gradient = cut_gradient_;
