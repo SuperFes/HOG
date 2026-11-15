@@ -483,8 +483,8 @@ std::vector<double> swells_on(const Sphere& sphere, const Body& body) {
     std::array<Swell, count> swells{};
     for (int k = 0; k < count; ++k) {
         const double across = 0.05 + (0.15 * unit(hash_values(body.seed, 26, k, 1)));
-        const double highest = std::min(body.continent_swell * body.continent_height,
-                                        steepest * across * body.radius);
+        const double highest =
+            std::min(body.continent_swell * body.continent_height, steepest * across * body.radius);
         swells.at(static_cast<std::size_t>(k)) = {
             .middle = random_direction(hash_values(body.seed, 26, k, 0)),
             .across = across,

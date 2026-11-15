@@ -1610,8 +1610,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
              0.0, folds_seed_)
              .value *
          (plain_fold + (belt_fold * here.folding))) +
-        (fbm(metres, {.wavelength = swell_wavelength, .gain = 0.5, .finest = fold_wavelength},
-             0.0, hash_values(folds_seed_, 1))
+        (fbm(metres, {.wavelength = swell_wavelength, .gain = 0.5, .finest = fold_wavelength}, 0.0,
+             hash_values(folds_seed_, 1))
              .value *
          platform_swell);
     layers.ice = top.ice;

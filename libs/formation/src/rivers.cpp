@@ -203,8 +203,7 @@ void settle_sea_floor(const Ground& ground, Rivers& rivers) {
 // is clearly steeper, as channels do, ever more clearly round after round, so a point whose height
 // turns on which of two ways it takes settles on one rather than trading back and forth; how many
 // points changed course.
-int reroute(const Ground& ground, std::span<const std::uint32_t> order, int round,
-            Rivers& rivers) {
+int reroute(const Ground& ground, std::span<const std::uint32_t> order, int round, Rivers& rivers) {
     const double late = static_cast<double>(round) / 100.0;
     const double clearly = 1.0 + (late * late);
     int changed = 0;

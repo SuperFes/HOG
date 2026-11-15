@@ -190,9 +190,9 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
             hog::globe::cell_under(glm::normalize(rock.middle),
                                    hog::globe::terms::rock_level(setup.generator.planet())));
     };
-    const Rock& rock =
-        std::ranges::max_element(found, {}, [&](const auto& at) { return cover_under(at.rock); })
-            ->rock;
+    const Rock& rock = std::ranges::max_element(found, {}, [&](const auto& at) {
+                           return cover_under(at.rock);
+                       })->rock;
     const DVec3 down = glm::normalize(rock.middle);
     const double cover = cover_under(rock);
     // Read finely enough for every block, none is rubble.

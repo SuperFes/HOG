@@ -226,9 +226,9 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
             }
             const Material rock = bed_rock(context, near);
             const double outside = std::max({bottom - radius, radius - top, base - radius});
-            Unit* const same = std::ranges::find(units.begin(), units.begin() + count, rock,
-                                                 &Unit::rock);
-            if (same != units.begin() + count) {
+            const std::span<Unit> found = std::span{units}.first(count);
+            if (const auto same = std::ranges::find(found, rock, &Unit::rock);
+                same != found.end()) {
                 same->outside = std::min(same->outside, outside);
             } else {
                 units.at(count++) = {.rock = rock, .outside = outside};

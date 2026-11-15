@@ -107,8 +107,7 @@ TEST_CASE("the flow settles, and wear balances uplift where the crust doesn't ho
     CHECK(held > 0);
 }
 
-TEST_CASE("softer rock wears to lower land, held down by its crust",
-          "[formation][rivers]") {
+TEST_CASE("softer rock wears to lower land, held down by its crust", "[formation][rivers]") {
     Body soft;
     soft.erodibility *= 2.0;
     const Made firm;
