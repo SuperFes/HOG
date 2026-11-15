@@ -135,3 +135,74 @@ TEST_CASE("spinning backwards turns the winds round", "[formation][climate]") {
         }
     }
 }
+
+namespace {
+
+// Mean rain over the mid-latitude westerlies between two longitudes, in degrees east.
+double rain_between(const Sphere& sphere, const Climate& climate, double west, double east) {
+    double rain = 0.0;
+    int count = 0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double latitude = latitude_of(sphere.point(point)) / degree;
+        const double longitude = longitude_of(sphere.point(point)) / degree;
+        if (latitude > 40.0 && latitude < 55.0 && longitude > west && longitude < east) {
+            rain += climate.rain[point];
+            ++count;
+        }
+    }
+    REQUIRE(count > 0);
+    return rain / count;
+}
+
+// Land from 0° to `land_to` east, a ridge `height` high along `ridge` east.
+std::vector<double> ridged(const Sphere& sphere, double land_to, double ridge, double height) {
+    std::vector<double> heights(sphere.size(), -3'000.0);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const double longitude = longitude_of(sphere.point(point)) / degree;
+        if (longitude > 0.0 && longitude < land_to) {
+            heights[point] = 200.0 + (height * std::exp(-std::pow((longitude - ridge) / 4.0, 2)));
+        }
+    }
+    return heights;
+}
+
+} // namespace
+
+TEST_CASE("snow wrung out climbing a ridge drifts onto its crest", "[formation][climate]") {
+    // Small enough that the snow drifts over several points.
+    Body body;
+    body.radius = 30'000.0;
+    const Sphere sphere{6, 3};
+    const std::vector<double> heights = ridged(sphere, 60.0, 20.0, 6'000.0);
+    Body still = body;
+    still.rain_drift = 0.0;
+    still.snow_drift = 0.0;
+    const Climate drifting = climate_on(sphere, heights, body);
+    const Climate falling = climate_on(sphere, heights, still);
+    const auto crest_share = [&](const Climate& climate) {
+        return rain_between(sphere, climate, 18.5, 21.5) / rain_between(sphere, climate, 8.0, 15.0);
+    };
+    CHECK(crest_share(drifting) > 1.5 * crest_share(falling));
+}
+
+TEST_CASE("a ridge far inland still wrings out the air it lifts, the flat land about it dry",
+          "[formation][climate]") {
+    Body body;
+    body.radius = 30'000.0;
+    body.rain_drift = 0.0;
+    body.snow_drift = 0.0;
+    const Sphere sphere{6, 3};
+    // Six of the rain's reaches inland.
+    const std::vector<double> heights = ridged(sphere, 140.0, 120.0, 3'000.0);
+    Body parched = body;
+    parched.driest_air = 0.0;
+    const Climate kept = climate_on(sphere, heights, body);
+    const Climate dried = climate_on(sphere, heights, parched);
+    const auto ridge_over_plain = [&](const Climate& climate) {
+        return rain_between(sphere, climate, 112.0, 119.0) /
+               rain_between(sphere, climate, 70.0, 90.0);
+    };
+    CHECK(ridge_over_plain(kept) > 3.0 * ridge_over_plain(dried));
+    // The floor makes no rain over the plain itself, which stays far drier than the coast.
+    CHECK(rain_between(sphere, kept, 70.0, 90.0) < 0.1 * rain_between(sphere, kept, 2.0, 8.0));
+}

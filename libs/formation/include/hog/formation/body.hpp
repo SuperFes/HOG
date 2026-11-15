@@ -93,6 +93,15 @@ struct Body {
     double rain_mean = 1.0;         // metres a year over the whole planet
     double rain_reach = 0.3;        // radians moist air carries inland before most has fallen
     double vapour_height = 2'500.0; // metres of rise that wring out most of the air's water
+    // Share of the water it could hold that air over land keeps however far it's come: plants and
+    // soil give water back, and the wind aloft brings more from the liquid, so ranges lifting it
+    // far inland still wring it out.
+    double driest_air = 0.3;
+    // Metres the wind carries what condenses before it lands, from clouds a kilometre and a half up
+    // in a 10 m/s wind: rain falls at 6 m/s, snow at 1, so what the climb wrings out as snow
+    // settles on the crests and over them.
+    double rain_drift = 2'500.0;
+    double snow_drift = 15'000.0;
 
     // Running water wearing the land (stream power, at Earth's scale).
     double erodibility = 2.0e-6;  // how readily bare rock wears, per year

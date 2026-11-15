@@ -166,13 +166,65 @@ void carry_moisture(const Sphere& sphere, std::span<const double> heights,
             }
             const Arriving arriving =
                 arriving_at(sphere, heights, body, climate.wind[point], moisture, point);
+            const double holds = capacity(climate.temperature[point]);
             const double kept =
-                arriving.any ? std::min(arriving.kept, capacity(climate.temperature[point])) : 0.0;
+                arriving.any ? std::min(std::max(arriving.kept, body.driest_air * holds), holds)
+                             : 0.0;
             next[point] = kept;
-            lost[point] = arriving.any ? arriving.moisture - kept : 0.0;
+            lost[point] = arriving.any ? std::max(0.0, arriving.moisture - kept) : 0.0;
         }
         std::swap(moisture, next);
     }
+}
+
+// Radians what condenses at `celsius` drifts on the wind before it lands: snow the further, the
+// two blended over a few degrees about freezing.
+double drift_at(double celsius, const Body& body) noexcept {
+    constexpr double blending = 2.0;
+    const double snow =
+        std::clamp((body.freezing + blending - celsius) / (2.0 * blending), 0.0, 1.0);
+    const double metres = body.rain_drift + ((body.snow_drift - body.rain_drift) * snow);
+    return std::max(metres, 0.0) / std::max(body.radius, 1.0);
+}
+
+// What condenses rides the wind down from the upwind neighbours as it falls, landing a share at
+// each point as far as it drifts there.
+std::vector<double> drift_down(const Sphere& sphere, const Body& body, const Climate& climate,
+                               std::span<const double> condensed) {
+    const std::uint32_t size = sphere.size();
+    std::vector<double> landing(size);
+    double furthest = 0.0;
+    for (std::uint32_t point = 0; point < size; ++point) {
+        const double drift = drift_at(climate.temperature[point], body);
+        landing[point] = drift > 0.0 ? 1.0 - maths::exp(-sphere.spacing() / drift) : 1.0;
+        furthest = std::max(furthest, drift);
+    }
+    std::vector<double> aloft(size, 0.0);
+    std::vector<double> next(size, 0.0);
+    std::vector<double> passing(size, 0.0); // condensed here and carried in
+    const int rounds = std::clamp(static_cast<int>(5.0 * furthest / sphere.spacing()), 1, 800);
+    for (int round = 0; round < rounds; ++round) {
+        for (std::uint32_t point = 0; point < size; ++point) {
+            const DVec3& here = sphere.point(point);
+            double weights = 0.0;
+            double arriving = 0.0;
+            for (const std::uint32_t from : sphere.neighbors(point)) {
+                const DVec3 step = here - sphere.point(from);
+                const double weight =
+                    std::max(0.0, glm::dot(climate.wind[point], step / glm::length(step)));
+                weights += weight;
+                arriving += weight * aloft[from];
+            }
+            passing[point] = (weights > 0.0 ? arriving / weights : 0.0) + condensed[point];
+            next[point] = passing[point] * (1.0 - landing[point]);
+        }
+        std::swap(aloft, next);
+    }
+    std::vector<double> fallen(size);
+    for (std::uint32_t point = 0; point < size; ++point) {
+        fallen[point] = passing[point] * landing[point];
+    }
+    return fallen;
 }
 
 } // namespace
@@ -212,12 +264,16 @@ Climate climate_on(const Sphere& sphere, std::span<const double> heights,
     std::vector<double> lost(size, 0.0);
     carry_moisture(sphere, heights, sea, body, climate, moisture, lost);
 
-    double total = 0.0;
-    double area = 0.0;
+    std::vector<double> condensed(size);
     for (std::uint32_t point = 0; point < size; ++point) {
         const double falling =
             sea[point] != 0 ? moisture[point] * sphere.spacing() / body.rain_reach : lost[point];
-        climate.rain[point] = (0.3 + rising[point]) * falling;
+        condensed[point] = (0.3 + rising[point]) * falling;
+    }
+    climate.rain = drift_down(sphere, body, climate, condensed);
+    double total = 0.0;
+    double area = 0.0;
+    for (std::uint32_t point = 0; point < size; ++point) {
         total += climate.rain[point] * sphere.area(point);
         area += sphere.area(point);
     }
