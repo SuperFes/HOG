@@ -16,7 +16,8 @@ TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vent
     CHECK(vents.size() < 400);
     const double sea = generator.sea_level().value_or(0.0);
     for (const auto& vent : vents) {
-        CHECK(vent.ground > sea);
+        // A pool's floor lies in a cave, which may reach under the sea's level; its land doesn't.
+        CHECK((vent.pool ? generator.column(vent.direction, 0.5).ground() : vent.ground) > sea);
         CHECK(std::abs(glm::length(vent.direction) - 1.0) < 1e-9);
     }
     const auto again = hog::globe::vent_sites(generator);

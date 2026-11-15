@@ -69,6 +69,17 @@ std::optional<Volcano> volcano_in(const Planet& planet, Cell cell) {
 
 namespace {
 
+// Whether the column is open all the way from `floor` up through a pool's headroom.
+bool open_over(const Generator::Column& column, double floor) {
+    const auto steps = static_cast<int>(pool_headroom / pool_step);
+    for (int step = 1; step <= steps; ++step) {
+        if (column.sample(floor + (pool_step * step)).distance <= 0.0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Where a pool could lie in the column, on the floor of a cave under the ground high enough to
 // stand in: where the cave first opens from solid rock.
 std::optional<double> pool_floor(const Generator::Column& column) {
@@ -81,7 +92,7 @@ std::optional<double> pool_floor(const Generator::Column& column) {
                 break;
             }
             const double distance = column.sample(at).distance;
-            if (distance > 0.0 && solid && column.sample(at + pool_headroom).distance > 0.0) {
+            if (distance > 0.0 && solid && open_over(column, at)) {
                 return at;
             }
             // On the surface itself is neither: the floor is under rock.
