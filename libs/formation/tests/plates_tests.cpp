@@ -248,10 +248,10 @@ TEST_CASE("old continental crust sags into broad basins and bows up into swells"
             CHECK(swell(point) == 0.0);
         }
     }
-    const double height = made.body.continent_height * made.body.continent_swell;
-    CHECK(highest > 0.5 * height);
-    CHECK(lowest < -0.5 * height);
-    // Broad: within the continents no steeper than the narrowest swell, a twentieth of the
-    // radius across, bows twice as high.
-    CHECK(steepest < 2.0 * height / (0.05 * made.body.radius));
+    // Swells are as high as a thousandth of their widths allows on a world this small.
+    const double narrowest = 1e-3 * 0.05 * made.body.radius;
+    CHECK(highest > narrowest);
+    CHECK(lowest < -narrowest);
+    CHECK(highest - lowest < 2.0 * made.body.continent_height * made.body.continent_swell);
+    CHECK(steepest < 2e-3);
 }

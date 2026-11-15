@@ -128,11 +128,13 @@ double steepest_at(const Ground& ground, std::uint32_t point, double length) {
     return steepest_over(length, *ground.body) * titan_hold(*ground.crust, *ground.body, point);
 }
 
-// How high land stands whose rivers would raise it `over` metres past where its crust floats: the
-// crust's float holds it down, but only as much more as it would rise, so it keeps its relief and
-// still drains as its rivers have it.
-double held_over(double over, const Body& body) {
-    const double relief = body.held_relief;
+// How high land stands whose rivers would raise it `over` metres past where its crust floats, at
+// `base`: the crust's float holds it down, but only as much more as it would rise, so it keeps its
+// relief and still drains as its rivers have it. The higher land floats the more relief it keeps
+// (Ahnert's), low land by the sea little.
+double held_over(double over, double base, const Body& body) {
+    const double relief =
+        body.held_relief * std::max(base, 0.0) / std::max(body.continent_height, 1.0);
     return relief > 0.0 ? relief * maths::log(1.0 + (over / relief)) : 0.0;
 }
 
@@ -156,7 +158,7 @@ void raise(const Ground& ground, std::span<const std::uint32_t> order,
                       (length * std::min(slope, steepest_at(ground, point, length)));
         const double base = ground.crust->base[point];
         rivers.ground[point] =
-            free[point] <= base ? free[point] : base + held_over(free[point] - base, body);
+            free[point] <= base ? free[point] : base + held_over(free[point] - base, base, body);
         // Where the crust's float falls under the ground downstream, the hollow is filled all but
         // flat, so water still finds its way out; lakes are left to a stage of their own.
         rivers.height[point] = std::max(rivers.ground[point], below + (1e-6 * length));

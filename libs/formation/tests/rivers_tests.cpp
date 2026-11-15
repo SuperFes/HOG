@@ -180,7 +180,7 @@ TEST_CASE("a titan belt's rock stands steeper, its land higher than ordinary roc
             usual_highest = std::max(usual_highest, usual.rivers.height[point]);
         }
     }
-    CHECK(titan_highest > 1.5 * usual_highest);
+    CHECK(titan_highest > 1.25 * usual_highest);
 }
 
 TEST_CASE("land its crust's float holds down keeps its relief, never a level plain",

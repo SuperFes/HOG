@@ -470,10 +470,11 @@ Shaped shaped_by(const Boundary& kind, double distance, double light, bool ridin
 
 // Old continental crust sags into broad basins and bows up into swells, each a few hundred to over
 // a thousand kilometres across on Earth (the Congo and Chad basins, the Ahaggar's swell), its
-// own height either way: how far each point stands over or under the crust's float, -1 to 1 or
-// further where they overlap.
+// own height either way, but no steeper than a thousandth: metres each point stands over or under
+// the crust's float.
 std::vector<double> swells_on(const Sphere& sphere, const Body& body) {
     constexpr int count = 48;
+    constexpr double steepest = 1e-3;
     struct Swell {
         DVec3 middle;
         double across = 0.0; // radians
@@ -481,10 +482,13 @@ std::vector<double> swells_on(const Sphere& sphere, const Body& body) {
     };
     std::array<Swell, count> swells{};
     for (int k = 0; k < count; ++k) {
+        const double across = 0.05 + (0.15 * unit(hash_values(body.seed, 26, k, 1)));
+        const double highest = std::min(body.continent_swell * body.continent_height,
+                                        steepest * across * body.radius);
         swells.at(static_cast<std::size_t>(k)) = {
             .middle = random_direction(hash_values(body.seed, 26, k, 0)),
-            .across = 0.05 + (0.15 * unit(hash_values(body.seed, 26, k, 1))),
-            .height = (2.0 * unit(hash_values(body.seed, 26, k, 2))) - 1.0};
+            .across = across,
+            .height = highest * ((2.0 * unit(hash_values(body.seed, 26, k, 2))) - 1.0)};
     }
     std::vector<double> made(sphere.size(), 0.0);
     for (std::uint32_t point = 0; point < sphere.size(); ++point) {
@@ -601,8 +605,7 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
         const double floor =
             std::max(body.abyss_depth, body.ridge_depth - (body.floor_sinking * std::sqrt(age)));
         crust.base[point] =
-            (light * body.continent_height * (1.0 + (body.continent_swell * swells[point]))) +
-            ((1.0 - light) * floor);
+            (light * (body.continent_height + swells[point])) + ((1.0 - light) * floor);
         crust.uplift[point] = light * 1.0e-5;
         if (nearest.source[point] == Nearest::none) {
             continue;
