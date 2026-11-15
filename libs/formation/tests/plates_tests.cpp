@@ -63,6 +63,7 @@ TEST_CASE("plates move along the surface, and pairs agree on their boundary",
 namespace {
 
 struct Made {
+    explicit Made(Body made_body = {}) : body{made_body} {}
     Body body;
     Sphere layout{5, body.seed};
     Sphere sphere{6, body.seed + 1};
@@ -217,4 +218,40 @@ TEST_CASE("a belt's crest rises and dips along it rather than running level",
     REQUIRE(belts > 50);
     const double mean = sum / belts;
     CHECK(std::sqrt((squares / belts) - (mean * mean)) > 0.05);
+}
+
+TEST_CASE("old continental crust sags into broad basins and bows up into swells",
+          "[formation][plates]") {
+    Body level;
+    level.continent_swell = 0.0;
+    const Made made;
+    const Made flat{level};
+    double lowest = 0.0;
+    double highest = 0.0;
+    double steepest = 0.0;
+    const auto swell = [&](std::uint32_t point) {
+        return made.crust.base[point] - flat.crust.base[point];
+    };
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        lowest = std::min(lowest, swell(point));
+        highest = std::max(highest, swell(point));
+        for (const std::uint32_t next : made.sphere.neighbors(point)) {
+            if (made.crust.light[point] < 1.0 || made.crust.light[next] < 1.0) {
+                continue;
+            }
+            const double run =
+                glm::length(made.sphere.point(point) - made.sphere.point(next)) * made.body.radius;
+            steepest = std::max(steepest, std::abs(swell(next) - swell(point)) / run);
+        }
+        // Only light crust swells.
+        if (made.crust.light[point] == 0.0) {
+            CHECK(swell(point) == 0.0);
+        }
+    }
+    const double height = made.body.continent_height * made.body.continent_swell;
+    CHECK(highest > 0.5 * height);
+    CHECK(lowest < -0.5 * height);
+    // Broad: within the continents no steeper than the narrowest swell, a twentieth of the
+    // radius across, bows twice as high.
+    CHECK(steepest < 2.0 * height / (0.05 * made.body.radius));
 }

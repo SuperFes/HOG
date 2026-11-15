@@ -4,6 +4,7 @@
 #include <hog/formation/plates.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -467,6 +468,40 @@ Shaped shaped_by(const Boundary& kind, double distance, double light, bool ridin
     return {};
 }
 
+// Old continental crust sags into broad basins and bows up into swells, each a few hundred to over
+// a thousand kilometres across on Earth (the Congo and Chad basins, the Ahaggar's swell), its
+// own height either way: how far each point stands over or under the crust's float, -1 to 1 or
+// further where they overlap.
+std::vector<double> swells_on(const Sphere& sphere, const Body& body) {
+    constexpr int count = 48;
+    struct Swell {
+        DVec3 middle;
+        double across = 0.0; // radians
+        double height = 0.0;
+    };
+    std::array<Swell, count> swells{};
+    for (int k = 0; k < count; ++k) {
+        swells.at(static_cast<std::size_t>(k)) = {
+            .middle = random_direction(hash_values(body.seed, 26, k, 0)),
+            .across = 0.05 + (0.15 * unit(hash_values(body.seed, 26, k, 1))),
+            .height = (2.0 * unit(hash_values(body.seed, 26, k, 2))) - 1.0};
+    }
+    std::vector<double> made(sphere.size(), 0.0);
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        const DVec3 at = sphere.point(point);
+        for (const Swell& swell : swells) {
+            // The chord stands for the angle this near; past three widths a swell counts for
+            // nothing.
+            const DVec3 off = at - swell.middle;
+            const double far = glm::dot(off, off) / (swell.across * swell.across);
+            if (far < 9.0) {
+                made[point] += swell.height * maths::exp(-far);
+            }
+        }
+    }
+    return made;
+}
+
 // The sphere level whose points lie about half a belt's width apart.
 int belt_level(const Sphere& sphere, const Body& body) {
     int level = sphere.subdivisions();
@@ -554,6 +589,7 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
     const Nearest ridge = nearest_sources(sphere, fine.ridges);
     const std::vector<double> rugged = sphere_noise(
         sphere, hash_values(body.seed, 17), belt_level(sphere, body), sphere.subdivisions());
+    const std::vector<double> swells = swells_on(sphere, body);
     for (std::uint32_t point = 0; point < size; ++point) {
         const double light = crust.light[point];
         double age = oldest_floor;
@@ -564,7 +600,9 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
         crust.floor_age[point] = age;
         const double floor =
             std::max(body.abyss_depth, body.ridge_depth - (body.floor_sinking * std::sqrt(age)));
-        crust.base[point] = (light * body.continent_height) + ((1.0 - light) * floor);
+        crust.base[point] =
+            (light * body.continent_height * (1.0 + (body.continent_swell * swells[point]))) +
+            ((1.0 - light) * floor);
         crust.uplift[point] = light * 1.0e-5;
         if (nearest.source[point] == Nearest::none) {
             continue;

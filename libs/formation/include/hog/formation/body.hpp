@@ -22,6 +22,7 @@ struct Body {
     double crust_thickness = 35'000.0; // metres of light crust
     double crust_rise = 0.15;          // metres light crust rises per metre it thickens
     double continent_height = 400.0;   // metres over the liquid, unthickened
+    double continent_swell = 0.5;      // share of that broad basins sag and swells bow up
     double ridge_depth = -2'600.0;     // metres, where new sea floor is made
     double abyss_depth = -5'500.0;     // metres, the deepest old sea floor
     double floor_sinking = 350.0;      // metres per square root of a million years of age
@@ -115,10 +116,10 @@ struct Body {
     double hillslope_steepest = 0.6;   // rise over run across a hillslope, about 31 degrees
     double hillslope_length = 1'000.0; // metres
     double roughness = 0.46;
-    // Rise over run the mud and silt draping a sea's margins stand at; steeper, they slump.
     // Metres of relief land keeps where the crust's float holds it down: it rises past the float
     // ever more slowly the higher its rivers would raise it, never a level plain.
     double held_relief = 100.0;
+    // Rise over run the mud and silt draping a sea's margins stand at; steeper, they slump.
     double sea_floor_steepest = 0.07;
 
     // Snow lying through summers, gathering into ice that flows and carves.
