@@ -307,10 +307,11 @@ void lay(const Land& land, const Cover& cold, Ice& ice) {
         const double slope = std::max(0.0, rivers.height[point] - below) /
                              (angle(sphere.point(point), sphere.point(down)) * land.body->radius);
         // Meltwater runs under the ice in a few channels and sweeps up what melts out only where it
-        // comes out from under the ice, at its edge.
+        // comes out from under the ice, at its edge; the stones in it stay as the moraine.
         const bool edge = cold.flux[point] <= 0.0;
+        const double fines = dropped * (1.0 - std::clamp(land.body->till_stones, 0.0, 1.0));
         washed[point] =
-            edge ? std::min(dropped, carrying_capacity(water[point], slope, *land.body)) : 0.0;
+            edge ? std::min(fines, carrying_capacity(water[point], slope, *land.body)) : 0.0;
         // Till heaps no higher than the ice's top: past that the ice rides over it and takes the
         // rest on, or at its edge leaves it to the meltwater.
         const double rock = rivers.ground[point] - ice.carved[point];
