@@ -128,24 +128,37 @@ double steepest_at(const Ground& ground, std::uint32_t point, double length) {
     return steepest_over(length, *ground.body) * titan_hold(*ground.crust, *ground.body, point);
 }
 
+// How high land stands whose rivers would raise it `over` metres past where its crust floats: the
+// crust's float holds it down, but only as much more as it would rise, so it keeps its relief and
+// still drains as its rivers have it.
+double held_over(double over, const Body& body) {
+    const double relief = body.held_relief;
+    return relief > 0.0 ? relief * maths::log(1.0 + (over / relief)) : 0.0;
+}
+
 // Up from the coast, each step as steep as balances wear against uplift there, a river having to
-// pass a threshold before it cuts at all; no steeper than slopes stand before they slide, and
-// never higher than the crust floats.
+// pass a threshold before it cuts at all; no steeper than slopes stand before they slide. That's
+// `free`, how high the rivers would raise it; it's held down where that's higher than the crust
+// floats.
 void raise(const Ground& ground, std::span<const std::uint32_t> order,
-           std::span<const double> wearing, Rivers& rivers) {
+           std::span<const double> wearing, std::span<double> free, Rivers& rivers) {
     const Body& body = *ground.body;
     for (const std::uint32_t point : order) {
         const std::uint32_t down = rivers.receiver[point];
-        const double below = ground.land[down] != 0 ? rivers.height[down] : 0.0;
+        const bool on_land = ground.land[down] != 0;
+        const double below = on_land ? rivers.height[down] : 0.0;
         const double length =
             angle(ground.sphere->point(point), ground.sphere->point(down)) * body.radius;
         const double flow = std::max(wearing[point], 1.0);
         const double slope = (ground.crust->uplift[point] + body.wear_threshold) /
                              (ground.erodibility[point] * maths::pow(flow, body.discharge_power));
-        // Where the crust's cap falls under the ground downstream, the hollow is filled all but
+        free[point] = (on_land ? free[down] : 0.0) +
+                      (length * std::min(slope, steepest_at(ground, point, length)));
+        const double base = ground.crust->base[point];
+        rivers.ground[point] =
+            free[point] <= base ? free[point] : base + held_over(free[point] - base, body);
+        // Where the crust's float falls under the ground downstream, the hollow is filled all but
         // flat, so water still finds its way out; lakes are left to a stage of their own.
-        const double worn = below + (length * std::min(slope, steepest_at(ground, point, length)));
-        rivers.ground[point] = std::min(worn, ground.crust->base[point]);
         rivers.height[point] = std::max(rivers.ground[point], below + (1e-6 * length));
     }
 }
@@ -184,22 +197,31 @@ void settle_sea_floor(const Ground& ground, Rivers& rivers) {
     }
 }
 
-// Water takes the steepest way down the land as it now stands; how many points changed course.
-int reroute(const Ground& ground, std::span<const std::uint32_t> order, Rivers& rivers) {
+// Water takes the steepest way down the land as it now stands, keeping its course unless another
+// is clearly steeper, as channels do, ever more clearly round after round, so a point whose height
+// turns on which of two ways it takes settles on one rather than trading back and forth; how many
+// points changed course.
+int reroute(const Ground& ground, std::span<const std::uint32_t> order, int round,
+            Rivers& rivers) {
+    const double late = static_cast<double>(round) / 100.0;
+    const double clearly = 1.0 + (late * late);
     int changed = 0;
     for (const std::uint32_t point : order) {
-        std::uint32_t lowest = rivers.receiver[point];
-        double drop = 0.0;
-        for (const std::uint32_t next : ground.sphere->neighbors(point)) {
+        const auto steepness = [&](std::uint32_t next) {
             const double there = ground.land[next] != 0 ? rivers.height[next] : 0.0;
             const double length = angle(ground.sphere->point(point), ground.sphere->point(next));
-            const double steepness = (rivers.height[point] - there) / length;
-            if (steepness > drop) {
-                drop = steepness;
+            return (rivers.height[point] - there) / length;
+        };
+        const std::uint32_t current = rivers.receiver[point];
+        std::uint32_t lowest = current;
+        double drop = current != point ? clearly * steepness(current) : 0.0;
+        for (const std::uint32_t next : ground.sphere->neighbors(point)) {
+            if (const double steeper = steepness(next); steeper > drop) {
+                drop = steeper;
                 lowest = next;
             }
         }
-        if (lowest != rivers.receiver[point]) {
+        if (lowest != current) {
             rivers.receiver[point] = lowest;
             ++changed;
         }
@@ -279,11 +301,12 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
     flood_from_sea(ground, rivers.receiver);
 
     std::vector<double> wearing(size, 0.0);
+    std::vector<double> free(size, 0.0);
     std::vector<std::uint32_t> order = downstream_first(sphere, rivers.receiver, ground.land);
     for (rivers.rounds = 1; rivers.rounds <= most_rounds; ++rivers.rounds) {
         gather(ground, order, rivers, wearing);
-        raise(ground, order, wearing, rivers);
-        if (reroute(ground, order, rivers) == 0) {
+        raise(ground, order, wearing, free, rivers);
+        if (reroute(ground, order, rivers.rounds, rivers) == 0) {
             break;
         }
         order = downstream_first(sphere, rivers.receiver, ground.land);

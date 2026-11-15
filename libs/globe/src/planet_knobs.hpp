@@ -39,6 +39,7 @@ inline constexpr std::array body_numbers{
     std::pair{"belt_ruggedness"sv, &formation::Body::belt_ruggedness},
     std::pair{"titan_strength"sv, &formation::Body::titan_strength},
     std::pair{"cover_thickness"sv, &formation::Body::cover_thickness},
+    std::pair{"held_relief"sv, &formation::Body::held_relief},
     std::pair{"rift_fill"sv, &formation::Body::rift_fill},
     std::pair{"sea_floor_mud"sv, &formation::Body::sea_floor_mud},
     std::pair{"layering"sv, &formation::Body::layering},

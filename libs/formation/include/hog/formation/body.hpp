@@ -116,6 +116,9 @@ struct Body {
     double hillslope_length = 1'000.0; // metres
     double roughness = 0.46;
     // Rise over run the mud and silt draping a sea's margins stand at; steeper, they slump.
+    // Metres of relief land keeps where the crust's float holds it down: it rises past the float
+    // ever more slowly the higher its rivers would raise it, never a level plain.
+    double held_relief = 100.0;
     double sea_floor_steepest = 0.07;
 
     // Snow lying through summers, gathering into ice that flows and carves.

@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -106,7 +107,7 @@ TEST_CASE("the flow settles, and wear balances uplift where the crust doesn't ho
     CHECK(held > 0);
 }
 
-TEST_CASE("softer rock wears to lower land, and none stands over its crust",
+TEST_CASE("softer rock wears to lower land, held down by its crust",
           "[formation][rivers]") {
     Body soft;
     soft.erodibility *= 2.0;
@@ -119,10 +120,13 @@ TEST_CASE("softer rock wears to lower land, and none stands over its crust",
             if (on_land(made, point)) {
                 sum += made.rivers.height[point];
                 ++count;
-                // Hollows are filled to just over the ground they drain to.
+                // Hollows are filled to just over the ground they drain to, and the crust's float
+                // holds the land down to within ten times its held relief of it.
                 const std::uint32_t down = made.rivers.receiver[point];
                 const double below = on_land(made, down) ? made.rivers.height[down] : 0.0;
-                CHECK(made.rivers.height[point] <= std::max(made.crust.base[point], below) + 1.0);
+                CHECK(made.rivers.height[point] <=
+                      std::max(made.crust.base[point] + (10.0 * made.body.held_relief), below) +
+                          1.0);
             }
         }
         return sum / count;
@@ -177,4 +181,36 @@ TEST_CASE("a titan belt's rock stands steeper, its land higher than ordinary roc
         }
     }
     CHECK(titan_highest > 1.5 * usual_highest);
+}
+
+TEST_CASE("land its crust's float holds down keeps its relief, never a level plain",
+          "[formation][rivers]") {
+    Body flat;
+    flat.held_relief = 0.0;
+    const Made made;
+    const Made capped{flat};
+    // Land whose neighbours on land all stand within a metre of it, of land held down.
+    const auto level_share = [](const Made& world) {
+        int held = 0;
+        int level = 0;
+        for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+            if (!on_land(world, point) ||
+                world.rivers.height[point] < world.crust.base[point] - 1.0) {
+                continue;
+            }
+            ++held;
+            bool flat_about = true;
+            for (const std::uint32_t next : world.sphere.neighbors(point)) {
+                if (on_land(world, next) &&
+                    std::abs(world.rivers.height[next] - world.rivers.height[point]) > 1.0) {
+                    flat_about = false;
+                }
+            }
+            level += flat_about ? 1 : 0;
+        }
+        UNSCOPED_INFO("held " << held << ", level " << level);
+        return held > 0 ? static_cast<double>(level) / held : 0.0;
+    };
+    CHECK(level_share(capped) > 0.1);
+    CHECK(level_share(made) < 0.02);
 }

@@ -157,7 +157,10 @@ TEST_CASE("no soil forms under ice, standing water or salt", "[formation][soil]"
 }
 
 TEST_CASE("soil grows down through what was laid, faster than into rock", "[formation][soil]") {
-    const Made made{glaciated()};
+    // Rivers that carry less lay alluvium where they slacken.
+    Body body = glaciated();
+    body.carrying = 0.01;
+    const Made made{body};
     int on_till = 0;
     int on_alluvium = 0;
     int on_lake_beds = 0;
