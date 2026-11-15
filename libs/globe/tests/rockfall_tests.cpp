@@ -197,7 +197,8 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     for (const double lod : {0.5, 1.0, 2.0, 4.0, 8.0, every_block}) {
         const hog::globe::terms::Rubble rubble =
             hog::globe::terms::fallen(setup.context, down, lod).rubble;
-        CHECK(rubble.depth >= last);
+        // Once all of it's rubble, no deeper but for rounding.
+        CHECK(rubble.depth >= last - 1e-6);
         CHECK(rubble.depth <= hog::globe::widest_joints);
         if (rubble.depth > 0.0) {
             CHECK(rubble.of == rock.material);

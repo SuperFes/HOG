@@ -78,7 +78,8 @@ TEST_CASE("the pockets found under the ground are the hollows in it, near to far
     // Each hollow is a pocket of its own, or part of a cave it broke into.
     for (const DVec3 hollow : hollows) {
         CHECK(std::ranges::any_of(pockets, [&](const Pocket& pocket) {
-            return glm::length(pocket.at - hollow) < std::max(6.0, pocket.across / 2.0);
+            // The hollows dug 6 m across, 3 out from their middles.
+            return glm::length(pocket.at - hollow) < std::max(6.0, (pocket.across / 2.0) + 3.0);
         }));
     }
     double last = 0.0;

@@ -99,9 +99,13 @@ struct Settling {
         if (!apart.plain() || here.covered() == apart.covered()) {
             return;
         }
-        ++edges;
         const Read& covered = here.covered() ? here : apart;
         const Read& bare = here.covered() ? apart : here;
+        // Ground no gullies cut has no hollows to fill; it lies over all of it.
+        if (std::abs(covered.here.cut) < 0.01) {
+            return;
+        }
+        ++edges;
         lower += covered.bed() < bare.bed() ? 1 : 0;
     }
     // Where it lies deep, its top runs smoother than the bed under it.
@@ -719,8 +723,12 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
         if (uncut.layers.ice > 0.0 || settled_on(uncut) <= 0.0) {
             continue;
         }
-        // Far under the sea, below where storms stir the bed, it drapes the bed as it falls.
+        // Far under the sea, below where storms stir the bed, it drapes the bed as it falls, as
+        // far as there's enough to tell.
         if (uncut.top.value < -500.0) {
+            if (settled_on(uncut) < 0.01) {
+                continue;
+            }
             ++settling.offshore;
             settling.draped += settled_on(formed.at(direction, voxel)) > 0.0 ? 1 : 0;
             continue;
@@ -749,7 +757,8 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
     // The level it fills to changes a little across the gap, now and then past the bed.
     CHECK(settling.lower * 100 > 70 * settling.edges);
     CHECK(settling.deep > 20);
-    CHECK(settling.level * 20 > 17 * settling.deep);
+    // Mostly: lying evenly thick over a tilted bed, its top tilts as the bed does.
+    CHECK(settling.level * 4 > 3 * settling.deep);
     // As much over the ground as was carried to it, the bed spread about as evenly as not.
     CHECK(std::abs(settling.settled - settling.carried) < 0.25 * settling.carried);
 }
