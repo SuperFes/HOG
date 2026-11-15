@@ -341,7 +341,7 @@ Material Generator::Column::inside(double radius) const noexcept {
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
     const double shown = std::max(0.0, ground_ - radius - (lod_ / 2.0));
-    return terms::material_at(context, strata_, scatter_, shown, ground_ - shown);
+    return terms::material_at(context, strata_, scatter_, direction_, shown, ground_ - shown);
 }
 
 Sample Generator::Column::sample(double radius, bool caves) const noexcept {
@@ -379,9 +379,9 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
         // ones find it, so the ground looks the same at every detail. Voxels stand half a lod
         // apart.
         const double shown = std::max(0.0, depth - (lod_ / 2.0));
-        sample.material =
-            on_rock ? rock_->material
-                    : terms::material_at(context, strata_, scatter_, shown, ground_ - shown);
+        sample.material = on_rock ? rock_->material
+                                  : terms::material_at(context, strata_, scatter_, direction_,
+                                                       shown, ground_ - shown);
     }
     // The sea fills the open space under its level, and the ground's pores below it. The voxel the
     // surface crosses holds only as much as lies under it, so water shallower than a voxel shows.

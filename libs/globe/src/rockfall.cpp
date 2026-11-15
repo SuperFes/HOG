@@ -228,9 +228,10 @@ Material material_of(const Context& context, const Fallen& fallen) noexcept {
     constexpr double depth = 4.0;
     const Layering& layers = fallen.source.layers;
     const Scatter scatter = scatter_at(context, fallen.from, layers);
-    const Material rock = material_at(context, layers, scatter, depth,
-                                      context.planet->body.radius + fallen.source.height - depth);
-    return properties(rock).strength < 1.0e6 ? basement_at(layers, scatter) : rock;
+    const double radius = context.planet->body.radius + fallen.source.height - depth;
+    const Material rock = material_at(context, layers, scatter, fallen.from, depth, radius);
+    return properties(rock).strength < 1.0e6 ? basement_at(context, layers, fallen.from * radius)
+                                             : rock;
 }
 
 // How many blocks are drawn about a coarsest cell to find the rubble the smallest make there.

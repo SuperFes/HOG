@@ -43,7 +43,7 @@ double share_of(const hog::globe::terms::Layering& layers, double depth, Materia
         const DVec3 down = hog::globe::center(
             hog::globe::cell_at_index(14, (k * 2'654'435'761ULL) % 1'610'612'736ULL));
         const hog::globe::Scatter scatter = hog::globe::terms::scatter_at(context, down, layers);
-        shown += hog::globe::terms::material_at(context, layers, scatter, depth,
+        shown += hog::globe::terms::material_at(context, layers, scatter, down, depth,
                                                 planet.body.radius - depth) == material
                      ? 1
                      : 0;
@@ -169,6 +169,30 @@ TEST_CASE("layers of one material lie as one, with no contact between them", "[g
                                              .topsoil = 0.6,
                                              .saprolite = 8.8};
     CHECK(share_of(layers, 0.0, Material::Soil) == 1.0);
+}
+
+TEST_CASE("two basements lie mixed in bodies, not in columns running straight down",
+          "[globe][strata]") {
+    const hog::globe::Planet& planet = wet().planet();
+    const Generator::Shape shape;
+    const hog::globe::terms::Context context{
+        .planet = &planet, .derived = &wet().derived(), .shape = &shape};
+    const hog::globe::terms::Layering basements{
+        .basement = Material::Granite, .basement_with = Material::Basalt, .basement_share = 0.3};
+    constexpr int count = 5'000;
+    int changed = 0;
+    for (std::uint64_t k = 0; k < count; ++k) {
+        const DVec3 down = hog::globe::center(
+            hog::globe::cell_at_index(14, (k * 2'654'435'761ULL) % 1'610'612'736ULL));
+        const hog::globe::Scatter scatter = hog::globe::terms::scatter_at(context, down, basements);
+        const auto at = [&](double depth) {
+            return hog::globe::terms::material_at(context, basements, scatter, down, depth,
+                                                  planet.body.radius - depth);
+        };
+        changed += at(5.0) != at(40.0) ? 1 : 0;
+    }
+    // Picked apart, two depths differ in 2 x 0.3 x 0.7 of the columns.
+    CHECK(static_cast<double>(changed) / count > 0.3);
 }
 
 TEST_CASE("where two basements or beach materials meet, each shows at its share",

@@ -44,13 +44,15 @@ double contact_width(Material material) noexcept {
 }
 
 double scatter(const Context& context, Term term, DVec3 direction) noexcept {
-    // Read with all its octaves at every detail, so a coarse column shows what's at its middle
+    return scatter_in(context, term, direction * context.planet->body.radius);
+}
+
+double scatter_in(const Context& context, Term term, DVec3 point) noexcept {
+    // Read with all its octaves at every detail, so a coarse voxel shows what's at its middle
     // and coarse ground holds each material in the same share as fine.
     const double voxel = context.planet->voxel;
     const Octaves octaves{.wavelength = 32.0 * voxel, .gain = 0.5, .finest = 2.0 * voxel};
-    const double x =
-        scatter_spread *
-        fbm(direction * context.planet->body.radius, octaves, 0.0, context.seed(term)).value;
+    const double x = scatter_spread * fbm(point, octaves, 0.0, context.seed(term)).value;
     return 0.5 + (0.5 * x / std::sqrt(1.0 + (x * x)));
 }
 
@@ -60,14 +62,15 @@ Scatter scatter_at(const Context& context, DVec3 direction, const Layering& laye
     if (layers.beach > 0.0 && layers.beach_share > 0.0) {
         made.beach = scatter(context, Term::Beach, direction);
     }
-    if (layers.basement_share > 0.0) {
-        made.basement = scatter(context, Term::Basement, direction);
-    }
     return made;
 }
 
-Material basement_at(const Layering& layers, const Scatter& scatter) noexcept {
-    return scatter.basement < layers.basement_share ? layers.basement_with : layers.basement;
+Material basement_at(const Context& context, const Layering& layers, DVec3 point) noexcept {
+    if (layers.basement_share <= 0.0) {
+        return layers.basement;
+    }
+    return scatter_in(context, Term::Basement, point) < layers.basement_share ? layers.basement_with
+                                                                              : layers.basement;
 }
 
 namespace {
@@ -129,15 +132,17 @@ bool past(double depth, double wander, double bottom, double width, double thick
 // The beds' rock at a point past what was laid over them, `laid` metres deep, or the basement,
 // the beds either side showing as the contacts with them wander into the point's.
 Material bedded(const Context& context, const Layering& layers, double wander, double depth,
-                double radius, double laid, Material basement) noexcept {
+                double radius, double laid, DVec3 point) noexcept {
+    // Two basements are both hard rock, so either's contact width stands for both.
+    const Material basement = layers.basement;
     if (layers.cover <= laid) {
-        return basement;
+        return basement_at(context, layers, point);
     }
     const std::int64_t bed = bed_at(context, layers, radius);
     const Material rock = bed_rock(context, bed);
     if (past(depth, wander, layers.cover, std::max(contact_width(rock), contact_width(basement)),
              layers.cover - laid)) {
-        return basement;
+        return basement_at(context, layers, point);
     }
     const double base = depth + radius - bed_bottom(context, layers, bed);
     const double roof = base - bed_thickness;
@@ -148,20 +153,22 @@ Material bedded(const Context& context, const Layering& layers, double wander, d
             return above;
         }
     }
-    const Material below = base >= layers.cover ? basement : bed_rock(context, bed - 1);
-    return past(depth, wander, base, std::max(contact_width(rock), contact_width(below)),
-                bed_thickness)
-               ? below
-               : rock;
+    const bool on_basement = base >= layers.cover;
+    const Material below = on_basement ? basement : bed_rock(context, bed - 1);
+    if (!past(depth, wander, base, std::max(contact_width(rock), contact_width(below)),
+              bed_thickness)) {
+        return rock;
+    }
+    return on_basement ? basement_at(context, layers, point) : below;
 }
 
 } // namespace
 
 Material material_at(const Context& context, const Layering& layers, const Scatter& scatter,
-                     double depth, double radius) noexcept {
-    const Material basement = basement_at(layers, scatter);
+                     DVec3 direction, double depth, double radius) noexcept {
+    const DVec3 point = direction * radius;
     if (depth >= layers.cover + contact_reach) {
-        return basement;
+        return basement_at(context, layers, point);
     }
     const Material beach = scatter.beach < layers.beach_share ? layers.beach_with : layers.beach_of;
     const Stack stack = stacked(layers, beach);
@@ -173,7 +180,7 @@ Material material_at(const Context& context, const Layering& layers, const Scatt
             continue;
         }
         // What lies under it: the next layer, or rock.
-        Material under = basement;
+        Material under = layers.basement;
         if (k + 1 < stack.count) {
             under = stack.layers.at(k + 1).material;
         } else if (bottom < layers.cover) {
@@ -185,7 +192,7 @@ Material material_at(const Context& context, const Layering& layers, const Scatt
             return layer.material;
         }
     }
-    return bedded(context, layers, scatter.contacts, depth, radius, bottom, basement);
+    return bedded(context, layers, scatter.contacts, depth, radius, bottom, point);
 }
 
 std::int64_t bed_at(const Context& context, const Layering& layers, double radius) noexcept {

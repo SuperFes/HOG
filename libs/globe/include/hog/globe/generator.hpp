@@ -76,7 +76,6 @@ struct Strata {
 struct Scatter {
     double contacts = 0.5;
     double beach = 0.5;
-    double basement = 0.5;
 };
 
 // A block of rock fallen from a crag and lying on the ground below it, as the box its joints

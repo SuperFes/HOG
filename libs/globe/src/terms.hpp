@@ -143,19 +143,24 @@ inline constexpr double contact_reach = widest_contact / 2.0;
 // Noise from 0 to 1 at `direction`, spread nearly evenly over that: under a share at that share
 // of places.
 [[nodiscard]] double scatter(const Context& context, Term term, DVec3 direction) noexcept;
+// The same at a point anywhere, metres from the planet's centre, for what varies with depth too.
+[[nodiscard]] double scatter_in(const Context& context, Term term, DVec3 point) noexcept;
 // Each the column under `direction` takes, those it has no use for under `layers` left out.
 [[nodiscard]] Scatter scatter_at(const Context& context, DVec3 direction,
                                  const Layering& layers) noexcept;
 
-// The rock under the beds, as `scatter` picks it.
-[[nodiscard]] Material basement_at(const Layering& layers, const Scatter& scatter) noexcept;
+// The rock under the beds at `point`, metres from the planet's centre: two basements lie mixed in
+// bodies, not columns.
+[[nodiscard]] Material basement_at(const Context& context, const Layering& layers,
+                                   DVec3 point) noexcept;
 
 // What's `depth` metres under the ground at `radius`, each contact wandering over the wider
 // width of the materials either side of it: half of it either way of where it was laid, but up
 // no more than half a thinner layer, so a layer thinning out shows in patches, ever fewer, and
 // none where it ends. Each contact is one surface, wavy as `scatter` has it.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers,
-                                   const Scatter& scatter, double depth, double radius) noexcept;
+                                   const Scatter& scatter, DVec3 direction, double depth,
+                                   double radius) noexcept;
 
 // Sedimentary beds run a few metres thick; a cliff shows dozens.
 inline constexpr double bed_thickness = 8.0;
