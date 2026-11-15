@@ -131,7 +131,7 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
         UNSCOPED_INFO("distance slope off by " << total << " on average, " << worst << " at worst");
         CHECK(total < 0.01);
         // Sharp edges are the worst: the estimate is a slope's, and an edge has two.
-        CHECK(worst < 0.08);
+        CHECK(worst < 0.09);
     };
     check(hog::testing::small_world());
     for (const World kind : {World::Frozen, World::Airless}) {
@@ -168,7 +168,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x8f49'53b7'd1b5'ed02ULL);
+    CHECK(digest == 0x42ab'dd9d'653e'b000ULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {

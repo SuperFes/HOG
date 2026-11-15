@@ -75,9 +75,11 @@ TEST_CASE("the pockets found under the ground are the hollows in it, near to far
     const double took =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     CHECK(took < 5.0);
+    // Each hollow is a pocket of its own, or part of a cave it broke into.
     for (const DVec3 hollow : hollows) {
-        CHECK(std::ranges::any_of(
-            pockets, [&](const Pocket& pocket) { return glm::length(pocket.at - hollow) < 6.0; }));
+        CHECK(std::ranges::any_of(pockets, [&](const Pocket& pocket) {
+            return glm::length(pocket.at - hollow) < std::max(6.0, pocket.across / 2.0);
+        }));
     }
     double last = 0.0;
     for (const Pocket& pocket : pockets) {

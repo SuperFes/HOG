@@ -79,9 +79,9 @@ struct Channel {
 constexpr double bankfull = 4.0;
 
 // From cubic metres a year wearing it and passing it, its lowest and highest months' flow `low`
-// and `high` times its mean.
-Channel channel_of(double wearing, double passing, double fall, bool loose, double reach,
-                   double low, double high) noexcept {
+// and `high` times its mean, meandering over no more than a quarter of `room` either way.
+Channel channel_of(double wearing, double passing, double fall, bool loose, double room, double low,
+                   double high) noexcept {
     constexpr double seconds_a_year = 31'557'600.0;
     constexpr double gentle = 0.01; // falls under which rivers wander freely
     const double mean = wearing / seconds_a_year;
@@ -97,7 +97,7 @@ Channel channel_of(double wearing, double passing, double fall, bool loose, doub
     channel.meander_length = 11.0 * channel.width;
     channel.meander = std::min(0.3 * channel.meander_length * (loose ? 1.0 : 0.3) *
                                    std::clamp(1.0 - (fall / gentle), 0.0, 1.0),
-                               reach / 4.0);
+                               room / 4.0);
     channel.belt = channel.meander + (channel.width / 2.0);
     return channel;
 }
@@ -1071,9 +1071,11 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     lowered.add(smooth, 0.0, smooth.value);
     // The lowest the ground stands with no river's channel cut in it.
     double banks = smooth.value;
-    // Walls reach a little way from their valleys, so none is ever missed among those of the
-    // points weighed here, however the points weighed change.
-    const double reach = 0.6 * sphere.spacing() * radius_;
+    // Walls reach far enough from their valleys to climb to the ground about them, which takes a
+    // point's run or more where the rock holds them gentler than the points fall; else their fade
+    // stands as a cliff along the course. Past the points weighed here a valley fades with its
+    // point's weight.
+    const double reach = 1.8 * sphere.spacing() * radius_;
     // Valleys wander off the lines their courses are drawn on at every scale down to the finest
     // asked, so their floors, walls and the reach of each ragged out of true; never so sharply
     // that the ground folds over, so their walls stand a little steeper or gentler and their
@@ -1208,8 +1210,9 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const double fall = metres > 0.0 ? (top_[point] - floor_to) / metres : 0.0;
     const auto channel_at = [&](std::uint32_t at, double falling) {
         Channel made = channel_of(world.rivers.flood[at], world.lakes.discharge[at], falling,
-                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep, reach,
-                                  world.regimes.low[at], world.regimes.high[at]);
+                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
+                                  0.6 * sphere.spacing() * radius_, world.regimes.low[at],
+                                  world.regimes.high[at]);
         // Channels too narrow for the detail asked fade out with their water, as gullies do.
         const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
         made.depth *= shown;

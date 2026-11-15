@@ -105,7 +105,11 @@ TEST_CASE("the ground under the sea is soaked to its pores, and dry above it", "
         REQUIRE(under.distance < 0.0);
         if (ground < sea) {
             CHECK(under.liquid == Material::Water);
-            CHECK(under.water == hog::globe::properties(under.material).porosity);
+            // Its pores alone where the voxel lies wholly in the ground, not across steep ground's
+            // surface a metre over.
+            if (under.distance <= -0.25) {
+                CHECK(under.water == hog::globe::properties(under.material).porosity);
+            }
             CHECK(under.water > 0.0);
             ++soaked;
         } else if (ground > sea + 50.0) {

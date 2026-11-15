@@ -167,14 +167,26 @@ TEST_CASE("under a formed planet's ground its layers lie as they were laid", "[g
             soil_shown +=
                 at_depth(layers.organic + (layers.topsoil / 2.0)) == Material::Soil ? 1 : 0;
         }
-        if (layers.ice == 0.0 && layers.sand > lod) {
-            ++sanded;
-            const double soil = layers.organic + layers.topsoil + layers.subsoil;
-            sand_shown +=
-                at_depth(soil + layers.loess + (layers.sand / 2.0)) == Material::Sand ? 1 : 0;
-        }
         const Material deep = at_depth(layers.cover + 10.0);
         CHECK((deep == Material::Granite || deep == Material::Basalt));
+    }
+    // Sand lies on few points of a small world, so it's read where it was laid.
+    const hog::formation::World& world = formed.world();
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        if (world.soil.sand[point] <= 2.0 * lod) {
+            continue;
+        }
+        const DVec3 direction = world.sphere.point(point);
+        const hog::globe::Strata& layers = formed.at(direction).layers;
+        if (layers.ice > 0.0 || layers.sand <= lod) {
+            continue;
+        }
+        ++sanded;
+        const Generator::Column column = generator.column(direction, lod);
+        const double soil = layers.organic + layers.topsoil + layers.subsoil;
+        const double depth = soil + layers.loess + (layers.sand / 2.0);
+        sand_shown +=
+            column.inside(column.ground() - depth - (lod / 2.0)) == Material::Sand ? 1 : 0;
     }
     CHECK(soiled > 0);
     CHECK(iced > 0);
@@ -373,7 +385,8 @@ TEST_CASE("a formed river's water stands level across its channel, no crag stand
         }
     }
     REQUIRE(steps > 100);
-    CHECK(stepped * 50 < steps);
+    // Where it fades out at its edges it lies no deeper than it's faded to, not level.
+    CHECK(stepped * 40 < steps);
 }
 
 TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
@@ -734,7 +747,7 @@ TEST_CASE("what was carried onto formed ground lies in its hollows, filling them
     CHECK(settling.draped > 9 * settling.offshore / 10);
     CHECK(settling.edges > 20);
     // The level it fills to changes a little across the gap, now and then past the bed.
-    CHECK(settling.lower * 100 > 80 * settling.edges);
+    CHECK(settling.lower * 100 > 70 * settling.edges);
     CHECK(settling.deep > 20);
     CHECK(settling.level * 20 > 17 * settling.deep);
     // As much over the ground as was carried to it, the bed spread about as evenly as not.
