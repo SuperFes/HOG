@@ -183,11 +183,18 @@ TEST_CASE("blocks too small for the detail read lie spread over the ground as ru
     const Setup setup;
     const auto found = rocks_on(setup, 1'500, 0.5);
     REQUIRE_FALSE(found.empty());
-    const Rock& rock = found.front().rock;
+    // Where blocks cover the most ground, so most of what's read coarsely is their rubble.
+    const auto cover_under = [&](const Rock& rock) {
+        return hog::globe::terms::fallen_cover(
+            setup.context,
+            hog::globe::cell_under(glm::normalize(rock.middle),
+                                   hog::globe::terms::rock_level(setup.generator.planet())));
+    };
+    const Rock& rock =
+        std::ranges::max_element(found, {}, [&](const auto& at) { return cover_under(at.rock); })
+            ->rock;
     const DVec3 down = glm::normalize(rock.middle);
-    const Cell coarsest =
-        hog::globe::cell_under(down, hog::globe::terms::rock_level(setup.generator.planet()));
-    const double cover = hog::globe::terms::fallen_cover(setup.context, coarsest);
+    const double cover = cover_under(rock);
     // Read finely enough for every block, none is rubble.
     CHECK(hog::globe::terms::fallen(setup.context, down, 0.01).rubble.depth == 0.0);
     // The coarser, the more of them rubble, all of them at last, of the rock they fell from, no
