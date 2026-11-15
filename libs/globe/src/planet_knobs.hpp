@@ -36,6 +36,8 @@ inline constexpr std::array body_numbers{
     std::pair{"arc_height"sv, &formation::Body::arc_height},
     std::pair{"rift_depth"sv, &formation::Body::rift_depth},
     std::pair{"uplift_share"sv, &formation::Body::uplift_share},
+    std::pair{"belt_ruggedness"sv, &formation::Body::belt_ruggedness},
+    std::pair{"titan_strength"sv, &formation::Body::titan_strength},
     std::pair{"cover_thickness"sv, &formation::Body::cover_thickness},
     std::pair{"rift_fill"sv, &formation::Body::rift_fill},
     std::pair{"sea_floor_mud"sv, &formation::Body::sea_floor_mud},
@@ -138,6 +140,7 @@ inline constexpr std::array body_counts{
     std::pair{"plates"sv, &formation::Body::plates},
     std::pair{"continents"sv, &formation::Body::continents},
     std::pair{"lava_floods"sv, &formation::Body::lava_floods},
+    std::pair{"titan_ranges"sv, &formation::Body::titan_ranges},
 };
 
 // In [planet.ore_abundance].
@@ -164,8 +167,9 @@ inline constexpr std::array shell{
 };
 
 // A knob added to the formation's Body must be added above, or a planet would drop it. The seed
-// and star_flux are the doubles' two extra; lava_floods sits alone among doubles, padded out.
-inline constexpr std::size_t lone_int_padding = sizeof(double) - sizeof(int);
+// and star_flux are the doubles' two extra; lava_floods and titan_ranges each sit alone among
+// doubles, padded out.
+inline constexpr std::size_t lone_int_padding = 2 * (sizeof(double) - sizeof(int));
 static_assert(sizeof(formation::Body) ==
                   ((body_numbers.size() + 1 + 1 + ores.size()) * sizeof(double)) +
                       (body_counts.size() * sizeof(int)) + lone_int_padding,

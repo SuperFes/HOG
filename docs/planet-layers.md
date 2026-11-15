@@ -182,6 +182,52 @@ terraces, floodplains, wetlands, springs, calderas or reefs.
 11. **Fidelity at every level:** each term gives the right average when coarse, so LOD changes
     don't show, and coarse tiles cost less than fine ones rather than more.
 
+## Hero features
+
+Agreed 2026-11-14: it's a game, so the world should hold striking features, bigger and stranger
+than Earth's where a knob says so. Each grows where its process fits (lava on ridges, tarns in
+glacial bowls above the snowline, necks in old volcanic fields) and is set by size and rarity
+knobs; exaggerating is fine, clamping toward a look still isn't. ★ marks what Tier 3 already
+lists.
+
+Order:
+1. **Titan ranges, sinister peaks and summit tarns.**
+   - a. Titan belts: a few seeded collision or subduction belts keep more of their shortening as
+     thicker crust and hold it before spreading (`titan_ranges`, `titan_strength`). Ice, carving
+     and lakes follow from the height.
+   - b. Dark, steep rock: sea floor and mantle shoved up in titan belts (ophiolite), strong rock
+     standing steeper than the global hillslope limit.
+   - c. Tarns in carved bowls and chains down glacial valleys; lake water freezing over where the
+     year stays below freezing.
+2. **Lava under the sea:** glowing fissures along ridges, pillow lava, black smokers, steam over
+   shallow vents.
+3. **Calderas★ and volcanic necks:** crater lakes with island cones; necks with dikes radiating
+   across worn-down volcanic fields.
+
+Backlog:
+- Mountains: needle spires, horns and knife ridges, overhanging faces, hanging valleys and
+  icefalls, penitentes, frozen waterfalls, table mountains with falls off them, arches and
+  balanced rocks.
+- Volcanic: summit lava lakes, fissure lava fields and kipukas, lava tubes, hot spring terraces,
+  acid lakes and sulfur fields, geysers★, mud pots, fumaroles.
+- Water: giant falls over hard beds★, slot canyons and gorges, sinking rivers and cliff springs★,
+  cenotes and blue holes, tower karst, sea stacks and arches, reefs and atolls★, pink salt lakes,
+  salt flats★, soda lakes.
+- Deserts and wastelands: dune seas★, gypsum dunes, oases, mesas and buttes, hoodoos, striped
+  badlands, yardangs, rock pedestals, ash plains, sulfur and salt flats with acid pools, impact
+  craters (fresh with rays, old and lake-filled, a multi-ring basin).
+- Ice: ice caps, glaciers clear blue to dirty, ice shelves calving bergs, sea ice★, pingos,
+  permafrost polygons★, ice caves.
+- Underground: chambers with skylight dolines and forest inside, crystal caves, underground rivers
+  and lakes, collapse sinkholes into caves.
+- Ground for life: floodplains, wetlands★, mangrove coasts, cloud-forest belts, karst towers and
+  table-mountain tops as islands of growth.
+- Fantastical, behind toggles: arches and spires past real rock strength, floating rock islands,
+  glowing mineral springs.
+
+The biome extremes (lush, desert, wasteland, ice) read the climate map; a biome field over it is
+missing and both these features and plants would read it.
+
 ## References
 
 - Ores by host rock, climate bands, seasons: Vintage Story wiki,

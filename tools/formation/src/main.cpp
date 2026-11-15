@@ -41,7 +41,8 @@ using hog::formation_lab::Rgb;
 constexpr std::string_view usage =
     "usage: hog-formation [--seed N] [--plates N] [--continents N] [--land SHARE]\n"
     "                     [--speed DEG_PER_MYR] [--age MYR] [--radius M] [--lid M]\n"
-    "                     [--cooling DEG_C] [--glaciated YEARS]\n"
+    "                     [--cooling DEG_C] [--glaciated YEARS] [--titans N]\n"
+    "                     [--titan-strength TIMES]\n"
     "                     [--layout SPLITS] [--detail SPLITS] [--width N] [--out DIR]\n"
     "Forms a planet in stages and writes a map of each stage's result to DIR:\n"
     "plates.png (plates, light crust, and how they meet), base.png (how the crust stands),\n"
@@ -99,6 +100,10 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.body.ice_cooling = n;
     } else if (name == "--glaciated") {
         options.body.glaciated_years = std::max(n, 0.0);
+    } else if (name == "--titans") {
+        options.body.titan_ranges = std::clamp(whole(), 0, 1000);
+    } else if (name == "--titan-strength") {
+        options.body.titan_strength = std::max(n, 1.0);
     } else if (name == "--layout") {
         options.layout = std::clamp(whole(), 2, Sphere::max_subdivisions);
     } else if (name == "--detail") {
@@ -844,9 +849,16 @@ int run(const Options& options) {
     const hog::formation::Rivers worn = hog::formation::rivers_on(
         sphere, crust, climate, hog::formation::standing_strength(sphere, crust, bedrock, body),
         body);
-    std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m\n",
-                             seconds_since(at), worn.rounds,
-                             *std::ranges::max_element(worn.height));
+    const auto peak =
+        static_cast<std::size_t>(std::ranges::max_element(worn.height) - worn.height.begin());
+    // The climate was worked out over the crust as it stood; the peak stands where it wore to.
+    const double peak_celsius =
+        climate.temperature[peak] -
+        (body.lapse_rate * (worn.height[peak] - std::max(crust.base[peak], 0.0)));
+    std::cout << std::format("rivers in {:.2f} s, settled after {} routings, highest {:.0f} m "
+                             "({:.1f} °C, {:.2f} m of rain a year, crust standing {:.0f} m)\n",
+                             seconds_since(at), worn.rounds, worn.height[peak], peak_celsius,
+                             climate.rain[peak], crust.base[peak]);
     at = std::chrono::steady_clock::now();
     const hog::formation::Ice ice = hog::formation::ice_on(sphere, crust, climate, worn, body);
     const hog::formation::Rivers rivers = hog::formation::ice_shaped(sphere, worn, ice);

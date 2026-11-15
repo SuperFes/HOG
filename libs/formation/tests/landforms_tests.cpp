@@ -84,6 +84,9 @@ TEST_CASE("landforms are likelihoods on land only", "[formation][landforms]") {
 TEST_CASE("each landform comes only where what makes it is", "[formation][landforms]") {
     const Made made;
     const Landforms& forms = made.forms;
+    // Troughs too shallow to show against the relief land stands at over a point's run.
+    const double run = made.sphere.spacing() * made.body.radius;
+    const double shallow = 0.004 * hog::formation::steepest_over(run, made.body) * run;
     for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
         const Rock rock = made.outcrop.rock[point];
         if (rock != Rock::Layered && rock != Rock::Folded) {
@@ -92,7 +95,7 @@ TEST_CASE("each landform comes only where what makes it is", "[formation][landfo
         if (made.bedrock.soluble[point] == 0.0) {
             CHECK(forms.karst[point] == 0.0);
         }
-        if (made.ice.carved[point] <= 20.0) {
+        if (made.ice.carved[point] <= shallow) {
             CHECK(forms.glacial[point] == 0.0);
         }
         if (rock != Rock::Layered && rock != Rock::Lava) {

@@ -30,6 +30,7 @@ struct Boundary {
     double closing = 0.0;        // radians a million years; under 0 pulling apart
     double width = 0.0;          // radians to its belt's edge
     double thickened = 0.0;      // metres the crust has thickened at its middle
+    bool titan = false;          // one of the titan belts, holding far thicker crust
 };
 
 // The plates as they are now and how they've been moving: laid out on a coarse sphere, each
@@ -79,6 +80,7 @@ struct Crust {
     std::vector<double> boundary;  // radians to the nearest boundary
     std::vector<double> floor_age; // millions of years since the sea floor was made
     std::vector<std::uint8_t> sea; // 1 under open sea; basins under the level elsewhere are land
+    std::vector<double> titan;     // how much a titan belt holds here, 0 to 1
 };
 
 [[nodiscard]] Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body);

@@ -152,7 +152,10 @@ Sides sides_of(const Plates& plates, const Steps& found, std::span<const std::si
     return sides;
 }
 
-Boundary classify(const Plates& plates, const Body& body, const Step& step, const Sides& sides) {
+// `hold` is how many times as much of its shortening the crust keeps as thicker crust, and holds
+// before it spreads: 1 but in titan belts.
+Boundary classify(const Plates& plates, const Body& body, const Step& step, const Sides& sides,
+                  double hold) {
     const std::uint16_t a = plates.plate(step.from);
     const std::uint16_t b = plates.plate(step.to);
     const DVec3 relative = plates.velocity(b, step.middle) - plates.velocity(a, step.middle);
@@ -177,15 +180,18 @@ Boundary classify(const Plates& plates, const Body& body, const Step& step, cons
         // Crust thickens over the belt's width; past twice its own thickness it spreads sideways
         // instead, widening the belt into a plateau.
         boundary.meeting = Meeting::Collision;
-        const double piled = body.thickening * shortening / std::sqrt(std::numbers::pi);
-        boundary.width = std::max(belt_width(body), piled);
+        const double piled = hold * body.thickening * shortening / std::sqrt(std::numbers::pi);
+        boundary.width = std::max(belt_width(body), piled / hold);
         boundary.thickened = piled * body.crust_thickness / boundary.width;
+        boundary.titan = hold > 1.0;
     } else if (lit_a || lit_b) {
         boundary.meeting = Meeting::Subduction;
         boundary.over = lit_a ? a : b;
-        const double piled = 0.5 * body.thickening * shortening / std::sqrt(std::numbers::pi);
-        boundary.thickened =
-            std::min(piled * body.crust_thickness / belt_width(body), 0.6 * body.crust_thickness);
+        const double piled =
+            0.5 * hold * body.thickening * shortening / std::sqrt(std::numbers::pi);
+        boundary.thickened = std::min(piled * body.crust_thickness / belt_width(body),
+                                      0.6 * hold * body.crust_thickness);
+        boundary.titan = hold > 1.0;
     } else {
         boundary.meeting = Meeting::IslandArc;
         boundary.over = plates.rides_over(a, b) ? a : b;
@@ -193,15 +199,45 @@ Boundary classify(const Plates& plates, const Body& body, const Step& step, cons
     return boundary;
 }
 
+// The pairs of plates whose belts are titans: of those closing on light crust, seeded, the
+// longer a pair's belt the likelier.
+std::vector<std::uint32_t> titan_pairs(const Plates& plates, const Body& body, const Steps& found) {
+    std::vector<std::pair<double, std::uint32_t>> ranked;
+    for (const auto& [key, members] : found.by_pair) {
+        int closing = 0;
+        for (const std::size_t index : members) {
+            const Step& step = found.steps[index];
+            const Meeting meeting =
+                classify(plates, body, step, sides_of(plates, found, members, step), 1.0).meeting;
+            closing += meeting == Meeting::Collision || meeting == Meeting::Subduction ? 1 : 0;
+        }
+        if (closing > 0) {
+            ranked.emplace_back(closing * unit(hash_values(body.seed, 16, key)), key);
+        }
+    }
+    std::ranges::stable_sort(ranked, std::ranges::greater{});
+    const auto count =
+        std::min(ranked.size(), static_cast<std::size_t>(std::max(body.titan_ranges, 0)));
+    std::vector<std::uint32_t> titans;
+    titans.reserve(count);
+    for (std::size_t rank = 0; rank < count; ++rank) {
+        titans.push_back(ranked[rank].second);
+    }
+    return titans;
+}
+
 std::vector<Boundary> find_boundaries(const Plates& plates, const Body& body) {
     const Steps found = boundary_steps(plates);
+    const std::vector<std::uint32_t> titans = titan_pairs(plates, body, found);
     std::vector<Boundary> boundaries;
     boundaries.reserve(found.steps.size());
     for (const auto& [key, members] : found.by_pair) {
+        const bool titan = std::ranges::find(titans, key) != titans.end();
+        const double hold = titan ? std::max(body.titan_strength, 1.0) : 1.0;
         for (const std::size_t index : members) {
             const Step& step = found.steps[index];
             boundaries.push_back(
-                classify(plates, body, step, sides_of(plates, found, members, step)));
+                classify(plates, body, step, sides_of(plates, found, members, step), hold));
         }
     }
     return boundaries;
@@ -431,6 +467,17 @@ Shaped shaped_by(const Boundary& kind, double distance, double light, bool ridin
     return {};
 }
 
+// The sphere level whose points lie about half a belt's width apart.
+int belt_level(const Sphere& sphere, const Body& body) {
+    int level = sphere.subdivisions();
+    double spacing = sphere.spacing();
+    while (level > 0 && spacing < 0.5 * belt_width(body)) {
+        --level;
+        spacing *= 2.0;
+    }
+    return level;
+}
+
 } // namespace
 
 Plates::Plates(const Body& body, const Sphere& layout)
@@ -498,12 +545,15 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
     crust.meeting.resize(size, Meeting::None);
     crust.boundary.resize(size);
     crust.floor_age.resize(size);
+    crust.titan.resize(size, 0.0);
     read_layout(sphere, plates, body, crust);
 
     const KindFinder finder{sphere, plates.boundaries()};
     const FineBoundaries fine = fine_boundaries(sphere, finder, crust);
     const Nearest nearest = nearest_sources(sphere, fine.sources);
     const Nearest ridge = nearest_sources(sphere, fine.ridges);
+    const std::vector<double> rugged = sphere_noise(
+        sphere, hash_values(body.seed, 17), belt_level(sphere, body), sphere.subdivisions());
     for (std::uint32_t point = 0; point < size; ++point) {
         const double light = crust.light[point];
         double age = oldest_floor;
@@ -525,8 +575,10 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
         crust.meeting[point] = distance < 3.0 * belt_width(body) ? kind.meeting : Meeting::None;
         const Shaped shaped =
             shaped_by(kind, distance, light, kind.over == crust.plate[point], floor, body);
-        crust.base[point] += shaped.base;
+        crust.base[point] += shaped.base * (1.0 + (std::clamp(body.belt_ruggedness, 0.0, 1.0) *
+                                                   (shaped.base > 0.0 ? rugged[point] : 0.0)));
         crust.uplift[point] += shaped.uplift;
+        crust.titan[point] = kind.titan ? light * bell(distance / kind.width) : 0.0;
     }
     crust.sea = open_sea(sphere, crust.base, body.smallest_sea);
     return crust;

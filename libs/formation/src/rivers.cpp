@@ -118,6 +118,16 @@ void gather(const Ground& ground, std::span<const std::uint32_t> order, Rivers& 
     }
 }
 
+// How many times steeper the rock at `point` stands, and slower it wears: more in titan belts.
+double titan_hold(const Crust& crust, const Body& body, std::uint32_t point) {
+    const double titan = point < crust.titan.size() ? crust.titan[point] : 0.0;
+    return 1.0 + ((std::max(body.titan_strength, 1.0) - 1.0) * titan);
+}
+
+double steepest_at(const Ground& ground, std::uint32_t point, double length) {
+    return steepest_over(length, *ground.body) * titan_hold(*ground.crust, *ground.body, point);
+}
+
 // Up from the coast, each step as steep as balances wear against uplift there, a river having to
 // pass a threshold before it cuts at all; no steeper than slopes stand before they slide, and
 // never higher than the crust floats.
@@ -134,7 +144,7 @@ void raise(const Ground& ground, std::span<const std::uint32_t> order,
                              (ground.erodibility[point] * maths::pow(flow, body.discharge_power));
         // Where the crust's cap falls under the ground downstream, the hollow is filled all but
         // flat, so water still finds its way out; lakes are left to a stage of their own.
-        const double worn = below + (length * std::min(slope, steepest_over(length, body)));
+        const double worn = below + (length * std::min(slope, steepest_at(ground, point, length)));
         rivers.ground[point] = std::min(worn, ground.crust->base[point]);
         rivers.height[point] = std::max(rivers.ground[point], below + (1e-6 * length));
     }
@@ -212,7 +222,7 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
         const double length =
             angle(ground.sphere->point(point), ground.sphere->point(down)) * body.radius;
         const double slope = (rivers.height[point] - below) / length;
-        if (slope >= steepest_over(length, body) * (1.0 - 1e-9)) {
+        if (slope >= steepest_at(ground, point, length) * (1.0 - 1e-9)) {
             rivers.wear[point] = uplift;
             continue;
         }
@@ -263,7 +273,8 @@ Rivers rivers_on(const Sphere& sphere, const Crust& crust, const Climate& climat
         const double strong = point < strength.size() ? strength[point] - 0.5 : 0.0;
         ground.erodibility[point] = body.erodibility *
                                     (1.0 - (body.cover_holding * rivers.cover[point])) *
-                                    maths::exp(-std::numbers::ln10 * body.rock_hardness * strong);
+                                    maths::exp(-std::numbers::ln10 * body.rock_hardness * strong) /
+                                    titan_hold(crust, body, point);
     }
     flood_from_sea(ground, rivers.receiver);
 

@@ -40,6 +40,14 @@ struct Body {
     double arc_height = 2'000.0;     // metres volcanoes build behind a trench
     double rift_depth = 1'500.0;     // metres a continent sags where it's pulled apart
     double uplift_share = 0.15;      // of the closing speed that pushes rock up in a belt
+    // Share a belt's thickening varies by along and across it, as the plates' edges and the rock
+    // they meet do: its crest rises to peaks and dips to cols rather than running level.
+    double belt_ruggedness = 0.5;
+    // A few belts where plates close, seeded, the longest likeliest, whose crust keeps
+    // `titan_strength` times as much of its shortening, holds that much more before spreading,
+    // and whose rock stands that many times steeper and wears that many times slower.
+    double titan_strength = 3.0;
+    int titan_ranges = 1;
 
     // Rock as it lies, by what shapes the land: layered rock laid over a hard basement, folded
     // where plates collided, lava over both. What the planet's history laid where is seeded.

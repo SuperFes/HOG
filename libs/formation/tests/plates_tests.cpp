@@ -160,3 +160,61 @@ TEST_CASE("the same body makes the same crust", "[formation][plates]") {
     CHECK(one.crust.base == two.crust.base);
     CHECK(one.crust.uplift == two.crust.uplift);
 }
+
+TEST_CASE("a titan belt holds far thicker crust, along one pair of plates only",
+          "[formation][plates]") {
+    Body plain;
+    plain.titan_ranges = 0;
+    const Sphere layout{5, plain.seed};
+    const Plates without{plain, layout};
+    const Plates with{Body{}, layout};
+    std::vector<std::uint32_t> pairs;
+    for (std::size_t index = 0; index < with.boundaries().size(); ++index) {
+        const auto& titan = with.boundaries()[index];
+        const auto& usual = without.boundaries()[index];
+        CHECK_FALSE(usual.titan);
+        if (!titan.titan) {
+            CHECK(titan.thickened == usual.thickened);
+            continue;
+        }
+        CHECK((titan.meeting == Meeting::Collision || titan.meeting == Meeting::Subduction));
+        CHECK(titan.thickened > 2.0 * usual.thickened);
+        const auto key =
+            (std::uint32_t{std::min(titan.a, titan.b)} << 16U) | std::max(titan.a, titan.b);
+        if (std::ranges::find(pairs, key) == pairs.end()) {
+            pairs.push_back(key);
+        }
+    }
+    CHECK(pairs.size() == 1);
+}
+
+TEST_CASE("a belt's crest rises and dips along it rather than running level",
+          "[formation][plates]") {
+    Body level;
+    level.belt_ruggedness = 0.0;
+    const Body rugged;
+    const Sphere layout{5, level.seed};
+    const Sphere sphere{6, level.seed + 1};
+    const Plates plates{level, layout};
+    const Crust flat = crust_on(sphere, plates, level);
+    const Crust rough = crust_on(sphere, plates, rugged);
+    double sum = 0.0;
+    double squares = 0.0;
+    int belts = 0;
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        // Thickened light crust, so all it stands over the continents' height is the belt's.
+        const double thickened = flat.base[point] - level.continent_height;
+        if (flat.meeting[point] != Meeting::Collision || flat.light[point] < 0.999 ||
+            thickened < 500.0) {
+            continue;
+        }
+        const double ratio = (rough.base[point] - flat.base[point]) / thickened;
+        CHECK(std::abs(ratio) <= rugged.belt_ruggedness);
+        sum += ratio;
+        squares += ratio * ratio;
+        ++belts;
+    }
+    REQUIRE(belts > 50);
+    const double mean = sum / belts;
+    CHECK(std::sqrt((squares / belts) - (mean * mean)) > 0.05);
+}

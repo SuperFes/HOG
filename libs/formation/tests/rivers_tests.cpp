@@ -161,3 +161,20 @@ TEST_CASE("the same body wears the same land", "[formation][rivers]") {
     CHECK(one.rivers.height == two.rivers.height);
     CHECK(one.rivers.receiver == two.rivers.receiver);
 }
+
+TEST_CASE("a titan belt's rock stands steeper, its land higher than ordinary rock's",
+          "[formation][rivers]") {
+    Body plain;
+    plain.titan_ranges = 0;
+    const Made titan;
+    const Made usual{plain};
+    double titan_highest = 0.0;
+    double usual_highest = 0.0;
+    for (std::uint32_t point = 0; point < titan.sphere.size(); ++point) {
+        if (titan.crust.titan[point] > 0.5 && on_land(titan, point)) {
+            titan_highest = std::max(titan_highest, titan.rivers.height[point]);
+            usual_highest = std::max(usual_highest, usual.rivers.height[point]);
+        }
+    }
+    CHECK(titan_highest > 1.5 * usual_highest);
+}
