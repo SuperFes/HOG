@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <numbers>
 #include <random>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -142,7 +143,8 @@ TEST_CASE("ways the ground could stand that run alike merge without digging unde
     Lowered lowered{50.0, 50.0};
     lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
     lowered.add({.value = 100.5, .gradient = {0.5, 0.0, 0.0}}, 1.0, 0.0);
-    CHECK_THAT(lowered.lowest().value, WithinAbs(100.0, 1e-9));
+    // But for the millimetres the soft turn between them takes.
+    CHECK_THAT(lowered.lowest().value, WithinAbs(100.0, 0.005));
 }
 
 TEST_CASE("walls meeting head on round over as much height as they part across the rounding, "
@@ -166,7 +168,10 @@ TEST_CASE("many walls meeting round the lowest no more than the one it meets mos
     for (int k = 0; k < 12; ++k) {
         lowered.add({.value = 100.0 + (0.1 * k), .gradient = {-0.5, 0.0, 0.0}}, 1.0, 0.0);
     }
-    CHECK_THAT(lowered.lowest().value, WithinAbs(90.0, 1e-9));
+    // Turning softly between those meeting about as low, no lower than all thirteen as low.
+    const double lowest = lowered.lowest().value;
+    CHECK(lowest <= 90.0);
+    CHECK(lowest > 90.0 - (hog::globe::lowest_softness * std::log(13.0)));
 }
 
 TEST_CASE("the lowest turns smoothly where another way comes lowest, so a crest rounded from it "
@@ -200,16 +205,60 @@ TEST_CASE("the lowest turns smoothly where another way comes lowest, so a crest 
     CHECK(stepping < 0.05);
 }
 
+TEST_CASE("the lowest rises the way it says, crests rounded and all", "[globe][valleys]") {
+    std::mt19937_64 random{11};
+    std::uniform_real_distribution<double> unit{0.0, 1.0};
+    double worst = 0.0;
+    for (int n = 0; n < 500; ++n) {
+        // A few planes crossing about here, far over their floors.
+        struct Plane {
+            double height;
+            DVec3 rise;
+        };
+        std::vector<Plane> planes;
+        const int count = 2 + static_cast<int>(4.0 * unit(random));
+        planes.reserve(static_cast<std::size_t>(count));
+        for (int k = 0; k < count; ++k) {
+            planes.push_back(
+                {.height = 100.0 + (20.0 * (unit(random) - 0.5)),
+                 .rise = {2.0 * (unit(random) - 0.5), 2.0 * (unit(random) - 0.5), 0.0}});
+        }
+        const auto lowest = [&](double x, double y) {
+            Lowered lowered{20.0, 30.0};
+            for (const Plane& plane : planes) {
+                lowered.add({.value = plane.height + (plane.rise.x * x) + (plane.rise.y * y),
+                             .gradient = plane.rise},
+                            1.0, -1'000.0);
+            }
+            return lowered.lowest();
+        };
+        constexpr double step = 1e-3;
+        for (int k = 0; k < 20; ++k) {
+            const double x = 30.0 * (unit(random) - 0.5);
+            const double y = 30.0 * (unit(random) - 0.5);
+            const DVec3 rise = lowest(x, y).gradient;
+            const double east =
+                (lowest(x + step, y).value - lowest(x - step, y).value) / (2.0 * step);
+            const double north =
+                (lowest(x, y + step).value - lowest(x, y - step).value) / (2.0 * step);
+            worst = std::max(worst, std::hypot(east - rise.x, north - rise.y));
+        }
+    }
+    CHECK(worst < 0.01);
+}
+
 TEST_CASE("rounding a crest never sinks it past halfway down to its floor", "[globe][valleys]") {
     Lowered lowered{40.0, 40.0};
     lowered.add({.value = 100.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 96.0);
     lowered.add({.value = 100.0, .gradient = {-0.5, 0.0, 0.0}}, 1.0, 96.0);
-    CHECK_THAT(lowered.lowest().value, WithinAbs(98.0, 1e-9));
+    CHECK_THAT(lowered.lowest().value, WithinAbs(98.0, 1e-6));
     // On its floor, nothing rounds it lower.
     Lowered floor{40.0, 40.0};
     floor.add({.value = 96.0, .gradient = {0.5, 0.0, 0.0}}, 1.0, 96.0);
     floor.add({.value = 96.0, .gradient = {-0.5, 0.0, 0.0}}, 1.0, 96.0);
-    CHECK_THAT(floor.lowest().value, WithinAbs(96.0, 1e-9));
+    // Only the soft turn between the two takes it under, a few centimetres.
+    CHECK_THAT(floor.lowest().value,
+               WithinAbs(96.0 - (hog::globe::lowest_softness * std::numbers::ln2), 1e-6));
 }
 
 TEST_CASE("a winding valley's ground stands over the floor of the stretch it stands as, handed "
@@ -357,4 +406,58 @@ TEST_CASE("a wall stands within its bounds anywhere in a cap", "[globe][valleys]
         bounded += bounds.standing.high - bounds.standing.low;
     }
     WARN("sampled span " << sampled / bounded << " of the bounds'");
+}
+
+TEST_CASE("a wall's ground rises the way it says, channel, bends and ends and all",
+          "[globe][valleys]") {
+    std::mt19937_64 random{7};
+    std::uniform_real_distribution<double> unit{0.0, 1.0};
+    double worst = 0.0;
+    for (int n = 0; n < 200; ++n) {
+        Valley valley = falling();
+        valley.to = glm::normalize(DVec3{1.0, (200.0 + (2'000.0 * unit(random))) / radius,
+                                         (unit(random) - 0.5) * 1'000.0 / radius});
+        valley.floor_to = 100.0 - (60.0 * unit(random));
+        valley.reach = 200.0 + (600.0 * unit(random));
+        // A belt as wide as the channel winds, as rivers' are.
+        valley.channel_width = 12.0 * unit(random);
+        valley.channel_depth = 3.0 * unit(random);
+        valley.channel_depth_to = 3.0 * unit(random);
+        valley.meander = 20.0 * unit(random);
+        valley.belt = valley.meander + (valley.channel_width / 2.0);
+        valley.meander_length = 11.0 * std::max(valley.channel_width, 1.0);
+        valley.length = 3'000.0;
+        valley.head = 0.2;
+        valley.foot = 0.6;
+        valley.wall = 0.2 + unit(random);
+        valley.seed = static_cast<std::uint64_t>(n);
+        // Every other one bends on into the stretches either side.
+        if (n % 2 == 1) {
+            const DVec3 along = valley.to - valley.from;
+            const auto turned = [&] {
+                return glm::normalize(
+                    along + DVec3{0.0, 0.0, 0.15 * (unit(random) - 0.5) * glm::length(along)});
+            };
+            valley.runs_from = turned();
+            valley.runs_to = turned();
+        }
+        for (int k = 0; k < 30; ++k) {
+            const DVec3 point =
+                at((2'500.0 * unit(random)) - 250.0, (1'200.0 * unit(random)) - 600.0);
+            const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, point));
+            const DVec3 north = glm::cross(point, east);
+            constexpr double step = 0.01;
+            const auto standing = [&](DVec3 way) {
+                return wall_at(valley, glm::normalize(point + (way * (step / radius))), radius)
+                    .standing;
+            };
+            const DVec3 rise = wall_at(valley, point, radius).standing_gradient;
+            const double east_error =
+                ((standing(east) - standing(-east)) / (2.0 * step)) - glm::dot(rise, east);
+            const double north_error =
+                ((standing(north) - standing(-north)) / (2.0 * step)) - glm::dot(rise, north);
+            worst = std::max(worst, std::hypot(east_error, north_error));
+        }
+    }
+    CHECK(worst < 0.05);
 }

@@ -108,7 +108,7 @@ constexpr double out_of_the_way = 1e5;
 // meets another as far as both are walls: a quadratic smooth minimum, its slope shared between the
 // two as they near. The crease is rounded over `rounding` across, in the gradients' units, so it
 // merges over as much height as they part over that: none where they run alike, and no more than
-// `blend`, as walls meeting head on part. Rounded by the one crest the lowest meets most, never by
+// `blend`, as walls meeting head on part. Rounded by the crest the lowest meets most, never by
 // every one at once, which would sink it far below them all; and never lower than halfway down to
 // its floor, handed over between floors as the ground is: what creeps off a crest never digs a
 // floor out. It turns as each way comes lowest over `handing_over`, never at once, so a crest
@@ -131,6 +131,9 @@ private:
     // The floor `low` stands over, handed over from its own to those coming as low over the blend,
     // so none breaks where another comes lowest.
     [[nodiscard]] double floor_under(const Ground& low) const noexcept;
+    // `low` rounded down by the crests it meets with one standing over it, the one it meets most
+    // counting most, never past halfway down to its floor.
+    [[nodiscard]] formation::Smooth::Read rounded(const Ground& low) const noexcept;
     double rounding_ = 0.0;
     double blend_ = 0.0;
     std::array<Ground, 32> grounds_{};
@@ -146,6 +149,9 @@ private:
 // halfway down to its floor: what creeps off a crest never digs the floor out. The water stands
 // at the level of whichever lies lowest, fading out over `handing_over` as another comes lower.
 constexpr double handing_over = 1.0;
+// Metres the ground's turn from one way to the next lowest softens over: where two stand the same
+// height, it stands this times ln 2 under both.
+constexpr double lowest_softness = handing_over / 8.0;
 
 class Lowest {
 public:

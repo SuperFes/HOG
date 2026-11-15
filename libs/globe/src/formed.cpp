@@ -78,6 +78,22 @@ struct Channel {
 
 constexpr double bankfull = 4.0;
 
+// How much the valley from the weighed point `at` counts, and how that changes per radian: as
+// far as it's weighed, or the point it runs into is if more, as it's read while its own isn't, so
+// it doesn't drop out as its own point comes to be weighed.
+std::pair<double, DVec3> weighed_valley(const formation::Smooth::Weights& weights, std::size_t at,
+                                        std::uint32_t receiver) {
+    std::pair<double, DVec3> weighed{weights.weights[at], weights.gradients[at]};
+    if (const auto down = std::ranges::find(weights.points, receiver);
+        down != weights.points.end()) {
+        const auto receiving = static_cast<std::size_t>(down - weights.points.begin());
+        if (weights.weights[receiving] > weighed.first) {
+            weighed = {weights.weights[receiving], weights.gradients[receiving]};
+        }
+    }
+    return weighed;
+}
+
 // From cubic metres a year wearing it and passing it, its lowest and highest months' flow `low`
 // and `high` times its mean, meandering over no more than a quarter of `room` either way.
 Channel channel_of(double wearing, double passing, double fall, bool loose, double room, double low,
@@ -1100,10 +1116,13 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     };
     // A valley is read here as far as its points are weighed here, so none comes or goes at
     // once as the points weighed change.
-    const auto valley = [&](std::uint32_t point, double weighed) {
+    const auto valley = [&](std::uint32_t point, double weighed, DVec3 weighed_gradient) {
         constexpr double weighed_fully = 0.02;
         const double near = std::min(1.0, weighed / weighed_fully);
         const double present = near * near * (3.0 - (2.0 * near));
+        const DVec3 present_gradient =
+            near < 1.0 ? weighed_gradient * (6.0 * near * (1.0 - near) / weighed_fully)
+                       : DVec3{0.0};
         if (present <= 0.0) {
             return;
         }
@@ -1131,10 +1150,11 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         banks = std::min(banks, fade(wall.standing + wall.cut));
         if (wall.standing < smooth.value) {
             const double faded = fade(wall.standing);
-            const DVec3 fading =
-                ((wall.standing_gradient * radius_) * reaching) +
-                (smooth.gradient * (1.0 - reaching)) +
-                ((wall.reaching_gradient * radius_) * present * (wall.standing - smooth.value));
+            const DVec3 fading = ((wall.standing_gradient * radius_) * reaching) +
+                                 (smooth.gradient * (1.0 - reaching)) +
+                                 (((wall.reaching_gradient * radius_ * present) +
+                                   (present_gradient * wall.reaching)) *
+                                  (wall.standing - smooth.value));
             // It's a wall to round a crest against only as far as it sinks below the ground about,
             // which is none.
             const double sunk =
@@ -1155,12 +1175,14 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     };
     for (std::size_t at = 0; at < weights.points.size(); ++at) {
         const std::uint32_t point = weights.points[at];
-        valley(point, weights.weights[at]);
+        const auto [weighed, weighed_gradient] =
+            weighed_valley(weights, at, world.rivers.receiver[point]);
+        valley(point, weighed, weighed_gradient);
         // And those running into it from points not weighed, as far as it is.
         for (const std::uint32_t up : sphere.neighbors(point)) {
             if (world.rivers.receiver[up] == point &&
                 std::ranges::find(weights.points, up) == weights.points.end()) {
-                valley(up, weights.weights[at]);
+                valley(up, weights.weights[at], weights.gradients[at]);
             }
         }
     }

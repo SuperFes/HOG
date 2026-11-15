@@ -7,6 +7,8 @@
 #include <cmath>
 #include <limits>
 #include <span>
+#include <utility>
+#include <vector>
 
 namespace hog::globe {
 
@@ -15,6 +17,51 @@ namespace {
 double smoothstep(double x) noexcept {
     const double t = std::clamp(x, 0.0, 1.0);
     return t * t * (3.0 - (2.0 * t));
+}
+
+// How far from its line its channel may reach: the noise winding it swings up to twice the
+// meander either way.
+double channel_reach(const Valley& valley, double toe) noexcept {
+    return std::max(valley.belt + toe, (2.0 * valley.meander) + (valley.channel_width / 2.0));
+}
+
+double smoothstep_slope(double x) noexcept {
+    const double t = std::clamp(x, 0.0, 1.0);
+    return 6.0 * t * (1.0 - t);
+}
+
+// The channel's cut `lateral` metres to one side of the line's great circle, `run` metres down
+// the whole valley where it's `depth` deep: how deep, and how that changes per metre across and
+// per metre down the valley, as it winds and deepens.
+struct ChannelCut {
+    double cut = 0.0;
+    double across = 0.0;
+    double along = 0.0;
+};
+
+ChannelCut channel_cut(const Valley& valley, double lateral, double run, double depth) noexcept {
+    const double head_end = run / valley.meander_length;
+    const double foot_end = (valley.length - run) / valley.meander_length;
+    const double ends = smoothstep(head_end) * smoothstep(foot_end);
+    const double ends_slope = ((smoothstep_slope(head_end) * smoothstep(foot_end)) -
+                               (smoothstep(head_end) * smoothstep_slope(foot_end))) /
+                              valley.meander_length;
+    const Octaves bends{
+        .wavelength = valley.meander_length, .gain = 0.5, .finest = valley.meander_length / 4.0};
+    const Noise bending = fbm(DVec3{run, 0.0, 0.0}, bends, 0.0, valley.seed);
+    const double wound = valley.meander * ends * bending.value;
+    const double winding =
+        valley.meander * ((ends_slope * bending.value) + (ends * bending.gradient.x));
+    const double across = 2.0 * (lateral - wound) / valley.channel_width;
+    if (std::abs(across) >= 1.0) {
+        return {};
+    }
+    const double deepening =
+        (valley.channel_depth_to - valley.channel_depth) / std::max(valley.length, 1e-300);
+    return {.cut = depth * (1.0 - (across * across)),
+            .across = -depth * 4.0 * across / valley.channel_width,
+            .along = (deepening * (1.0 - (across * across))) +
+                     (4.0 * depth * across / valley.channel_width * winding)};
 }
 
 } // namespace
@@ -57,30 +104,32 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
     }
 
     // The river winds along the floor, but runs into the next valley's where they meet.
+    // Its channel winds about the line's great circle, carried on past the ends, so it runs on
+    // smoothly beside them.
     const DVec3 square = glm::cross(valley.from, valley.to);
-    const double side = glm::dot(direction, square) < 0.0 ? -1.0 : 1.0;
+    const double square_size = glm::length(square);
+    const DVec3 normal = square_size > 0.0 ? square / square_size : DVec3{0.0};
+    const double sine = std::clamp(glm::dot(direction, normal), -1.0, 1.0);
+    const double lateral = maths::asin(sine) * radius;
+    const DVec3 sideways =
+        (normal - (direction * sine)) / std::max(std::sqrt(1.0 - (sine * sine)), 1e-12);
     const double whole = valley.head + ((valley.foot - valley.head) * t);
     const double run = whole * valley.length;
     const double depth =
         valley.channel_depth + ((valley.channel_depth_to - valley.channel_depth) * whole);
     const double water_depth =
         valley.water_depth + ((valley.water_depth_to - valley.water_depth) * whole);
-    double cut = 0.0;
-    double cutting = 0.0;
-    if (valley.channel_width > 0.0 && away < valley.belt + toe) {
-        const double ends = smoothstep(run / valley.meander_length) *
-                            smoothstep((valley.length - run) / valley.meander_length);
-        const Octaves bends{.wavelength = valley.meander_length,
-                            .gain = 0.5,
-                            .finest = valley.meander_length / 4.0};
-        const double wound =
-            valley.meander * ends * fbm(DVec3{run, 0.0, 0.0}, bends, 0.0, valley.seed).value;
-        const double off = (side * away) - wound;
-        const double across = 2.0 * off / valley.channel_width;
-        if (std::abs(across) < 1.0) {
-            cut = depth * (1.0 - (across * across));
-            cutting = -depth * 4.0 * across / valley.channel_width;
-        }
+    const ChannelCut channel = valley.channel_width > 0.0 && away < channel_reach(valley, toe)
+                                   ? channel_cut(valley, lateral, run, depth)
+                                   : ChannelCut{};
+    const double cut = channel.cut;
+    const double cutting = channel.across;
+    // How the cut changes along the line between its ends, where it runs on, per metre.
+    DVec3 cut_along{0.0};
+    if (channel.along != 0.0 && t > 0.0 && t < 1.0) {
+        const DVec3 chord = along - (direction * glm::dot(along, direction));
+        cut_along = chord * ((valley.foot - valley.head) * valley.length / (length * radius) *
+                             channel.along);
     }
 
     const double standing = floor + climbed - cut;
@@ -107,26 +156,32 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
     if (const double size = glm::length(outward); size > 0.0) {
         const DVec3 unit = outward / size;
         wall.fall += unit * climbing;
-        wall.standing_gradient += unit * (climbing - (side * cutting));
-        wall.gradient += unit * (climbing + steepening - (side * cutting));
+        wall.standing_gradient += unit * climbing;
+        wall.gradient += unit * (climbing + steepening);
         wall.reaching_gradient = unit * (-steepening / out_of_the_way);
-        wall.cut_gradient = unit * (side * cutting);
     }
-    wall.standing_gradient += varying;
-    wall.gradient += varying;
+    const DVec3 cut_gradient = (sideways * cutting) + cut_along;
+    wall.standing_gradient += varying - cut_gradient;
+    wall.gradient += varying - cut_gradient;
+    wall.cut_gradient = cut_gradient;
     // The way the floor runs, turning smoothly from one bend to the next.
     DVec3 runs = along;
     if (glm::dot(valley.runs_from, valley.runs_from) > 0.0) {
         runs = (valley.runs_from * (1.0 - t)) + (valley.runs_to * t);
         runs *= std::sqrt(length) / std::max(glm::length(runs), 1e-300);
     }
+    const double span = std::sqrt(length) * radius;
+    // The ground follows the floor along the line between its ends, level past them.
+    const DVec3 chord = along - (direction * glm::dot(along, direction));
+    if (const double size = glm::length(chord); size > 0.0 && t > 0.0 && t < 1.0) {
+        const DVec3 falling = chord / size * ((valley.floor_to - valley.floor_from) / span);
+        wall.gradient += falling;
+        wall.standing_gradient += falling;
+    }
     const DVec3 ahead = runs - (direction * glm::dot(runs, direction));
     const bool inside = (t > 0.0 || valley.head > 0.0) && (t < 1.0 || valley.foot < 1.0);
     if (const double size = glm::length(ahead); size > 0.0 && inside) {
-        const double span = std::sqrt(length) * radius;
         const DVec3 falling = ahead / size * ((valley.floor_to - valley.floor_from) / span);
-        wall.gradient += falling;
-        wall.standing_gradient += falling;
         // The floor stops falling past the valley's ends; water running off turns there
         // smoothly.
         constexpr double turning = 0.1;
@@ -173,7 +228,7 @@ WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within, dou
                             .high = climbed(std::max(steepness.high, 0.0), away.high)};
     // The channel, wherever it may wind across the belt.
     double deepest = 0.0;
-    if (valley.channel_width > 0.0 && away.low < valley.belt + toe) {
+    if (valley.channel_width > 0.0 && away.low < channel_reach(valley, toe)) {
         const auto depth_at = [&](double share) {
             const double whole = valley.head + ((valley.foot - valley.head) * share);
             return valley.channel_depth +
@@ -199,51 +254,76 @@ void Lowered::add(const formation::Smooth::Read& ground, double wall, double flo
     ++count_;
 }
 
+formation::Smooth::Read Lowered::rounded(const Ground& low) const noexcept {
+    const double sinking = std::max(0.0, low.read.value - floor_under(low)) / 2.0;
+    thread_local std::vector<std::pair<double, DVec3>> drops;
+    drops.clear();
+    double deepest = 0.0;
+    for (const Ground& one : std::span<const Ground>{grounds_.data(), count_}) {
+        // Of two standing level, only one is rounded by the other.
+        const double apart = one.read.value - low.read.value;
+        if (apart < 0.0 || (apart == 0.0 && &one <= &low)) {
+            continue;
+        }
+        const double width =
+            std::min(blend_, rounding_ * glm::length(one.read.gradient - low.read.gradient)) *
+            one.wall * low.wall;
+        if (width <= 0.0 || apart >= width) {
+            continue;
+        }
+        const double share = (width - apart) / width;
+        const double rounded = share * share * width / 4.0;
+        // How the drop changes: held halfway down to the floor, it's half the ground's.
+        drops.emplace_back(std::min(rounded, sinking),
+                           rounded < sinking
+                               ? (low.read.gradient - one.read.gradient) * (share / 2.0)
+                               : low.read.gradient / 2.0);
+        deepest = std::max(deepest, drops.back().first);
+    }
+    if (deepest <= 0.0) {
+        return low.read;
+    }
+    // A soft maximum of the drops, k ln(1 + sum of (e^(drop/k) - 1)): the one drop alone, nothing
+    // added as one begins, turning smoothly from one to the next. Taken over the deepest, so none
+    // overflows.
+    const double none = maths::exp(-deepest / lowest_softness);
+    double sum = 0.0;
+    DVec3 sum_gradient{0.0};
+    for (const auto& [drop, dropping] : drops) {
+        const double weight = maths::exp((drop - deepest) / lowest_softness);
+        sum += weight - none;
+        sum_gradient += dropping * weight;
+    }
+    sum += none;
+    return {.value = low.read.value - (deepest + (lowest_softness * maths::log(sum))),
+            .gradient = low.read.gradient - (sum_gradient / sum)};
+}
+
 formation::Smooth::Read Lowered::lowest() const noexcept {
-    const std::span<const Ground> all{grounds_.data(), count_};
-    // Each ground alone, and rounded down by each crest it meets with one standing over it, never
-    // past halfway down to its floor; those that can't come within the hand-over of `bound`
-    // skipped.
+    // Each ground rounded down by the crests it meets; those that can't come within the hand-over
+    // of `bound` skipped.
     const auto ways = [&](const double& bound, const auto& each) {
-        for (const Ground& low : all) {
-            if (low.read.value - (blend_ / 4.0) >= bound + handing_over) {
-                continue;
-            }
-            each(low.read.value, low.read.gradient);
-            const double sinking = std::max(0.0, low.read.value - floor_under(low)) / 2.0;
-            for (const Ground& one : all) {
-                const double apart = one.read.value - low.read.value;
-                if (apart < 0.0 || &one == &low) {
-                    continue;
-                }
-                const double width = std::min(blend_, rounding_ * glm::length(one.read.gradient -
-                                                                              low.read.gradient)) *
-                                     one.wall * low.wall;
-                if (width <= 0.0 || apart >= width) {
-                    continue;
-                }
-                const double share = (width - apart) / width;
-                each(low.read.value - std::min(share * share * width / 4.0, sinking),
-                     (low.read.gradient * (1.0 - (share / 2.0))) +
-                         (one.read.gradient * (share / 2.0)));
+        for (const Ground& low : std::span<const Ground>{grounds_.data(), count_}) {
+            if (low.read.value - (blend_ / 4.0) < bound + handing_over) {
+                const formation::Smooth::Read way = rounded(low);
+                each(way.value, way.gradient);
             }
         }
     };
     double lowest = std::numeric_limits<double>::infinity();
     ways(lowest, [&](double value, DVec3) { lowest = std::min(lowest, value); });
-    // Turning as each way comes lowest over the hand-over, so what's rounded from it never steps.
+    // Turning as each way comes lowest over the hand-over, so what's rounded from it never steps:
+    // a soft minimum, whose slope is the ways' as they share it. Those past the hand-over count
+    // for next to nothing.
     DVec3 gradient{0.0};
     double weights = 0.0;
     ways(lowest, [&](double value, DVec3 way) {
-        const double near = 1.0 - ((value - lowest) / handing_over);
-        if (near <= 0.0) {
-            return;
-        }
-        const double weight = near * near * (3.0 - (2.0 * near));
+        const double weight = maths::exp(-(value - lowest) / lowest_softness);
         gradient += way * weight;
         weights += weight;
     });
-    return {.value = lowest, .gradient = gradient / weights};
+    return {.value = lowest - (lowest_softness * maths::log(weights)),
+            .gradient = gradient / weights};
 }
 
 double Lowered::floor_under(const Ground& low) const noexcept {
