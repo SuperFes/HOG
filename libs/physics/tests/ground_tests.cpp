@@ -45,12 +45,42 @@ WorldPosition over(DVec3 direction) {
                          (globe::ground_below(earth(), direction, lod()).value_or(0.0) + 10.0)};
 }
 
-// Land, off the voxels' corners, which a ray dropped straight down can slip between.
+// Land gentle, dry and bare of fallen rock for some way round, so a ray dropped straight down
+// meets it where it was dropped; off the voxels' corners, which such a ray can slip between.
 DVec3 land() {
-    const DVec3 found =
-        globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
-    const double off = 0.3 * earth().planet().voxel / earth().planet().body.radius;
-    return glm::normalize(found + DVec3{0.0, off, 2.0 * off});
+    static const DVec3 found = [] {
+        const double radius = earth().planet().body.radius;
+        const DVec3 near =
+            globe::land_near(earth(), DVec3{1.0, 0.0, 0.0}).value_or(DVec3{1.0, 0.0, 0.0});
+        const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, near));
+        const DVec3 north = glm::cross(near, east);
+        const double off = 0.3 * earth().planet().voxel / radius;
+        const auto plain = [&](DVec3 at) {
+            for (int i = -3; i <= 3; ++i) {
+                for (int j = -3; j <= 3; ++j) {
+                    const globe::Generator::Column column =
+                        earth().column(glm::normalize(at + (((east * static_cast<double>(i)) +
+                                                             (north * static_cast<double>(j))) *
+                                                            (5.0 / radius))),
+                                       lod());
+                    if (column.slope() > 0.3 || column.water() >= column.ground() ||
+                        column.top() > column.ground()) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        for (int step = 0; step < 400; ++step) {
+            const DVec3 at =
+                glm::normalize(near + (east * (step * 10.0 / radius)) + DVec3{0.0, off, 2.0 * off});
+            if (plain(at)) {
+                return at;
+            }
+        }
+        return near;
+    }();
+    return found;
 }
 
 // The finest tile holding a place.
