@@ -199,6 +199,41 @@ TEST_CASE("under a formed planet's ground its layers lie as they were laid", "[g
     CHECK(sand_shown > 0);
 }
 
+TEST_CASE("a formed planet's beds fold, hundreds of metres where mountains rose, tens elsewhere",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    const double radius = generator.planet().body.radius;
+    double plain = 0.0;
+    double belt = 0.0;
+    int plains = 0;
+    int belts = 0;
+    int tilted = 0;
+    constexpr int count = 1'000;
+    for (std::uint64_t n = 0; n < count; ++n) {
+        const DVec3 direction = somewhere(n);
+        const DVec3 along = glm::normalize(glm::cross(direction, somewhere(n + count)));
+        const Formed::Here here = formed.at(direction);
+        const Formed::Here near = formed.at(glm::normalize(direction + (along * 200.0 / radius)));
+        tilted += std::abs(here.layers.fold - near.layers.fold) > 0.5 ? 1 : 0;
+        if (here.folding < 0.1) {
+            plain += std::abs(here.layers.fold);
+            ++plains;
+        } else if (here.folding > 0.5) {
+            belt += std::abs(here.layers.fold);
+            ++belts;
+        }
+    }
+    UNSCOPED_INFO("plains " << plains << " at " << plain / plains << ", belts " << belts << " at "
+                            << belt / std::max(belts, 1) << ", tilted " << tilted);
+    // Nowhere do the beds lie level for long.
+    CHECK(tilted > 85 * count / 100);
+    REQUIRE(plains > 0);
+    CHECK(plain / plains < 100.0);
+    REQUIRE(belts > 20);
+    CHECK(belt / belts > 2.0 * plain / plains);
+}
+
 TEST_CASE("a formed lake's water meets its shore and never stands as a wall", "[globe][formed]") {
     const Generator& generator = formed_generator();
     const Formed& formed = *generator.shape().formed;

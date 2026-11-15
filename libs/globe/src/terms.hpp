@@ -4,6 +4,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/noise.hpp>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -24,6 +25,7 @@ enum class Term : std::uint8_t {
     Contacts = 17,
     Basement = 18,
     Beach = 19,
+    Bedding = 20,
 };
 
 struct Context {
@@ -162,15 +164,35 @@ inline constexpr double contact_reach = widest_contact / 2.0;
                                    const Scatter& scatter, DVec3 direction, double depth,
                                    double radius) noexcept;
 
-// Sedimentary beds run a few metres thick; a cliff shows dozens.
+// Sedimentary beds run a few metres thick on average; a cliff shows dozens.
 inline constexpr double bed_thickness = 8.0;
 
-// The bed at `radius`, counted up from the one at the planet's radius where unfolded, its bottom
-// in metres from the centre, and its rock; beds lie only within the layers' cover.
+// The beds in one column, counted up from the one at the planet's radius where unfolded, each
+// bottom in metres from the centre. Beds come in sets, each bed in a set drawn once for the planet
+// as thin or massive, so a bed is as thick wherever it shows; walking through them, each set is
+// drawn once. Beds lie only within the layers' cover.
+class Beds {
+public:
+    static constexpr std::int64_t in_set = 8;
+
+    Beds(const Context& context, const Layering& layers) noexcept;
+
+    [[nodiscard]] std::int64_t at(double radius) noexcept;
+    [[nodiscard]] double bottom(std::int64_t bed) noexcept;
+    [[nodiscard]] double top(std::int64_t bed) noexcept { return bottom(bed + 1); }
+
+private:
+    void draw(std::int64_t set) noexcept;
+
+    std::uint64_t seed_ = 0;
+    double base_ = 0.0; // where the beds at the planet's radius would lie unfolded
+    std::int64_t set_ = 0;
+    bool drawn_ = false;
+    std::array<double, in_set + 1> bottoms_{}; // up from its set's bottom, the last its top
+};
+
 [[nodiscard]] std::int64_t bed_at(const Context& context, const Layering& layers,
                                   double radius) noexcept;
-[[nodiscard]] double bed_bottom(const Context& context, const Layering& layers,
-                                std::int64_t bed) noexcept;
 [[nodiscard]] Material bed_rock(const Context& context, std::int64_t bed) noexcept;
 
 } // namespace hog::globe::terms

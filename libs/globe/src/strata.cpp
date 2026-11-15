@@ -138,25 +138,28 @@ Material bedded(const Context& context, const Layering& layers, double wander, d
     if (layers.cover <= laid) {
         return basement_at(context, layers, point);
     }
-    const std::int64_t bed = bed_at(context, layers, radius);
+    Beds beds{context, layers};
+    const std::int64_t bed = beds.at(radius);
     const Material rock = bed_rock(context, bed);
     if (past(depth, wander, layers.cover, std::max(contact_width(rock), contact_width(basement)),
              layers.cover - laid)) {
         return basement_at(context, layers, point);
     }
-    const double base = depth + radius - bed_bottom(context, layers, bed);
-    const double roof = base - bed_thickness;
+    const double bottom = beds.bottom(bed);
+    const double top = beds.top(bed);
+    const double base = depth + radius - bottom;
+    const double roof = base - (top - bottom);
     if (roof > laid) {
         const Material above = bed_rock(context, bed + 1);
         if (!past(depth, wander, roof, std::max(contact_width(rock), contact_width(above)),
-                  bed_thickness)) {
+                  beds.top(bed + 1) - top)) {
             return above;
         }
     }
     const bool on_basement = base >= layers.cover;
     const Material below = on_basement ? basement : bed_rock(context, bed - 1);
     if (!past(depth, wander, base, std::max(contact_width(rock), contact_width(below)),
-              bed_thickness)) {
+              top - bottom)) {
         return rock;
     }
     return on_basement ? basement_at(context, layers, point) : below;
@@ -195,13 +198,50 @@ Material material_at(const Context& context, const Layering& layers, const Scatt
     return bedded(context, layers, scatter.contacts, depth, radius, bottom, point);
 }
 
-std::int64_t bed_at(const Context& context, const Layering& layers, double radius) noexcept {
-    const double lifted = radius - context.planet->body.radius + layers.fold;
-    return static_cast<std::int64_t>(std::floor(lifted / bed_thickness));
+Beds::Beds(const Context& context, const Layering& layers) noexcept
+    : seed_{context.seed(Term::Bedding)}, base_{context.planet->body.radius - layers.fold} {}
+
+void Beds::draw(std::int64_t set) noexcept {
+    if (drawn_ && set == set_) {
+        return;
+    }
+    // Most beds thin, a few massive, some twenty-five times another's thickness.
+    double sum = 0.0;
+    for (std::int64_t k = 0; k < in_set; ++k) {
+        const double draw = unit(hash_values(seed_, set, k));
+        sum += 0.15 + (4.0 * draw * draw * draw);
+        bottoms_.at(static_cast<std::size_t>(k + 1)) = sum;
+    }
+    const double scale = static_cast<double>(in_set) * bed_thickness / sum;
+    for (double& bottom : bottoms_) {
+        bottom *= scale;
+    }
+    set_ = set;
+    drawn_ = true;
 }
 
-double bed_bottom(const Context& context, const Layering& layers, std::int64_t bed) noexcept {
-    return context.planet->body.radius - layers.fold + (static_cast<double>(bed) * bed_thickness);
+std::int64_t Beds::at(double radius) noexcept {
+    const double thickness = static_cast<double>(in_set) * bed_thickness;
+    const double lifted = radius - base_;
+    const auto set = static_cast<std::int64_t>(std::floor(lifted / thickness));
+    draw(set);
+    const double within = lifted - (static_cast<double>(set) * thickness);
+    std::int64_t k = 0;
+    while (k + 1 < in_set && bottoms_.at(static_cast<std::size_t>(k + 1)) <= within) {
+        ++k;
+    }
+    return (set * in_set) + k;
+}
+
+double Beds::bottom(std::int64_t bed) noexcept {
+    const std::int64_t set = (bed >= 0 ? bed : bed - in_set + 1) / in_set;
+    draw(set);
+    return base_ + (static_cast<double>(set * in_set) * bed_thickness) +
+           bottoms_.at(static_cast<std::size_t>(bed - (set * in_set)));
+}
+
+std::int64_t bed_at(const Context& context, const Layering& layers, double radius) noexcept {
+    return Beds{context, layers}.at(radius);
 }
 
 Material bed_rock(const Context& context, std::int64_t bed) noexcept {

@@ -37,6 +37,14 @@ constexpr int most_fine = 16;
 constexpr double rip_spacing = 4.0;
 // Metres the bars, levees and hummocks of what was carried stand on flats.
 constexpr double bedforms_stand = 1.0;
+// Beds lie nearly flat under plains, rippling tens of metres; where mountains were built they
+// fold hundreds. Under both, platforms sag into basins and swell over domes far wider, a
+// hundredth of the planet's radius.
+constexpr double fold_wavelength = 3'000.0;
+constexpr double plain_fold = 20.0;
+constexpr double belt_fold = 600.0;
+constexpr double swell_share = 0.01;
+constexpr double platform_swell = 150.0;
 
 // The top of what lies `laid` deep on the whole over a bed spread `spread` either side of its
 // mean, over that mean: settled into the bed's hollows, standing in bedforms as high as half of
@@ -334,7 +342,8 @@ Formed::Formed(const Planet& planet)
       joints_seed_{hash_values(planet.body.seed, 0x6a6f'696e'7473ULL)},
       rock_seed_{hash_values(planet.body.seed, 0x726f'636bULL)},
       faults_seed_{hash_values(planet.body.seed, 0x6661'756c'7473ULL)},
-      bars_seed_{hash_values(planet.body.seed, 0x6261'7273ULL)} {
+      bars_seed_{hash_values(planet.body.seed, 0x6261'7273ULL)},
+      folds_seed_{hash_values(planet.body.seed, 0x666f'6c64'73ULL)} {
     const formation::World& world = world_;
     const std::uint32_t size = world.sphere.size();
     for (auto* field : {&top_, &organic_, &topsoil_, &subsoil_, &loess_, &sand_, &alluvium_,
@@ -1594,6 +1603,17 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     here.light = value(light_);
     here.folding = value(world.bedrock.folding);
     Strata& layers = here.layers;
+    const DVec3 metres = direction * radius_;
+    const double swell_wavelength = std::max(swell_share * radius_, 4.0 * fold_wavelength);
+    layers.fold =
+        (fbm(metres, {.wavelength = fold_wavelength, .gain = 0.5, .finest = fold_wavelength / 16.0},
+             0.0, folds_seed_)
+             .value *
+         (plain_fold + (belt_fold * here.folding))) +
+        (fbm(metres, {.wavelength = swell_wavelength, .gain = 0.5, .finest = fold_wavelength},
+             0.0, hash_values(folds_seed_, 1))
+             .value *
+         platform_swell);
     layers.ice = top.ice;
     layers.organic = value(organic_);
     layers.topsoil = value(topsoil_);

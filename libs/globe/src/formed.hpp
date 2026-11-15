@@ -232,6 +232,7 @@ private:
     // Beaches' grains: sand, volcanic sand, shell sand, shingle, and mud.
     std::array<Grains, 5> grains_{};
     std::uint64_t bars_seed_ = 0;
+    std::uint64_t folds_seed_ = 0; // how the beds are folded
     // At each point a lake was formed over, 1 and the level formed for it; elsewhere nothing.
     std::vector<double> lake_share_;
     std::vector<double> lake_cap_;

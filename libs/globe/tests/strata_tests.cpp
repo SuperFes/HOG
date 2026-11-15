@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -213,4 +214,34 @@ TEST_CASE("where two basements or beach materials meet, each shows at its share"
                                             .beach_share = 0.4};
     CHECK(std::abs(share_of(beach, 0.0, Material::Shingle) - 0.4) < 0.05);
     CHECK(std::abs(share_of(beach, 0.0, Material::Sand) - 0.6) < 0.05);
+}
+
+TEST_CASE("beds run thin and massive, each as thick wherever it shows, the fold lifting them whole",
+          "[globe][strata]") {
+    const hog::globe::Planet& planet = wet().planet();
+    const Generator::Shape shape;
+    const hog::globe::terms::Context context{
+        .planet = &planet, .derived = &wet().derived(), .shape = &shape};
+    const hog::globe::terms::Layering flat{.cover = 1'000.0};
+    const hog::globe::terms::Layering folded{.cover = 1'000.0, .fold = 37.5};
+    hog::globe::terms::Beds beds{context, flat};
+    hog::globe::terms::Beds lifted{context, folded};
+    double thinnest = 1e9;
+    double thickest = 0.0;
+    double sum = 0.0;
+    constexpr std::int64_t count = 400;
+    for (std::int64_t bed = -count / 2; bed < count / 2; ++bed) {
+        const double bottom = beds.bottom(bed);
+        const double thickness = beds.top(bed) - bottom;
+        thinnest = std::min(thinnest, thickness);
+        thickest = std::max(thickest, thickness);
+        sum += thickness;
+        CHECK(beds.at(bottom + (thickness / 2.0)) == bed);
+        CHECK(std::abs(lifted.bottom(bed) - (bottom - 37.5)) < 1e-6);
+        // Drawn once for the planet, a bed is as thick read alone as walked through.
+        CHECK(hog::globe::terms::Beds{context, flat}.bottom(bed) == bottom);
+    }
+    CHECK(thinnest < 3.0);
+    CHECK(thickest > 15.0);
+    CHECK(std::abs((sum / count) - hog::globe::terms::bed_thickness) < 1e-6);
 }

@@ -314,12 +314,11 @@ std::vector<Generator::Column::Boundary> Generator::Column::boundaries(double lo
     const double low = std::max(lowest, base);
     const double high = std::min(highest, ground_);
     if (beds && low < high) {
-        const std::int64_t first =
-            terms::bed_at(context, strata_, low + shown - terms::contact_reach);
-        const std::int64_t last =
-            terms::bed_at(context, strata_, high + shown + terms::contact_reach);
+        terms::Beds bedding{context, strata_};
+        const std::int64_t first = bedding.at(low + shown - terms::contact_reach);
+        const std::int64_t last = bedding.at(high + shown + terms::contact_reach);
         for (std::int64_t bed = first; bed <= last + 1; ++bed) {
-            const double edge = terms::bed_bottom(context, strata_, bed) - shown;
+            const double edge = bedding.bottom(bed) - shown;
             add(edge - terms::contact_reach, edge + terms::contact_reach);
         }
     }

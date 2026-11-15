@@ -207,23 +207,31 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
         double outside = 0.0;
         double open = 1.0; // of what its caves open to
     };
-    // Bounded, every bed within reach, as a cave in any of them could be the nearest.
-    const std::int64_t beds_about =
-        bound ? static_cast<std::int64_t>(cave_reach / bed_thickness) + 1 : 1;
-    // Up to 15 beds and two basements.
-    std::array<Unit, 17> units{};
+    // Bounded, every bed within reach, as a cave in any of them could be the nearest; beds of one
+    // rock open alike, so each rock counts once, by the nearest of its beds.
+    std::array<Unit, 5> units{};
     std::size_t count = 0;
     const double base = ground - layers.cover; // beds lie over it, the basement under it
     double nearest = cave_reach;
     if (layers.cover > 0.0) {
-        const std::int64_t bed = bed_at(context, layers, radius);
-        for (std::int64_t near = bed - beds_about; near <= bed + beds_about; ++near) {
-            const double bottom = bed_bottom(context, layers, near);
-            const double top = bottom + bed_thickness;
-            if (top > base && bottom < ground && count + 2 < units.size()) {
-                units.at(count++) = {.rock = bed_rock(context, near),
-                                     .outside =
-                                         std::max({bottom - radius, radius - top, base - radius})};
+        Beds beds{context, layers};
+        const std::int64_t bed = beds.at(radius);
+        const std::int64_t first = bound ? beds.at(radius - cave_reach) : bed - 1;
+        const std::int64_t last = bound ? beds.at(radius + cave_reach) : bed + 1;
+        for (std::int64_t near = first; near <= last; ++near) {
+            const double bottom = beds.bottom(near);
+            const double top = beds.top(near);
+            if (top <= base || bottom >= ground) {
+                continue;
+            }
+            const Material rock = bed_rock(context, near);
+            const double outside = std::max({bottom - radius, radius - top, base - radius});
+            Unit* const same = std::ranges::find(units.begin(), units.begin() + count, rock,
+                                                 &Unit::rock);
+            if (same != units.begin() + count) {
+                same->outside = std::min(same->outside, outside);
+            } else {
+                units.at(count++) = {.rock = rock, .outside = outside};
             }
         }
     }
