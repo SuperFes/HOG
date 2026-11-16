@@ -170,6 +170,7 @@ inline constexpr std::array shell{
     std::pair{"sky_height"sv, &Planet::sky_height},
     std::pair{"heat_flow"sv, &Planet::heat_flow},
     std::pair{"formed_detail"sv, &Planet::formed_detail},
+    std::pair{"river_size"sv, &Planet::river_size},
 };
 
 // A knob added to the formation's Body must be added above, or a planet would drop it. The seed

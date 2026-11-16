@@ -10,3 +10,5 @@ floor_depth = 500.0
 sky_height = 3000.0
 # The land formed stage by stage, plates to soil, on a sphere split this many times.
 formed_detail = 7.0
+# Rivers cut and filled for this many times their water, so a small world's show.
+river_size = 100.0

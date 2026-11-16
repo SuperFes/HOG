@@ -1251,6 +1251,49 @@ TEST_CASE("what stands out of the ground round a place", "[.probe_spikes]") {
     }
 }
 
+TEST_CASE("rivers sized up run wider and deeper over the same courses", "[globe][formed]") {
+    const Formed& plain = *formed_generator().shape().formed;
+    Planet planet = formed_planet();
+    planet.river_size = 100.0;
+    const Formed sized{planet};
+    const hog::formation::World& world = plain.world();
+    const double lod = planet.voxel;
+    const double radius = planet.body.radius;
+    // Metres of water across each river and how deep it runs deepest, both ways.
+    double plain_wet = 0.0;
+    double sized_wet = 0.0;
+    double plain_deepest = 0.0;
+    double sized_deepest = 0.0;
+    int crossed = 0;
+    for (const std::uint32_t point : largest_rivers(world, 10)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 middle = glm::normalize(from + to);
+        const DVec3 across = glm::normalize(glm::cross(to - from, middle));
+        if (plain.at(middle, lod).top.value < 0.0) {
+            continue;
+        }
+        ++crossed;
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
+        for (int step = -half; step < half; ++step) {
+            const DVec3 here = glm::normalize(middle + (across * (step * across_river / radius)));
+            const double plain_depth = river_depth(plain.at(here, lod));
+            const double sized_depth = river_depth(sized.at(here, lod));
+            plain_wet += plain_depth > 0.0 ? across_river : 0.0;
+            sized_wet += sized_depth > 0.0 ? across_river : 0.0;
+            plain_deepest = std::max(plain_deepest, plain_depth);
+            sized_deepest = std::max(sized_deepest, sized_depth);
+        }
+    }
+    UNSCOPED_INFO(crossed << " crossed: " << plain_wet << " m wet, " << plain_deepest
+                          << " m deep; sized up " << sized_wet << " m wet, " << sized_deepest
+                          << " m deep");
+    REQUIRE(crossed > 3);
+    // Channels go as the water's square root across and its 0.4 power deep.
+    CHECK(sized_wet > 4.0 * std::max(plain_wet, across_river));
+    CHECK(sized_deepest > 3.0 * plain_deepest);
+}
+
 TEST_CASE("big rivers run over floors of the gravel they reworked their belts into",
           "[globe][formed]") {
     const Generator& generator = large_generator();

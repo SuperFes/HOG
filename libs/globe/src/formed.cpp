@@ -357,6 +357,7 @@ DVec3 outward_from(DVec3 direction, DVec3 on) noexcept {
 Formed::Formed(const Planet& planet)
     : world_{formation_body(planet), 5, static_cast<int>(planet.formed_detail)},
       smooth_{world_.sphere, 2.0}, radius_{planet.body.radius}, voxel_{planet.voxel},
+      river_size_{planet.river_size},
       // The widest gullies half the points' spacing apart, the finest down to a few voxels.
       gullies_{.longest = world_.sphere.spacing() * planet.body.radius / 2.0,
                .octaves = 1 + maths::floor_log2(world_.sphere.spacing() * planet.body.radius / 2.0 /
@@ -1271,10 +1272,10 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // The sheet its channel reworks the belt into lies as deep whatever the detail: floods scour
     // its bends half as deep again as its banks stand.
     const auto channel_at = [&](std::uint32_t at, double falling, double& sheet) {
-        Channel made = channel_of(world.rivers.flood[at], world.lakes.discharge[at], falling,
-                                  alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
-                                  0.6 * sphere.spacing() * radius_, world.regimes.low[at],
-                                  world.regimes.high[at]);
+        Channel made = channel_of(
+            river_size_ * world.rivers.flood[at], river_size_ * world.lakes.discharge[at], falling,
+            alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
+            0.6 * sphere.spacing() * radius_, world.regimes.low[at], world.regimes.high[at]);
         sheet = 1.5 * made.depth;
         // Channels too narrow for the detail asked fade out with their water, as gullies do.
         const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);

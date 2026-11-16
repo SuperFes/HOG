@@ -106,6 +106,11 @@ TEST_CASE("only a planet that can be is valid", "[globe][planet]") {
         unformed.formed_detail = detail;
         CHECK_FALSE(hog::globe::validate(unformed).has_value());
     }
+    for (const double size : {0.0, -1.0}) {
+        Planet dry;
+        dry.river_size = size;
+        CHECK_FALSE(hog::globe::validate(dry).has_value());
+    }
 }
 
 TEST_CASE("a planet file sets any knob by name, all in [planet]", "[globe][planet]") {
@@ -118,6 +123,7 @@ plates = 9
 lid_thickness = 350
 formed_detail = 6
 voxel = 0.5
+river_size = 40
 moons = []
 
 [planet.ore_abundance]
@@ -137,6 +143,7 @@ pressure_kpa = 90
     CHECK(planet.body.ore_abundance.coal == 1.0);
     CHECK(planet.formed_detail == 6.0);
     CHECK(planet.voxel == 0.5);
+    CHECK(planet.river_size == 40.0);
     CHECK(planet.system.moons.empty());
     CHECK(std::abs(planet.system.air.pressure - 90'000.0) < 1e-9);
     // What isn't given is the working world's.
@@ -184,8 +191,10 @@ TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
     softer.body.erodibility *= 2.0;
     Planet moonless = earth;
     moonless.system.moons.clear();
+    Planet wider = earth;
+    wider.river_size = 100.0;
     CHECK(hog::globe::world_id(earth) == hog::globe::world_id(Planet{}));
-    for (const Planet& changed : {other, larger, finer, softer, moonless, frozen()}) {
+    for (const Planet& changed : {other, larger, finer, softer, moonless, wider, frozen()}) {
         CHECK(hog::globe::world_id(earth) != hog::globe::world_id(changed));
     }
 }
@@ -218,6 +227,7 @@ TEST_CASE("a planet sent as bytes is the same planet, and a cut or odd one is re
     odd.body.ore_abundance.oil = 0.25;
     odd.heat_flow = 0.02;
     odd.formed_detail = 7.0;
+    odd.river_size = 30.0;
     odd.system.rings = hog::planet::Rings{};
     for (const Planet& planet : {Planet{}, frozen(), odd}) {
         const auto bytes = hog::globe::encode_planet(planet);
@@ -227,6 +237,7 @@ TEST_CASE("a planet sent as bytes is the same planet, and a cut or odd one is re
         CHECK(read->body.seed == planet.body.seed);
         CHECK(read->system == planet.system);
         CHECK(read->body.ore_abundance.oil == planet.body.ore_abundance.oil);
+        CHECK(read->river_size == planet.river_size);
     }
     const auto bytes = hog::globe::encode_planet(odd);
     for (std::size_t length = 0; length < bytes.size(); length += 7) {

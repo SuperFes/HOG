@@ -178,6 +178,7 @@ Result<void> validate(const Planet& planet) {
         {within(planet.formed_detail, 4.0, 9.0) &&
              planet.formed_detail == std::floor(planet.formed_detail),
          "formed_detail must be a whole 4 to 9 splits"},
+        {positive(planet.river_size), "river_size must be positive"},
     });
     for (const auto& [holds, message] : checks) {
         if (!holds) {

@@ -42,6 +42,9 @@ struct Planet {
     // Splits of the sphere the land is formed on, stage by stage from plates to soil
     // (hog::formation), its heights, ice, lakes and layers then read from it.
     double formed_detail = 5.0;
+    // Times the water rivers' channels are cut and filled for: past 1 they run wider and deeper
+    // than their water alone makes them, as a small world's must to be seen.
+    double river_size = 1.0;
 };
 
 // The formation's knobs as the planet sets them, with what its stars set filled in.

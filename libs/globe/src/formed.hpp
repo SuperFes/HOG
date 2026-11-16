@@ -174,6 +174,7 @@ private:
     formation::Smooth smooth_;
     double radius_;
     double voxel_ = 1.0; // metres across the finest voxels
+    double river_size_ = 1.0;
     [[nodiscard]] double sphere_spacing_metres() const noexcept {
         return world_.sphere.spacing() * radius_;
     }
