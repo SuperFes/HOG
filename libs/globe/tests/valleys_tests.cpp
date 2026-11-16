@@ -332,7 +332,8 @@ TEST_CASE("a crest is rounded as far as its walls have climbed, never at once wh
         return out.standing;
     };
     constexpr double step = 0.05;
-    for (double x = -5.0; x < 5.0; x += step) {
+    for (int i = 0; i < 200; ++i) {
+        const double x = -5.0 + (i * step);
         CHECK(std::abs(lowered(x + step) - lowered(x)) < step);
     }
 }
