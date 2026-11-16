@@ -78,27 +78,25 @@ Cube HeldTiles::at(Site site) const {
 }
 
 std::optional<std::uint32_t> HeldTiles::top(Site site, std::uint32_t below) const {
-    std::int64_t layer = std::int64_t{below} - 1;
-    while (layer >= 0) {
+    // A finest tile's height at a time: a coarse tile may span finer ones held inside it.
+    for (std::int64_t layer = std::int64_t{below} - 1; layer >= 0;
+         layer = (layer / side * side) - 1) {
         site.layer = static_cast<std::uint32_t>(layer);
         const std::optional<HeldTile> held = finest_over(finest_holding(site));
-        if (!held) {
-            layer = (layer / side * side) - 1;
+        if (!held || uniform_air(*held->tree)) {
             continue;
         }
         const unsigned level = held->key.level;
         const std::int64_t lowest = std::int64_t{held->key.k} * side << level;
-        if (!uniform_air(*held->tree)) {
-            const auto x = static_cast<int>((site.i >> level) - (held->key.i * side));
-            const auto y = static_cast<int>((site.j >> level) - (held->key.j * side));
-            for (auto z = static_cast<int>((layer >> level) - (lowest >> level)); z >= 0; --z) {
-                if (holds_matter(held->tree->at(x, y, z))) {
-                    const std::int64_t over = ((lowest >> level) + z + 1) << level;
-                    return static_cast<std::uint32_t>(std::min(over, std::int64_t{below}) - 1);
-                }
+        const auto x = static_cast<int>((site.i >> level) - (held->key.i * side));
+        const auto y = static_cast<int>((site.j >> level) - (held->key.j * side));
+        const auto bottom = static_cast<int>(((layer / side * side) >> level) - (lowest >> level));
+        for (auto z = static_cast<int>((layer >> level) - (lowest >> level)); z >= bottom; --z) {
+            if (holds_matter(held->tree->at(x, y, z))) {
+                const std::int64_t over = ((lowest >> level) + z + 1) << level;
+                return static_cast<std::uint32_t>(std::min(over, layer + 1) - 1);
             }
         }
-        layer = lowest - 1;
     }
     return std::nullopt;
 }

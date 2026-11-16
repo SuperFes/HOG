@@ -84,3 +84,17 @@ TEST_CASE("the top of a column held is found down through its tiles, any level",
     CHECK(held.top({.face = 0, .i = side + 3, .j = 3}, 9) == 8);
     CHECK_FALSE(held.top({.face = 0, .i = 5 * side, .j = 3}, over));
 }
+
+TEST_CASE("the top of a column is found in finer tiles held inside a coarse one over them",
+          "[globe][held_tiles]") {
+    HeldTiles held;
+    // Coarse ground rounds a crag down; the finer tile sent after it has the crag to its top.
+    held.put({.level = 3, .face = 0, .i = 0, .j = 0, .k = 0}, ground_to(2));
+    held.put({.level = 0, .face = 0, .i = 0, .j = 0, .k = 0}, ground_to(30));
+    const std::uint32_t over = 8 * 8 * side;
+    CHECK(held.top({.face = 0, .i = 3, .j = 3}, over) == 29);
+    // Coarse ground to layer 80 under finer air from 64: the ground tops out under the air.
+    held.put({.level = 3, .face = 0, .i = 0, .j = 0, .k = 0}, ground_to(10));
+    held.put({.level = 0, .face = 0, .i = 0, .j = 0, .k = 1}, air());
+    CHECK(held.top({.face = 0, .i = 3, .j = 3}, over) == side - 1);
+}
