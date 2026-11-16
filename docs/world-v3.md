@@ -36,10 +36,10 @@ Decided:
 Leaning:
 
 - Several trees sharing one key space, one per kind of data (below).
-- Smooth surfaces meshed from the voxels' amounts (surface nets or dual contouring, `qef.hpp`).
+- Smooth surfaces meshed from the shape tree's amounts (surface nets or dual contouring, `qef.hpp`).
   A plain grid's axes only line up with "up" in six places, so blocks would stair-step almost
   everywhere.
-- Trees cut into pages of 64³ voxels (subtrees) for disk and the wire, keyed by depth and grid
+- Trees cut into pages of 64³ finest nodes (subtrees) for disk and the wire, keyed by depth and grid
   position. Pages are where a tree is cut, not edges in the world.
 - Edits as a log over the baked trees, with snapshots and rollback (below).
 
@@ -71,9 +71,9 @@ rhythm.
 
 | Tree | Holds | Why apart |
 | --- | --- | --- |
-| Shape | how much of each voxel is solid | meshing and collision; streamed first |
+| Shape | how much of each node is solid | meshing and collision; streamed first |
 | Material | an index into the world's short list of materials | texturing; broad strata collapse |
-| Water | which water body a voxel's basin belongs to, or loose water's amount | exact levels, flow; changes with the seasons |
+| Water | which water body a node's basin belongs to, or loose water's amount | exact levels, flow; changes with the seasons |
 | Edits | changes players make, over the baked trees | later; kept off the main path |
 
 Not trees:
@@ -117,7 +117,7 @@ the generator fills what wasn't.
 Edits are a log over the baked trees, so the bake and play never fight.
 
 - Each edit has an id, who made it, when, and the generator version it was made against. It's
-  kept as the voxels it leaves, so it can be checked against the ground under it.
+  kept as the nodes it leaves, so it can be checked against the ground under it.
 - Edits copy only the nodes they change (the trees share identical nodes), so a snapshot is a kept
   root and rollback is pointing back at one. Old nodes no kept snapshot holds are swept up; how
   many snapshots to keep is a setting.
@@ -174,12 +174,14 @@ step replaces something, the old and new are compared before the old goes.
 ### 0 · Measure and decide
 
 1. **Split trees or one**: count nodes on real baked tiles held as one `Cube` tree against shape,
-   material and water trees apart. Decides the leaning above.
+   material and water trees apart. Decides the leaning above. Measured on today's tiles (small
+   world, 64 places, four depths): apart costs 1.4–1.7× one tree while water holds amounts, which
+   trace the ground; water as only a body id is ~500 nodes against ~160 000, and then apart is
+   ~1.03× the nodes and ~5% fewer bytes. Holds with water as bodies.
 2. **Meshing cost now**: a hidden benchmark of `mesh_tile` on real tiles (block fill, column
-   steps, faces), as the baseline the new mesher must beat.
-3. **Coarse bake cost**: time and size of a whole-planet coarse bake at a few metres, and the
-   fine fill time per km² now that rivers are in, to replace the extrapolations above.
-4. Confirm page size from step 1's counts.
+   steps, faces), as the baseline the new mesher must beat. Measured: 25–38 ms a 64³ tile on one
+   core, 7 500–12 400 quads, four vertices a quad, none shared.
+3. Confirm page size from step 1's counts.
 
 ### 1 · Grid keys and trees
 
@@ -187,11 +189,11 @@ step replaces something, the old and new are compared before the old goes.
    neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
 2. Shape, material and water trees, each a `VoxelTree` or a leaner kind, with node summaries and
    versions; a page record holding its trees; encode and decode. Tests: round trips, identical
-   voxels give identical bytes, a split leaf's summary matches its children.
+   nodes give identical bytes, a split leaf's summary matches its children.
 3. Water body table: sea, lake, river (course, level along it, flow, seasonal rise and peak),
    with ids stable across bakes. Tests: level and flow read at points along a river.
-4. Heat as baseline plus deviations. Tests: matches today's voxel temperatures within a step.
-5. Edits log: format only (id, author, time, generator version, the voxels left), unused until
+4. Heat as baseline plus deviations. Tests: matches today's temperatures within a step.
+5. Edits log: format only (id, author, time, generator version, the nodes left), unused until
    edits come back. Tests: an edit over a baked page reads through.
 
 ### 2 · Generator on the grid
