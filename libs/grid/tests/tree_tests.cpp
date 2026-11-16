@@ -9,7 +9,6 @@
 #include <vector>
 
 using hog::grid::Material;
-using hog::grid::Shape;
 using hog::grid::Tree;
 using hog::grid::Water;
 
@@ -59,12 +58,7 @@ void check_summaries(const Tree<Kind>& tree) {
 
 } // namespace
 
-TEST_CASE("shape summarises as the mean, material and water as the most common", "[grid]") {
-    CHECK(Shape::summary({0, 0, 0, 0, 0, 0, 0, 0}) == 0);
-    CHECK(Shape::summary({65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535}) == 65535);
-    CHECK(Shape::summary({65535, 65535, 65535, 65535, 0, 0, 0, 0}) == 32768);
-    CHECK(Shape::summary({8, 0, 0, 0, 0, 0, 0, 0}) == 1);
-    CHECK(Shape::summary({3, 0, 0, 0, 0, 0, 0, 0}) == 0);
+TEST_CASE("material and water summarise as the most common", "[grid]") {
     CHECK(Material::summary({1, 2, 2, 3, 3, 3, 0, 0}) == 3);
     CHECK(Material::summary({5, 4, 5, 4, 1, 2, 6, 7}) == 4);
     CHECK(Water::summary({0, 0, 0, 0, 0, 9, 9, 9}) == 0);
@@ -72,18 +66,17 @@ TEST_CASE("shape summarises as the mean, material and water as the most common",
 }
 
 TEST_CASE("eight alike merge into one", "[grid]") {
-    const auto whole = Tree<Shape>::build(levels, [](int, int, int) { return Shape::Value{77}; });
+    const auto whole = Tree<Water>::build(levels, [](int, int, int) { return Water::Value{77}; });
     CHECK(whole.nodes() == 1);
-    CHECK(whole.root() == Tree<Shape>::Found{.value = 77, .open = false, .depth = 0});
-    CHECK(whole.at(levels, 3, 4, 5) == Tree<Shape>::Found{.value = 77, .open = false, .depth = 0});
+    CHECK(whole.root() == Tree<Water>::Found{.value = 77, .open = false, .depth = 0});
+    CHECK(whole.at(levels, 3, 4, 5) == Tree<Water>::Found{.value = 77, .open = false, .depth = 0});
 
-    const auto halves = Tree<Shape>::build(
-        levels, [](int x, int, int) { return static_cast<Shape::Value>(x < 8 ? 65535 : 0); });
+    const auto halves = Tree<Water>::build(
+        levels, [](int x, int, int) { return static_cast<Water::Value>(x < 8 ? 5 : 6); });
     CHECK(halves.nodes() == 3);
     CHECK(halves.leaves() == 2);
-    CHECK(halves.root().value == 32768);
-    CHECK(halves.at(levels, 2, 9, 9) ==
-          Tree<Shape>::Found{.value = 65535, .open = false, .depth = 1});
+    CHECK(halves.root().value == 5);
+    CHECK(halves.at(levels, 2, 9, 9) == Tree<Water>::Found{.value = 5, .open = false, .depth = 1});
 }
 
 TEST_CASE("a tree reads back what it was built from", "[grid]") {
@@ -102,8 +95,8 @@ TEST_CASE("a tree reads back what it was built from", "[grid]") {
 
 TEST_CASE("a split node's value is its children's summary", "[grid]") {
     check_summaries(patchy_tree());
-    check_summaries(Tree<Shape>::build(levels, [](int x, int y, int z) {
-        return static_cast<Shape::Value>(hog::hash_values(2, x, y / 4, z) % 65536);
+    check_summaries(Tree<Water>::build(levels, [](int x, int y, int z) {
+        return static_cast<Water::Value>(hog::hash_values(2, x, y / 4, z) % 5);
     }));
 }
 
@@ -130,10 +123,10 @@ TEST_CASE("trees come back from their bytes", "[grid]") {
         }
     }
 
-    const Tree<Shape> open{6, 1234, true};
-    const auto open_back = Tree<Shape>::decode(open.encode());
+    const Tree<Water> open{6, 1234, true};
+    const auto open_back = Tree<Water>::decode(open.encode());
     REQUIRE(open_back);
-    CHECK(open_back->root() == Tree<Shape>::Found{.value = 1234, .open = true, .depth = 0});
+    CHECK(open_back->root() == Tree<Water>::Found{.value = 1234, .open = true, .depth = 0});
 }
 
 TEST_CASE("broken tree bytes are refused", "[grid]") {

@@ -36,7 +36,7 @@ Decided:
 Leaning:
 
 - Several trees sharing one key space, one per kind of data (below).
-- Smooth surfaces meshed from the shape tree's amounts (surface nets or dual contouring, `qef.hpp`).
+- Smooth surfaces meshed from the shape tree's planes (dual contouring, `qef.hpp`).
   A plain grid's axes only line up with "up" in six places, so blocks would stair-step almost
   everywhere.
 - Trees cut into pages of 64³ finest nodes (subtrees) for disk and the wire, keyed by depth and grid
@@ -57,8 +57,8 @@ sky, a third of a metre) that's about 87 km across and 18 halvings deep. Nothing
 node splits only where what's under it differs, so open sea, sky and deep rock each stay one large
 node, and detail goes only where it's needed. Pages group the nodes that exist for disk and the
 wire, under one node and down six levels at most; where the tree stops early there's no page
-under it. Each node sums up what's under it (shape averaged,
-material and water by most), so a node is its own coarse view, and a change under it updates
+under it. Each node sums up what's under it (shape as the plane through its
+eight, material and water by most), so a node is its own coarse view, and a change under it updates
 only the nodes above it. Neighbours are x ± 1: no face edges, no radial layers, no
 tapered boxes. "Up" and gravity are the direction from the centre, worked out from position,
 never from a grid axis.
@@ -74,7 +74,7 @@ rhythm.
 
 | Tree | Holds | Why apart |
 | --- | --- | --- |
-| Shape | how much of each node is solid | meshing and collision; streamed first |
+| Shape | the surface through each node as a plane, or all solid or all open | meshing and collision; streamed first |
 | Material | an index into the world's short list of materials | texturing; broad strata collapse |
 | Water | which water body a node's basin belongs to, or loose water's amount | exact levels, flow; changes with the seasons |
 | Edits | changes players make, over the baked trees | later; kept off the main path |
@@ -190,10 +190,14 @@ step replaces something, the old and new are compared before the old goes.
 
 1. Root node, node and page keys (depth, x, y, z), Morton order, parent, children and
    neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
-2. Shape, material and water trees (`grid::Tree`, one value a node: solid out of 65535, a
+2. Shape, material and water trees (`grid::Tree`, one value a node: the surface's plane, a
    material index, a water body id), with node summaries and versions; a page record holding its
    trees; encode and decode. Tests: round trips, identical nodes give identical bytes, a split
    leaf's summary matches its children. Loose water's amount waits for live water.
+   Shape leaves hold a plane (normal and distance) so flat and straight ground stays coarse:
+   eight merge where one plane runs within a quarter of a finest node of theirs. Measured on a
+   ball 40 finest nodes round: within 0.4 of a finest node of the true surface. Curvature per
+   leaf is an idea to try if gentle curves still split too much.
 3. Water body table: sea, lake, river (course, level along it, flow, seasonal rise and peak),
    with ids stable across bakes. Tests: level and flow read at points along a river.
 4. Heat as baseline plus deviations: the baseline stays the planet's (`baseline_temperature`),

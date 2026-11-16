@@ -20,13 +20,13 @@ namespace {
 Page full_page() {
     return Page{.root = Key{.depth = 12, .x = 5, .y = 6, .z = 7},
                 .generator = 42,
-                .shape =
-                    Held<Shape>{.version = 3,
-                                .tree = Tree<Shape>::build(6,
-                                                           [](int x, int y, int z) {
-                                                               return static_cast<Shape::Value>(
-                                                                   (x + y > z + 40) ? 0 : 65535);
-                                                           })},
+                .shape = Held<Shape>{.version = 3,
+                                     .tree = Tree<Shape>::build(
+                                         6,
+                                         [](int x, int y, int z) {
+                                             return x + y > z + 40 ? hog::grid::Surface::open()
+                                                                   : hog::grid::Surface::solid();
+                                         })},
                 .material = Held<Material>{.version = 1, .tree = Tree<Material>{6, 2, false}},
                 .water = Held<Water>{.version = 9, .tree = Tree<Water>{6, 1, true}}};
 }
@@ -86,6 +86,7 @@ TEST_CASE("broken page bytes are refused", "[grid]") {
     CHECK_FALSE(Page::decode(trees));
 
     Page deep;
-    deep.shape = Held<Shape>{.version = 0, .tree = Tree<Shape>{7, 0, false}};
+    deep.shape =
+        Held<Shape>{.version = 0, .tree = Tree<Shape>{7, hog::grid::Surface::solid(), false}};
     CHECK_FALSE(Page::decode(deep.encode()));
 }

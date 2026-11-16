@@ -10,41 +10,10 @@ namespace hog::grid {
 
 namespace {
 
-// The most common of the eight, the lowest of those tied.
-template <typename Value>
-Value most(const std::array<Value, 8>& children) noexcept {
-    Value best = children[0];
-    int best_count = 0;
-    for (const Value candidate : children) {
-        const auto count = static_cast<int>(std::ranges::count(children, candidate));
-        if (count > best_count || (count == best_count && candidate < best)) {
-            best = candidate;
-            best_count = count;
-        }
-    }
-    return best;
-}
-
 constexpr std::uint8_t split_flag = 1;
 constexpr std::uint8_t open_flag = 2;
 
 } // namespace
-
-Shape::Value Shape::summary(const std::array<Value, 8>& children) noexcept {
-    std::uint32_t sum = 4;
-    for (const Value child : children) {
-        sum += child;
-    }
-    return static_cast<Value>(sum / 8);
-}
-
-Material::Value Material::summary(const std::array<Value, 8>& children) noexcept {
-    return most(children);
-}
-
-Water::Value Water::summary(const std::array<Value, 8>& children) noexcept {
-    return most(children);
-}
 
 template <typename Kind>
 Tree<Kind>::Tree(std::uint8_t levels, Value whole, bool open)
@@ -52,7 +21,7 @@ Tree<Kind>::Tree(std::uint8_t levels, Value whole, bool open)
 
 template <typename Kind>
 std::size_t Tree<Kind>::Hash::operator()(const Node& node) const noexcept {
-    std::uint64_t hash = hash_values(0, node.value, node.open);
+    std::uint64_t hash = hash_values(0, Kind::hash(node.value), node.open);
     for (const Id child : node.children) {
         hash = hash_combine(hash, child);
     }
@@ -69,14 +38,19 @@ auto Tree<Kind>::held(const Node& node) -> Id {
 }
 
 template <typename Kind>
-auto Tree<Kind>::joined(const std::array<Id, 8>& children) -> Id {
-    if (std::ranges::all_of(children, [&](Id child) { return child == children[0]; }) &&
-        !nodes_[children[0]].split()) {
-        return children[0];
-    }
+auto Tree<Kind>::joined(const std::array<Id, 8>& children, double side) -> Id {
     std::array<Value, 8> values{};
     for (std::size_t k = 0; k < 8; ++k) {
         values.at(k) = nodes_[children.at(k)].value;
+    }
+    const Node& first = nodes_[children[0]];
+    if (std::ranges::none_of(children, [&](Id child) {
+            const Node& node = nodes_[child];
+            return node.split() || node.open != first.open;
+        })) {
+        if (const std::optional<Value> one = Kind::merged(values, side)) {
+            return leaf_of(*one, first.open);
+        }
     }
     return held({.value = Kind::summary(values), .open = false, .children = children});
 }
@@ -148,7 +122,7 @@ std::vector<std::byte> Tree<Kind>::encode() const {
         index[order[n]] = static_cast<Id>(n);
         out.write(static_cast<std::uint8_t>((node.split() ? split_flag : 0U) |
                                             (node.open ? open_flag : 0U)));
-        out.write(node.value);
+        Kind::write(out, node.value);
         if (node.split()) {
             for (const Id child : node.children) {
                 out.write_varint(index[child]);
@@ -194,7 +168,7 @@ Result<Tree<Kind>> Tree<Kind>::decode(std::span<const std::byte> bytes) {
 template <typename Kind>
 auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded) -> Result<Decoded> {
     const auto flags = in.read<std::uint8_t>();
-    const auto value = in.read<Value>();
+    const auto value = Kind::read(in);
     if (!flags || !value) {
         return make_error(ErrorCode::Parse, "a tree node cut short");
     }

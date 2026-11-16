@@ -1,8 +1,10 @@
 #pragma once
 
 #include <hog/core/result.hpp>
+#include <hog/grid/kinds.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -10,35 +12,13 @@
 #include <unordered_map>
 #include <vector>
 
-namespace hog {
-class ByteReader;
-}
-
 namespace hog::grid {
-
-// How much of a node is solid, out of 65535; a coarse node holds the mean of those under it.
-struct Shape {
-    using Value = std::uint16_t;
-    [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
-};
-
-// An index into the world's list of materials; a coarse node holds the most common under it.
-struct Material {
-    using Value = std::uint8_t;
-    [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
-};
-
-// The water body a node's basin belongs to, 0 for none; a coarse node holds the most common
-// under it.
-struct Water {
-    using Value = std::uint32_t;
-    [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
-};
 
 // One kind of data over a node's subtree, `levels` deep. Every node holds a value: a leaf's
 // stands for all under it, a split node's is its kind's summary of its eight. An open leaf has
 // finer detail under it, held elsewhere or still to come; a closed one is the same all through.
-// Alike nodes are held once, so building the same content gives the same tree.
+// Alike nodes are held once, so building the same content gives the same tree. Eight leaves merge
+// into one wherever their kind says one value stands for them all.
 template <typename Kind>
 class Tree {
 public:
@@ -58,8 +38,7 @@ public:
     // One leaf over all of it.
     Tree(std::uint8_t levels, Value whole, bool open);
 
-    // Every node at the foot, 2^levels a side, from `value_at(x, y, z)`; closed leaves, eight
-    // alike merged into one.
+    // Every node at the foot, 2^levels a side, from `value_at(x, y, z)`; closed leaves.
     template <typename ValueAt>
     [[nodiscard]] static Tree build(std::uint8_t levels, const ValueAt& value_at) {
         Tree tree;
@@ -77,6 +56,7 @@ public:
         }
         while (across > 1) {
             const int half = across / 2;
+            const double side = std::ldexp(1.0, levels) / across;
             std::vector<Id> coarser;
             coarser.reserve(static_cast<std::size_t>(half) * static_cast<std::size_t>(half) *
                             static_cast<std::size_t>(half));
@@ -95,7 +75,7 @@ public:
                                                 (2 * y) + static_cast<int>((k >> 1U) & 1U),
                                                 (2 * z) + static_cast<int>((k >> 2U) & 1U));
                         }
-                        coarser.push_back(tree.joined(children));
+                        coarser.push_back(tree.joined(children, side));
                     }
                 }
             }
@@ -133,7 +113,7 @@ private:
     static constexpr Id none = std::numeric_limits<Id>::max();
 
     struct Node {
-        Value value{};
+        Value value{}; // NOLINT(readability-redundant-member-init): zeroes integral kinds
         bool open = false;
         std::array<Id, 8> children{none, none, none, none, none, none, none, none};
 
@@ -150,8 +130,9 @@ private:
     [[nodiscard]] Id leaf_of(Value value, bool open) {
         return held({.value = value, .open = open});
     }
-    // Eight alike collapse into the one.
-    [[nodiscard]] Id joined(const std::array<Id, 8>& children);
+    // Eight leaves alike in being open or closed become one where their kind merges them; else a
+    // split node. Of children `side` finest nodes across.
+    [[nodiscard]] Id joined(const std::array<Id, 8>& children, double side);
     // A decoded node's id here and how far it reaches down.
     struct Decoded {
         Id id = 0;

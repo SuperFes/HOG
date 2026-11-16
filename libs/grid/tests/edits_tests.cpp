@@ -18,16 +18,21 @@ using hog::grid::Tree;
 
 namespace {
 
-constexpr Shape::Value solid = 65535;
+constexpr hog::grid::Surface solid = hog::grid::Surface::solid();
+constexpr hog::grid::Surface open = hog::grid::Surface::open();
 
-// Rooted twelve deep, solid where x is in the low half of the page, all of one material.
+// Rooted twelve deep, solid and open in a checkerboard of blocks four across, all of one
+// material.
 Page baked() {
     return Page{.root = Key{.depth = 12, .x = 1, .y = 2, .z = 3},
                 .generator = 7,
                 .shape = Held<Shape>{.version = 1,
                                      .tree = Tree<Shape>::build(
-                                         6, [](int x, int,
-                                               int) { return x < 32 ? solid : Shape::Value{0}; })},
+                                         6,
+                                         [](int x, int y, int z) {
+                                             return ((x / 4) + (y / 4) + (z / 4)) % 2 == 0 ? solid
+                                                                                           : open;
+                                         })},
                 .material = Held<Material>{.version = 1, .tree = Tree<Material>{6, 3, false}},
                 .water = std::nullopt};
 }
@@ -45,7 +50,7 @@ EditLog dug() {
                              .time = 1'763'000'000'000,
                              .generator = 7,
                              .left = {{.key = Key{.depth = 16, .x = 16, .y = 32, .z = 48},
-                                       .shape = Shape::Value{0},
+                                       .shape = open,
                                        .material = std::nullopt,
                                        .water = std::nullopt}}});
     log.edits.push_back(Edit{.id = 2,
@@ -65,14 +70,15 @@ TEST_CASE("an edit over a baked page reads through to it", "[grid]") {
     const Page page = baked();
     const EditLog none;
     CHECK(none.read<Shape>(page, in_page(0, 0, 0)) == solid);
-    CHECK(none.read<Shape>(page, in_page(40, 0, 0)) == Shape::Value{0});
+    CHECK(none.read<Shape>(page, in_page(44, 0, 0)) == open);
     CHECK(none.read<Material>(page, in_page(0, 0, 0)) == Material::Value{3});
 
     const EditLog log = dug();
-    CHECK(log.read<Shape>(page, in_page(0, 0, 0)) == Shape::Value{0});
-    CHECK(log.read<Shape>(page, in_page(3, 3, 3)) == Shape::Value{0});
+    CHECK(log.read<Shape>(page, in_page(0, 0, 0)) == open);
+    CHECK(log.read<Shape>(page, in_page(3, 3, 3)) == open);
     CHECK(log.read<Shape>(page, in_page(1, 1, 1)) == solid);
-    CHECK(log.read<Shape>(page, in_page(4, 0, 0)) == solid);
+    CHECK(log.read<Shape>(page, in_page(8, 0, 0)) == solid);
+    CHECK(log.read<Shape>(page, in_page(4, 0, 0)) == open);
     CHECK(log.read<Material>(page, in_page(1, 1, 1)) == Material::Value{9});
     CHECK(log.read<Material>(page, in_page(0, 0, 0)) == Material::Value{3});
 }
@@ -83,7 +89,7 @@ TEST_CASE("nothing reads where neither an edit nor the page says", "[grid]") {
     CHECK_FALSE(log.read<hog::grid::Water>(page, in_page(0, 0, 0)));
     CHECK_FALSE(log.read<Shape>(page, Key{.depth = 18}));
     CHECK_FALSE(log.read<Shape>(page, Key{.depth = 19, .x = 208, .y = 256, .z = 384}));
-    CHECK(log.read<Shape>(page, Key{.depth = 19, .x = 128, .y = 256, .z = 384}) == Shape::Value{0});
+    CHECK(log.read<Shape>(page, Key{.depth = 19, .x = 128, .y = 256, .z = 384}) == open);
     CHECK(log.read<Shape>(page, page.root) == page.shape.value().tree.root().value);
 }
 

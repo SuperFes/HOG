@@ -36,12 +36,12 @@ const std::optional<Held<Kind>>& held_of(const Page& page) {
     }
 }
 
-template <typename Value>
-Result<std::optional<Value>> read_value(ByteReader& in, bool present) {
+template <typename Kind>
+Result<std::optional<typename Kind::Value>> read_value(ByteReader& in, bool present) {
     if (!present) {
         return std::nullopt;
     }
-    auto value = in.read<Value>();
+    auto value = Kind::read(in);
     if (!value) {
         return std::unexpected(std::move(value.error()));
     }
@@ -63,9 +63,9 @@ Result<Edit::Left> read_left(ByteReader& in) {
     if ((*kinds & ~(has_shape | has_material | has_water)) != 0) {
         return make_error(ErrorCode::Parse, std::format("an edit's kinds {}", *kinds));
     }
-    auto shape = read_value<Shape::Value>(in, (*kinds & has_shape) != 0);
-    auto material = read_value<Material::Value>(in, (*kinds & has_material) != 0);
-    auto water = read_value<Water::Value>(in, (*kinds & has_water) != 0);
+    auto shape = read_value<Shape>(in, (*kinds & has_shape) != 0);
+    auto material = read_value<Material>(in, (*kinds & has_material) != 0);
+    auto water = read_value<Water>(in, (*kinds & has_water) != 0);
     if (!shape || !material || !water) {
         return make_error(ErrorCode::Parse, "an edit's values cut short");
     }
@@ -145,13 +145,13 @@ std::vector<std::byte> EditLog::encode() const {
                                                 (left.material ? has_material : 0U) |
                                                 (left.water ? has_water : 0U)));
             if (left.shape) {
-                out.write(*left.shape);
+                Shape::write(out, *left.shape);
             }
             if (left.material) {
-                out.write(*left.material);
+                Material::write(out, *left.material);
             }
             if (left.water) {
-                out.write(*left.water);
+                Water::write(out, *left.water);
             }
         }
     }
