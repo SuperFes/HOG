@@ -301,6 +301,11 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 
 **Species rules**
 
+- [ ] Plant lab: a standalone tool to grow and tune plants one species at a time before they go in the
+game, an L-system (or similar grammar) generator with a seed, toggles for every rule, and each plant's
+levels of detail side by side and switching by distance, from the whole plant near to texture far off.
+The grasses already made are the bar; the earlier trees and bushes fell short of it. Bought plant tools
+(such as Florasynth) could feed it too, but the lab is still needed for LOD and tuning.
 - [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, 
 needle or frond) that grows an individual deterministically from a seed (libs/flora: whorled levels, gnarl and rise, 
 foliage as solid crossed fronds, meshed as low-poly tubes at baked detail levels)
