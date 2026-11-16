@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/assert.hpp>
 #include <hog/core/result.hpp>
 #include <hog/grid/kinds.hpp>
 
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -83,6 +85,66 @@ public:
             across = half;
         }
         tree.root_ = level.front();
+        return tree;
+    }
+
+    // A node as a builder going down decides it: a leaf with its value, open or not.
+    struct Leaf {
+        Value value{}; // NOLINT(readability-redundant-member-init): zeroes integral kinds
+        bool open = false;
+    };
+
+    // From the root down, asking `decide(depth, x, y, z)` of each node reached, x, y, z among
+    // that depth's: a leaf ends it there, none splits it. Every node `levels` deep must be a leaf.
+    template <typename Decide>
+    [[nodiscard]] static Tree grow(std::uint8_t levels, const Decide& decide) {
+        struct Frame {
+            std::uint8_t depth = 0;
+            std::uint32_t x = 0;
+            std::uint32_t y = 0;
+            std::uint32_t z = 0;
+            std::size_t next = 0;
+            std::array<Id, 8> children{};
+        };
+        Tree tree;
+        tree.levels_ = levels;
+        std::vector<Frame> stack;
+        Id done = 0;
+        // Pushes a node that splits; a leaf is made at once, as `done`.
+        const auto reach = [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                               std::uint32_t z) {
+            if (const std::optional<Leaf> leaf = decide(depth, x, y, z)) {
+                done = tree.leaf_of(leaf->value, leaf->open);
+                return false;
+            }
+            HOG_ASSERT(depth < levels, "nodes at the foot must be leaves");
+            stack.push_back({.depth = depth, .x = x, .y = y, .z = z});
+            return true;
+        };
+        if (!reach(0, 0, 0, 0)) {
+            tree.root_ = done;
+            return tree;
+        }
+        while (!stack.empty()) {
+            const Frame top = stack.back();
+            if (top.next == 8) {
+                done = tree.joined(top.children, std::ldexp(1.0, levels - top.depth - 1));
+                stack.pop_back();
+                if (stack.empty()) {
+                    break;
+                }
+                Frame& parent = stack.back();
+                parent.children.at(parent.next++) = done;
+                continue;
+            }
+            const auto octant = static_cast<std::uint32_t>(top.next);
+            if (!reach(static_cast<std::uint8_t>(top.depth + 1), (2 * top.x) + (octant & 1U),
+                       (2 * top.y) + ((octant >> 1U) & 1U), (2 * top.z) + ((octant >> 2U) & 1U))) {
+                Frame& same = stack.back();
+                same.children.at(same.next++) = done;
+            }
+        }
+        tree.root_ = done;
         return tree;
     }
 

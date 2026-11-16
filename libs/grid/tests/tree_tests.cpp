@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 using hog::grid::Material;
@@ -165,4 +166,42 @@ TEST_CASE("broken tree bytes are refused", "[grid]") {
     std::vector<std::byte> self = split;
     self.back() = std::byte{2};
     CHECK_FALSE(Tree<Material>::decode(self));
+}
+
+TEST_CASE("growing down to the foot gives what building up does", "[grid]") {
+    const auto grown = Tree<Material>::grow(
+        levels,
+        [](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+           std::uint32_t z) -> std::optional<Tree<Material>::Leaf> {
+            if (depth < levels) {
+                return std::nullopt;
+            }
+            return Tree<Material>::Leaf{.value = patchy(x, y, z), .open = false};
+        });
+    CHECK(grown.same_as(patchy_tree()));
+}
+
+TEST_CASE("growing stops where a node is decided a leaf", "[grid]") {
+    const auto whole =
+        Tree<Water>::grow(levels, [](std::uint8_t, std::uint32_t, std::uint32_t, std::uint32_t) {
+            return std::optional{Tree<Water>::Leaf{.value = 3, .open = true}};
+        });
+    CHECK(whole.nodes() == 1);
+    CHECK(whole.root() == Tree<Water>::Found{.value = 3, .open = true, .depth = 0});
+
+    // One corner split to the foot, the rest leaves at the top.
+    const auto corner = Tree<Water>::grow(
+        levels,
+        [](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+           std::uint32_t z) -> std::optional<Tree<Water>::Leaf> {
+            if (x == 0 && y == 0 && z == 0 && depth < levels) {
+                return std::nullopt;
+            }
+            return Tree<Water>::Leaf{.value = depth == levels ? 1U : 2U, .open = false};
+        });
+    // The foot's eight alike merge into the node over them.
+    CHECK(corner.at(levels, 0, 0, 0) == Tree<Water>::Found{.value = 1, .open = false, .depth = 3});
+    CHECK(corner.at(levels, 15, 15, 15) ==
+          Tree<Water>::Found{.value = 2, .open = false, .depth = 1});
+    CHECK(corner.at(1, 0, 0, 0) == Tree<Water>::Found{.value = 2, .open = false, .depth = 1});
 }

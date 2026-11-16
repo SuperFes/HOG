@@ -216,3 +216,48 @@ TEST_CASE("meshing real tiles", "[.bench][globe][voxel_mesh]") {
                       << static_cast<double>(vertices) / tiles << " vertices a tile");
     }
 }
+
+TEST_CASE("generator sampling cost by way of asking", "[.bench][globe]") {
+    const auto& generator = hog::testing::small_world();
+    const double lod = hog::globe::voxel_lod(generator);
+    const hog::globe::Layers& layers = generator.layers();
+    std::vector<hog::DVec3> ups;
+    std::vector<double> grounds;
+    for (int n = 0; n < 200; ++n) {
+        const hog::DVec3 up = hog::globe::center(
+            hog::globe::cell_at_index(7, static_cast<std::uint64_t>(n) * 2'654'435'761U % 98'304U));
+        ups.push_back(up);
+        grounds.push_back(hog::globe::ground_below(generator, up, lod).value_or(0.0));
+    }
+    const auto time = [](auto&& work) {
+        const auto started = std::chrono::steady_clock::now();
+        work();
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
+    double sink = 0.0;
+    const double samples = time([&] {
+        for (std::size_t n = 0; n < ups.size(); ++n) {
+            sink += generator.sample(ups[n] * grounds[n], lod).distance;
+        }
+    });
+    const double columns = time([&] {
+        for (const hog::DVec3 up : ups) {
+            sink += generator.column(up, lod).ground();
+        }
+    });
+    const auto column = generator.column(ups[0], lod);
+    const double along = time([&] {
+        for (int n = 0; n < 2000; ++n) {
+            sink += column.sample(grounds[0] + (n * 0.01) - 10.0).distance;
+        }
+    });
+    hog::globe::Cell corner = hog::globe::cell_under(ups[0], layers.level);
+    const std::uint32_t last = (std::uint32_t{1} << corner.level) - 32U;
+    corner.i = std::min(corner.i, last);
+    corner.j = std::min(corner.j, last);
+    const double square =
+        time([&] { sink += static_cast<double>(generator.columns(corner, 32, lod).size()); });
+    WARN("sample " << samples / 200 * 1e3 << " ms, column " << columns / 200 * 1e3
+                   << " ms, along a column " << along / 2000 * 1e6 << " us, columns in a 32 square "
+                   << square / 1024 * 1e3 << " ms each; " << sink);
+}

@@ -214,7 +214,11 @@ step replaces something, the old and new are compared before the old goes.
    body. Materials are a palette of derived mixes, each named and made of others (loam of sand,
    silt and clay), so one index says what digging gives; the generator steps through the mixes
    between neighbours rather than jumping. Tests: a page read against the generator at the
-   same points.
+   same points. Done top down (`globe::fill`): each depth's nodes are probed together, and only
+   those the surface may cross split. The generator is asked in batches of columns on its own
+   cells, read between the four about each node: one point alone costs 0.73 ms (its column),
+   a batched column 0.025 ms, a point along a made column 0.9 µs. A 32³ node on the ground
+   fills in ~0.2 s on one core. Water marks only the sea's basin until 2.3.
 2. Coarse agrees with fine: a node filled coarse equals the fine ones under it summed up, so
    detail filled later never jumps. Tests: every level of a small world.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
