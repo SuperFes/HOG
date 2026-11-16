@@ -31,7 +31,7 @@ struct Material {
 // The water body a node's basin belongs to, 0 for none; a coarse node holds the most common
 // under it.
 struct Water {
-    using Value = std::uint16_t;
+    using Value = std::uint32_t;
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
 };
 
