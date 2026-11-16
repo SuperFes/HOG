@@ -455,16 +455,18 @@ void Formed::fill_walls() {
                 radius_;
             steepest = std::max(steepest, std::abs(top_[next] - top_[point]) / std::max(run, 1.0));
         }
-        // As steep as what covers them holds: loose ground its repose, soil as steep as it lies,
-        // rock as it stands where bare.
+        // As steep as what covers them holds: soil as steep as it lies, which it does however
+        // thin while it mantles them; else rock as it stands where bare, as many times steeper as
+        // the land formed of it stands, under loose ground at its repose as high as that lies.
         const double deposits =
             alluvium_[point] + lake_beds_[point] + till_[point] + sand_[point] + loess_[point];
         const double soil = organic_[point] + topsoil_[point] + subsoil_[point];
-        double holds = soil > creeping_depth ? soil_holds_[point] : rock_steepest;
-        if (deposits > loose_deep) {
-            holds = loose_steepest;
-        }
-        wall_[point] = std::min(steepest, holds);
+        wall_[point] = soil > creeping_depth
+                           ? std::min(steepest, soil_holds_[point])
+                           : wall_steepness(steepest, world.sphere.spacing() * radius_,
+                                            deposits > loose_deep ? deposits : 0.0, loose_steepest,
+                                            rock_steepest * formation::titan_hold(
+                                                                world.crust, world.body, point));
     }
 }
 

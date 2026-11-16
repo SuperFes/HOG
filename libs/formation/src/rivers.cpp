@@ -118,12 +118,6 @@ void gather(const Ground& ground, std::span<const std::uint32_t> order, Rivers& 
     }
 }
 
-// How many times steeper the rock at `point` stands, and slower it wears: more in titan belts.
-double titan_hold(const Crust& crust, const Body& body, std::uint32_t point) {
-    const double titan = point < crust.titan.size() ? crust.titan[point] : 0.0;
-    return 1.0 + ((std::max(body.titan_strength, 1.0) - 1.0) * titan);
-}
-
 double steepest_at(const Ground& ground, std::uint32_t point, double length) {
     return steepest_over(length, *ground.body) * titan_hold(*ground.crust, *ground.body, point);
 }
@@ -257,6 +251,11 @@ void wear_down(const Ground& ground, std::span<const double> wearing, Rivers& ri
 }
 
 } // namespace
+
+double titan_hold(const Crust& crust, const Body& body, std::uint32_t point) {
+    const double titan = point < crust.titan.size() ? crust.titan[point] : 0.0;
+    return 1.0 + ((std::max(body.titan_strength, 1.0) - 1.0) * titan);
+}
 
 double steepest_over(double length, const Body& body) {
     const double hillslopes = std::max(length / std::max(body.hillslope_length, 1e-9), 1.0);

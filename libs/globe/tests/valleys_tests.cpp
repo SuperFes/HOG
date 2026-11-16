@@ -293,6 +293,22 @@ TEST_CASE("a winding valley's ground stands over the floor of the stretch it sta
     }
 }
 
+TEST_CASE("loose ground holds walls in rock gentle only as high as it lies", "[globe][valleys]") {
+    using hog::globe::wall_steepness;
+    // Gentler than either holds: the ground's own fall.
+    CHECK(wall_steepness(0.3, 100.0, 500.0, 0.7, 1.7) == 0.3);
+    // Deeper than the walls climb, it holds them all at its repose.
+    CHECK_THAT(wall_steepness(3.0, 100.0, 1000.0, 0.7, 1.7), WithinAbs(0.7, 1e-12));
+    // A few metres of it over rock climbing 300 m: nearly as steep as the rock.
+    const double shallow = wall_steepness(3.0, 100.0, 10.0, 0.7, 1.7);
+    CHECK_THAT(shallow, WithinAbs(300.0 / ((10.0 / 0.7) + (290.0 / 1.7)), 1e-12));
+    CHECK(shallow > 1.6);
+    // None: as steep as the rock holds.
+    CHECK_THAT(wall_steepness(3.0, 100.0, 0.0, 0.7, 1.7), WithinAbs(1.7, 1e-12));
+    // Level ground has no walls.
+    CHECK(wall_steepness(0.0, 100.0, 10.0, 0.7, 1.7) == 0.0);
+}
+
 TEST_CASE("a crest is rounded as far as its walls have climbed, never at once where a foot turns",
           "[globe][valleys]") {
     // One stretch's floor turning up into its wall at 0 over no width at all, another's wall

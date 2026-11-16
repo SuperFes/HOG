@@ -193,6 +193,16 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
     return wall;
 }
 
+double wall_steepness(double fall, double run, double loose, double loose_holds,
+                      double rock_holds) noexcept {
+    const double climb = fall * run;
+    if (climb <= 0.0) {
+        return 0.0;
+    }
+    const double in_loose = std::clamp(loose, 0.0, climb);
+    return std::min(fall, climb / ((in_loose / loose_holds) + ((climb - in_loose) / rock_holds)));
+}
+
 WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within, double radius,
                        Interval steepness) noexcept {
     // Along the line no further than its chord moves over the cap, and away from it no further

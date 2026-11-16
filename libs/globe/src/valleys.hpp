@@ -95,6 +95,13 @@ struct Wall {
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
 
+// How steeply walls cut in rock stand where the ground falls `fall` to the next point `run`
+// metres off, rise over run: no steeper than that, nor than they hold, climbing through `loose`
+// metres of loose ground at `loose_holds`, then rock at `rock_holds`. Loose ground holds walls
+// gentle only as high as it lies.
+[[nodiscard]] double wall_steepness(double fall, double run, double loose, double loose_holds,
+                                    double rock_holds) noexcept;
+
 // Bounds of where wall_at() has the ground stand anywhere within `within` radians of `direction`,
 // as `standing` and with its rise out of the way as `height`, its walls as steep as anywhere in
 // `steepness` in place of the valley's own.

@@ -36,5 +36,7 @@ struct Rivers {
 
 // The steepest land stands on the whole over a run of `length` metres, rise over run.
 [[nodiscard]] double steepest_over(double length, const Body& body);
+// How many times steeper the rock at `point` stands, and slower it wears: more in titan belts.
+[[nodiscard]] double titan_hold(const Crust& crust, const Body& body, std::uint32_t point);
 
 } // namespace hog::formation
