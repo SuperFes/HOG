@@ -61,12 +61,13 @@ struct Strata {
     double organic = 0.0; // dead plant matter: litter, or peat
     double topsoil = 0.0;
     double subsoil = 0.0;
-    double loess = 0.0;     // silt the wind laid
-    double sand = 0.0;      // sand the wind laid
-    double alluvium = 0.0;  // what rivers laid
-    double lake_beds = 0.0; // what settled in hollows
-    double till = 0.0;      // what ice laid
-    double saprolite = 0.0; // the rock under those rotted in place
+    double loess = 0.0;        // silt the wind laid
+    double sand = 0.0;         // sand the wind laid
+    double alluvium = 0.0;     // what rivers laid
+    double channel_belt = 0.0; // the gravel rivers reworked their belts into, under what they laid
+    double lake_beds = 0.0;    // what settled in hollows
+    double till = 0.0;         // what ice laid
+    double saprolite = 0.0;    // the rock under those rotted in place
     double lava = 0.0;
 };
 

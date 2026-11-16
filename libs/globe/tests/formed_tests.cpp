@@ -1250,3 +1250,37 @@ TEST_CASE("what stands out of the ground round a place", "[.probe_spikes]") {
         print_spikes(probe, 120);
     }
 }
+
+TEST_CASE("big rivers run over floors of the gravel they reworked their belts into",
+          "[globe][formed]") {
+    const Generator& generator = large_generator();
+    const Formed& formed = *generator.shape().formed;
+    const hog::formation::World& world = formed.world();
+    const double lod = generator.planet().voxel;
+    const double radius = generator.planet().body.radius;
+    int rivers = 0;
+    int on_alluvium = 0;
+    double deep = 0.0;
+    for (const std::uint32_t point : largest_rivers(world, 20)) {
+        const DVec3 from = world.sphere.point(point);
+        const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+        const DVec3 across = glm::normalize(glm::cross(to - from, from));
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
+        const DVec3 middle = glm::normalize(from + to);
+        for (int step = -half; step < half; step += 2) {
+            const Formed::Here here =
+                formed.at(glm::normalize(middle + (across * (step * across_river / radius))), lod);
+            if (here.river && here.top.value > 0.0) {
+                ++rivers;
+                on_alluvium += here.layers.channel_belt > 0.0 ? 1 : 0;
+                deep += here.layers.channel_belt;
+                break;
+            }
+        }
+    }
+    UNSCOPED_INFO(on_alluvium << " of " << rivers << " rivers on alluvium, " << deep / rivers
+                              << " m deep on average");
+    REQUIRE(rivers > 5);
+    CHECK(on_alluvium * 10 >= rivers * 9);
+    CHECK(deep / rivers > 0.2);
+}

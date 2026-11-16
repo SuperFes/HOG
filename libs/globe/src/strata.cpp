@@ -83,7 +83,7 @@ struct Laid {
     bool wanders = true;
 };
 struct Stack {
-    std::array<Laid, 13> layers{};
+    std::array<Laid, 14> layers{};
     std::size_t count = 0;
 };
 
@@ -93,7 +93,7 @@ Stack stacked(const Layering& layers, Material beach) noexcept {
         stack.layers.at(stack.count++) = {
             .thickness = layers.rubble, .material = layers.rubble_of, .wanders = false};
     }
-    for (const auto& [thickness, material] : std::array<std::pair<double, Material>, 12>{{
+    for (const auto& [thickness, material] : std::array<std::pair<double, Material>, 13>{{
              {layers.ice, Material::Ice},
              {layers.beach, beach},
              {layers.organic, Material::Soil},
@@ -102,6 +102,7 @@ Stack stacked(const Layering& layers, Material beach) noexcept {
              {layers.loess, Material::Sediment},
              {layers.sand, Material::Sand},
              {layers.alluvium, Material::Sediment},
+             {layers.channel_belt, Material::Gravel},
              {layers.lake_beds, Material::Clay},
              {layers.till, Material::Gravel},
              {layers.saprolite, Material::Clay},

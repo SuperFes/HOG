@@ -43,6 +43,10 @@ struct Valley {
     double channel_width = 0.0;
     double channel_depth = 0.0;
     double channel_depth_to = 0.0;
+    // Metres deep the river reworks its belt into a sheet of its own alluvium as it wanders, as
+    // deep as it scours whatever the detail it's read at, changing along it as its channel does.
+    double sheet = 0.0;
+    double sheet_to = 0.0;
     double water_depth = 0.0;
     double water_depth_to = 0.0;
     // The lowest its water stands, as where it runs into a lake that holds it up.
@@ -86,6 +90,8 @@ struct Wall {
     // How deep the channel cuts under `standing`.
     double cut = 0.0;
     DVec3 cut_gradient{0.0};
+    // Metres of the river's own alluvium under its floor, uncut.
+    double sheet = 0.0;
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
 
@@ -173,6 +179,7 @@ private:
     Lowered lowered_;
     double lowest_ = 0.0;
     double cut_ = 0.0;
+    double sheet_ = 0.0;
     DVec3 cut_gradient_{0.0};
     DVec3 fall_{0.0};
     double floor_ = 0.0;

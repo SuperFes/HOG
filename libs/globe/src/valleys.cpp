@@ -150,7 +150,8 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
               .standing_gradient = DVec3{0.0},
               .reaching_gradient = DVec3{0.0},
               .cut = cut,
-              .cut_gradient = DVec3{0.0}};
+              .cut_gradient = DVec3{0.0},
+              .sheet = valley.sheet + ((valley.sheet_to - valley.sheet) * whole)};
     // Up the walls away from the line, and along its floor between its ends.
     const DVec3 outward = direction - (nearest * cosine);
     if (const double size = glm::length(outward); size > 0.0) {
@@ -346,6 +347,7 @@ double Lowered::floor_under(const Ground& low) const noexcept {
 void Lowest::add(const Wall& one) noexcept {
     if (count_ == 0) {
         cut_ = one.cut;
+        sheet_ = one.sheet;
         cut_gradient_ = one.cut_gradient;
         fall_ = one.fall;
         floor_ = one.floor;
@@ -357,6 +359,7 @@ void Lowest::add(const Wall& one) noexcept {
         const double lower = std::clamp(0.5 + ((lowest_ - one.standing) / (2.0 * over)), 0.0, 1.0);
         const double taken = lower * lower * (3.0 - (2.0 * lower));
         cut_ += (one.cut - cut_) * taken;
+        sheet_ += (one.sheet - sheet_) * taken;
         cut_gradient_ += (one.cut_gradient - cut_gradient_) * taken;
         fall_ += (one.fall - fall_) * taken;
         floor_ += (one.floor - floor_) * taken;
@@ -414,6 +417,7 @@ void Lowest::lower(Wall& wall) const noexcept {
     wall.bank = std::max({std::min(bank, wall.standing + flooded), wall.water, wall.standing});
     wall.season = season;
     wall.cut = cut_;
+    wall.sheet = sheet_;
     wall.cut_gradient = cut_gradient_;
     // Water runs off the stretch the ground stands as, turning only where the ground does.
     wall.fall = fall_;

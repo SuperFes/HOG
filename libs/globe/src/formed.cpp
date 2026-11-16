@@ -142,6 +142,7 @@ void add_weighted(Wall& sum, const Wall& one, double weight) noexcept {
     sum.reaching_gradient += weight * one.reaching_gradient;
     sum.cut += weight * one.cut;
     sum.cut_gradient += weight * one.cut_gradient;
+    sum.sheet += weight * one.sheet;
 }
 
 void divide(Wall& sum, double total) noexcept {
@@ -160,6 +161,7 @@ void divide(Wall& sum, double total) noexcept {
     sum.reaching_gradient /= total;
     sum.cut /= total;
     sum.cut_gradient /= total;
+    sum.sheet /= total;
 }
 
 OnCube on_cube(DVec3 direction) noexcept {
@@ -184,12 +186,15 @@ struct GroundWay {
     double counts = 1.0;
 };
 
-// The water in a valley's channel at a place, faded as its ground is.
+// The water in a valley's channel at a place, faded as its ground is; and the level its belt
+// lies at, over the sheet of its own alluvium so deep.
 struct ValleyRiver {
     double ground = 0.0;
     double water = 0.0;
     double bank = 0.0;
     Season season;
+    double level = 0.0;
+    double sheet = 0.0;
 };
 
 // How high a valley's ground stands over its floor at a place, and where it stands.
@@ -198,6 +203,26 @@ struct ValleyFloor {
     double above = 0.0;
     DVec3 gradient{0.0};
 };
+
+// Metres of a river's own alluvium under the ground standing at `top`: the sheet it reworked its
+// belt into, down to as deep as its channel under the belt, the channel cut into it, thinning out
+// up the walls over its own depth; the deepest river's.
+double sheet_under(const std::vector<ValleyRiver>& rivers, double top) noexcept {
+    double deepest = 0.0;
+    for (const ValleyRiver& river : rivers) {
+        if (river.sheet <= 0.0) {
+            continue;
+        }
+        const double over = (top - river.level) / river.sheet;
+        if (over >= 1.0) {
+            continue;
+        }
+        const double kept = over <= 0.0 ? 1.0 : 1.0 - (over * over * (3.0 - (2.0 * over)));
+        deepest = std::max(deepest,
+                           std::clamp(top - (river.level - river.sheet), 0.0, river.sheet) * kept);
+    }
+    return deepest;
+}
 
 // Metres of a river's water over the ground standing at `top`, the year round and in flood; and
 // the level its water stands at either way, metres over the sea, and how that rises through the
@@ -1151,11 +1176,12 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
             return (reaching * height) + ((1.0 - reaching) * smooth.value);
         };
         // Its water too, fading out as its floor rises over the ground about it.
-        rivers.push_back(
-            {.ground = fade(wall.standing),
-             .water = fade(wall.water),
-             .bank = fade(wall.bank),
-             .season = {.rise = reaching * wall.season.rise, .peak = wall.season.peak}});
+        rivers.push_back({.ground = fade(wall.standing),
+                          .water = fade(wall.water),
+                          .bank = fade(wall.bank),
+                          .season = {.rise = reaching * wall.season.rise, .peak = wall.season.peak},
+                          .level = fade(wall.floor + wall.cut),
+                          .sheet = reaching * wall.sheet});
         banks = std::min(banks, fade(wall.standing + wall.cut));
         if (wall.standing < smooth.value) {
             const double faded = fade(wall.standing);
@@ -1203,6 +1229,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     carved.river_level = depths.level;
     carved.flood_level = depths.flood_level;
     carved.season = depths.season;
+    carved.sheet = sheet_under(rivers, carved.top.value);
     const FloorHold hold = floor_hold(floors, carved.top.value, spread);
     carved.above_floor = hold.above;
     carved.above_floor_gradient = hold.gradient;
@@ -1239,11 +1266,14 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const double length = runs.back();
     const double metres = length * radius_;
     const double fall = metres > 0.0 ? (top_[point] - floor_to) / metres : 0.0;
-    const auto channel_at = [&](std::uint32_t at, double falling) {
+    // The sheet its channel reworks the belt into lies as deep whatever the detail: floods scour
+    // its bends half as deep again as its banks stand.
+    const auto channel_at = [&](std::uint32_t at, double falling, double& sheet) {
         Channel made = channel_of(world.rivers.flood[at], world.lakes.discharge[at], falling,
                                   alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
                                   0.6 * sphere.spacing() * radius_, world.regimes.low[at],
                                   world.regimes.high[at]);
+        sheet = 1.5 * made.depth;
         // Channels too narrow for the detail asked fade out with their water, as gullies do.
         const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
         made.depth *= shown;
@@ -1251,15 +1281,17 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
         made.rise *= shown;
         return made;
     };
-    const Channel channel = channel_at(point, fall);
+    double sheet = 0.0;
+    const Channel channel = channel_at(point, fall, sheet);
     // Its channel and water meet the next one's as they are where it runs into it; at the sea, it
     // brims to the sea's level.
     Channel next = channel;
+    double sheet_to = sheet;
     if (mouth) {
         next.water = channel.depth;
         next.rise = 0.0;
     } else {
-        next = channel_at(down, fall);
+        next = channel_at(down, fall, sheet_to);
     }
     // Running into a lake, its water stands no lower than the lake's, and comes down to it where
     // it runs in: as deep in its channel there as the lake stands over its floor, brimming at most.
@@ -1359,6 +1391,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                   .channel_width = channel.width,
                                   .channel_depth = channel.depth,
                                   .channel_depth_to = next.depth,
+                                  .sheet = sheet,
+                                  .sheet_to = sheet_to,
                                   .water_depth = channel.water,
                                   .water_depth_to = next.water,
                                   .least_water = least_water,
@@ -1497,7 +1531,8 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
                 .season = ground.season,
                 .bed = dissected.top.value,
                 .settled = 1.0,
-                .bedforms = Noise{}};
+                .bedforms = Noise{},
+                .sheet = ground.sheet};
     // Ice fills the gullies itself, what it carried lying under it.
     if (dissected.ice <= 0.0) {
         settle(direction, weights, lod, cut);
@@ -1638,6 +1673,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
         *laid -= taken;
         cut -= taken;
     }
+    // Under it all, what the rivers reworked their belts into, gullies cut into as into rock.
+    layers.channel_belt = std::max(0.0, under.sheet - cut);
     layers.saprolite = std::max(0.0, layers.saprolite - cut);
     // Under what covers it the rock rots in from its joints as it's brought up to the top (Linton's
     // tors): the narrowest blocks rot right through, the widest leave rounded cores, which stand
@@ -1653,8 +1690,8 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const double holds = cut_slope / value(soil_holds_);
     const double over = ((layers.organic + layers.topsoil + layers.subsoil) *
                          std::max(0.0, 1.0 - (holds * holds))) +
-                        layers.loess + layers.sand + layers.alluvium + layers.lake_beds +
-                        layers.till + layers.lava + layers.saprolite;
+                        layers.loess + layers.sand + layers.alluvium + layers.channel_belt +
+                        layers.lake_beds + layers.till + layers.lava + layers.saprolite;
     here.weathering = {.rate = value(weathering_),
                        .worn = value(worn_),
                        .years = value(years_),
@@ -1693,9 +1730,10 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
             rock_rises = relief;
             top.top.value += here.crag;
             top.top.gradient += core.rise * fade;
-            for (double* loose : {&layers.organic, &layers.topsoil, &layers.subsoil, &layers.loess,
-                                  &layers.sand, &layers.alluvium, &layers.lake_beds, &layers.till,
-                                  &layers.lava, &layers.saprolite}) {
+            for (double* loose :
+                 {&layers.organic, &layers.topsoil, &layers.subsoil, &layers.loess, &layers.sand,
+                  &layers.alluvium, &layers.channel_belt, &layers.lake_beds, &layers.till,
+                  &layers.lava, &layers.saprolite}) {
                 *loose = 0.0;
             }
         }
@@ -1720,8 +1758,9 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     layers.subsoil *= lying;
     // Rotted rock is the top of the rock itself, so the beds under it lie no deeper for it.
     layers.cover = layers.ice + layers.beach + layers.organic + layers.topsoil + layers.subsoil +
-                   layers.loess + layers.sand + layers.alluvium + layers.lake_beds + layers.till +
-                   layers.lava + std::max(rock_cover, layers.saprolite);
+                   layers.loess + layers.sand + layers.alluvium + layers.channel_belt +
+                   layers.lake_beds + layers.till + layers.lava +
+                   std::max(rock_cover, layers.saprolite);
     const double light = std::clamp(here.light, 0.0, 1.0);
     mix_of(
         std::array{std::pair{Material::Granite, light}, std::pair{Material::Basalt, 1.0 - light}},

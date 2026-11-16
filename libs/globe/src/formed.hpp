@@ -93,6 +93,8 @@ private:
         double river_level = 0.0;
         double flood_level = 0.0;
         Season season; // the river's
+        // Metres of its own alluvium a river left under it.
+        double sheet = 0.0;
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const;
@@ -127,6 +129,7 @@ private:
         // The bars, levees and hummocks laid ground stands in, about -1 to 1 of their height;
         // gradient per metre along the ground.
         Noise bedforms;
+        double sheet = 0.0; // as carved
     };
     [[nodiscard]] Surface surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                   double lod) const;
