@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hog/client/column_meshes.hpp>
+#include <hog/client/drawn.hpp>
 #include <hog/client/ground_changes.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
@@ -79,7 +79,7 @@ private:
     struct Work {
         globe::TileKey key;
         std::uint64_t arrived = 0;
-        std::unique_ptr<jobs::Async<ColumnDrawn>> job;
+        std::unique_ptr<jobs::Async<Drawn>> job;
     };
     // Coarser first, so a tile's decided after those over it.
     struct CoarseFirst {
@@ -124,7 +124,7 @@ private:
     std::set<globe::TileKey> bare_;                 // held with nothing drawn for it yet
     std::vector<Work> working_;
     // Meshing no longer wanted, kept till done so it's never waited on.
-    std::vector<std::unique_ptr<jobs::Async<ColumnDrawn>>> abandoned_;
+    std::vector<std::unique_ptr<jobs::Async<Drawn>>> abandoned_;
     std::uint64_t taken_ = 0;
     // What's to be drawn under each key since last collected, the last word on each: shown, or
     // gone where none.

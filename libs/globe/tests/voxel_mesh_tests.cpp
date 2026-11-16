@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <vector>
@@ -26,8 +27,6 @@ namespace {
 
 using hog::globe::Cube;
 using hog::globe::Material;
-using hog::globe::Site;
-using hog::globe::TileColumn;
 using hog::globe::Volume;
 using hog::globe::Voxel;
 using hog::globe::VoxelMesh;
@@ -36,30 +35,47 @@ using hog::globe::bed::earth;
 
 constexpr std::uint32_t ground = 40; // the highest layer of rock
 constexpr std::uint32_t tile = 64;
-const Site middle{.face = 2, .i = 10 * tile, .j = 10 * tile};
+const hog::globe::TileKey middle{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
 
-// Rock up to `ground` right across a tile column, with water a layer deep over it if `wet`.
-TileColumn flat(bool wet = false) {
-    return {.floor = 0,
-            .tiles = {{0, VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
-                           if (std::cmp_less_equal(z, ground)) {
-                               return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
-                           }
-                           if (wet && std::cmp_equal(z, ground + 1)) {
-                               return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
-                           }
-                           return Cube{};
-                       })}}};
+// Rock up to `ground` right across a tile, with water a layer deep over it if `wet`.
+VoxelTree flat(bool wet = false) {
+    return VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+        if (std::cmp_less_equal(z, ground)) {
+            return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
+        }
+        if (wet && std::cmp_equal(z, ground + 1)) {
+            return Cube{.liquid = Material::Water, .liquid_amount = Voxel::full};
+        }
+        return Cube{};
+    });
 }
 
-// The tile column at `middle` and the eight about it, held.
-void hold_about(Volume& volume, const TileColumn& column) {
-    for (std::uint32_t j = 9; j <= 11; ++j) {
-        for (std::uint32_t i = 9; i <= 11; ++i) {
-            REQUIRE(
-                volume.decode_column({.face = 2, .i = i * tile, .j = j * tile}, column.encode()));
+// A voxel of a tile, changed.
+struct Changed {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+    Cube cube;
+};
+
+// The tile with the voxels changed.
+VoxelTree with(const VoxelTree& tree, std::initializer_list<Changed> changes) {
+    return VoxelTree::build(Volume::tile_side, [&](int x, int y, int z) {
+        for (const Changed& change : changes) {
+            if (change.x == x && change.y == y && change.z == z) {
+                return change.cube;
+            }
         }
-    }
+        return tree.at(x, y, z);
+    });
+}
+
+// The tile at `middle`, among tiles beside it holding as it does.
+VoxelMesh mesh_among(const VoxelTree& tree) {
+    const auto beside = [&](hog::globe::TileKey at) -> const VoxelTree* {
+        return at.level == middle.level && at.k == middle.k ? &tree : nullptr;
+    };
+    return hog::globe::mesh_tile(earth().layers(), middle, tree, beside);
 }
 
 std::size_t quads(const VoxelMesh& mesh) {
@@ -70,10 +86,7 @@ std::size_t quads(const VoxelMesh& mesh) {
 
 TEST_CASE("flat ground meshes to its top faces alone, facing up, where its rock ends",
           "[globe][voxel_mesh]") {
-    Volume volume;
-    const hog::globe::World world{earth(), volume};
-    hold_about(volume, flat());
-    const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh mesh = mesh_among(flat());
     CHECK(quads(mesh) == std::size_t{tile} * tile);
     const double top = earth().layers().bottom(static_cast<int>(ground) + 1);
     for (const hog::globe::VoxelVertex& vertex : mesh.vertices) {
@@ -84,9 +97,11 @@ TEST_CASE("flat ground meshes to its top faces alone, facing up, where its rock 
     }
 
     // A voxel stood on it shows its four sides and top, and hides the ground under it.
-    REQUIRE(volume.set({.face = 2, .i = middle.i + 5, .j = middle.j + 7, .layer = ground + 1},
-                       {.solid = Material::Basalt, .solid_amount = Voxel::full}));
-    const VoxelMesh stood = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh stood = mesh_among(
+        with(flat(), {{.x = 5,
+                       .y = 7,
+                       .z = ground + 1,
+                       .cube = {.solid = Material::Basalt, .solid_amount = Voxel::full}}}));
     CHECK(quads(stood) == quads(mesh) - 1 + 5);
     CHECK(std::ranges::count(stood.vertices, Material::Basalt,
                              &hog::globe::VoxelVertex::material) == 5 * 4);
@@ -94,10 +109,7 @@ TEST_CASE("flat ground meshes to its top faces alone, facing up, where its rock 
 
 TEST_CASE("water shows its top to the open, and the ground under it shows through it",
           "[globe][voxel_mesh]") {
-    Volume volume;
-    const hog::globe::World world{earth(), volume};
-    hold_about(volume, flat(true));
-    const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh mesh = mesh_among(flat(true));
     CHECK(quads(mesh) == std::size_t{2} * tile * tile);
     CHECK(std::ranges::count(mesh.vertices, Material::Water, &hog::globe::VoxelVertex::material) ==
           std::ptrdiff_t{4} * tile * tile);
@@ -105,11 +117,8 @@ TEST_CASE("water shows its top to the open, and the ground under it shows throug
 
 TEST_CASE("water stands as high as it fills its voxel, as one sheet with the water beside it",
           "[globe][voxel_mesh]") {
-    Volume volume;
-    const hog::globe::World world{earth(), volume};
-    TileColumn shallow = flat();
     const auto quarter = static_cast<std::uint16_t>(Voxel::full / 4);
-    shallow.tiles.front().second = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+    const VoxelTree shallow = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
         if (std::cmp_less_equal(z, ground)) {
             return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
         }
@@ -118,7 +127,6 @@ TEST_CASE("water stands as high as it fills its voxel, as one sheet with the wat
         }
         return Cube{};
     });
-    hold_about(volume, shallow);
     const hog::globe::Layers& layers = earth().layers();
     const double bottom = layers.bottom(static_cast<int>(ground) + 1);
     const auto water_tops = [&](const VoxelMesh& mesh) {
@@ -132,7 +140,7 @@ TEST_CASE("water stands as high as it fills its voxel, as one sheet with the wat
         }
         return tops;
     };
-    const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh mesh = mesh_among(shallow);
     CHECK(quads(mesh) == std::size_t{2} * tile * tile);
     for (const double top : water_tops(mesh)) {
         CHECK(std::abs(top - (bottom + (0.25 * layers.thickness))) < 0.01);
@@ -140,10 +148,13 @@ TEST_CASE("water stands as high as it fills its voxel, as one sheet with the wat
 
     // Filled to half, one voxel's water is no step over its neighbours': the sheet rises to the
     // water about each of its corners, whole, with no sides.
-    const Site deeper{.face = 2, .i = middle.i + 5, .j = middle.j + 7, .layer = ground + 1};
-    REQUIRE(volume.set(deeper, {.liquid = Material::Water,
-                                .liquid_amount = static_cast<std::uint16_t>(Voxel::full / 2)}));
-    const VoxelMesh stepped = hog::globe::mesh_tile_column(world, middle, 0);
+    const auto deeper = [&](std::uint16_t amount) {
+        return with(shallow, {{.x = 5,
+                               .y = 7,
+                               .z = ground + 1,
+                               .cube = {.liquid = Material::Water, .liquid_amount = amount}}});
+    };
+    const VoxelMesh stepped = mesh_among(deeper(static_cast<std::uint16_t>(Voxel::full / 2)));
     CHECK(quads(stepped) == quads(mesh));
     const std::vector<double> tops = water_tops(stepped);
     CHECK(std::ranges::count_if(tops, [&](double top) {
@@ -167,22 +178,17 @@ TEST_CASE("water stands as high as it fills its voxel, as one sheet with the wat
     }
 
     // Too little to stand in it, it doesn't show: the sheet has a hole there, and no walls.
-    REQUIRE(volume.set(deeper, {.liquid = Material::Water,
-                                .liquid_amount = static_cast<std::uint16_t>(Voxel::full / 32)}));
-    const VoxelMesh wet = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh wet = mesh_among(deeper(static_cast<std::uint16_t>(Voxel::full / 32)));
     CHECK(quads(wet) == quads(mesh) - 1);
 }
 
 TEST_CASE("ground stands as high as its matter, keeping out water lower than it, and hangs as "
           "low",
           "[globe][voxel_mesh]") {
-    Volume volume;
-    const hog::globe::World world{earth(), volume};
     const auto share = [](double of) {
         return static_cast<std::uint16_t>(of * static_cast<double>(Voxel::full));
     };
-    TileColumn sea = flat();
-    sea.tiles.front().second = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
+    const VoxelTree sea = VoxelTree::build(Volume::tile_side, [&](int, int, int z) {
         if (std::cmp_less_equal(z, ground)) {
             return Cube{.solid = Material::Granite, .solid_amount = Voxel::full};
         }
@@ -191,19 +197,24 @@ TEST_CASE("ground stands as high as its matter, keeping out water lower than it,
         }
         return Cube{};
     });
-    hold_about(volume, sea);
-    // Ground a third of a voxel high, over the water beside it.
-    const Site dry{.face = 2, .i = middle.i + 5, .j = middle.j + 7, .layer = ground + 1};
-    REQUIRE(volume.set(dry, {.solid = Material::Granite, .solid_amount = share(0.33)}));
-    // A ledge two voxels up, with a share of a voxel hanging under it.
-    const Site ledge{.face = 2, .i = middle.i + 20, .j = middle.j + 20, .layer = ground + 4};
-    REQUIRE(volume.set(ledge, {.solid = Material::Basalt, .solid_amount = Voxel::full}));
-    Site hanging = ledge;
-    hanging.layer -= 1;
-    REQUIRE(volume.set(hanging, {.solid = Material::Basalt, .solid_amount = share(0.4)}));
+    // Ground a third of a voxel high, over the water beside it; and a ledge two voxels up, with a
+    // share of a voxel hanging under it.
+    const VoxelTree shaped =
+        with(sea, {{.x = 5,
+                    .y = 7,
+                    .z = ground + 1,
+                    .cube = {.solid = Material::Granite, .solid_amount = share(0.33)}},
+                   {.x = 20,
+                    .y = 20,
+                    .z = ground + 4,
+                    .cube = {.solid = Material::Basalt, .solid_amount = Voxel::full}},
+                   {.x = 20,
+                    .y = 20,
+                    .z = ground + 3,
+                    .cube = {.solid = Material::Basalt, .solid_amount = share(0.4)}}});
 
     const hog::globe::Layers& layers = earth().layers();
-    const VoxelMesh mesh = hog::globe::mesh_tile_column(world, middle, 0);
+    const VoxelMesh mesh = mesh_among(shaped);
     std::size_t water_sides = 0;
     std::vector<double> granite_tops;
     std::vector<double> basalt_bottoms;
@@ -239,7 +250,7 @@ TEST_CASE("ground stands as high as its matter, keeping out water lower than it,
 TEST_CASE("a tile meshes from its own voxels, reading the tiles beside it where there are any",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
-    const VoxelTree rock = flat().tiles.front().second;
+    const VoxelTree rock = flat();
     const hog::globe::TileKey key{.level = 0, .face = 2, .i = 10, .j = 10, .k = 0};
     const VoxelMesh mesh = hog::globe::mesh_tile(layers, key, rock);
     CHECK(quads(mesh) == std::size_t{tile} * tile);
@@ -296,7 +307,7 @@ TEST_CASE("water's sheet marks the corners on its edge, where it meets ground st
         return std::ranges::count(mesh.vertices, true, &hog::globe::VoxelVertex::shore);
     };
     // Open water right across: no edge anywhere.
-    CHECK(shores(hog::globe::mesh_tile(layers, key, flat(true).tiles.front().second)) == 0);
+    CHECK(shores(hog::globe::mesh_tile(layers, key, flat(true))) == 0);
 
     // A pool ten columns square sunk a voxel into the rock: its rim's corners are the edge's.
     const VoxelTree pool = VoxelTree::build(Volume::tile_side, [](int x, int y, int z) {
@@ -413,7 +424,7 @@ TEST_CASE("a lake's sheet runs on over the shore as far as its water rises throu
 TEST_CASE("a tile at a face's edge reads the tile across it on the next face",
           "[globe][voxel_mesh]") {
     const hog::globe::Layers& layers = earth().layers();
-    const VoxelTree rock = flat().tiles.front().second;
+    const VoxelTree rock = flat();
     const VoxelTree air{Volume::tile_side};
     const auto tiles = std::uint32_t{1} << (layers.level - std::countr_zero(tile));
     for (const auto& [i, by] : {std::pair{tiles - 1, 1}, std::pair{0U, -1}}) {

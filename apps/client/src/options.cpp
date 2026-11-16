@@ -94,20 +94,14 @@ struct Kept {
 };
 
 constexpr std::array kept{
-    Kept{.name = "--planet",
-         .keep = [](Options& options, std::string_view value) { options.planet = value; }},
     Kept{.name = "--connect",
          .keep = [](Options& options, std::string_view value) { options.connect = value; }},
     Kept{.name = "--login",
          .keep = [](Options& options, std::string_view value) { options.login = value; }},
     Kept{.name = "--name",
          .keep = [](Options& options, std::string_view value) { options.name = value; }},
-    Kept{.name = "--companion",
-         .keep = [](Options& options, std::string_view value) { options.companion = value; }},
     Kept{.name = "--capture",
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
-    Kept{.name = "--world",
-         .keep = [](Options& options, std::string_view value) { options.world = value; }},
 };
 
 const Kept* kept_named(std::string_view option) {
@@ -152,13 +146,6 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--threads must be from 0 to {}, not {}", most_threads, value));
         }
         options.threads = static_cast<std::uint32_t>(*threads);
-    } else if (option == "--voxel") {
-        options.voxel = real(value);
-        if (!options.voxel || !(*options.voxel > 0.0)) {
-            return make_error(
-                ErrorCode::InvalidArgument,
-                std::format("--voxel takes a size in metres over zero, not {}", value));
-        }
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--quit-after") {
@@ -183,7 +170,6 @@ struct Flag {
 constexpr std::array flags{
     Flag{.name = "-h", .set = [](Options& options) { options.help = true; }},
     Flag{.name = "--help", .set = [](Options& options) { options.help = true; }},
-    Flag{.name = "--alone", .set = [](Options& options) { options.companion.reset(); }},
     Flag{.name = "--through", .set = [](Options& options) { options.through = true; }},
     Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
     Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
@@ -218,14 +204,6 @@ Result<void> check_together(const Options& options) {
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
     }
-    if (options.world && options.connect) {
-        return make_error(ErrorCode::InvalidArgument,
-                          "--world is for flying alone: a server sends its own ground");
-    }
-    if (options.voxel && options.connect) {
-        return make_error(ErrorCode::InvalidArgument,
-                          "--voxel is for flying alone: a server's world has its own cell size");
-    }
     if (!options.simulate.off() && !options.connect) {
         return make_error(ErrorCode::InvalidArgument, "--simulate is for --connect");
     }
@@ -257,7 +235,6 @@ std::string_view usage() noexcept {
 Flies or walks over the planet.
 
 options:
-  --planet PATH          the planet's config (default config/planet.toml)
   --at LAT,LON,ALT[,HEADING,PITCH]
                          start at degrees of latitude and longitude, metres above
                          sea level (default over latitude 0, longitude 0), facing
@@ -272,9 +249,6 @@ options:
   --simulate SETTINGS    a bad network to connect over, such as
                          lag=75,jitter=10,loss=2,reorder=1 in ms and percent, each
                          added both ways
-  --companion PATH       a drawing on white paper of someone 3 m tall to fly along
-                         with (default res/Matt.png)
-  --alone                fly without them
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
@@ -284,10 +258,6 @@ options:
                          talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
-  --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
-                         own (0.5 by default); for looking, flying alone
-  --world FILE           the world's file, its ground made ahead by hog-build-world, to
-                         fly over alone; without it there is no ground
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

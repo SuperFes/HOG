@@ -1,9 +1,0 @@
-# The development planet, held in a coarse shell and formed coarsely so the smoke test starts in
-# seconds.
-[planet]
-seed = 1
-radius = 115000.0
-voxel = 2.5
-floor_depth = 4000.0
-sky_height = 10000.0
-formed_detail = 5

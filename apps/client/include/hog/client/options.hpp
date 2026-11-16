@@ -29,13 +29,12 @@ struct Place {
 };
 
 struct Options {
-    std::filesystem::path planet = "config/planet.toml";
     // Over latitude 0, longitude 0 without one.
     std::optional<Place> start;
     // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.
     std::optional<double> time_of_day;
     std::uint32_t threads = 0; // meshing the ground, 0 for one per hardware thread
-    // A server's IP address and port to connect to; alone without one.
+    // A server's IP address and port to connect to.
     std::optional<std::string> connect;
     // A login service's IP address and port, and the name to log in with, for a connect token
     // to connect with; without, connecting with none.
@@ -43,8 +42,6 @@ struct Options {
     std::optional<std::string> name;
     // A bad network to try the connection on.
     net::Simulation simulate;
-    // A drawing on white paper, of someone to fly along with; none without one.
-    std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};
     // For smoke tests and pictures: how long to run before quitting, and where to save the last
     // frame drawn, as a PNG.
     std::optional<std::chrono::milliseconds> quit_after;
@@ -54,11 +51,6 @@ struct Options {
     // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
     // reads as small talk whatever this says.
     bool chat_filter = true;
-    // The voxel world's cell size in metres, in place of the planet's own; for looking at a world
-    // finer or coarser, flying alone.
-    std::optional<double> voxel;
-    // The world's file to fly over alone, its ground made ahead.
-    std::optional<std::filesystem::path> world;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;

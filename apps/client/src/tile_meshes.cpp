@@ -198,7 +198,7 @@ void TileMeshes::mesh(globe::TileKey key) {
     working_.push_back(
         {.key = key,
          .arrived = held.arrived,
-         .job = std::make_unique<jobs::Async<ColumnDrawn>>(
+         .job = std::make_unique<jobs::Async<Drawn>>(
              *jobs_, [layers = layers_, sea = sea_, key, tree = held.tree, near = std::move(near),
                       thickness] {
                  const globe::TileAt at = [&](globe::TileKey wanted) -> const globe::VoxelTree* {
@@ -220,7 +220,7 @@ void TileMeshes::gather(bool wait) {
             still.push_back(std::move(work));
             continue;
         }
-        ColumnDrawn drawn = work.job->take();
+        Drawn drawn = work.job->take();
         const auto found = held_.find(work.key);
         if (found == held_.end() || found->second.arrived != work.arrived) {
             continue;

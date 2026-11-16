@@ -7,7 +7,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/chat.cpp
-    src/column_meshes.cpp
+    src/drawn.cpp
     src/tile_meshes.cpp
     src/cutaway.cpp
     src/daylight.cpp
@@ -36,7 +36,7 @@ hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
     tests/chat_tests.cpp
-    tests/column_meshes_tests.cpp
+    tests/drawn_tests.cpp
     tests/tile_meshes_tests.cpp
     tests/tile_look_tests.cpp
     tests/lod_look_tests.cpp
@@ -69,12 +69,12 @@ if(NOT HOG_BUILD_CLIENT)
     return()
 endif()
 
-# Opens the window and plays, as the client or as the viewer.
+# Opens the window and plays.
 add_library(hog_play src/play.cpp)
 add_library(hog::play ALIAS hog_play)
 target_include_directories(hog_play PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_play PUBLIC hog::chat hog::client hog::jobs hog::login hog::net
-    hog::planet hog::protocol hog::skies hog::store hog::window)
+    hog::planet hog::protocol hog::window)
 hog_target_defaults(hog_play)
 
 # The game client: connects to a server and draws its world.
@@ -82,24 +82,3 @@ add_executable(hog_client_cli src/main.cpp)
 set_target_properties(hog_client_cli PROPERTIES OUTPUT_NAME hog-client)
 target_link_libraries(hog_client_cli PRIVATE hog::play)
 hog_target_defaults(hog_client_cli)
-
-# Draws a planet it builds itself, alone: for looking and testing.
-add_executable(hog_viewer_cli src/viewer_main.cpp)
-set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
-target_link_libraries(hog_viewer_cli PRIVATE hog::play)
-hog_target_defaults(hog_viewer_cli)
-
-# GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.
-if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
-    # Flies for a moment without a window, on a software device with validation and the timings
-    # shown, saving what it drew. Skipped where there's no Vulkan.
-    add_test(NAME hog_viewer_smoke
-        COMMAND hog_viewer_cli --planet "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke_planet.toml"
-                --companion "${PROJECT_SOURCE_DIR}/res/Matt.png"
-                --quit-after 1 --threads 2 --timings --software --validate
-                --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
-    set_tests_properties(hog_viewer_smoke PROPERTIES
-        ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"
-        SKIP_RETURN_CODE 77
-        TIMEOUT 120)
-endif()

@@ -34,23 +34,16 @@ struct VoxelMesh {
     std::vector<std::uint32_t> indices;
 };
 
-// The faces of the tile column at `corner` where its matter meets what isn't, each voxel a box of
-// the planet's own shape `level` halvings coarser than the world's: 2^level cells across and
-// layers tall. Shaped matter, or grain filling half a voxel, shows against anything else; a
-// liquid only against open space. The columns beside it are read as the world holds them. From
-// the column's floor, under which all is rock, up through its tiles; nothing where the world
-// holds none of it.
-[[nodiscard]] VoxelMesh mesh_tile_column(const World& world, Site corner, int level);
-
 // The tile at a key of any level, where there's one.
 using TileAt = std::function<const VoxelTree*(TileKey)>;
 
-// The faces of the tile at `key`, its voxels `tile`, drawn as mesh_tile_column draws a column's.
-// Past its sides the tiles on its face are read from `beside`, of its level or the finest coarser
-// it has there; else finer, a voxel each read where it meets the tile; elsewhere the tile is taken
-// to go on as its edge does. Given `shore_rise`, water's open top runs on over the shore beside it
-// wherever the ground there is no more than that many metres over it, hidden under the ground at
-// rest, for the sea to run up over.
+// The faces of the tile at `key`, its voxels `tile`, where its matter meets what isn't, each voxel
+// a box of the planet's own shape. Shaped matter, or grain filling half a voxel, shows against
+// anything else; a liquid only against open space. Past its sides the tiles on its face are read
+// from `beside`, of its level or the finest coarser it has there; else finer, a voxel each read
+// where it meets the tile; elsewhere the tile is taken to go on as its edge does. Given
+// `shore_rise`, water's open top runs on over the shore beside it wherever the ground there is no
+// more than that many metres over it, hidden under the ground at rest, for the sea to run up over.
 [[nodiscard]] VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
                                   const TileAt& beside = {},
                                   std::optional<double> shore_rise = std::nullopt);

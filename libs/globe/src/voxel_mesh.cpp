@@ -240,30 +240,6 @@ private:
     std::vector<Slot> slots_;
 };
 
-// The layers the tile column holds, as voxels of the level: from under its floor to over its
-// highest tile.
-struct Span {
-    int lowest = 0;
-    int highest = 0; // past the last
-};
-
-std::optional<Span> span_of(const World& world, Site corner, int level) {
-    const int size = 1 << level;
-    std::optional<std::uint32_t> floor;
-    std::uint32_t top = 0;
-    if (level == 0) {
-        floor = world.volume().floor(corner);
-        top = world.volume().held_top(corner);
-    }
-    if (!floor) {
-        return std::nullopt;
-    }
-    const int count = world.layers().count / size;
-    const auto highest = static_cast<int>(std::max(top, *floor));
-    return Span{.lowest = static_cast<int>(*floor) / size,
-                .highest = std::min(count, (highest + size - 1) / size)};
-}
-
 void quad(VoxelMesh& mesh, const std::array<DVec3, 8>& box, const std::array<std::size_t, 4>& at,
           Material material) {
     std::array<DVec3, 4> points{};
@@ -293,42 +269,6 @@ void quad(VoxelMesh& mesh, const std::array<DVec3, 8>& box, const std::array<std
     for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
                                            : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {
         mesh.indices.push_back(first + corner);
-    }
-}
-
-// Reads the column whose cells at `first`'s level start at it, and those beside it, into the
-// block: a cell of the world's own level in the middle of each stands for it.
-void fill(const World& world, Block& block, Cell first, int size) {
-    const Layers& layers = world.layers();
-    const int across = block.across();
-    const int bottom = std::max(block.lowest(), 0);
-    const int top = std::min(block.lowest() + block.height(), layers.count / size);
-    for (int y = -1; y <= across; ++y) {
-        for (int x = -1; x <= across; ++x) {
-            // Those past its corners are never looked at.
-            const bool beside = (x >= 0 && x < across) || (y >= 0 && y < across);
-            const std::optional<Cell> column = beside ? next_to(first, x, y) : std::nullopt;
-            if (!column) {
-                continue;
-            }
-            const auto middle = static_cast<std::uint32_t>(size / 2);
-            const Cell fine{.level = static_cast<std::uint8_t>(layers.level),
-                            .face = column->face,
-                            .i = (column->i * static_cast<std::uint32_t>(size)) + middle,
-                            .j = (column->j * static_cast<std::uint32_t>(size)) + middle};
-            const std::vector<Voxel> voxels =
-                world.fill(std::span{&fine, 1}, bottom * size, top - bottom, size);
-            std::vector<Held> held(static_cast<std::size_t>(block.height()));
-            for (int z = block.lowest(); z < block.lowest() + block.height(); ++z) {
-                Held& here = held[static_cast<std::size_t>(z - block.lowest())];
-                if (z < bottom) {
-                    here = {.ground = Material::Granite, .ground_share = 1.0};
-                } else if (z < top) {
-                    here = held_of(voxels[static_cast<std::size_t>(z - bottom)]);
-                }
-            }
-            block.stand(x, y, held);
-        }
     }
 }
 
@@ -909,43 +849,6 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile, co
     const double voxel = layers.bottom((base + 1) * size) - layers.bottom(base * size);
     Sheet sheet{block, shore_rise ? *shore_rise / voxel : -1.0, voxel};
     for (int z = base; z < top; ++z) {
-        const double low = layers.bottom(z * size);
-        const double high = layers.bottom((z + 1) * size);
-        for (int y = 0; y < across; ++y) {
-            for (int x = 0; x < across; ++x) {
-                add_voxel(mesh, block, first, x, y, z, low, high);
-                add_sheet(mesh, block, sheet, layers, first, x, y, z, size);
-            }
-        }
-    }
-    return mesh;
-}
-
-VoxelMesh mesh_tile_column(const World& world, Site corner, int level) {
-    const Layers& layers = world.layers();
-    const std::optional<Span> span = span_of(world, corner, level);
-    VoxelMesh mesh;
-    if (!span || span->highest <= span->lowest) {
-        return mesh;
-    }
-    const int size = 1 << level;
-    const int across = Volume::tile_side >> level;
-    const Cell first{.level = static_cast<std::uint8_t>(layers.level - level),
-                     .face = corner.face,
-                     .i = (corner.i / side) * static_cast<std::uint32_t>(across),
-                     .j = (corner.j / side) * static_cast<std::uint32_t>(across)};
-    const Cell tile{.level = static_cast<std::uint8_t>(layers.level - std::countr_zero(side)),
-                    .face = corner.face,
-                    .i = corner.i / side,
-                    .j = corner.j / side};
-    mesh.origin = center(tile) * layers.bottom(span->lowest * size);
-
-    // A voxel under the floor, all rock, and one over the top, all air.
-    Block block{across, span->lowest - 1, span->highest - span->lowest + 2};
-    fill(world, block, first, size);
-    Sheet sheet{block, -1.0,
-                layers.bottom((span->lowest + 1) * size) - layers.bottom(span->lowest * size)};
-    for (int z = span->lowest; z < span->highest; ++z) {
         const double low = layers.bottom(z * size);
         const double high = layers.bottom((z + 1) * size);
         for (int y = 0; y < across; ++y) {
