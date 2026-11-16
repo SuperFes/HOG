@@ -37,6 +37,8 @@ public:
     // Where it stands, or is to once the ground there is sent.
     [[nodiscard]] WorldPosition feet() const;
     [[nodiscard]] bool standing() const noexcept { return player_.has_value(); }
+    // Its feet on the ground, not falling or leaping.
+    [[nodiscard]] bool on_ground() const { return player_ && player_->standing(); }
     [[nodiscard]] const client::Session& session() const noexcept { return session_; }
     // The ground as it's been sent.
     [[nodiscard]] const globe::World& world() const noexcept { return held_->world; }

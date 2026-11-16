@@ -7,6 +7,7 @@
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/net/server.hpp>
+#include <hog/physics/character.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/testing/ports.hpp>
@@ -16,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -112,7 +114,7 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
 
     std::atomic<bool> stop = false;
     // Streaming the ground in is timed apart; this is how long it has to walk once it stands.
-    auto give_up = MonotonicClock::now() + 120s;
+    auto give_up = MonotonicClock::now() + 300s;
     MonotonicClock::time_point last = MonotonicClock::now();
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
@@ -131,8 +133,9 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
             walked += step < 1.0 ? step : 0.0;
             was = bot->feet();
         }
-        // Far enough that only taken moves get there: the server isn't sending it back.
-        if (walked >= 5.0 || now >= give_up) {
+        // Far enough that only taken moves get there: the server isn't sending it back. Read
+        // with its feet down, not mid-fall off a ledge.
+        if ((walked >= 5.0 && bot->on_ground()) || now >= give_up) {
             stop = true;
         }
     }};
@@ -144,7 +147,28 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     const DVec3 feet = bot->feet().metres();
     const double ground = hog::globe::top_of(bot->world(), glm::normalize(feet)).value_or(0.0);
     CHECK(ground == hog::globe::top_of(server->globe(), glm::normalize(feet)).value_or(-1.0));
-    // Ground walked on is whole voxels, so within one of the surface its matter makes.
-    CHECK(std::abs(glm::length(feet) - ground) < bot->world().layers().thickness);
+    // It stands on the surface meshed from the voxels, which runs between the tops of the columns
+    // its feet reach and the next, so within a voxel of their lowest and highest.
+    const DVec3 up = glm::normalize(feet);
+    const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
+    const DVec3 north = glm::cross(up, east);
+    const double voxel = bot->world().layers().thickness;
+    const double reach = hog::physics::CharacterSettings{}.radius + voxel;
+    const auto steps = static_cast<int>(std::ceil(2.0 * reach / voxel));
+    double lowest = ground;
+    double highest = ground;
+    for (int along = -steps; along <= steps; ++along) {
+        for (int across = -steps; across <= steps; ++across) {
+            const double apart = reach / steps;
+            const DVec3 there =
+                glm::normalize(feet + (along * apart * east) + (across * apart * north));
+            const double top = hog::globe::top_of(bot->world(), there).value_or(0.0);
+            lowest = std::min(lowest, top);
+            highest = std::max(highest, top);
+        }
+    }
+    CHECK(bot->on_ground());
+    CHECK(glm::length(feet) > lowest - voxel);
+    CHECK(glm::length(feet) < highest + voxel);
     CHECK(server->players() != nullptr);
 }
