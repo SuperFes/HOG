@@ -1,4 +1,5 @@
 add_library(hog_grid
+    src/edits.cpp
     src/grid.cpp
     src/heat.cpp
     src/page.cpp
@@ -11,6 +12,7 @@ target_link_libraries(hog_grid PUBLIC hog::core)
 hog_target_defaults(hog_grid)
 
 hog_add_tests(hog_grid
+    tests/edits_tests.cpp
     tests/grid_tests.cpp
     tests/heat_tests.cpp
     tests/key_tests.cpp
