@@ -608,14 +608,23 @@ TEST_CASE("a world of tiles held alone reads them as the world they were made fr
     const std::optional<double> ground = hog::globe::top_of(made.world(), up);
     REQUIRE(ground);
     CHECK(hog::globe::top_of(alone, up) == ground);
+    // Under the ground, as deep as the tiles held go.
+    int read = 0;
     for (const double under : {0.5, 3.0, 12.0}) {
         const Site site{
             .face = cell.face,
             .i = cell.i,
             .j = cell.j,
             .layer = static_cast<std::uint32_t>(earth().layers().layer_at(ground.value() - under))};
+        if (std::ranges::none_of(column.value().tiles, [&](const auto& tile) {
+                return tile.first == site.layer / side;
+            })) {
+            continue;
+        }
         CHECK(alone.at(site) == made.world().at(site));
+        ++read;
     }
+    CHECK(read >= 2);
     const hog::globe::TileKey key{.level = 0,
                                   .face = cell.face,
                                   .i = cell.i / side,

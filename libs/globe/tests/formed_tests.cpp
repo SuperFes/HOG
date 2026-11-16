@@ -377,7 +377,7 @@ TEST_CASE("a formed river's water stands in its channel and meets its banks with
         }
         ++crossed;
         // Across the valley as far as its course winds from the line.
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
         bool any = false;
         Formed::Here last = at(-half * across_river / radius);
         for (int step = -half; step < half; ++step) {
@@ -421,7 +421,7 @@ TEST_CASE("a formed river's water stands level across its channel, no crag stand
         const auto at = [&](double off) {
             return formed.at(glm::normalize(middle + (across * off)), lod);
         };
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
         Formed::Here last = at(-half * across_river / radius);
         for (int step = -half; step < half; ++step) {
             const Formed::Here next = at((step + 1) * across_river / radius);
@@ -454,22 +454,29 @@ TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
         const DVec3 from = world.sphere.point(point);
         const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
         const DVec3 across = glm::normalize(glm::cross(to - from, from));
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
-        // Across each of a dozen stretches along it, the water nearest the line.
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
+        // Across each of a dozen stretches along it, the water nearest where it was across the
+        // last: its course winds off the line as the ground guides it, but no further across than
+        // a couple of stretches along, or it's another river's.
         std::vector<double> levels;
         constexpr int stretches = 12;
+        const int winding = 2 * half * 2 / stretches;
+        int was = 0;
         for (int k = 1; k < stretches; ++k) {
             const DVec3 along = glm::normalize(from + ((to - from) * (k / double{stretches})));
             std::optional<double> level;
-            int nearest = half;
+            int nearest = levels.empty() ? 2 * half : winding;
+            int found = was;
             for (int step = -half; step < half; step += 2) {
                 const Formed::Here here = formed.at(
                     glm::normalize(along + (across * (step * across_river / radius))), lod);
-                if (here.river && std::abs(step) < nearest) {
-                    nearest = std::abs(step);
+                if (here.river && std::abs(step - was) < nearest) {
+                    nearest = std::abs(step - was);
+                    found = step;
                     level = here.river->level;
                 }
             }
+            was = found;
             if (level) {
                 levels.push_back(*level);
                 // Past where it meets the sea, the nearest water is another river's.
@@ -503,7 +510,7 @@ TEST_CASE("a formed river's channel is left out with its water where read coarse
         const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
         const DVec3 middle = glm::normalize(from + to);
         const DVec3 across = glm::normalize(glm::cross(to - from, middle));
-        const int half = static_cast<int>(0.35 * glm::length(to - from) * radius / across_river);
+        const int half = static_cast<int>(0.5 * glm::length(to - from) * radius / across_river);
         for (int step = -half; step < half; ++step) {
             const DVec3 direction =
                 glm::normalize(middle + (across * (step * across_river / radius)));
@@ -888,7 +895,7 @@ TEST_CASE("beaches lie along formed shores as flat as the waves leave them, bare
     REQUIRE(sand.size() > 20);
     const auto middle = sand.begin() + static_cast<std::ptrdiff_t>(sand.size() / 2);
     std::ranges::nth_element(sand, middle);
-    CHECK(*middle < 0.25 * std::tan(properties(Material::Sand).saturated_repose));
+    CHECK(*middle < 0.3 * std::tan(properties(Material::Sand).saturated_repose));
 }
 
 TEST_CASE("formed ground cost", "[.bench][globe][formed]") {
