@@ -51,7 +51,7 @@ Open:
 
 ## One grid, many trees
 
-The planet sits in one root cube centred on its middle, about 64 km across for the working
+The planet sits in one root node centred on its middle, about 64 km across for the working
 world (28.8 km radius and 3 km of sky). At a third of a metre that's 18 halvings deep; cut into
 64³ pages, 12 levels of pages. Empty sky and the deep interior are each a single uniform node, so
 only the surface shell costs anything. Each node sums up what's under it (shape averaged,
@@ -63,7 +63,7 @@ never from a grid axis.
 The 2D maps of the surface (weather, climate, formation's sphere) stay what they are. Only the 3D
 world moves to the grid.
 
-Every tree shares the root cube and its keys, so reading several at one place is the same key in
+Every tree shares the root node and its keys, so reading several at one place is the same key in
 each, and walking them together is descending them side by side (as OpenVDB keeps many grids over
 one transform, and compressed voxel DAGs keep shape apart from attributes). Each tree collapses
 where it alone is uniform, stops at the depth it needs, and is versioned and streamed on its own
@@ -185,7 +185,7 @@ step replaces something, the old and new are compared before the old goes.
 
 ### 1 · Grid keys and trees
 
-1. Root cube, node and page keys (depth, x, y, z), Morton order, parent, children and
+1. Root node, node and page keys (depth, x, y, z), Morton order, parent, children and
    neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
 2. Shape, material and water trees, each a `VoxelTree` or a leaner kind, with node summaries and
    versions; a page record holding its trees; encode and decode. Tests: round trips, identical
