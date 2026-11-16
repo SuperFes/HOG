@@ -51,9 +51,11 @@ Open:
 
 ## One grid, many trees
 
-The planet sits in one root node centred on its middle, about 64 km across for the working
-world (28.8 km radius and 3 km of sky). At a third of a metre that's 18 halvings deep; cut into
-64³ pages, 12 levels of pages. Empty sky and the deep interior are each a single uniform node, so
+The planet sits in one root node centred on its middle: the smallest that halves down to the
+finest size and holds the planet and its sky. For the working world (28.8 km radius and 3 km of
+sky, a third of a metre) that's about 87 km across and 18 halvings deep. Pages are cut every six
+levels up from the finest, so each holds 64³ at its foot and there are three levels of them; the
+top page holds whatever levels are left. Empty sky and the deep interior are each a single uniform node, so
 only the surface shell costs anything. Each node sums up what's under it (shape averaged,
 material and water by most), so a node is its own coarse view, and a change under it updates
 only the nodes above it. Neighbours are x ± 1: no face edges, no radial layers, no
