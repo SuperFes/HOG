@@ -362,7 +362,13 @@ void Lowest::add(const Wall& one) noexcept {
         floor_ += (one.floor - floor_) * taken;
         lowest_ = std::min(lowest_, one.standing);
     }
-    lowered_.add({.value = one.standing, .gradient = one.standing_gradient}, one.steep, one.floor);
+    // A wall to round a crest against as far as it's climbed over its floor against the blend,
+    // not as its foot turns: the foot turns over far less than a crest rounds, so the rounding
+    // would come in at once there.
+    const double risen =
+        std::clamp((one.standing - one.floor) / std::max(blend_, handing_over), 0.0, 1.0);
+    lowered_.add({.value = one.standing, .gradient = one.standing_gradient},
+                 risen * risen * (3.0 - (2.0 * risen)), one.floor);
     if (count_ < stretches_.size()) {
         stretches_[count_] = {
             .standing = one.standing, .water = one.water, .bank = one.bank, .season = one.season};

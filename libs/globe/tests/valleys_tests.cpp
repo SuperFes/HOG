@@ -293,6 +293,34 @@ TEST_CASE("a winding valley's ground stands over the floor of the stretch it sta
     }
 }
 
+TEST_CASE("a crest is rounded as far as its walls have climbed, never at once where a foot turns",
+          "[globe][valleys]") {
+    // One stretch's floor turning up into its wall at 0 over no width at all, another's wall
+    // standing over it as near as rounds a crest between them.
+    const auto lowered = [](double x) {
+        Wall foot;
+        foot.standing = 100.0 + (0.5 * std::max(x, 0.0));
+        foot.standing_gradient = {x > 0.0 ? 0.5 : 0.0, 0.0, 0.0};
+        foot.floor = 100.0;
+        foot.steep = x > 0.0 ? 1.0 : 0.0;
+        Wall wall;
+        wall.standing = 110.0 - (0.3 * x);
+        wall.standing_gradient = {-0.3, 0.0, 0.0};
+        wall.floor = 40.0;
+        wall.steep = 1.0;
+        Lowest lowest{40.0, 40.0};
+        lowest.add(foot);
+        lowest.add(wall);
+        Wall out;
+        lowest.lower(out);
+        return out.standing;
+    };
+    constexpr double step = 0.05;
+    for (double x = -5.0; x < 5.0; x += step) {
+        CHECK(std::abs(lowered(x + step) - lowered(x)) < step);
+    }
+}
+
 TEST_CASE("where one stretch's floor meets another's wall, the floor the ground stands over hands "
           "over without a step",
           "[globe][valleys]") {
