@@ -53,10 +53,11 @@ Open:
 
 The planet sits in one root node centred on its middle: the smallest that halves down to the
 finest size and holds the planet and its sky. For the working world (28.8 km radius and 3 km of
-sky, a third of a metre) that's about 87 km across and 18 halvings deep. Pages are cut every six
-levels up from the finest, so each holds 64³ at its foot and there are three levels of them; the
-top page holds whatever levels are left. Empty sky and the deep interior are each a single uniform node, so
-only the surface shell costs anything. Each node sums up what's under it (shape averaged,
+sky, a third of a metre) that's about 87 km across and 18 halvings deep. Nothing is cut ahead: a
+node splits only where what's under it differs, so open sea, sky and deep rock each stay one large
+node, and detail goes only where it's needed. Pages group the nodes that exist for disk and the
+wire, under one node and down six levels at most; where the tree stops early there's no page
+under it. Each node sums up what's under it (shape averaged,
 material and water by most), so a node is its own coarse view, and a change under it updates
 only the nodes above it. Neighbours are x ± 1: no face edges, no radial layers, no
 tapered boxes. "Up" and gravity are the direction from the centre, worked out from position,
