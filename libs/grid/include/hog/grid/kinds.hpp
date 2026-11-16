@@ -111,8 +111,9 @@ struct Discrete {
     [[nodiscard]] static Result<Value> read(ByteReader& in) { return in.read<Value>(); }
 };
 
-// An index into the world's list of materials.
-struct Material : Discrete<std::uint8_t> {};
+// An index into the world's palette of materials, each a named mix of what it's made of (a loam
+// of sand, silt and clay, say), so one value says what digging there gives.
+struct Material : Discrete<std::uint16_t> {};
 
 // The water body a node's basin belongs to, 0 for none.
 struct Water : Discrete<std::uint32_t> {};

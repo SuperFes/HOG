@@ -162,7 +162,8 @@ can coarsen itself.
 The client keeps the pages it's been sent in one tree, with a hash per level for neighbours and
 the finest page over a point. Per page it picks a depth by distance (fine near the camera,
 halving outward), meshes the shape tree at that depth into a smooth surface, textures it by the
-material tree, and caches the mesh until a version or the depth changes. Where depths meet, a seam
+material tree, blending each node's material into its neighbours' by distance so nature shows no
+borders (hard edges only where the data has them: rock out of soil, or a player's sidewalk), and caches the mesh until a version or the depth changes. Where depths meet, a seam
 scheme closes the gap and the swap morphs or fades, so nothing pops.
 
 Water is drawn from its bodies, not voxel amounts: the sea and lakes as a surface at their level
@@ -191,7 +192,7 @@ step replaces something, the old and new are compared before the old goes.
 1. Root node, node and page keys (depth, x, y, z), Morton order, parent, children and
    neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
 2. Shape, material and water trees (`grid::Tree`, one value a node: the surface's plane, a
-   material index, a water body id), with node summaries and versions; a page record holding its
+   16-bit material index, a water body id), with node summaries and versions; a page record holding its
    trees; encode and decode. Tests: round trips, identical nodes give identical bytes, a split
    leaf's summary matches its children. Loose water's amount waits for live water.
    Shape leaves hold a plane (normal and distance) so flat and straight ground stays coarse:
@@ -209,8 +210,11 @@ step replaces something, the old and new are compared before the old goes.
 
 ### 2 · Generator on the grid
 
-1. Fill a node at any depth from the generator at grid points: shape amount, material, water
-   body. Tests: a page read against the generator at the same points.
+1. Fill a node at any depth from the generator at grid points: shape plane, material, water
+   body. Materials are a palette of derived mixes, each named and made of others (loam of sand,
+   silt and clay), so one index says what digging gives; the generator steps through the mixes
+   between neighbours rather than jumping. Tests: a page read against the generator at the
+   same points.
 2. Coarse agrees with fine: a node filled coarse equals the fine ones under it summed up, so
    detail filled later never jumps. Tests: every level of a small world.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from

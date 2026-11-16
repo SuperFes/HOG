@@ -18,8 +18,8 @@ constexpr std::uint8_t levels = 4;
 constexpr std::uint32_t across = 1U << levels;
 
 // Patches of a few materials, alike in blocks of two or four so some merge and some don't.
-std::uint8_t patchy(std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint64_t seed = 1) {
-    return static_cast<std::uint8_t>(hog::hash_values(seed, x / 2, y / 2, z / 4) % 3);
+Material::Value patchy(std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint64_t seed = 1) {
+    return static_cast<Material::Value>(hog::hash_values(seed, x / 2, y / 2, z / 4) % 3);
 }
 
 Tree<Material> patchy_tree(std::uint64_t seed = 1) {
@@ -151,7 +151,7 @@ TEST_CASE("broken tree bytes are refused", "[grid]") {
     const auto halves = Tree<Material>::build(
         2, [](int x, int, int) { return static_cast<Material::Value>(x < 2 ? 1 : 2); });
     const std::vector<std::byte> split = halves.encode();
-    const std::size_t root = split.size() - 8 - 1 - 1;
+    const std::size_t root = split.size() - 8 - 2 - 1;
     REQUIRE(split[root] == std::byte{1});
     std::vector<std::byte> wrong_summary = split;
     wrong_summary[root + 1] = std::byte{2};
