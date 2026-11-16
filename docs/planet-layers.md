@@ -210,7 +210,9 @@ Backlog:
   balanced rocks.
 - Volcanic: summit lava lakes, fissure lava fields and kipukas, lava tubes, hot spring terraces,
   acid lakes and sulfur fields, geysers★, mud pots, fumaroles.
-- Water: giant falls over hard beds★, slot canyons and gorges, sinking rivers and cliff springs★,
+- Water: rivers you meet. None show in recent generations, so first find out whether water is
+  missing or just too small to see. If too few run, join some into bigger rivers, some fed by
+  melt off frozen peaks. Giant falls over hard beds★, slot canyons and gorges, sinking rivers and cliff springs★,
   cenotes and blue holes, tower karst, sea stacks and arches, reefs and atolls★, pink salt lakes,
   salt flats★, soda lakes.
 - Deserts and wastelands: dune seas★, gypsum dunes, oases, mesas and buttes, hoodoos, striped
