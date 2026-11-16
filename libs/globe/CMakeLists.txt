@@ -68,6 +68,7 @@ hog_add_tests(hog_globe
     tests/vents_tests.cpp
     tests/octree_estimate_tests.cpp
     tests/temperature_tests.cpp
+    tests/tile_cost_tests.cpp
     tests/cube_tests.cpp
     tests/voxel_tests.cpp
     tests/voxel_tree_tests.cpp
