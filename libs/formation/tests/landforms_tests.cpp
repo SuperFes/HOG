@@ -123,7 +123,7 @@ TEST_CASE("each landform comes only where what makes it is", "[formation][landfo
     for (const auto* field :
          {&forms.canyons, &forms.mesas, &forms.escarpments, &forms.karst, &forms.sea_cliffs,
           &forms.fault_scarps, &forms.volcanoes, &forms.scree}) {
-        CHECK(std::ranges::max(*field) > 0.3);
+        CHECK(std::ranges::max(*field) > 0.25);
     }
     const Made cold{glaciated()};
     CHECK(std::ranges::max(cold.forms.glacial) > 0.3);

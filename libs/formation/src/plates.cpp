@@ -506,6 +506,29 @@ std::vector<double> swells_on(const Sphere& sphere, const Body& body) {
     return made;
 }
 
+// Old land is never level: earlier cycles of wear and the rock under it leave hills and hollows
+// at every size, each no steeper than the last, the widest as high as `plain_relief` lets them:
+// metres each point stands over or under the crust's float. Without them rivers on a plain
+// run as straight as the slope they start on.
+std::vector<double> relief_on(const Sphere& sphere, const Body& body) {
+    constexpr double steepest = 3e-3;
+    const double highest = std::max(body.plain_relief, 0.0) * body.continent_height;
+    int level = sphere.subdivisions();
+    double spacing = sphere.spacing() * body.radius;
+    while (level > 0 && steepest * 2.0 * spacing <= highest) {
+        --level;
+        spacing *= 2.0;
+    }
+    // Noise is about half as strong as its strongest octave.
+    const double strongest = std::min(highest, steepest * spacing);
+    std::vector<double> made =
+        sphere_noise(sphere, hash_values(body.seed, 27), level, sphere.subdivisions());
+    for (double& value : made) {
+        value *= 2.0 * strongest;
+    }
+    return made;
+}
+
 // The sphere level whose points lie about half a belt's width apart.
 int belt_level(const Sphere& sphere, const Body& body) {
     int level = sphere.subdivisions();
@@ -594,6 +617,7 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
     const std::vector<double> rugged = sphere_noise(
         sphere, hash_values(body.seed, 17), belt_level(sphere, body), sphere.subdivisions());
     const std::vector<double> swells = swells_on(sphere, body);
+    const std::vector<double> relief = relief_on(sphere, body);
     for (std::uint32_t point = 0; point < size; ++point) {
         const double light = crust.light[point];
         double age = oldest_floor;
@@ -604,8 +628,8 @@ Crust crust_on(const Sphere& sphere, const Plates& plates, const Body& body) {
         crust.floor_age[point] = age;
         const double floor =
             std::max(body.abyss_depth, body.ridge_depth - (body.floor_sinking * std::sqrt(age)));
-        crust.base[point] =
-            (light * (body.continent_height + swells[point])) + ((1.0 - light) * floor);
+        crust.base[point] = (light * (body.continent_height + swells[point] + relief[point])) +
+                            ((1.0 - light) * floor);
         crust.uplift[point] = light * 1.0e-5;
         if (nearest.source[point] == Nearest::none) {
             continue;

@@ -255,3 +255,27 @@ TEST_CASE("old continental crust sags into broad basins and bows up into swells"
     CHECK(highest - lowest < 2.0 * made.body.continent_height * made.body.continent_swell);
     CHECK(steepest < 2e-3);
 }
+
+TEST_CASE("old land rises and sinks in hills and hollows no higher than its relief allows",
+          "[formation][plates]") {
+    Body level;
+    level.plain_relief = 0.0;
+    const Made made;
+    const Made flat{level};
+    double lowest = 0.0;
+    double highest = 0.0;
+    for (std::uint32_t point = 0; point < made.sphere.size(); ++point) {
+        const double relief = made.crust.base[point] - flat.crust.base[point];
+        lowest = std::min(lowest, relief);
+        highest = std::max(highest, relief);
+        if (made.crust.light[point] == 0.0) {
+            CHECK(relief == 0.0);
+        }
+    }
+    const double allowed = made.body.plain_relief * made.body.continent_height;
+    UNSCOPED_INFO("relief " << lowest << " to " << highest);
+    CHECK(highest > 0.25 * allowed);
+    CHECK(lowest < -0.25 * allowed);
+    CHECK(highest < 2.0 * allowed);
+    CHECK(lowest > -2.0 * allowed);
+}

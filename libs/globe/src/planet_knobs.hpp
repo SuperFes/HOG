@@ -24,6 +24,7 @@ inline constexpr std::array body_numbers{
     std::pair{"crust_rise"sv, &formation::Body::crust_rise},
     std::pair{"continent_height"sv, &formation::Body::continent_height},
     std::pair{"continent_swell"sv, &formation::Body::continent_swell},
+    std::pair{"plain_relief"sv, &formation::Body::plain_relief},
     std::pair{"ridge_depth"sv, &formation::Body::ridge_depth},
     std::pair{"abyss_depth"sv, &formation::Body::abyss_depth},
     std::pair{"floor_sinking"sv, &formation::Body::floor_sinking},

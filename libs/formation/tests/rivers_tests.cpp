@@ -186,6 +186,7 @@ TEST_CASE("land its crust's float holds down keeps its relief, never a level pla
           "[formation][rivers]") {
     Body flat;
     flat.held_relief = 0.0;
+    flat.plain_relief = 0.0;
     const Made made;
     const Made capped{flat};
     // Land whose neighbours on land all stand within a metre of it, of land held down.
@@ -212,4 +213,43 @@ TEST_CASE("land its crust's float holds down keeps its relief, never a level pla
     };
     CHECK(level_share(capped) > 0.1);
     CHECK(level_share(made) < 0.02);
+}
+
+TEST_CASE("rivers on old plains wander rather than run as straight as the slope they start on",
+          "[formation][rivers]") {
+    Body level;
+    level.plain_relief = 0.0;
+    const Made made;
+    const Made smooth{level};
+    // How far rivers on light crust away from belts get over a reach, against the way they ran.
+    constexpr int reach = 8;
+    const auto straightness = [](const Made& world) {
+        double straight = 0.0;
+        int rivers = 0;
+        for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+            if (!on_land(world, point) || world.crust.light[point] < 1.0 ||
+                world.crust.meeting[point] != hog::formation::Meeting::None) {
+                continue;
+            }
+            std::uint32_t at = point;
+            double path = 0.0;
+            int steps = 0;
+            while (steps < reach && on_land(world, world.rivers.receiver[at])) {
+                const std::uint32_t down = world.rivers.receiver[at];
+                path += glm::length(world.sphere.point(down) - world.sphere.point(at));
+                at = down;
+                ++steps;
+            }
+            if (steps == reach) {
+                straight += glm::length(world.sphere.point(at) - world.sphere.point(point)) / path;
+                ++rivers;
+            }
+        }
+        UNSCOPED_INFO(rivers << " reaches");
+        return rivers > 0 ? straight / rivers : 1.0;
+    };
+    const double wandering = straightness(made);
+    const double straight = straightness(smooth);
+    UNSCOPED_INFO("chord over path " << wandering << " with relief, " << straight << " without");
+    CHECK(wandering < straight - 0.02);
 }

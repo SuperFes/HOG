@@ -23,6 +23,7 @@ struct Body {
     double crust_rise = 0.15;          // metres light crust rises per metre it thickens
     double continent_height = 400.0;   // metres over the liquid, unthickened
     double continent_swell = 0.5;      // share of that broad basins sag and swells bow up, at most
+    double plain_relief = 0.1;         // share of it old land's hills and hollows rise and sink
     double ridge_depth = -2'600.0;     // metres, where new sea floor is made
     double abyss_depth = -5'500.0;     // metres, the deepest old sea floor
     double floor_sinking = 350.0;      // metres per square root of a million years of age
