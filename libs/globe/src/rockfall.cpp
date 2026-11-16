@@ -394,7 +394,8 @@ public:
     }
 
     // The rubble of the blocks too small to resolve under `direction`, blended between the
-    // middles of the cells it's reckoned over so it runs on unbroken from one to the next.
+    // middles of the cells it's reckoned over so it runs on unbroken from one to the next, of the
+    // rock of the cell that lays the most of it here.
     Rubble rubble(DVec3 direction) {
         const auto [held, off_i, off_j] =
             place_under(direction, fall_level(*context_->planet, lod_));
@@ -402,22 +403,24 @@ public:
         const int dj = off_j < 0.0 ? -1 : 1;
         const double across_i = std::abs(off_i);
         const double across_j = std::abs(off_j);
-        Rubble blended = rubble_of(held);
-        const auto blend = [&](double Rubble::* of) {
-            const auto at = [&](int i, int j, double weight) {
-                if (weight <= 0.0) {
-                    return 0.0;
-                }
-                const std::optional<Cell> cell = next_to(held, i, j);
-                return weight * (rubble_of(cell.value_or(held)).*of);
-            };
-            return ((1.0 - across_j) * (1.0 - across_i) * (blended.*of)) +
-                   at(di, 0, (1.0 - across_j) * across_i) + at(0, dj, across_j * (1.0 - across_i)) +
-                   at(di, dj, across_j * across_i);
+        Rubble blended{.of = rubble_of(held).of};
+        double most = 0.0;
+        const auto add = [&](int i, int j, double weight) {
+            if (weight <= 0.0) {
+                return;
+            }
+            const Rubble& one = rubble_of(next_to(held, i, j).value_or(held));
+            blended.depth += weight * one.depth;
+            blended.share += weight * one.share;
+            if (weight * one.depth > most) {
+                most = weight * one.depth;
+                blended.of = one.of;
+            }
         };
-        const double depth = blend(&Rubble::depth);
-        blended.share = blend(&Rubble::share);
-        blended.depth = depth;
+        add(0, 0, (1.0 - across_j) * (1.0 - across_i));
+        add(di, 0, (1.0 - across_j) * across_i);
+        add(0, dj, across_j * (1.0 - across_i));
+        add(di, dj, across_j * across_i);
         return blended;
     }
 
