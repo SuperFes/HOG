@@ -19,27 +19,32 @@ Decided:
 - The generator bakes into octrees, and octrees are what's stored and streamed: they're far
   smaller than meshes to send.
 - The client decides how to draw. The server never meshes.
-- The game server stays light: it reads the baked store and streams. Generating detail is not
-  its job.
+- The game server stays light: it reads the store and streams. While the generator is still
+  changing, the server fills what the store lacks through the generator library and keeps it;
+  once the generator settles the world is fully baked ahead and the server never generates.
 - Streaming goes nearest first on connect, then fills in outward from the player.
 - The 3D world drops the cube-sphere for a plain grid: x, y, z from the planet's centre.
+- One tree per kind of data over the whole planet. A coarse node is one not yet split; adding
+  detail splits it. There are no separate trees per level of detail.
 - Water tops are flat at their body's known level; river water moves the way it runs, with the
   wind on top.
+- Water reacts to changes live and locally: a change at a water edge wakes a local flow that runs
+  until it settles back into bodies. Player changes first; changes from the world itself later,
+  through the same path.
 - Tests check data. Visual and whole-program tests wait until the engine nears stable.
 
 Leaning:
 
-- Several octrees sharing one key space, one per kind of data (below).
+- Several trees sharing one key space, one per kind of data (below).
 - Smooth surfaces meshed from the voxels' amounts (surface nets or dual contouring, `qef.hpp`).
   A plain grid's axes only line up with "up" in six places, so blocks would stair-step almost
   everywhere.
-- Regions of 64³ voxels, each a `VoxelTree`, keyed by level and grid position.
-- A baker process apart from the game server, baking coarse everywhere ahead and fine detail on
-  demand, kept once baked.
+- Trees cut into pages of 64³ voxels (subtrees) for disk and the wire, keyed by depth and grid
+  position. Pages are where a tree is cut, not edges in the world.
+- Edits as a log over the baked trees, with snapshots and rollback (below).
 
 Open:
 
-- Baker as its own process from the start, or a library the server calls until it moves out.
 - Seam scheme between levels of detail: Transvoxel-style transition cells, or skirts.
 - Sea run-up on the shore: a water-surface shader effect, or dropped.
 - `river_size` on the working planet: keep 100, or back to 1 until rivers are joined.
@@ -47,9 +52,11 @@ Open:
 ## One grid, many trees
 
 The planet sits in one root cube centred on its middle, about 64 km across for the working
-world (28.8 km radius and 3 km of sky). At a third of a metre that's 18 halvings deep; with 64³
-regions, 12 levels of regions. Empty sky and the deep interior are each a single uniform node, so
-only the surface shell costs anything. Neighbours are x ± 1: no face edges, no radial layers, no
+world (28.8 km radius and 3 km of sky). At a third of a metre that's 18 halvings deep; cut into
+64³ pages, 12 levels of pages. Empty sky and the deep interior are each a single uniform node, so
+only the surface shell costs anything. Each node sums up what's under it (shape averaged,
+material and water by most), so a node is its own coarse view, and a change under it updates
+only the nodes above it. Neighbours are x ± 1: no face edges, no radial layers, no
 tapered boxes. "Up" and gravity are the direction from the centre, worked out from position,
 never from a grid axis.
 
@@ -66,13 +73,15 @@ rhythm.
 | --- | --- | --- |
 | Shape | how much of each voxel is solid | meshing and collision; streamed first |
 | Material | an index into the world's short list of materials | texturing; broad strata collapse |
-| Water | which water body a voxel is in | exact levels, flow; changes with the seasons |
+| Water | which water body a voxel's basin belongs to, or loose water's amount | exact levels, flow; changes with the seasons |
 | Edits | changes players make, over the baked trees | later; kept off the main path |
 
 Not trees:
 
 - **Water bodies**: a small table. The sea and each lake have one level, a river its course with
-  the level and flow along it, each with how it rises through the year.
+  the level and flow along it, each with how it rises through the year. The water tree marks a
+  body's whole basin; the level says how full it is, so a lake rising or draining changes one
+  number, not the tree.
 - **Heat**: worked out from the planet's baseline (`baseline_temperature`), with sparse
   deviations only where something is hot.
 - **Weather**: its own system and grid, as now.
@@ -81,29 +90,74 @@ Not trees:
 
 ## Baking
 
-The generator answers what's at any 3D point and resolution, so it can fill any region at any
-level directly; coarse regions agree with the fine ones under them. A full fine bake isn't
-practical: the store's measurements put 0.5 m at about 22 MB a km², which is roughly 230 GB and
-200 hours on 8 threads for the working planet. So:
+The generator answers what's at any 3D point and resolution, so it can fill any node at any
+depth directly; coarse nodes agree with the fine ones under them. A full fine bake isn't
+practical while the generator is changing: scaled from the store's Nov 12 measurements (113 s
+on 8 threads and ~35 MB for a 1.6 km² coastal patch at 0.5 m), the working planet is roughly
+200 hours and 230 GB at 0.5 m, and about twice that at 0.33 m. Mostly sea could make it 2–3×
+less; rivers added since could make it more. So, for now:
 
-- Coarse levels are baked for the whole planet ahead of play.
-- Fine levels are baked ahead round the spawn, and elsewhere on demand when a player nears,
-  then kept.
-- The baker writes the store (`libs/baked`, LMDB); the game server only reads it, and asks the
-  baker for regions it lacks.
+- Coarse levels are baked for the whole planet ahead of play. They're few, the same for every
+  player, and the part that's slow live: in the Nov 10 first-view benchmark, levels 7–13 took
+  ~66 s of 73 s for ~330 tiles, while fine levels round the player took ~0.6 s each.
+- The formed world is baked too, so the generator library starts without forming (~12.6 s).
+- Fine detail is filled when a player nears, by the generator library in the server on worker
+  threads, and written to the store so it's made once.
+- Everything stored carries the generator version that made it; the version is bumped whenever
+  the generator's output changes, since `world_id` covers only the settings. On a mismatch the
+  server generates live and rebakes coarse in the background. Dev runs use a scratch store, so a
+  forgotten bump can't serve stale ground.
+
+Once the generator settles, the world is fully baked ahead, the baker becomes its own process,
+and the server only reads. The code path is the same either way: the store holds what was baked,
+the generator fills what wasn't.
+
+## Editing while playing
+
+Edits are a log over the baked trees, so the bake and play never fight.
+
+- Each edit has an id, who made it, when, and the generator version it was made against. It's
+  kept as the voxels it leaves, so it can be checked against the ground under it.
+- Edits copy only the nodes they change (the trees share identical nodes), so a snapshot is a kept
+  root and rollback is pointing back at one. Old nodes no kept snapshot holds are swept up; how
+  many snapshots to keep is a setting.
+- Removing one edit from the middle puts its nodes back if nothing later touched them, and
+  otherwise replays the log without it from the snapshot before it.
+- Edits are written to the store in one batch per server tick (LMDB has one writer); each keeps
+  its own id inside the batch.
+- An edit touching several trees (shape and material) commits them together under one version.
+  The nodes above it re-sum; far clients get an update only if a node's bytes change.
+- Changing the generator after a live world has edits is a migration, run on purpose, never a
+  casual rebake.
+
+### Water against edits
+
+- An edit that changes shape next to water, or opens its containment, is found by looking up the
+  water tree at the same keys.
+- That wakes a live flow over a small patch round the change: water held there as amounts, moving
+  much like Minecraft's, until it settles; then it's turned back into bodies with flat levels and
+  the patch stops.
+- A breached lake loses what flows out through the patch, and its level drops over time; the rest
+  of the lake is just the lower number. The sea never runs short: a breach into a dry hollow below
+  sea level fills it and joins it to the sea. A trench off a river fills to the river's level
+  where they meet; moving a river's course waits.
+- The water changes an edit causes are logged under its id, so rolling the edit back rolls them
+  back too.
+- Changes from the world itself (rockfall, seasons, erosion) later use the same path; player
+  changes come first.
 
 ## Streaming
 
-On connect the client gets coarse regions for all it can see first (they're cheap), then fine
-regions nearest first. After that the server refines outward by what improves the view most per
-byte, within a bandwidth budget. It remembers which version of each tree's region each client
+On connect the client gets coarse pages for all it can see first (they're cheap), then fine
+pages nearest first. After that the server refines outward by what improves the view most per
+byte, within a bandwidth budget. It remembers which version of each tree's page each client
 holds, and sends only what's newer: a season's water, an edit. The client asks for nothing it
 can coarsen itself.
 
 ## Drawing
 
-The client keeps the regions it's been sent in one tree, with a hash per level for neighbours and
-the finest region over a point. Per region it picks a depth by distance (fine near the camera,
+The client keeps the pages it's been sent in one tree, with a hash per level for neighbours and
+the finest page over a point. Per page it picks a depth by distance (fine near the camera,
 halving outward), meshes the shape tree at that depth into a smooth surface, textures it by the
 material tree, and caches the mesh until a version or the depth changes. Where depths meet, a seam
 scheme closes the gap and the swap morphs or fades, so nothing pops.
@@ -123,28 +177,29 @@ step replaces something, the old and new are compared before the old goes.
    material and water trees apart. Decides the leaning above.
 2. **Meshing cost now**: a hidden benchmark of `mesh_tile` on real tiles (block fill, column
    steps, faces), as the baseline the new mesher must beat.
-3. Answer the open questions above that step 1 of the next stage needs (region size, baker
-   form).
+3. **Coarse bake cost**: time and size of a whole-planet coarse bake at a few metres, and the
+   fine fill time per km² now that rivers are in, to replace the extrapolations above.
+4. Confirm page size from step 1's counts.
 
 ### 1 · Grid keys and trees
 
-1. Root cube, region keys (level, x, y, z), Morton order, parent, children and neighbours.
-   Tests: round trips, neighbours across region edges, the key of any point.
-2. Shape, material and water trees per region, each a `VoxelTree` or a leaner kind, with
-   versions; a region record holding its trees; encode and decode. Tests: round trips,
-   identical voxels give identical bytes.
+1. Root cube, node and page keys (depth, x, y, z), Morton order, parent, children and
+   neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
+2. Shape, material and water trees, each a `VoxelTree` or a leaner kind, with node summaries and
+   versions; a page record holding its trees; encode and decode. Tests: round trips, identical
+   voxels give identical bytes, a split leaf's summary matches its children.
 3. Water body table: sea, lake, river (course, level along it, flow, seasonal rise and peak),
    with ids stable across bakes. Tests: level and flow read at points along a river.
 4. Heat as baseline plus deviations. Tests: matches today's voxel temperatures within a step.
-5. Edits overlay: format only, unused until edits come back. Tests: an edit over a baked region
-   reads through.
+5. Edits log: format only (id, author, time, generator version, the voxels left), unused until
+   edits come back. Tests: an edit over a baked page reads through.
 
 ### 2 · Generator on the grid
 
-1. Fill a region at any level from the generator at grid points: shape amount, material, water
-   body. Tests: a region read against the generator at the same points.
-2. Coarse from fine: a coarse region equals the fine ones under it combined (shape averaged,
-   material and water by most). Tests: every level of a small world.
+1. Fill a node at any depth from the generator at grid points: shape amount, material, water
+   body. Tests: a page read against the generator at the same points.
+2. Coarse agrees with fine: a node filled coarse equals the fine ones under it summed up, so
+   detail filled later never jumps. Tests: every level of a small world.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
    the largest rivers come out as bodies with the right levels.
@@ -153,31 +208,34 @@ step replaces something, the old and new are compared before the old goes.
 
 ### 3 · Store and baker
 
-1. `libs/baked` on grid keys, per tree, with versions; old store files refused by format
-   version. Tests: put, get, the holder of any point, versions.
-2. `hog-bake`: coarse for the whole planet, fine round a place. Measure size and time on the
-   working world and the small world.
-3. Baking on demand: a queue of wanted regions, the baker filling it and the store telling
-   readers. Tests: a region asked for appears and is read.
-4. The baker as its own process (or library, per step 0.3).
+1. `libs/baked` on grid keys, per tree, with versions and the generator version; old store files
+   refused by format version. Tests: put, get, the holder of any point, versions, a generator
+   version mismatch refused.
+2. `hog-bake`: coarse for the whole planet, fine round a place, and the formed world. Measure size
+   and time on the working world and the small world.
+3. Filling on demand: a queue of wanted nodes, the generator library filling it on worker threads
+   and writing the store, the store telling readers. Tests: a node asked for appears and is read;
+   a stale generator version is filled again.
+4. Scratch stores for dev runs.
+5. Later, once the generator settles: a full bake ahead, and the baker as its own process.
 
 ### 4 · Server streaming
 
-1. The server reads the store per tree and never generates. Tests: a server on a baked small
-   world serves a region with no generator running.
+1. The server reads the store per tree, and fills only what it lacks through step 3.3. Tests: a
+   server on a fully baked small world serves a page with no generator running.
 2. Interest and order: coarse in view first, then nearest fine, then outward refinement within a
-   byte budget per client. Tests: order of regions sent for a player standing still.
-3. What each client holds, by region and tree version; only newer sent. Tests: a water season
+   byte budget per client. Tests: order of pages sent for a player standing still.
+3. What each client holds, by page and tree version; only newer sent. Tests: a water season
    change sends only water trees.
-4. Protocol messages for regions, bodies and version bumps; protocol version bumped. Tests:
+4. Protocol messages for pages, bodies and version bumps; protocol version bumped. Tests:
    round trips, refusal of a cut message.
 5. Bot and load tests streaming the new way.
 
 ### 5 · Client
 
-1. One held tree: regions per level in hashes, finest-over lookups, a memory budget and
+1. One held tree: pages per level in hashes, finest-over lookups, a memory budget and
    eviction farthest first. Tests: lookups and eviction on held data.
-2. Depth by distance per region. Tests: depth chosen for a camera path.
+2. Depth by distance per page. Tests: depth chosen for a camera path.
 3. Smooth mesher over the shape tree at a depth, material weights per vertex. Tests: closed
    surfaces on flat, slope, overhang and cave regions; vertices on the surface within tolerance.
 4. Seams between depths. Tests: no gaps along every shared edge of mixed-depth neighbours.
@@ -215,8 +273,14 @@ superseded.
 
 ### 8 · After parity
 
-- Edits on the overlay tree, sent as version bumps.
-- Hand regions to separate servers by subtree, for the big world.
+- Edits on the log ([above](#editing-while-playing)): batching per tick, snapshots, rollback,
+  removing one edit, sent as version bumps. Tests: rollback restores a snapshot's bytes; removing
+  a middle edit equals the log replayed without it.
+- Live local water from edits: detection at water edges, the patch flow, settling into bodies,
+  lake levels drained through a breach. Tests: a breached lake's level falls by what flowed out; a
+  hollow opened below sea level fills; rolling back the edit restores the water.
+- Changes from the world itself through the same water path.
+- Hand subtrees to separate servers, for the big world.
 - A whole-program smoke test once the engine nears stable.
 
 ## Carried over
@@ -234,5 +298,5 @@ Open from the river work, to fold in where they fit:
 - [The globe](globe.md): its generator and rules stay; its voxel shell, tiles and meshing are
   replaced here.
 - [The shape tree](octree-generation.md): forming's primitives and node summaries can be what
-  bakes regions quickly; its wire, client and removal steps are this plan's steps 4, 5 and 7.
+  bakes pages quickly; its wire, client and removal steps are this plan's steps 4, 5 and 7.
 - [Planet layers](planet-layers.md): the formation backlog and hero features are unchanged.
