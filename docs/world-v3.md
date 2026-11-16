@@ -195,7 +195,10 @@ step replaces something, the old and new are compared before the old goes.
    leaf's summary matches its children. Loose water's amount waits for live water.
 3. Water body table: sea, lake, river (course, level along it, flow, seasonal rise and peak),
    with ids stable across bakes. Tests: level and flow read at points along a river.
-4. Heat as baseline plus deviations. Tests: matches today's temperatures within a step.
+4. Heat as baseline plus deviations: the baseline stays the planet's (`baseline_temperature`),
+   and only hot things are kept, as sources falling off to none at their reach. Today's only
+   heat over the baseline is live (lava flow, vents), so nothing fills them until those move
+   over. Tests: falloff, overlapping sources add, round trips.
 5. Edits log: format only (id, author, time, generator version, the nodes left), unused until
    edits come back. Tests: an edit over a baked page reads through.
 

@@ -1,5 +1,6 @@
 add_library(hog_grid
     src/grid.cpp
+    src/heat.cpp
     src/page.cpp
     src/tree.cpp
     src/water_bodies.cpp)
@@ -11,6 +12,7 @@ hog_target_defaults(hog_grid)
 
 hog_add_tests(hog_grid
     tests/grid_tests.cpp
+    tests/heat_tests.cpp
     tests/key_tests.cpp
     tests/page_tests.cpp
     tests/tree_tests.cpp
