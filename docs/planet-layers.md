@@ -211,10 +211,11 @@ Backlog:
 - Volcanic: summit lava lakes, fissure lava fields and kipukas, lava tubes, hot spring terraces,
   acid lakes and sulfur fields, geysers★, mud pots, fumaroles.
 - Water: rivers you meet. A small world's catchments only gather creeks (under 1 m³/s on the
-  28.8 km world), so `river_size` cuts and fills channels for more water than they carry. Their
-  water still runs shallow: it stands no higher than the lowest uncut ground about it, and a
-  neighbouring valley often lies lower than a river's own floor. Next: join some into bigger
-  rivers, some fed by melt off frozen peaks. Giant falls over hard beds★, slot canyons and gorges, sinking rivers and cliff springs★,
+  28.8 km world), so `river_size` cuts and fills channels for more water than they carry, and a
+  channel winding out over its walls' foot cuts its bed down from the floor there. About one in
+  seven of the largest still runs dry, perched over ground lower than its own floor (the points
+  about it carved lower, by ice say, than the course it was routed along). Next: join some into
+  bigger rivers, some fed by melt off frozen peaks. Giant falls over hard beds★, slot canyons and gorges, sinking rivers and cliff springs★,
   cenotes and blue holes, tower karst, sea stacks and arches, reefs and atolls★, pink salt lakes,
   salt flats★, soda lakes.
 - Deserts and wastelands: dune seas★, gypsum dunes, oases, mesas and buttes, hoodoos, striped

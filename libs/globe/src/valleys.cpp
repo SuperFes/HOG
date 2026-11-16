@@ -19,12 +19,6 @@ double smoothstep(double x) noexcept {
     return t * t * (3.0 - (2.0 * t));
 }
 
-// How far from its line its channel may reach: the noise winding it swings up to twice the
-// meander either way.
-double channel_reach(const Valley& valley, double toe) noexcept {
-    return std::max(valley.belt + toe, (2.0 * valley.meander) + (valley.channel_width / 2.0));
-}
-
 double smoothstep_slope(double x) noexcept {
     const double t = std::clamp(x, 0.0, 1.0);
     return 6.0 * t * (1.0 - t);
@@ -32,11 +26,15 @@ double smoothstep_slope(double x) noexcept {
 
 // The channel's cut `lateral` metres to one side of the line's great circle, `run` metres down
 // the whole valley where it's `depth` deep: how deep, and how that changes per metre across and
-// per metre down the valley, as it winds and deepens.
+// per metre down the valley, as it winds and deepens; and its share of its full depth there, 1 in
+// its middle to none at its banks, and how that changes.
 struct ChannelCut {
     double cut = 0.0;
     double across = 0.0;
     double along = 0.0;
+    double share = 0.0;
+    double share_across = 0.0;
+    double share_along = 0.0;
 };
 
 ChannelCut channel_cut(const Valley& valley, double lateral, double run, double depth) noexcept {
@@ -58,13 +56,26 @@ ChannelCut channel_cut(const Valley& valley, double lateral, double run, double 
     }
     const double deepening =
         (valley.channel_depth_to - valley.channel_depth) / std::max(valley.length, 1e-300);
-    return {.cut = depth * (1.0 - (across * across)),
-            .across = -depth * 4.0 * across / valley.channel_width,
-            .along = (deepening * (1.0 - (across * across))) +
-                     (4.0 * depth * across / valley.channel_width * winding)};
+    const double share = 1.0 - (across * across);
+    const double share_across = -4.0 * across / valley.channel_width;
+    const double share_along = 4.0 * across / valley.channel_width * winding;
+    return {.cut = depth * share,
+            .across = depth * share_across,
+            .along = (deepening * share) + (depth * share_along),
+            .share = share,
+            .share_across = share_across,
+            .share_along = share_along};
 }
 
 } // namespace
+
+double channel_toe(double belt, double width) noexcept {
+    return std::min(std::max(0.5 * belt, width), belt);
+}
+
+double channel_reach(double belt, double width, double meander, double toe) noexcept {
+    return std::max(belt + toe, (2.0 * meander) + (width / 2.0));
+}
 
 double rise_past(double away, double reach) noexcept {
     const double half = reach / 2.0;
@@ -92,7 +103,7 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
     // down to the floor (or the channel's width, where the belt is narrower), never past the
     // middle of the floor, which lies level across.
     const double out = away - valley.belt;
-    const double toe = std::min(std::max(0.5 * valley.belt, valley.channel_width), valley.belt);
+    const double toe = channel_toe(valley.belt, valley.channel_width);
     double climbed = 0.0;
     double climbing = 0.0;
     if (toe <= 0.0 || out >= toe) {
@@ -119,23 +130,32 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
         valley.channel_depth + ((valley.channel_depth_to - valley.channel_depth) * whole);
     const double water_depth =
         valley.water_depth + ((valley.water_depth_to - valley.water_depth) * whole);
-    const ChannelCut channel = valley.channel_width > 0.0 && away < channel_reach(valley, toe)
-                                   ? channel_cut(valley, lateral, run, depth)
-                                   : ChannelCut{};
-    const double cut = channel.cut;
-    const double cutting = channel.across;
-    // How the cut changes along the line between its ends, where it runs on, per metre.
-    DVec3 cut_along{0.0};
-    if (channel.along != 0.0 && t > 0.0 && t < 1.0) {
+    const ChannelCut channel =
+        valley.channel_width > 0.0 &&
+                away < channel_reach(valley.belt, valley.channel_width, valley.meander, toe)
+            ? channel_cut(valley, lateral, run, depth)
+            : ChannelCut{};
+    // Per metre down the whole valley, as a change per metre between the line's ends.
+    DVec3 per_run{0.0};
+    if (t > 0.0 && t < 1.0) {
         const DVec3 chord = along - (direction * glm::dot(along, direction));
-        cut_along = chord * ((valley.foot - valley.head) * valley.length / (length * radius) *
-                             channel.along);
+        per_run = chord * ((valley.foot - valley.head) * valley.length / (length * radius));
     }
-
-    const double standing = floor + climbed - cut;
     // Steeper or gentler as the walls vary along it.
     const DVec3 varying =
         valley.wall > 0.0 ? valley.wall_gradient * (climbed / valley.wall) : DVec3{0.0};
+    const DVec3 outward = direction - (nearest * cosine);
+    const double outward_size = glm::length(outward);
+    const DVec3 unit = outward_size > 0.0 ? outward / outward_size : DVec3{0.0};
+    // The channel cuts its bed down from the floor wherever it winds: where it swings out over
+    // the walls' foot it undercuts them, the wall it climbed cut away under it as far as it's
+    // deep there.
+    const double cut = channel.cut + (climbed * channel.share);
+    const DVec3 cut_gradient = (sideways * (channel.across + (climbed * channel.share_across))) +
+                               (per_run * (channel.along + (climbed * channel.share_along))) +
+                               (((unit * climbing) + varying) * channel.share);
+
+    const double standing = floor + climbed - cut;
     Wall wall{.height = standing + rise,
               .gradient = DVec3{0.0},
               .floor = floor - cut,
@@ -153,15 +173,12 @@ Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept {
               .cut_gradient = DVec3{0.0},
               .sheet = valley.sheet + ((valley.sheet_to - valley.sheet) * whole)};
     // Up the walls away from the line, and along its floor between its ends.
-    const DVec3 outward = direction - (nearest * cosine);
-    if (const double size = glm::length(outward); size > 0.0) {
-        const DVec3 unit = outward / size;
+    if (outward_size > 0.0) {
         wall.fall += unit * climbing;
         wall.standing_gradient += unit * climbing;
         wall.gradient += unit * (climbing + steepening);
         wall.reaching_gradient = unit * (-steepening / out_of_the_way);
     }
-    const DVec3 cut_gradient = (sideways * cutting) + cut_along;
     wall.standing_gradient += varying - cut_gradient;
     wall.gradient += varying - cut_gradient;
     wall.cut_gradient = cut_gradient;
@@ -227,7 +244,7 @@ WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within, dou
     const Interval floor{.low = std::min(floor_at(t.low), floor_at(t.high)),
                          .high = std::max(floor_at(t.low), floor_at(t.high))};
     // Up the walls, rising with the distance and the steepness both.
-    const double toe = std::min(std::max(0.5 * valley.belt, valley.channel_width), valley.belt);
+    const double toe = channel_toe(valley.belt, valley.channel_width);
     const auto climbed = [&](double wall, double distance) {
         const double out = distance - valley.belt;
         if (toe <= 0.0 || out >= toe) {
@@ -237,17 +254,21 @@ WallBounds wall_bounds(const Valley& valley, DVec3 direction, double within, dou
     };
     const Interval climbing{.low = climbed(std::max(steepness.low, 0.0), away.low),
                             .high = climbed(std::max(steepness.high, 0.0), away.high)};
-    // The channel, wherever it may wind across the belt.
+    // The channel, wherever it may wind across the belt, cut down from the floor even under the
+    // walls' foot.
     double deepest = 0.0;
-    if (valley.channel_width > 0.0 && away.low < channel_reach(valley, toe)) {
+    double lowest_climbed = climbing.low;
+    if (valley.channel_width > 0.0 &&
+        away.low < channel_reach(valley.belt, valley.channel_width, valley.meander, toe)) {
         const auto depth_at = [&](double share) {
             const double whole = valley.head + ((valley.foot - valley.head) * share);
             return valley.channel_depth +
                    ((valley.channel_depth_to - valley.channel_depth) * whole);
         };
         deepest = std::max({0.0, depth_at(t.low), depth_at(t.high)});
+        lowest_climbed = 0.0;
     }
-    const Interval standing{.low = floor.low + climbing.low - deepest,
+    const Interval standing{.low = floor.low + lowest_climbed - deepest,
                             .high = floor.high + climbing.high};
     return {.standing = standing,
             .height = standing + Interval{.low = rise_past(away.low, valley.reach),

@@ -117,6 +117,60 @@ TEST_CASE("a valley's river stands in its channel, deepening along it to the nex
     CHECK_THAT(wall_at(river, at(1'000.0, 0.0), radius).water, WithinAbs(80.0, 0.01));
 }
 
+TEST_CASE("a channel winding out over its walls' foot cuts its bed down from the floor there",
+          "[globe][valleys]") {
+    // A channel as wide as the belt is, its walls' foot rounded right to the middle, winding far
+    // either side of it.
+    Valley river = falling();
+    river.belt = 10.0;
+    river.channel_width = 20.0;
+    river.channel_depth = 2.0;
+    river.channel_depth_to = 2.0;
+    river.water_depth = 1.5;
+    river.water_depth_to = 1.5;
+    river.meander = 20.0;
+    river.meander_length = 220.0;
+    river.length = 1'000.0;
+    std::vector<double> swings;
+    for (int along = 4; along <= 36; ++along) {
+        const double east = 25.0 * along;
+        CAPTURE(east);
+        const double floor = 100.0 - (20.0 * east / 1'000.0);
+        double bed = 1e300;
+        double bed_north = 0.0;
+        for (int across = -800; across <= 800; ++across) {
+            const double north = 0.05 * across;
+            if (const double standing = wall_at(river, at(east, north), radius).standing;
+                standing < bed) {
+                bed = standing;
+                bed_north = north;
+            }
+        }
+        swings.push_back(std::abs(bed_north));
+        CHECK_THAT(bed, WithinAbs(floor - 2.0, 0.01));
+        CHECK_THAT(wall_at(river, at(east, bed_north), radius).water - bed, WithinAbs(1.5, 0.01));
+        // Across its bed, short of its banks, the ground rises the way it says.
+        for (const double off : {-5.0, 0.0, 5.0}) {
+            constexpr double step = 0.01;
+            const auto standing = [&](double e, double n) {
+                return wall_at(river, at(east + e, bed_north + off + n), radius).standing;
+            };
+            const DVec3 point = at(east, bed_north + off);
+            const DVec3 rise = wall_at(river, point, radius).standing_gradient;
+            const DVec3 eastward = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, point));
+            const DVec3 northward = glm::cross(point, eastward);
+            CHECK_THAT(
+                glm::dot(rise, eastward),
+                WithinAbs((standing(step, 0.0) - standing(-step, 0.0)) / (2.0 * step), 0.01));
+            CHECK_THAT(
+                glm::dot(rise, northward),
+                WithinAbs((standing(0.0, step) - standing(0.0, -step)) / (2.0 * step), 0.01));
+        }
+    }
+    // It swung well out over the foot in places.
+    CHECK(std::ranges::max(swings) > 8.0);
+}
+
 TEST_CASE("a valley's water rises through the year as it does along it, at its own peak",
           "[globe][valleys]") {
     Valley river = falling();

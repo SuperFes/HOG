@@ -95,6 +95,14 @@ struct Wall {
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
 
+// Metres either side of a belt `belt` across that its walls' foot is rounded over, for a channel
+// `width` across: half the belt, or the channel's width where the belt is narrower.
+[[nodiscard]] double channel_toe(double belt, double width) noexcept;
+
+// How far from its line a channel `width` across, bending `meander` either way, may reach: the
+// noise winding it swings up to twice the meander either way, and on past the walls' foot `toe`.
+[[nodiscard]] double channel_reach(double belt, double width, double meander, double toe) noexcept;
+
 // How steeply walls cut in rock stand where the ground falls `fall` to the next point `run`
 // metres off, rise over run: no steeper than that, nor than they hold, climbing through `loose`
 // metres of loose ground at `loose_holds`, then rock at `rock_holds`. Loose ground holds walls

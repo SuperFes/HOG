@@ -311,6 +311,12 @@ DVec3 blended_fall(const std::vector<GroundWay>& ways, double top, double blend)
     return fall;
 }
 
+// The least ground stands, over its channel, `away` metres from its course: as low as the floor
+// out to where its channel may wind, `reaches`, the walls past that.
+double least_under(double floor, double walls, double away, double reaches) noexcept {
+    return away < reaches ? floor : walls;
+}
+
 // `run` as a share of `length`, or `none` along none.
 // A river `depth` deep where it ran, standing over `bed` at its own `level` along its course, one
 // level across its channel, wherever the ground's lower: bars in it stand dry. Where the ground
@@ -1344,6 +1350,10 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // no higher than the walls' foot rounded over the belt; any that might stand lowest is read,
     // so none comes lowest with a step.
     const double deepest = std::max(channel.depth, next.depth);
+    // Out to where its channel may wind, cut down from the floor even under the walls' foot.
+    const double channel_reaches = channel_reach(channel.belt, channel.width, channel.meander,
+                                                 channel_toe(channel.belt, channel.width)) +
+                                   1.0;
     double surely = 1e300;
     // How far the whole course lies, and which way from its nearest.
     double nearest = 1e300;
@@ -1355,11 +1365,11 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                     0.0, 1.0);
         const DVec3 on = line[k] + (along * t);
         const double away = glm::length(direction - on) * radius_;
-        const double walls = floor_at(runs[k] + (t * (runs[k + 1] - runs[k]))) +
-                             (slope * std::max(0.0, away - channel.belt));
+        const double floor_here = floor_at(runs[k] + (t * (runs[k + 1] - runs[k])));
+        const double walls = floor_here + (slope * std::max(0.0, away - channel.belt));
         rough[k] = walls + rise_past(away, reach);
         lowest = std::min(lowest, rough[k]);
-        least[k] = walls - deepest;
+        least[k] = least_under(floor_here, walls, away, channel_reaches) - deepest;
         surely = std::min(surely, walls + (slope * channel.belt / 4.0));
         if (away < nearest) {
             nearest = away;

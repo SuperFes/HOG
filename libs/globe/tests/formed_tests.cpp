@@ -439,8 +439,9 @@ TEST_CASE("a formed river's water stands level across its channel, no crag stand
         }
     }
     REQUIRE(steps > 100);
-    // Where it fades out at its edges it lies no deeper than it's faded to, not level.
-    CHECK(stepped * 40 < steps);
+    // Where it fades out at its edges it lies no deeper than it's faded to, not level; nor quite
+    // level where a winding course hands its water over from one stretch to the next.
+    CHECK(stepped * 30 < steps);
 }
 
 TEST_CASE("a formed river's water falls downstream", "[globe][formed]") {
