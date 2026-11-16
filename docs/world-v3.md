@@ -189,9 +189,10 @@ step replaces something, the old and new are compared before the old goes.
 
 1. Root node, node and page keys (depth, x, y, z), Morton order, parent, children and
    neighbours. Tests: round trips, neighbours across page cuts, the key of any point.
-2. Shape, material and water trees, each a `VoxelTree` or a leaner kind, with node summaries and
-   versions; a page record holding its trees; encode and decode. Tests: round trips, identical
-   nodes give identical bytes, a split leaf's summary matches its children.
+2. Shape, material and water trees (`grid::Tree`, one value a node: solid out of 65535, a
+   material index, a water body id), with node summaries and versions; a page record holding its
+   trees; encode and decode. Tests: round trips, identical nodes give identical bytes, a split
+   leaf's summary matches its children. Loose water's amount waits for live water.
 3. Water body table: sea, lake, river (course, level along it, flow, seasonal rise and peak),
    with ids stable across bakes. Tests: level and flow read at points along a river.
 4. Heat as baseline plus deviations. Tests: matches today's temperatures within a step.
