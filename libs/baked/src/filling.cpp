@@ -47,8 +47,8 @@ Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
 }
 
 struct Filler::Impl {
-    Impl(const globe::Generator& generator, PageStore& store, jobs::JobSystem& jobs)
-        : generator(&generator), store(&store), jobs(&jobs), grid(globe::grid_of(generator)) {}
+    Impl(const globe::Generator& from, PageStore& into, jobs::JobSystem& on)
+        : generator(&from), store(&into), jobs(&on), grid(globe::grid_of(from)) {}
 
     const globe::Generator* generator;
     PageStore* store;

@@ -198,18 +198,18 @@ void TileMeshes::mesh(globe::TileKey key) {
     working_.push_back(
         {.key = key,
          .arrived = held.arrived,
-         .job = std::make_unique<jobs::Async<Drawn>>(
-             *jobs_, [layers = layers_, sea = sea_, key, tree = held.tree, near = std::move(near),
-                      thickness] {
-                 const globe::TileAt at = [&](globe::TileKey wanted) -> const globe::VoxelTree* {
-                     const auto found = near.find(wanted);
-                     return found == near.end() ? nullptr : found->second.get();
-                 };
-                 // As high as the sea runs up the shore, the sheet runs out over it.
-                 return drawn_of(globe::mesh_tile(layers, key, *tree, at,
-                                                  static_cast<double>(terrain::shore_reach)),
-                                 sea, thickness);
-             })});
+         .job = std::make_unique<jobs::Async<Drawn>>(*jobs_, [layers = layers_, sea = sea_, key,
+                                                              tree = held.tree,
+                                                              near = std::move(near), thickness] {
+             const globe::TileAt at = [&](globe::TileKey wanted) -> const globe::VoxelTree* {
+                 const auto found = near.find(wanted);
+                 return found == near.end() ? nullptr : found->second.get();
+             };
+             // As high as the sea runs up the shore, the sheet runs out over it.
+             return drawn_of(globe::mesh_tile(layers, key, *tree, at,
+                                              static_cast<double>(terrain::shore_reach)),
+                             sea, thickness);
+         })});
 }
 
 void TileMeshes::gather(bool wait) {

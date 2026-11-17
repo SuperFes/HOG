@@ -91,18 +91,18 @@ struct Server::PageStreaming {
         const baked::Baking baking = baked::baking_of(generator);
         const baked::PageStore::Options options{
             .map_bytes = page_store_bytes, .readers = 1024, .read_only = false};
-        auto store = config.store ? baked::PageStore::open(*config.store, baking, options)
-                                  : baked::PageStore::scratch(baking, options);
-        if (!store) {
-            return std::unexpected(store.error());
+        auto opened = config.store ? baked::PageStore::open(*config.store, baking, options)
+                                   : baked::PageStore::scratch(baking, options);
+        if (!opened) {
+            return std::unexpected(opened.error());
         }
-        log::info(server_log, "streaming grid pages from {}", store->directory().string());
-        auto pages = std::make_unique<PageStreaming>(std::move(*store), generator, jobs);
-        auto source = server::PageSource::open(pages->store, &pages->filler);
-        if (!source) {
-            return std::unexpected(source.error());
+        log::info(server_log, "streaming grid pages from {}", opened->directory().string());
+        auto pages = std::make_unique<PageStreaming>(std::move(*opened), generator, jobs);
+        auto reading = server::PageSource::open(pages->store, &pages->filler);
+        if (!reading) {
+            return std::unexpected(reading.error());
         }
-        pages->source.emplace(std::move(*source));
+        pages->source.emplace(std::move(*reading));
         return pages;
     }
 

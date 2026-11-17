@@ -209,8 +209,8 @@ private:
     Tree() = default;
 
     [[nodiscard]] Id held(const Node& node);
-    [[nodiscard]] Id leaf_of(Value value, bool open) {
-        return held({.value = value, .open = open});
+    [[nodiscard]] Id leaf_of(Value value, bool opened) {
+        return held({.value = value, .open = opened});
     }
     // Eight leaves alike in being open or closed become one where their kind merges them; else a
     // split node. Of children `side` finest nodes across.
