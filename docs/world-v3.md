@@ -242,8 +242,9 @@ step replaces something, the old and new are compared before the old goes.
      at the finest detail each point is a lone column (~0.7 ms), 12× the fill; taken two levels
      finer, 6×, and nodes of 128 m and over still differ by half their shares, as the finer
      columns are still smoothed and two entries hold too little of a km-wide node. Dropped.
-     Leaning: the generator covers coarse ground by the share of it steep enough to stay bare,
-     and gives that share, so the fill blends cover and rock from one column.
+     Decided: the blend is enough for now. Later, a bake can sum coarse nodes up from finer
+     ones where it matters; idea: the generator gives the share of coarse ground steep enough
+     to stay bare, so the fill blends cover and rock from one column.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
    the largest rivers come out as bodies with the right levels.
