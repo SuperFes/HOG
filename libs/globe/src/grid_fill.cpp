@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -35,6 +36,12 @@ struct Probe {
     std::optional<grid::Surface> surface; // where the node is a leaf
     bool caves = false;                   // a cave may lie in it at finer detail
 };
+
+// Which way is up at a point. At the centre every way is down alike, so any will do.
+DVec3 up_at(DVec3 point) noexcept {
+    const double radius = glm::length(point);
+    return radius > 0.0 ? point / radius : DVec3{0.0, 0.0, 1.0};
+}
 
 // Metres from the centre a column's water stands at its highest in the year; 0 where none does.
 double highest_water(const Generator::Column& column) noexcept {
@@ -145,7 +152,7 @@ private:
             std::vector<std::size_t> feet;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
                 const double radius = glm::length(middles[n]);
-                const Generator::Column& column = column_at(middles[n], radius, level);
+                const Generator::Column& column = column_at(middles[n], level);
                 Probe probe{.distance = distances[n],
                             .material = distances[n] > clear * size
                                             ? Material::Air
@@ -185,7 +192,7 @@ private:
         if (probe.distance > 0.0) {
             return true;
         }
-        const Generator::Column& column = column_at(middle, probe.radius, level);
+        const Generator::Column& column = column_at(middle, level);
         if (!column.caves(probe.radius - reach, probe.radius + reach, reach).empty()) {
             return false;
         }
@@ -240,7 +247,7 @@ private:
     // The solid at a point as the nearest column made has it; air where it's open.
     [[nodiscard]] Material solid_in(DVec3 point, int level) const {
         const double radius = glm::length(point);
-        const auto found = columns_.find(slot(cell_under(point / radius, level)));
+        const auto found = columns_.find(slot(cell_under(up_at(point), level)));
         if (found == columns_.end()) {
             return Material::Air;
         }
@@ -276,7 +283,7 @@ private:
     // The solid at or just under a point, as the nearest column made has it: where the column
     // has the point open, the solid it reaches going down. Air only where it reaches none.
     [[nodiscard]] Material solid_at(DVec3 point, double radius, int level, double size) const {
-        const auto found = columns_.find(slot(cell_under(point / radius, level)));
+        const auto found = columns_.find(slot(cell_under(up_at(point), level)));
         if (found == columns_.end()) {
             return Material::Air;
         }
@@ -288,12 +295,12 @@ private:
     }
 
     // The column made nearest a point, among those about it.
-    [[nodiscard]] const Generator::Column& column_at(DVec3 point, double radius, int level) const {
-        return columns_.at(slot(cell_under(point / radius, level)));
+    [[nodiscard]] const Generator::Column& column_at(DVec3 point, int level) const {
+        return columns_.at(slot(cell_under(up_at(point), level)));
     }
 
     static Between around(DVec3 point, int level) {
-        const CellPlace place = place_under(glm::normalize(point), level);
+        const CellPlace place = place_under(up_at(point), level);
         const int di = place.i < 0.0 ? -1 : 1;
         const int dj = place.j < 0.0 ? -1 : 1;
         const Cell across = next_to(place.cell, di, 0).value_or(place.cell);
@@ -353,14 +360,16 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
         });
     // What the shape leaves out, its middle in the node, within this far along the ground.
     const DVec3 middle = grid.centre(key);
-    const double reach =
-        half_diagonal * grid.size(key.depth) * generator.planet().body.radius / glm::length(middle);
+    const double reach = glm::length(middle) > 0.0
+                             ? half_diagonal * grid.size(key.depth) *
+                                   generator.planet().body.radius / glm::length(middle)
+                             : std::numeric_limits<double>::infinity();
     std::vector<Placed> placed;
     // Rocks and crags, as the finest detail filled lays them.
     if (filler.near_ground(terms::rock_cell)) {
         const double lod = std::max(grid.size(static_cast<std::uint8_t>(key.depth + levels)),
                                     voxel_lod(generator));
-        for (const Rock& rock : generator.rocks_within(middle, reach, lod)) {
+        for (const Rock& rock : generator.rocks_within(up_at(middle), reach, lod)) {
             if (grid.key_at(rock.middle, key.depth) == key) {
                 placed.push_back(placed_rock(rock));
             }
@@ -373,7 +382,7 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
         }
     }
     // Vents, and pools on cavern floors however deep under the ground.
-    for (const VentSite& site : vent_sites_within(generator, middle, reach)) {
+    for (const VentSite& site : vent_sites_within(generator, up_at(middle), reach)) {
         if (grid.key_at(site.direction * site.ground, key.depth) == key) {
             placed.push_back(placed_vent(site));
         }

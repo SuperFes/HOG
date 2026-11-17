@@ -19,6 +19,9 @@ namespace hog::globe {
 
 class Formed;
 
+// Steps on whenever what the generator makes changes, so what was stored from before reads stale.
+inline constexpr std::uint32_t generator_version = 1;
+
 namespace terms {
 struct Ground;
 struct Fall;

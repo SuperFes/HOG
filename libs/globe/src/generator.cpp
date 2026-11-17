@@ -118,6 +118,9 @@ std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
 }
 
 std::vector<Rock> Generator::rocks_within(DVec3 toward, double reach, double lod) const {
+    if (terms::widest_rock(planet_) < lod) {
+        return {};
+    }
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const int level = terms::rock_level(planet_);
     const DVec3 middle = glm::normalize(toward);

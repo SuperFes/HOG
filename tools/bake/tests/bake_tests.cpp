@@ -1,11 +1,8 @@
 #include <hog/bake/bake.hpp>
-#include <hog/baked/store.hpp>
-#include <hog/core/hash.hpp>
-#include <hog/globe/cell.hpp>
+#include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
-#include <hog/globe/land.hpp>
-#include <hog/globe/planet.hpp>
-#include <hog/globe/volume_build.hpp>
+#include <hog/globe/grid_fill.hpp>
+#include <hog/grid/grid.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/testing/temporary_directory.hpp>
 #include <hog/testing/world.hpp>
@@ -13,123 +10,90 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
-#include <cstdint>
-#include <map>
+#include <optional>
 #include <vector>
 
-using hog::globe::Generator;
-using hog::globe::TileKey;
+using hog::bake::pages_under;
+using hog::bake::Reach;
+using hog::grid::Key;
 
 namespace {
 
-const Generator& planet() {
-    return hog::testing::small_world();
-}
-
-constexpr std::uint8_t level = 3;
-
-// A block two tiles of `level` across holding the ground under `direction`: small enough to
-// bake in a test.
-TileKey ground_block(const Generator& generator, hog::DVec3 direction) {
-    const hog::globe::Layers& layers = generator.layers();
-    const hog::globe::Cell cell = hog::globe::cell_under(direction, layers.level);
-    const double ground = generator.column(direction, hog::globe::voxel_lod(generator)).ground();
-    const unsigned shift = 6 + level + 1;
-    return {.level = level + 1,
-            .face = cell.face,
-            .i = cell.i >> shift,
-            .j = cell.j >> shift,
-            .k = static_cast<std::uint32_t>(layers.layer_at(ground)) >> shift};
+Reach coarse(double metres) {
+    return {.coarse = metres, .around = std::nullopt, .across = 0.0};
 }
 
 } // namespace
 
-TEST_CASE("blocks about a place hold it, on its face, up the shell", "[bake]") {
-    const Generator& generator = planet();
-    const hog::DVec3 direction{0.3, -0.2, 0.93};
-    const std::vector<TileKey> blocks = hog::bake::blocks_around(generator, direction, 10.0, level);
-    REQUIRE_FALSE(blocks.empty());
-    const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
-    bool holds = false;
-    for (const TileKey block : blocks) {
-        CHECK(block.face == cell.face);
-        CHECK(block.level == level + hog::bake::block_above);
-        holds = holds || hog::bake::node_of(block).contains(
-                             hog::baked::Point{.face = cell.face, .x = cell.i, .y = cell.j});
-    }
-    CHECK(holds);
-    const std::vector<TileKey> face = hog::bake::face_blocks(generator, cell.face, level);
-    CHECK(face.size() > blocks.size());
+TEST_CASE("pages are wanted under open leaves where coarse enough, or near the place", "[bake]") {
+    // 1 m nodes 11 deep: a top page of 5 levels over pages of 6.
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const Key top{};
+    const Key foot{.depth = 5, .x = 9, .y = 20, .z = 3};
+    // Feet of the pages under the top one are 1 m across.
+    CHECK(pages_under(grid, coarse(1.0), top, foot, true) == std::vector<Key>{foot});
+    CHECK(pages_under(grid, coarse(2.0), top, foot, true).empty());
+    CHECK(pages_under(grid, coarse(1.0), top, foot, false).empty());
+    // Near the place, caves too.
+    const hog::DVec3 inside = grid.centre(foot);
+    const Reach near{.around = inside, .across = 1.0};
+    CHECK(pages_under(grid, near, top, foot, false) == std::vector<Key>{foot});
+    CHECK(pages_under(grid, near, top, foot.beside(2, 0, 0).value(), false).empty());
+    // A leaf over the top page's feet leads to the pages at them under it.
+    const Key shallow = foot.ancestor(3);
+    CHECK(pages_under(grid, coarse(1.0), top, shallow, true).size() == 64);
+    CHECK(pages_under(grid, near, top, shallow, false) == std::vector<Key>{foot});
+    // A page that's one open leaf leads to the pages at its foot, never back to itself.
+    CHECK(pages_under(grid, near, top, top, false) == std::vector<Key>{foot});
+    // None under the finest nodes.
+    CHECK(pages_under(grid, coarse(0.0), foot, foot, true).empty());
 }
 
-TEST_CASE("a bake stores the voxels as the generator makes them, once", "[bake]") {
-    const Generator& generator = planet();
+TEST_CASE("a bake stores the pages down to a place as the generator fills them, once", "[bake]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
     const hog::testing::TemporaryDirectory directory;
-    auto store = hog::baked::Store::open(directory.path(), {.map_bytes = std::uint64_t{1} << 30U});
+    auto store = hog::baked::PageStore::open(directory.path(), hog::bake::baking_of(generator));
     REQUIRE(store.has_value());
     hog::jobs::JobSystem jobs{2};
     const hog::DVec3 direction = glm::normalize(hog::DVec3{0.3, -0.2, 0.93});
-    TileKey above = ground_block(generator, direction);
-    ++above.k;
-    const std::vector<TileKey> blocks{ground_block(generator, direction), above};
+    const hog::DVec3 place =
+        direction * generator.column(direction, hog::globe::voxel_lod(generator)).ground();
+    const Reach reach{.around = place, .across = 0.5};
     std::vector<std::size_t> reported;
     const auto baked =
-        hog::bake::bake(generator, *store, jobs, blocks, level, 1,
+        hog::bake::bake(generator, *store, jobs, reach, 2,
                         [&](std::size_t done, std::size_t) { reported.push_back(done); });
     REQUIRE(baked.has_value());
-    CHECK(baked->made == blocks.size());
-    CHECK(baked->skipped == 0);
-    CHECK(reported == std::vector<std::size_t>{1, 2});
+    CHECK(baked->kept == 0);
+    CHECK(baked->shape_bytes > 0);
+    REQUIRE_FALSE(reported.empty());
+    CHECK(reported.back() == baked->filled);
 
-    const auto again = hog::bake::bake(generator, *store, jobs, blocks, level);
-    REQUIRE(again.has_value());
-    CHECK(again->made == 0);
-    CHECK(again->skipped == blocks.size());
-
-    // Where a leaf is known at the bake's level, it's the generator's voxel there.
+    // Every page down to the finest over the place, each as a fill of it gives.
+    const Key finest = grid.key_at(place, grid.depth()).value();
     auto snapshot = store->read();
     REQUIRE(snapshot.has_value());
-    const TileKey block = blocks.front();
-    const hog::baked::Node node = hog::bake::node_of(block);
-    std::size_t compared = 0;
-    std::map<TileKey, hog::globe::VoxelTree> made_tiles;
-    for (std::uint64_t n = 0; n < 4000 && compared < 200; ++n) {
-        const auto pick = [&](std::uint64_t axis) {
-            return static_cast<std::uint32_t>(hog::hash_values(axis, n) % node.side());
-        };
-        const hog::baked::Point p{
-            .face = node.face, .x = node.x + pick(1), .y = node.y + pick(2), .z = node.z + pick(3)};
-        const auto held = snapshot->at(p);
-        REQUIRE(held.has_value());
-        const hog::baked::Leaf leaf = held.value_or(hog::baked::Leaf{});
-        if (leaf.open != hog::globe::made_at(level)) {
-            continue;
+    CHECK(snapshot->holder<hog::grid::Shape>(finest) == grid.page_of(finest));
+    std::size_t pages = 0;
+    for (Key page = grid.page_of(finest);; page = grid.page_of(page)) {
+        CAPTURE(page.depth);
+        const auto read = snapshot->page(page);
+        REQUIRE(read.has_value());
+        const hog::globe::Filled filled =
+            hog::globe::fill(generator, grid, page, grid.levels_under(page.depth));
+        CHECK(read.value().page.shape.value().tree.same_as(filled.shape));
+        CHECK(read.value().page.material.value().tree.same_as(filled.material));
+        CHECK(read.value().page.water.value().tree.same_as(filled.water));
+        ++pages;
+        if (page.depth == 0) {
+            break;
         }
-        const unsigned tile = 6 + level;
-        const TileKey key{
-            .level = level, .face = p.face, .i = p.x >> tile, .j = p.y >> tile, .k = p.z >> tile};
-        auto found = made_tiles.find(key);
-        if (found == made_tiles.end()) {
-            found = made_tiles.emplace(key, hog::globe::generate_tile(generator, key)).first;
-        }
-        const hog::globe::VoxelTree& made = found->second;
-        const auto within = [&](std::uint32_t at) {
-            return static_cast<int>((at & ((1U << tile) - 1U)) >> level);
-        };
-        REQUIRE(leaf.cube == made.at(within(p.x), within(p.y), within(p.z)));
-        ++compared;
     }
-    CHECK(compared > 0);
-}
+    CHECK(baked->filled >= pages);
 
-TEST_CASE("a bake refuses a store of another planet", "[bake]") {
-    const hog::testing::TemporaryDirectory directory;
-    auto store = hog::baked::Store::open(directory.path());
-    REQUIRE(store.has_value());
-    REQUIRE(store->write([](hog::baked::Batch& batch) {
-        const std::vector<std::byte> other{std::byte{1}};
-        return batch.set_header(other);
-    }));
-    hog::jobs::JobSystem jobs{1};
-    CHECK_FALSE(hog::bake::bake(planet(), *store, jobs, {}, level));
+    const auto again = hog::bake::bake(generator, *store, jobs, reach);
+    REQUIRE(again.has_value());
+    CHECK(again->filled == 0);
+    CHECK(again->kept == baked->filled);
 }

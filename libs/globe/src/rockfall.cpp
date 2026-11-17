@@ -477,6 +477,10 @@ int rock_level(const Planet& planet) noexcept {
     return std::max(0, maths::ceil_log2(std::numbers::pi / 2.0 * planet.body.radius / rock_cell));
 }
 
+double widest_rock(const Planet& planet) noexcept {
+    return fits * std::numbers::pi / 2.0 * planet.body.radius / std::ldexp(1.0, rock_level(planet));
+}
+
 double fallen_cover(const Context& context, Cell coarsest) noexcept {
     return fallen_about(*context.planet, coarsest,
                         [&](Cell at) {

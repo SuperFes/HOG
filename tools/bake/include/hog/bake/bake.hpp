@@ -1,58 +1,56 @@
 #pragma once
 
-#include <hog/baked/node.hpp>
-#include <hog/baked/store.hpp>
+#include <hog/baked/page_store.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/globe/generator.hpp>
-#include <hog/globe/volume.hpp>
-#include <hog/globe/voxel_tree.hpp>
+#include <hog/grid/grid.hpp>
+#include <hog/grid/key.hpp>
 #include <hog/jobs/job_system.hpp>
 
 #include <cstddef>
-#include <cstdint>
 #include <functional>
-#include <span>
+#include <limits>
+#include <optional>
 #include <vector>
 
 namespace hog::bake {
 
-// A block is made and written whole: a tile this many levels coarser than the voxels baked, so
-// 8 × 8 tiles of them across.
-inline constexpr int block_above = 3;
+// What a page store of the generator's world is.
+[[nodiscard]] baked::Baking baking_of(const globe::Generator& generator);
 
-// The blocks of a bake at `level` (each voxel 2^level of the finest a side): every one in the
-// shell over a face, or those over a square `metres` across about `direction`.
-[[nodiscard]] std::vector<globe::TileKey> face_blocks(const globe::Generator& generator,
-                                                      std::uint8_t face, std::uint8_t level);
-[[nodiscard]] std::vector<globe::TileKey> blocks_around(const globe::Generator& generator,
-                                                        DVec3 direction, double metres,
-                                                        std::uint8_t level);
-
-// The node of the store a tile stands for.
-[[nodiscard]] baked::Node node_of(globe::TileKey key) noexcept;
-
-// The voxels of `block` at `level`, made as the server makes tiles: from the block down, a level
-// at a time, each tile split until it's at `level` or nothing of it shows from outside, which
-// stays as coarse as it was made. Reads nothing else.
-[[nodiscard]] globe::VoxelTree make_block(const globe::Generator& generator, globe::TileKey block,
-                                          std::uint8_t level);
-
-struct Baked {
-    std::size_t made = 0;    // blocks made and written
-    std::size_t skipped = 0; // already baked at least as finely
-    std::size_t bytes = 0;   // of pages written
+// Which pages a bake makes, down from the top page through the open leaves under each: every page
+// whose finest nodes are `coarse` metres across or wider where the surface runs, and every page
+// within `across` / 2 metres of `around` (metres from the centre) however fine, caves and all.
+struct Reach {
+    double coarse = std::numeric_limits<double>::infinity();
+    std::optional<DVec3> around;
+    double across = 0.0;
 };
 
-// Called after each batch with the blocks done and to do in all.
-using Progress = std::function<void(std::size_t done, std::size_t total)>;
+// The pages a bake reaching as `reach` makes under an open leaf at `leaf` of the page rooted at
+// `page`, at its foot. `surface` says whether it's open for the ground passing near rather than
+// for caves that may lie in it.
+[[nodiscard]] std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach,
+                                                 grid::Key page, grid::Key leaf, bool surface);
 
-// Bakes the blocks the store doesn't hold at `level` or finer yet, `batch` at a time across the
-// job system's threads, each batch written together, so a stopped bake carries on where it left
-// off. Fails, writing nothing, on a store baked from another planet.
-[[nodiscard]] Result<Baked> bake(const globe::Generator& generator, baked::Store& store,
-                                 jobs::JobSystem& jobs, std::span<const globe::TileKey> blocks,
-                                 std::uint8_t level, std::size_t batch = 64,
+struct Baked {
+    std::size_t filled = 0; // pages filled and written
+    std::size_t kept = 0;   // already held as this generator makes them
+    // Of each kind's trees written.
+    std::size_t shape_bytes = 0;
+    std::size_t material_bytes = 0;
+    std::size_t water_bytes = 0;
+};
+
+// Called after each batch with the pages done and those known to do so far.
+using Progress = std::function<void(std::size_t done, std::size_t known)>;
+
+// Fills the pages `reach` asks for that the store doesn't hold as this generator makes them yet,
+// `batch` at a time across the job system's threads, each batch written together, so a stopped
+// bake carries on where it left off. Pages held are read for the open leaves to go down from.
+[[nodiscard]] Result<Baked> bake(const globe::Generator& generator, baked::PageStore& store,
+                                 jobs::JobSystem& jobs, const Reach& reach, std::size_t batch = 64,
                                  const Progress& progress = {});
 
 } // namespace hog::bake

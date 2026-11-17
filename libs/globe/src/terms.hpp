@@ -102,6 +102,8 @@ inline constexpr double rock_cell = 32.0;
 inline constexpr int rock_sizes = 4;
 // The level of the coarsest cells that keep a rock.
 [[nodiscard]] int rock_level(const Planet& planet) noexcept;
+// No block is wider than this, metres: what the widest of those cells holds.
+[[nodiscard]] double widest_rock(const Planet& planet) noexcept;
 // The share of the ground about a coarsest cell that blocks of rock cover: what comes loose from
 // the rock upslope, falling no further out than the shadow angle reaches, spread over how far it
 // runs out and lasting until it breaks down, with what comes loose from the rock there. None

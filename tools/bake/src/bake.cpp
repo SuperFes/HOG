@@ -1,225 +1,213 @@
 #include <hog/bake/bake.hpp>
-#include <hog/baked/page.hpp>
-#include <hog/globe/cell.hpp>
-#include <hog/globe/land.hpp>
+#include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/volume_archive.hpp>
-#include <hog/globe/volume_build.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <numbers>
-#include <ranges>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <utility>
 
 namespace hog::bake {
 namespace {
 
-constexpr int side = globe::Volume::tile_side;
-constexpr int side_bits = 6;
-static_assert(side == 1 << side_bits);
-
-// The level of the blocks a bake at `level` makes, no coarser than a tile spanning a face.
-std::uint8_t block_level(const globe::Generator& generator, std::uint8_t level) {
-    return static_cast<std::uint8_t>(
-        std::min<int>(level + block_above, globe::top_level(generator.layers())));
+// Metres from `point` to the nearest of the node.
+double distance_to(const grid::Grid& grid, grid::Key key, DVec3 point) {
+    const DVec3 low = grid.low(key);
+    const DVec3 nearest = glm::clamp(point, low, low + DVec3{grid.size(key.depth)});
+    return glm::length(point - nearest);
 }
 
-bool in_shell(const globe::Layers& layers, globe::TileKey key) {
-    return static_cast<std::int64_t>(key.k) * (std::int64_t{side} << key.level) < layers.count;
-}
-
-// Every block over the face from (i, j) to (i_end, j_end), counted in blocks, up the shell.
-std::vector<globe::TileKey> blocks_over(const globe::Layers& layers, std::uint8_t face,
-                                        std::uint8_t level, std::uint32_t i, std::uint32_t j,
-                                        std::uint32_t i_end, std::uint32_t j_end) {
-    std::vector<globe::TileKey> blocks;
-    for (std::uint32_t bj = j; bj < j_end; ++bj) {
-        for (std::uint32_t bi = i; bi < i_end; ++bi) {
-            for (globe::TileKey key{.level = level, .face = face, .i = bi, .j = bj};
-                 in_shell(layers, key); ++key.k) {
-                blocks.push_back(key);
+// Each open leaf of a page's shape tree, as its key in the grid, and whether it's open for the
+// ground passing near rather than for caves in the solid.
+template <typename Visit>
+void open_leaves(const grid::Tree<grid::Shape>& tree, grid::Key root, const Visit& visit) {
+    struct At {
+        std::uint8_t depth = 0;
+        std::uint32_t x = 0;
+        std::uint32_t y = 0;
+        std::uint32_t z = 0;
+    };
+    std::vector<At> pending{{}};
+    while (!pending.empty()) {
+        const At at = pending.back();
+        pending.pop_back();
+        const auto found = tree.at(at.depth, at.x, at.y, at.z);
+        const bool leaf = at.depth == tree.levels() ||
+                          tree.at(at.depth + 1, 2 * at.x, 2 * at.y, 2 * at.z).depth == at.depth;
+        if (!leaf) {
+            for (std::uint32_t octant = 0; octant < 8; ++octant) {
+                pending.push_back({.depth = static_cast<std::uint8_t>(at.depth + 1),
+                                   .x = (2 * at.x) + (octant & 1U),
+                                   .y = (2 * at.y) + ((octant >> 1U) & 1U),
+                                   .z = (2 * at.z) + ((octant >> 2U) & 1U)});
             }
+            continue;
+        }
+        if (found.open) {
+            visit(grid::Key{.depth = static_cast<std::uint8_t>(root.depth + at.depth),
+                            .x = (root.x << at.depth) + at.x,
+                            .y = (root.y << at.depth) + at.y,
+                            .z = (root.z << at.depth) + at.z},
+                  !found.value.is_solid());
         }
     }
-    return blocks;
 }
 
-std::uint32_t blocks_across(const globe::Layers& layers, std::uint8_t level) {
-    return std::max<std::uint32_t>((std::uint32_t{1} << layers.level) >> (side_bits + level), 1U);
-}
-
-// Whether records at least as fine as `level` cover the whole block.
-bool baked_already(const baked::Snapshot& snapshot, globe::TileKey block, std::uint8_t level) {
-    const baked::Node node = node_of(block);
-    std::uint64_t covered = 0;
-    snapshot.each(node, [&](const baked::Record& record) {
-        if (record.page.voxel() <= level) {
-            covered += std::uint64_t{1} << (3U * std::min(record.node.size, node.size));
+// The pages of `pages` the store holds whole as this generator makes them, by their shape trees.
+Result<std::vector<std::optional<grid::Tree<grid::Shape>>>> held(const baked::PageStore& store,
+                                                                 std::span<const grid::Key> pages) {
+    Result<baked::PageStore::Snapshot> snapshot = store.read();
+    if (!snapshot) {
+        return std::unexpected{snapshot.error()};
+    }
+    std::vector<std::optional<grid::Tree<grid::Shape>>> shapes;
+    shapes.reserve(pages.size());
+    for (const grid::Key page : pages) {
+        std::optional<baked::PageStore::Read> read = snapshot->page(page);
+        if (read && read->page.shape && read->page.material && read->page.water) {
+            shapes.emplace_back(std::move(read->page.shape->tree));
+        } else {
+            shapes.emplace_back();
         }
-    });
-    return covered >= std::uint64_t{1} << (3U * node.size);
+    }
+    return shapes;
 }
 
-// Writes the blocks' pages in one batch, and the header first where one's given.
-Result<void> write(baked::Store& store, std::span<const std::byte> header,
-                   std::span<const globe::TileKey> blocks,
-                   std::span<const std::vector<std::byte>> pages) {
-    return store.write([&](baked::Batch& out) -> Result<void> {
-        if (!header.empty()) {
-            if (Result<void> set = out.set_header(header); !set) {
-                return set;
-            }
-        }
-        for (std::size_t n = 0; n < blocks.size(); ++n) {
-            if (Result<void> put = out.put(node_of(blocks[n]), pages[n]); !put) {
-                return put;
+Result<void> write(baked::PageStore& store, std::span<const grid::Key> pages,
+                   std::span<const std::optional<globe::Filled>> filled) {
+    return store.write([&](baked::PageStore::Batch& batch) -> Result<void> {
+        for (std::size_t n = 0; n < pages.size(); ++n) {
+            const globe::Filled& page = filled[n].value();
+            for (const Result<std::uint32_t>& put :
+                 {batch.put(pages[n], page.shape), batch.put(pages[n], page.material),
+                  batch.put(pages[n], page.water)}) {
+                if (!put) {
+                    return std::unexpected{put.error()};
+                }
             }
         }
         return {};
     });
 }
 
-// Makes the tiles of one footprint, putting those done into the block's tree and the rest's
-// children in the shell into `next`.
-void make_footprint(const globe::Generator& generator, globe::TileKey block, std::uint8_t level,
-                    std::span<const globe::TileKey> footprint, globe::VoxelTree& tree,
-                    std::vector<globe::TileKey>& next) {
-    const globe::Layers& layers = generator.layers();
-    for (const globe::MadeTile& made : globe::generate_stack(generator, footprint)) {
-        const globe::TileKey key = made.key;
-        if (key.level > level && !made.hidden) {
-            for (std::size_t octant = 0; octant < 8; ++octant) {
-                if (const globe::TileKey child = key.child(octant); in_shell(layers, child)) {
-                    next.push_back(child);
-                }
-            }
-            continue;
-        }
-        const int up = key.level - level;
-        const unsigned below = block.level - key.level;
-        const auto corner = [&](std::uint32_t at, std::uint32_t block_at) {
-            return static_cast<int>(at - (block_at << below)) * (side << up);
-        };
-        tree.graft(corner(key.i, block.i), corner(key.j, block.j), corner(key.k, block.k),
-                   made.tree, 1 << up, globe::made_at(key.level));
+// Fills those of `pages` the store doesn't hold yet and writes them together, giving each page's
+// shape tree, held or filled.
+Result<std::vector<grid::Tree<grid::Shape>>>
+bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::PageStore& store,
+           jobs::JobSystem& jobs, std::span<const grid::Key> pages, Baked& baked) {
+    auto shapes = held(store, pages);
+    if (!shapes) {
+        return std::unexpected{shapes.error()};
     }
+    std::vector<grid::Key> missing;
+    std::vector<std::size_t> slots;
+    for (std::size_t n = 0; n < pages.size(); ++n) {
+        if (!(*shapes)[n]) {
+            missing.push_back(pages[n]);
+            slots.push_back(n);
+        }
+    }
+    std::vector<std::optional<globe::Filled>> filled(missing.size());
+    jobs.parallel_for(
+        static_cast<std::uint32_t>(missing.size()), 1, [&](jobs::Range range, std::uint32_t) {
+            for (std::uint32_t n = range.begin; n < range.end; ++n) {
+                filled[n] =
+                    globe::fill(generator, grid, missing[n], grid.levels_under(missing[n].depth));
+            }
+        });
+    if (Result<void> written = write(store, missing, filled); !written) {
+        return std::unexpected{written.error()};
+    }
+    for (std::size_t m = 0; m < missing.size(); ++m) {
+        globe::Filled& page = filled[m].value();
+        baked.shape_bytes += page.shape.encode().size();
+        baked.material_bytes += page.material.encode().size();
+        baked.water_bytes += page.water.encode().size();
+        (*shapes)[slots[m]] = std::move(page.shape);
+    }
+    baked.filled += missing.size();
+    baked.kept += pages.size() - missing.size();
+    std::vector<grid::Tree<grid::Shape>> made;
+    made.reserve(pages.size());
+    for (std::optional<grid::Tree<grid::Shape>>& shape : *shapes) {
+        made.push_back(std::move(shape).value());
+    }
+    return made;
 }
 
 } // namespace
 
-baked::Node node_of(globe::TileKey key) noexcept {
-    const unsigned size = side_bits + key.level;
-    return {.face = key.face,
-            .size = static_cast<std::uint8_t>(size),
-            .x = key.i << size,
-            .y = key.j << size,
-            .z = key.k << size};
+baked::Baking baking_of(const globe::Generator& generator) {
+    return {.world = globe::world_id(generator.planet()),
+            .grid = globe::grid_of(generator),
+            .generator = globe::generator_version};
 }
 
-std::vector<globe::TileKey> face_blocks(const globe::Generator& generator, std::uint8_t face,
-                                        std::uint8_t level) {
-    const globe::Layers& layers = generator.layers();
-    const std::uint8_t blocks = block_level(generator, level);
-    const std::uint32_t across = blocks_across(layers, blocks);
-    return blocks_over(layers, face, blocks, 0, 0, across, across);
-}
-
-std::vector<globe::TileKey> blocks_around(const globe::Generator& generator, DVec3 direction,
-                                          double metres, std::uint8_t level) {
-    const globe::Layers& layers = generator.layers();
-    const std::uint8_t blocks = block_level(generator, level);
-    const std::uint32_t across = blocks_across(layers, blocks);
-    const globe::Cell cell = globe::cell_under(glm::normalize(direction), layers.level);
-    // Cells are widest at a face's middle, a quarter turn of the planet across the face.
-    const double cell_width = generator.planet().body.radius * (std::numbers::pi / 2.0) /
-                              static_cast<double>(std::uint64_t{1} << layers.level);
-    const auto half = static_cast<std::uint32_t>(std::ceil(metres / cell_width / 2.0));
-    const unsigned shift = side_bits + blocks;
-    const auto low = [&](std::uint32_t at) { return (at - std::min(at, half)) >> shift; };
-    const auto high = [&](std::uint32_t at) {
-        return std::min(((at + half) >> shift) + 1, across);
+std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach, grid::Key page,
+                                   grid::Key leaf, bool surface) {
+    // Rooted at the page's foot, which is the leaf itself only where the leaf is at that foot.
+    const auto roots = static_cast<std::uint8_t>(page.depth + grid.levels_under(page.depth));
+    if (roots >= grid.depth()) {
+        return {};
+    }
+    const bool every =
+        surface &&
+        grid.size(static_cast<std::uint8_t>(roots + grid.levels_under(roots))) >= reach.coarse;
+    const auto near = [&](grid::Key key) {
+        return reach.around && distance_to(grid, key, *reach.around) <= reach.across / 2.0;
     };
-    return blocks_over(layers, cell.face, blocks, low(cell.i), low(cell.j), high(cell.i),
-                       high(cell.j));
-}
-
-globe::VoxelTree make_block(const globe::Generator& generator, globe::TileKey block,
-                            std::uint8_t level) {
-    globe::VoxelTree tree{side << (block.level - level), globe::Cube{}, baked::unknown};
-    std::vector<globe::TileKey> frontier{block};
-    while (!frontier.empty()) {
-        std::ranges::sort(frontier);
-        std::vector<globe::TileKey> next;
-        // Sorted, the tiles over one footprint lie together.
-        for (std::size_t from = 0; from < frontier.size();) {
-            std::size_t to = from + 1;
-            while (to < frontier.size() && frontier[to].i == frontier[from].i &&
-                   frontier[to].j == frontier[from].j) {
-                ++to;
-            }
-            make_footprint(generator, block, level, std::span{frontier}.subspan(from, to - from),
-                           tree, next);
-            from = to;
+    std::vector<grid::Key> found;
+    std::vector<grid::Key> pending{leaf};
+    while (!pending.empty()) {
+        const grid::Key key = pending.back();
+        pending.pop_back();
+        if (!every && !near(key)) {
+            continue;
         }
-        frontier = std::move(next);
+        if (key.depth == roots) {
+            found.push_back(key);
+            continue;
+        }
+        for (std::size_t octant = 0; octant < 8; ++octant) {
+            pending.push_back(key.child(octant));
+        }
     }
-    return tree;
+    std::ranges::sort(found);
+    return found;
 }
 
-Result<Baked> bake(const globe::Generator& generator, baked::Store& store, jobs::JobSystem& jobs,
-                   std::span<const globe::TileKey> blocks, std::uint8_t level, std::size_t batch,
+Result<Baked> bake(const globe::Generator& generator, baked::PageStore& store,
+                   jobs::JobSystem& jobs, const Reach& reach, std::size_t batch,
                    const Progress& progress) {
-    const std::vector<std::byte> header = globe::encode_planet(generator.planet());
-    const Result<std::vector<std::byte>> held = store.header();
-    if (!held) {
-        return std::unexpected{held.error()};
-    }
-    if (!held->empty() && *held != header) {
-        return make_error(ErrorCode::InvalidArgument, "the store was baked from another planet");
-    }
-
+    const grid::Grid grid = globe::grid_of(generator);
+    batch = std::max<std::size_t>(batch, 1);
     Baked baked;
-    std::vector<globe::TileKey> wanted;
-    {
-        Result<baked::Snapshot> snapshot = store.read();
-        if (!snapshot) {
-            return std::unexpected{snapshot.error()};
-        }
-        for (const globe::TileKey block : blocks) {
-            if (baked_already(*snapshot, block, level)) {
-                ++baked.skipped;
-            } else {
-                wanted.push_back(block);
+    // A depth of pages at a time, top down, each leading to those under its open leaves.
+    std::vector<grid::Key> wave{grid::Key{}};
+    while (!wave.empty()) {
+        std::vector<grid::Key> next;
+        for (std::size_t from = 0; from < wave.size(); from += batch) {
+            const std::span<const grid::Key> pages =
+                std::span{wave}.subspan(from, std::min(batch, wave.size() - from));
+            auto shapes = bake_pages(generator, grid, store, jobs, pages, baked);
+            if (!shapes) {
+                return std::unexpected{shapes.error()};
+            }
+            for (std::size_t n = 0; n < pages.size(); ++n) {
+                open_leaves((*shapes)[n], pages[n], [&](grid::Key leaf, bool surface) {
+                    const std::vector<grid::Key> under =
+                        pages_under(grid, reach, pages[n], leaf, surface);
+                    next.insert(next.end(), under.begin(), under.end());
+                });
+            }
+            if (progress) {
+                const std::size_t done = baked.filled + baked.kept;
+                progress(done, done + (wave.size() - from - pages.size()) + next.size());
             }
         }
-    }
-
-    batch = std::max<std::size_t>(batch, 1);
-    std::vector<std::vector<std::byte>> pages;
-    for (std::size_t from = 0; from < wanted.size(); from += batch) {
-        const std::size_t count = std::min(batch, wanted.size() - from);
-        pages.assign(count, {});
-        jobs.parallel_for(static_cast<std::uint32_t>(count), 1,
-                          [&](jobs::Range range, std::uint32_t) {
-                              for (std::uint32_t n = range.begin; n < range.end; ++n) {
-                                  const globe::TileKey block = wanted[from + n];
-                                  pages[n] = baked::encode_tree(make_block(generator, block, level),
-                                                                node_of(block).size, level, 0);
-                              }
-                          });
-        const Result<void> written =
-            write(store, held->empty() ? std::span{header} : std::span<const std::byte>{},
-                  std::span{wanted}.subspan(from, count), pages);
-        if (!written) {
-            return std::unexpected{written.error()};
-        }
-        for (const std::vector<std::byte>& page : pages) {
-            baked.bytes += page.size();
-        }
-        baked.made += count;
-        if (progress) {
-            progress(from + count, wanted.size());
-        }
+        std::ranges::sort(next);
+        wave = std::move(next);
     }
     return baked;
 }

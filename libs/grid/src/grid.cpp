@@ -59,4 +59,10 @@ Key Grid::page_of(Key key) const noexcept {
     return key.ancestor(static_cast<std::uint8_t>(cut));
 }
 
+std::uint8_t Grid::levels_under(std::uint8_t at) const noexcept {
+    const int top = depth_ % page_levels;
+    const int span = at == 0 && top > 0 ? top : page_levels;
+    return static_cast<std::uint8_t>(std::min(span, depth_ - at));
+}
+
 } // namespace hog::grid

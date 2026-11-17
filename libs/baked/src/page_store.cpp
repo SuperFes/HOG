@@ -109,14 +109,6 @@ std::optional<Held> held_at(const lmdb::txn& txn, const lmdb::dbi& trees, const 
                 .tree = as_bytes(value).subspan(2 * sizeof(std::uint32_t))};
 }
 
-// Levels a page rooted `depth` deep spans: page_levels, but the top page holds what's left over
-// the cuts, and none goes past the finest depth.
-std::uint8_t levels_under(const grid::Grid& grid, std::uint8_t depth) noexcept {
-    const int top = grid.depth() % grid::page_levels;
-    const int span = depth == 0 && top > 0 ? top : grid::page_levels;
-    return static_cast<std::uint8_t>(std::min(span, grid.depth() - depth));
-}
-
 bool is_page_root(const grid::Grid& grid, grid::Key key) noexcept {
     return key.is_valid() && key.depth < grid.depth() && grid.page_of(key.child(0)) == key;
 }
@@ -259,7 +251,7 @@ Result<std::uint32_t> PageStore::Batch::put(grid::Key root, const grid::Tree<Kin
     if (!is_page_root(grid, root)) {
         return make_error(ErrorCode::InvalidArgument, "a tree must be held at a page's root");
     }
-    if (tree.levels() > levels_under(grid, root.depth)) {
+    if (tree.levels() > grid.levels_under(root.depth)) {
         return make_error(ErrorCode::InvalidArgument, "a tree deeper than its page");
     }
     const std::vector<std::byte> bytes = tree.encode();

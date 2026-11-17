@@ -283,7 +283,20 @@ step replaces something, the old and new are compared before the old goes.
    found by trying each page over it, finest first, at most four. The face store stays until
    `hog-bake` moves over in 3.2. Still to come: the water bodies table and placed objects.
 2. `hog-bake`: coarse for the whole planet, fine round a place, and the formed world. Measure size
-   and time on the working world and the small world.
+   and time on the working world and the small world. Done for the pages (`bake::bake`): from the
+   top page down, a depth of pages at a time, each leading to the pages under its open leaves.
+   Under a leaf open for the ground passing, every page goes in whose finest nodes are `--coarse`
+   metres or wider; within `--across` of `--at` every page does, caves too, down to the finest.
+   Pages are filled in batches across threads and each batch written together, so a stopped bake
+   carries on; pages held as this generator makes them are read, not filled. Small world (12 km,
+   0.5 m), 4 threads on a busy machine: coarse to 32 m (the top page and those rooted at depth 4)
+   is 2327 pages in 424 s, 59 MB (shape 31, material 18, water 6); fine round a place 200 m
+   across is 202 more pages in 6 s, 2 MB. A coarse page costs some 0.7 s of a thread, a fine one
+   0.03 s. Found on the way: the top page's middle is the planet's centre, which has no up; and
+   fallen rocks were scattered for nodes too coarse to hold any. Left: the working world, the
+   formed world (most of `formation::World` would be stored, so it waits on measuring what reads
+   it), and retiring the face store and `hog-baked-bench` (step 7). Ground open for caves near
+   the surface is followed only round a place, so the coarse bake leaves it to be filled live.
 3. Filling on demand: a queue of wanted nodes, the generator library filling it on worker threads
    and writing the store, the store telling readers. Tests: a node asked for appears and is read;
    a stale generator version is filled again.

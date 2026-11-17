@@ -34,6 +34,9 @@ public:
     // depth, so the finest pages are full and the top page, rooted at the root, holds what's
     // left; a page holds the levels under its root, and the root node is the top page's.
     [[nodiscard]] Key page_of(Key key) const noexcept;
+    // Levels the page rooted `at` deep holds under its root: page_levels, but the top page holds
+    // what's left over the cuts, and none goes past the finest depth. Precondition: a page's root.
+    [[nodiscard]] std::uint8_t levels_under(std::uint8_t at) const noexcept;
 
 private:
     double finest_;

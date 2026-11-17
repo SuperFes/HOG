@@ -99,6 +99,13 @@ TEST_CASE("pages are cut every six levels up from the finest", "[grid]") {
     CHECK(page_depth(deeper, 8) == 2);
     CHECK(page_depth(deeper, 9) == 8);
     CHECK(page_depth(deeper, 20) == 14);
+
+    // Each page holds the levels down to the next cut.
+    CHECK(working().levels_under(0) == 6);
+    CHECK(working().levels_under(12) == 6);
+    CHECK(deeper.levels_under(0) == 2);
+    CHECK(deeper.levels_under(2) == 6);
+    CHECK(deeper.levels_under(14) == 6);
 }
 
 TEST_CASE("a page holds its nodes, and a step past its side is in the next page", "[grid]") {
