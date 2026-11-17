@@ -355,7 +355,13 @@ step replaces something, the old and new are compared before the old goes.
    `scratch = true`): it pumps the filler each tick, follows a player where it moved, or once a
    second while pages were filled, and sends within the queue room tiles use. Tiles still go
    alongside until the client draws pages (step 5).
-5. Bot and load tests streaming the new way.
+5. Bot and load tests streaming the new way. Done for the bot: the client session takes `Pages` and `Bodies` in, and a bot
+   decodes the pages sent it and counts them (`hog-bot --run-for` logs each bot's at the end); a
+   test has a bot sent pages, the top page first. Found on the way: the filler started every fill
+   at once, and the pool's queue, once full, ran them on the pumping thread (one pump took 69 s);
+   now a few per thread run, the rest wait their turn first asked first, and a node waiting on a
+   page is gone over again only once that page is written. The bot still stands on tiles until
+   the client's physics reads the shape tree (5.9). Load numbers with many bots wait on that too.
 
 ### 5 · Client
 

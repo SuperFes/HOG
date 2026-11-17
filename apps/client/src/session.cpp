@@ -93,6 +93,21 @@ void Session::look(std::optional<Whereabouts> player, MonotonicClock::time_point
     }
 }
 
+bool Session::took_ground(protocol::Message& message) {
+    if (auto* tiles = std::get_if<protocol::Tiles>(&message)) {
+        tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
+                      std::make_move_iterator(tiles->tiles.end()));
+    } else if (auto* pages = std::get_if<protocol::Pages>(&message)) {
+        pages_.insert(pages_.end(), std::make_move_iterator(pages->pages.begin()),
+                      std::make_move_iterator(pages->pages.end()));
+    } else if (auto* bodies = std::get_if<protocol::Bodies>(&message)) {
+        bodies_.push_back(std::move(bodies->bytes));
+    } else {
+        return false;
+    }
+    return true;
+}
+
 void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point now) {
     auto message = protocol::decode(bytes);
     if (!message && message.error().code == ErrorCode::Unsupported) {
@@ -141,9 +156,7 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         weather_ = std::move(*weather);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
-    } else if (auto* tiles = std::get_if<protocol::Tiles>(&*message)) {
-        tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
-                      std::make_move_iterator(tiles->tiles.end()));
+    } else if (took_ground(*message)) {
     } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
         grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {

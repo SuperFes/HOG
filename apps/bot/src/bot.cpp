@@ -2,6 +2,7 @@
 #include <hog/client/tile_meshes.hpp>
 #include <hog/core/log.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/grid/page.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -67,6 +68,27 @@ void Bot::take_ground() {
     player_ = std::move(*player);
 }
 
+void Bot::take_pages() {
+    for (const std::vector<std::byte>& bytes : session_.take_pages()) {
+        streamed_.bytes += bytes.size();
+        auto page = grid::Page::decode(bytes);
+        if (!page) {
+            ++streamed_.refused;
+            log::warn(bot_log, "can't hold a page sent: {}", page.error());
+            continue;
+        }
+        ++streamed_.pages;
+        if (page->shape) {
+            pages_[page->root] = page->shape->tree.levels();
+        }
+    }
+}
+
+std::optional<std::uint8_t> Bot::holds(grid::Key root) const {
+    const auto found = pages_.find(root);
+    return found == pages_.end() ? std::nullopt : std::optional{found->second};
+}
+
 void Bot::update(MonotonicClock::time_point now, double seconds) {
     // Until it stands it hangs where it's to, flying, which the server takes as it is.
     session_.look(client::Whereabouts{.at = feet(),
@@ -74,6 +96,7 @@ void Bot::update(MonotonicClock::time_point now, double seconds) {
                                                         : protocol::Stance::Flying},
                   now);
     take_ground();
+    take_pages();
     if (!player_) {
         return;
     }

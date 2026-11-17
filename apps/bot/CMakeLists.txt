@@ -5,7 +5,7 @@ add_library(hog_bot
 add_library(hog::bot ALIAS hog_bot)
 
 target_include_directories(hog_bot PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_bot PUBLIC hog::client hog::core hog::planet)
+target_link_libraries(hog_bot PUBLIC hog::client hog::core hog::grid hog::planet)
 hog_target_defaults(hog_bot)
 
 add_executable(hog_bot_cli src/main.cpp)

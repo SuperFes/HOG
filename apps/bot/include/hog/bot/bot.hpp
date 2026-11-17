@@ -10,9 +10,11 @@
 #include <hog/globe/held_tiles.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/grid/key.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <random>
@@ -43,6 +45,16 @@ public:
     // The ground as it's been sent.
     [[nodiscard]] const globe::World& world() const noexcept { return held_->world; }
 
+    // The grid pages the server has streamed it.
+    struct Streamed {
+        std::size_t pages = 0; // taken in
+        std::size_t bytes = 0;
+        std::size_t refused = 0; // that weren't pages
+    };
+    [[nodiscard]] const Streamed& streamed() const noexcept { return streamed_; }
+    // Whether it's been sent the page rooted at `root`, and how deep.
+    [[nodiscard]] std::optional<std::uint8_t> holds(grid::Key root) const;
+
 private:
     // On the heap, where the player's ground can keep hold of it.
     struct Held {
@@ -64,6 +76,8 @@ private:
         const WanderSettings& settings) noexcept;
     // Takes in the tiles sent, standing the player on the ground once its finest is there.
     void take_ground();
+    // Takes in the grid pages sent.
+    void take_pages();
 
     std::unique_ptr<Held> held_;
     std::optional<client::Player> player_;
@@ -73,6 +87,8 @@ private:
     std::mt19937_64 random_;
     double planet_radius_;
     WanderSettings settings_;
+    Streamed streamed_;
+    std::map<grid::Key, std::uint8_t> pages_; // levels of each
 };
 
 } // namespace hog::bot

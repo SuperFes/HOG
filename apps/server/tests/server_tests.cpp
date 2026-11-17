@@ -734,10 +734,10 @@ TEST_CASE("a player is streamed grid pages, the top page first, when the server 
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(first);
-    CHECK(first->root == hog::grid::Key{});
-    CHECK(first->shape.has_value());
-    CHECK(first->material.has_value());
-    CHECK(first->water.has_value());
+    CHECK(first.value().root == hog::grid::Key{});
+    CHECK(first.value().shape.has_value());
+    CHECK(first.value().material.has_value());
+    CHECK(first.value().water.has_value());
 }
 
 TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {

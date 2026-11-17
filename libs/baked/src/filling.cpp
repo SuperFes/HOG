@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <utility>
 
 namespace hog::baked {
@@ -56,21 +58,35 @@ struct Filler::Impl {
     mutable std::mutex lock;
     std::vector<grid::Key> asked; // guarded by lock
 
-    std::vector<grid::Key> waiting;
+    // Fills under way, a few per thread, so the pool's queue never overflows onto the thread
+    // pumping; and those waiting their turn, first asked first, as deep as each is to go.
     std::map<grid::Key, std::unique_ptr<jobs::Async<globe::Filled>>> filling;
+    std::deque<std::pair<grid::Key, std::uint8_t>> queued;
+    std::set<grid::Key> queued_pages;
+    // Nodes asked for waiting on a page being filled, by the page, gone over again once it's
+    // written; and all of them, so one asked again waits once.
+    std::map<grid::Key, std::vector<grid::Key>> blocked;
+    std::set<grid::Key> waiting;
+
+    // Pages read from the store in one pump, by root.
+    using Seen = std::map<grid::Key, std::optional<PageStore::Read>>;
 
     // Down the pages over `node` to the first that isn't held whole as this generator makes it,
     // as deep as the node needs, or that answers it.
-    [[nodiscard]] Next next(const PageStore::Snapshot& snapshot, grid::Key node) const {
+    [[nodiscard]] Next next(const PageStore::Snapshot& snapshot, Seen& seen, grid::Key node) const {
         grid::Key page{};
         while (true) {
             const auto foot = static_cast<std::uint8_t>(page.depth + grid.levels_under(page.depth));
             const auto needs = static_cast<std::uint8_t>(
                 std::clamp<int>(node.depth - page.depth, 1, foot - page.depth));
-            if (filling.contains(page)) {
+            if (filling.contains(page) || queued_pages.contains(page)) {
                 return {.is = Next::Is::Filling, .page = page, .levels = needs};
             }
-            const std::optional<PageStore::Read> read = snapshot.page(page);
+            auto [at, fresh] = seen.try_emplace(page);
+            if (fresh) {
+                at->second = snapshot.page(page);
+            }
+            const std::optional<PageStore::Read>& read = at->second;
             if (!read || !read->page.shape || !read->page.material || !read->page.water ||
                 read->page.shape->tree.levels() < needs) {
                 return {.is = Next::Is::Fill, .page = page, .levels = needs};
@@ -91,10 +107,23 @@ struct Filler::Impl {
     }
 
     void start(grid::Key page, std::uint8_t levels) {
-        filling.emplace(page,
-                        std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, page, levels] {
-                            return globe::fill(*generator, grid, page, levels);
-                        }));
+        if (queued_pages.insert(page).second) {
+            queued.emplace_back(page, levels);
+        }
+    }
+
+    // Starts fills waiting their turn while there's room.
+    void launch() {
+        const std::size_t most = std::size_t{2} * jobs->thread_count();
+        while (filling.size() < most && !queued.empty()) {
+            const auto [page, levels] = queued.front();
+            queued.pop_front();
+            queued_pages.erase(page);
+            filling.emplace(
+                page, std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, page, levels] {
+                    return globe::fill(*generator, grid, page, levels);
+                }));
+        }
     }
 
     // Takes the fills finished, or with `wait` the first under way where none has.
@@ -116,6 +145,15 @@ struct Filler::Impl {
             return pages;
         }
         if (Result<void> written = write_filled(*store, pages, filled); !written) {
+            // Forgotten, so they're gone over afresh when next asked for.
+            for (const grid::Key page : pages) {
+                if (const auto found = blocked.find(page); found != blocked.end()) {
+                    for (const grid::Key node : found->second) {
+                        waiting.erase(node);
+                    }
+                    blocked.erase(found);
+                }
+            }
             return std::unexpected{written.error()};
         }
         return pages;
@@ -138,35 +176,50 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
     if (!written) {
         return written;
     }
+    // Those asked for anew, and those waiting on the pages just written.
+    std::vector<grid::Key> nodes;
     {
         const std::scoped_lock guard{impl.lock};
-        impl.waiting.insert(impl.waiting.end(), impl.asked.begin(), impl.asked.end());
+        for (const grid::Key node : impl.asked) {
+            if (impl.waiting.insert(node).second) {
+                nodes.push_back(node);
+            }
+        }
         impl.asked.clear();
     }
-    if (impl.waiting.empty()) {
+    for (const grid::Key page : *written) {
+        if (const auto found = impl.blocked.find(page); found != impl.blocked.end()) {
+            nodes.insert(nodes.end(), found->second.begin(), found->second.end());
+            impl.blocked.erase(found);
+        }
+    }
+    if (nodes.empty()) {
+        impl.launch();
         return written;
     }
     Result<PageStore::Snapshot> snapshot = impl.store->read();
     if (!snapshot) {
         return std::unexpected{snapshot.error()};
     }
-    std::vector<grid::Key> still;
-    for (const grid::Key node : impl.waiting) {
-        const Next next = impl.next(*snapshot, node);
+    Impl::Seen seen;
+    for (const grid::Key node : nodes) {
+        const Next next = impl.next(*snapshot, seen, node);
         if (next.is == Next::Is::Fill) {
             impl.start(next.page, next.levels);
         }
-        if (next.is != Next::Is::Answered) {
-            still.push_back(node);
+        if (next.is == Next::Is::Answered) {
+            impl.waiting.erase(node);
+        } else {
+            impl.blocked[next.page].push_back(node);
         }
     }
-    impl.waiting = std::move(still);
+    impl.launch();
     return written;
 }
 
 bool Filler::idle() const {
     const std::scoped_lock guard{impl_->lock};
-    return impl_->asked.empty() && impl_->waiting.empty() && impl_->filling.empty();
+    return impl_->asked.empty() && impl_->filling.empty() && impl_->queued.empty();
 }
 
 } // namespace hog::baked

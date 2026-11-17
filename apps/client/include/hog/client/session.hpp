@@ -89,6 +89,17 @@ public:
         return std::exchange(tiles_, {});
     }
 
+    // Grid pages the server sent since last asked, oldest first, each as `grid::Page::encode`
+    // codes it.
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_pages() noexcept {
+        return std::exchange(pages_, {});
+    }
+    // Water bodies the server sent since last asked, oldest first, each as
+    // `grid::WaterBodies::encode` codes them.
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() noexcept {
+        return std::exchange(bodies_, {});
+    }
+
     // The grain the server has in flight near the player.
     [[nodiscard]] const GrainField& grains() const noexcept { return grains_; }
 
@@ -125,6 +136,8 @@ private:
     Session(net::Client client, std::string address, std::vector<std::byte> token) noexcept;
 
     void heard(std::span<const std::byte> bytes, MonotonicClock::time_point now);
+    // Keeps the ground sent, if that's what the message is.
+    bool took_ground(protocol::Message& message);
     void send(const protocol::Message& message, net::Delivery delivery);
 
     net::Client client_;
@@ -146,6 +159,8 @@ private:
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentTile> tiles_;
+    std::vector<std::vector<std::byte>> pages_;
+    std::vector<std::vector<std::byte>> bodies_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;

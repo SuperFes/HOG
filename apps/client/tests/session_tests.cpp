@@ -597,3 +597,30 @@ TEST_CASE("a session takes the tiles sent, and asks to dig and build once welcom
         }
     }
 }
+
+TEST_CASE("a session takes the grid pages and water bodies sent, oldest first",
+          "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    stand.send(protocol::Pages{.pages = {{std::byte{1}, std::byte{2}}, {std::byte{3}}}});
+    stand.send(protocol::Bodies{.bytes = {std::byte{9}}});
+    stand.send(protocol::Pages{.pages = {{}}});
+    std::vector<std::vector<std::byte>> pages;
+    std::vector<std::vector<std::byte>> bodies;
+    look_until(session, stand, [&] {
+        for (std::vector<std::byte>& page : session.take_pages()) {
+            pages.push_back(std::move(page));
+        }
+        for (std::vector<std::byte>& sent : session.take_bodies()) {
+            bodies.push_back(std::move(sent));
+        }
+        return pages.size() == 3 && bodies.size() == 1;
+    });
+    CHECK(pages[0] == std::vector{std::byte{1}, std::byte{2}});
+    CHECK(pages[1] == std::vector{std::byte{3}});
+    CHECK(pages[2].empty());
+    CHECK(bodies[0] == std::vector{std::byte{9}});
+    CHECK(session.take_pages().empty());
+    CHECK(session.take_bodies().empty());
+}
