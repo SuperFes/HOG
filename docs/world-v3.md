@@ -293,7 +293,10 @@ step replaces something, the old and new are compared before the old goes.
    is 2327 pages in 424 s, 59 MB (shape 31, material 18, water 6); fine round a place 200 m
    across is 202 more pages in 6 s, 2 MB. A coarse page costs some 0.7 s of a thread, a fine one
    0.03 s. Found on the way: the top page's middle is the planet's centre, which has no up; and
-   fallen rocks were scattered for nodes too coarse to hold any. Left: the working world, the
+   fallen rocks were scattered for nodes too coarse to hold any. Working world (28.8 km, 1/3 m):
+   coarse to 16 m (the top page and those rooted at depth 6, feet 21 m) is 124994 pages in 74
+   min on 4 busy threads, 939 MB (shape 464, material 290, water 110), some 0.09 s of a thread a
+   page. Left: the
    formed world (most of `formation::World` would be stored, so it waits on measuring what reads
    it), and retiring the face store and `hog-baked-bench` (step 7). Ground open for caves near
    the surface is followed only round a place, so the coarse bake leaves it to be filled live.
