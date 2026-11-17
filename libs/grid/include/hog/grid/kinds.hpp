@@ -5,6 +5,7 @@
 #include <hog/core/result.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -62,11 +63,42 @@ private:
     std::uint16_t material_ = 0;
 };
 
+// Two of the palette's first `blendable` entries showing together, the first over at least half
+// of it, as palette entries of their own past those: what finer nodes show, seen from afar.
+struct Blend {
+    static constexpr std::uint16_t blendable = 64;
+    static constexpr int steps = 16; // the share is held in these parts
+
+    std::uint16_t first = 0;
+    std::uint16_t second = 0;
+    double share = 1.0; // of the first
+
+    // The entry: the first alone where the share rounds to all of it, or either isn't blendable.
+    [[nodiscard]] std::uint16_t entry() const noexcept;
+    // Of any entry; one that isn't a blend is itself alone.
+    [[nodiscard]] static Blend of(std::uint16_t entry) noexcept;
+};
+
+// Tallies entries by how much of each shows, a blend counting its two by their shares, and
+// blends the two that show most, the lowest of those tied first. None counts nothing.
+class Blending {
+public:
+    void add(std::uint16_t entry, double weight = 1.0) noexcept;
+    [[nodiscard]] std::uint16_t entry() const noexcept;
+
+private:
+    void tally(std::uint16_t entry, double weight) noexcept;
+
+    std::array<std::uint16_t, 16> entries_{};
+    std::array<double, 16> weights_{};
+    std::size_t count_ = 0;
+};
+
 // Each kind of data a tree holds says how eight nodes sum up into the one over them, when one
 // value stands for all eight so they needn't be split, and how its values are stored.
 
 // Where the ground is and what it shows. A coarse node holds the plane through its eight, showing
-// the material most of those crossed show, so it looks as they do from afar; eight merge where
+// the blend of what those crossed show, so it looks as they do from afar; eight merge where
 // one plane runs within `tolerance` finest nodes of theirs, so flat ground stays coarse.
 struct Shape {
     using Value = Surface;

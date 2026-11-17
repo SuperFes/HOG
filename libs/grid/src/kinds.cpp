@@ -102,15 +102,102 @@ Result<Surface> Surface::from_raw(std::int32_t distance, std::uint16_t u, std::u
     return Surface{distance, u, v, material};
 }
 
+namespace {
+
+// Blends follow the blendable entries, eight shares of each ordered pair, from half up.
+constexpr int blend_shares = Blend::steps / 2;
+constexpr int blends = Blend::blendable * Blend::blendable * blend_shares;
+
+} // namespace
+
+std::uint16_t Blend::entry() const noexcept {
+    if (first >= blendable || second >= blendable || first == second) {
+        return first;
+    }
+    const bool swap = share < 0.5;
+    const auto parts = static_cast<int>(std::lround((swap ? 1.0 - share : share) * steps));
+    if (parts >= steps) {
+        return swap ? second : first;
+    }
+    const int over = swap ? second : first;
+    const int under = swap ? first : second;
+    return static_cast<std::uint16_t>(blendable + (((over * blendable) + under) * blend_shares) +
+                                      (parts - blend_shares));
+}
+
+Blend Blend::of(std::uint16_t entry) noexcept {
+    if (entry < blendable || entry >= blendable + blends) {
+        return {.first = entry, .second = entry, .share = 1.0};
+    }
+    const int index = entry - blendable;
+    const int pair = index / blend_shares;
+    return {.first = static_cast<std::uint16_t>(pair / blendable),
+            .second = static_cast<std::uint16_t>(pair % blendable),
+            .share = static_cast<double>(blend_shares + (index % blend_shares)) / steps};
+}
+
+void Blending::add(std::uint16_t entry, double weight) noexcept {
+    if (entry == 0) {
+        return;
+    }
+    const Blend blend = Blend::of(entry);
+    tally(blend.first, weight * blend.share);
+    if (blend.second != blend.first) {
+        tally(blend.second, weight * (1.0 - blend.share));
+    }
+}
+
+void Blending::tally(std::uint16_t entry, double weight) noexcept {
+    for (std::size_t k = 0; k < count_; ++k) {
+        if (entries_.at(k) == entry) {
+            weights_.at(k) += weight;
+            return;
+        }
+    }
+    if (count_ < entries_.size()) {
+        entries_.at(count_) = entry;
+        weights_.at(count_) = weight;
+        ++count_;
+    }
+}
+
+std::uint16_t Blending::entry() const noexcept {
+    const auto before = [&](std::size_t a, std::size_t b) {
+        return weights_.at(a) > weights_.at(b) ||
+               (weights_.at(a) == weights_.at(b) && entries_.at(a) < entries_.at(b));
+    };
+    std::size_t best = count_;
+    std::size_t next = count_;
+    for (std::size_t k = 0; k < count_; ++k) {
+        if (best == count_ || before(k, best)) {
+            next = best;
+            best = k;
+        } else if (next == count_ || before(k, next)) {
+            next = k;
+        }
+    }
+    if (best == count_) {
+        return 0;
+    }
+    if (next == count_) {
+        return entries_.at(best);
+    }
+    const double both = weights_.at(best) + weights_.at(next);
+    return Blend{.first = entries_.at(best),
+                 .second = entries_.at(next),
+                 .share = both > 0.0 ? weights_.at(best) / both : 1.0}
+        .entry();
+}
+
 Surface Shape::summary(const std::array<Value, 8>& children) noexcept {
     DVec3 normals{0.0};
     double distances = 0.0;
     int crossing = 0;
-    std::array<std::uint16_t, 8> shown{};
+    Blending shown;
     for (std::size_t k = 0; k < 8; ++k) {
         const Surface& child = children.at(k);
         if (child.crosses()) {
-            shown.at(k) = child.material();
+            shown.add(child.material());
             const DVec3 normal = child.normal();
             normals += normal;
             // A child's distance in its parent's sides, at its parent's middle.
@@ -124,8 +211,7 @@ Surface Shape::summary(const std::array<Value, 8>& children) noexcept {
     if (glm::dot(normals, normals) < 1e-12) {
         return between(children);
     }
-    return Surface::plane(glm::normalize(normals), distances / crossing,
-                          Discrete<std::uint16_t>::summary(shown));
+    return Surface::plane(glm::normalize(normals), distances / crossing, shown.entry());
 }
 
 std::optional<Shape::Value> Shape::merged(const std::array<Value, 8>& children,

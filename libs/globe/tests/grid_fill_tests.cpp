@@ -54,6 +54,28 @@ double held(const hog::grid::Grid& grid, Key key, const Filled& filled, DVec3 po
            glm::dot(leaf.value.normal(), point - grid.centre(over));
 }
 
+// How much of what two palette entries show differs, from 0 alike to 1 nothing shared.
+double unlike(std::uint16_t one, std::uint16_t other) {
+    const hog::grid::Blend a = hog::grid::Blend::of(one);
+    const hog::grid::Blend b = hog::grid::Blend::of(other);
+    const auto share = [](const hog::grid::Blend& blend, std::uint16_t entry) {
+        return (blend.first == entry ? blend.share : 0.0) +
+               (blend.second == entry && blend.second != blend.first ? 1.0 - blend.share : 0.0);
+    };
+    const std::array named{a.first, a.second, b.first, b.second};
+    double apart = 0.0;
+    for (std::size_t k = 0; k < named.size(); ++k) {
+        bool counted = false;
+        for (std::size_t j = 0; j < k; ++j) {
+            counted = counted || named.at(j) == named.at(k);
+        }
+        if (!counted) {
+            apart += std::abs(share(a, named.at(k)) - share(b, named.at(k)));
+        }
+    }
+    return apart / 2.0;
+}
+
 // How a node filled coarse compares with it filled finer, over many nodes. Materials count only
 // on nodes up to 8 m: the generator covers coarser ground by its smoothed slope, gentler than the
 // finer, so it lays clay where finer shows bare rock.
@@ -62,7 +84,7 @@ struct Agreement {
     double apart = 0.0; // the planes' distances, in sides
     double alike = 0.0; // their normals' dot
     int crossing_fine = 0;
-    int shows = 0; // of those, showing the same material
+    double shown = 0.0; // of those, how unlike what they show
     int solid = 0;
     int holds = 0; // of nodes not all open, holding the same material
 
@@ -84,7 +106,7 @@ struct Agreement {
             alike += glm::dot(was.value.normal(), is.value.normal());
             if (fine_enough) {
                 ++crossing_fine;
-                shows += was.value.material() == is.value.material() ? 1 : 0;
+                shown += unlike(was.value.material(), is.value.material());
             }
         }
         // The sea's basin is never missed coarse, and solid holds its material at both.
@@ -239,7 +261,7 @@ TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][gr
     CHECK(agreed.alike / agreed.crossing > 0.8);
     // As shares only with enough nodes to tell, which quick runs haven't.
     if (agreed.crossing_fine >= 10) {
-        CHECK(4 * agreed.shows >= 3 * agreed.crossing_fine);
+        CHECK(agreed.shown / agreed.crossing_fine < 0.25);
     }
     if (agreed.solid >= 10) {
         CHECK(4 * agreed.holds >= 3 * agreed.solid);

@@ -10,6 +10,8 @@
 
 using Catch::Approx;
 using hog::DVec3;
+using hog::grid::Blend;
+using hog::grid::Blending;
 using hog::grid::Shape;
 using hog::grid::Surface;
 using hog::grid::Tree;
@@ -87,23 +89,56 @@ TEST_CASE("a plane missing its node leaves it all solid or all open", "[grid]") 
     CHECK(Surface::from_raw(Surface::solid().raw_distance(), 0, 0, 0) == Surface::solid());
 }
 
-TEST_CASE("a coarse plane shows what most of the planes under it show", "[grid]") {
+TEST_CASE("a blend holds two entries and a share, and stands alone where it can", "[grid]") {
+    const Blend sand_soil{.first = 4, .second = 3, .share = 0.75};
+    const Blend back = Blend::of(sand_soil.entry());
+    CHECK(sand_soil.entry() >= Blend::blendable);
+    CHECK(back.first == 4);
+    CHECK(back.second == 3);
+    CHECK(back.share == 0.75);
+    // The share counts from whichever shows more.
+    CHECK(Blend{.first = 3, .second = 4, .share = 0.25}.entry() == sand_soil.entry());
+    CHECK(Blend{.first = 4, .second = 3, .share = 0.99}.entry() == 4);
+    CHECK(Blend{.first = 4, .second = 4, .share = 0.5}.entry() == 4);
+    CHECK(Blend{.first = 4, .second = Blend::blendable, .share = 0.5}.entry() == 4);
+    CHECK(Blend::of(9).first == 9);
+    CHECK(Blend::of(9).share == 1.0);
+    CHECK(Blend::of(60'000).first == 60'000);
+
+    // Blends tally by their shares: three quarters sand and soil, with soil alone, is soil over
+    // sand five to three.
+    Blending blending;
+    blending.add(sand_soil.entry());
+    blending.add(3);
+    CHECK(blending.entry() == Blend{.first = 3, .second = 4, .share = 0.625}.entry());
+    blending.add(0);
+    blending.add(7, 0.1);
+    CHECK(Blend::of(blending.entry()).share == 0.625);
+    CHECK(Blending{}.entry() == 0);
+    Blending tied;
+    tied.add(4);
+    tied.add(3);
+    CHECK(tied.entry() == Blend{.first = 3, .second = 4, .share = 0.5}.entry());
+}
+
+TEST_CASE("a coarse plane shows the blend of what the planes under it show", "[grid]") {
     const DVec3 up{0.0, 0.0, 1.0};
     const Surface solid = Surface::solid();
     const Surface open = Surface::open();
-    // Flat ground low through the lower four, showing sand mostly, then soil.
+    // Flat ground low through the lower four, showing sand three times, soil once.
     const auto showing = [&](std::uint16_t material) { return Surface::plane(up, 0.4, material); };
     const Surface summed =
         Shape::summary({showing(4), showing(3), showing(4), showing(4), open, open, open, open});
+    const std::uint16_t blend = Blend{.first = 4, .second = 3, .share = 0.75}.entry();
     REQUIRE(summed.crosses());
-    CHECK(summed.material() == 4);
+    CHECK(summed.material() == blend);
     // Unknown where none crossed shows anything.
     CHECK(Shape::summary({solid, solid, solid, solid, open, open, open, open}).material() == 0);
     // What the ground shows never keeps it from merging: the material tree holds it finer.
     const auto merged = Shape::merged(
         {showing(4), showing(3), showing(4), showing(4), open, open, open, open}, 1.0);
     REQUIRE(merged);
-    CHECK(merged.value().material() == 4);
+    CHECK(merged.value().material() == blend);
 
     const Tree<Shape> tree = Tree<Shape>::build(levels, [&](int x, int y, int z) {
         return Surface::plane(up, middle(x, y, z).z - 20.3,

@@ -230,13 +230,20 @@ step replaces something, the old and new are compared before the old goes.
    as the most common but none (air, no body), so a coarse node shows what's in it. Still apart:
    - Caves showing only finer turn a few summaries' normals (cave roofs average in with the
      ground). Idea: sum planes up by how much of each child is solid, so a cave counts little.
-   - Decided: shape leaves carry the material their surface shows, summed up as the most
-     common the crossed children show, so ground looks alike at every depth; the material tree
-     holds what digging gives, a coarse node the most common inside. Neither keeps eight from
-     merging. Up to 8 m nodes they agree (14 of 15 shown, 23 of 26 held). Coarser, the
-     generator itself disagrees: it lays cover by its slope smoothed to the detail asked, so
-     ground bare and steep at 32 m and finer reads as gentle clay-covered ground at 128 m.
-     Leaning: the generator covers coarse ground by the share of it steep enough to stay bare.
+   - Decided: shape leaves carry the material their surface shows, so ground looks alike at
+     every depth; the material tree holds what digging gives, a coarse node the most common
+     inside. Neither keeps eight from merging. What shows sums up as a blend: palette entries
+     past the first 64 blend two of those by sixteenths, so a coarse node shows the mix of what
+     the crossed children show, which the client blends as an overlay. Up to 8 m nodes they
+     agree (shown under 0.25 unlike by shares, 23 of 26 held). Coarser, the generator itself
+     disagrees: it lays cover by its slope smoothed to the detail asked, so ground bare and
+     steep at 32 m and finer reads as gentle clay-covered ground at 128 m.
+   - Tried: a coarse node blending what finer columns show at 4×4 points over its plane. Taken
+     at the finest detail each point is a lone column (~0.7 ms), 12× the fill; taken two levels
+     finer, 6×, and nodes of 128 m and over still differ by half their shares, as the finer
+     columns are still smoothed and two entries hold too little of a km-wide node. Dropped.
+     Leaning: the generator covers coarse ground by the share of it steep enough to stay bare,
+     and gives that share, so the fill blends cover and rock from one column.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
    the largest rivers come out as bodies with the right levels.
