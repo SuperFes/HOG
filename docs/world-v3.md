@@ -366,7 +366,12 @@ step replaces something, the old and new are compared before the old goes.
 ### 5 · Client
 
 1. One held tree: pages per level in hashes, finest-over lookups, a memory budget and
-   eviction farthest first. Tests: lookups and eviction on held data.
+   eviction farthest first. Tests: lookups and eviction on held data. Done (`client::HeldPages`):
+   pages by their root's depth in hash maps; a page deeper than held replaces it, one as deep
+   replaces only the trees it carries; `at<Kind>(node)` answers from the finest page over the node
+   holding that kind, as deep as it's held, saying which page. `evict` lets go of the farthest
+   pages from the eye until under a byte budget, never the top page, and gives their roots for
+   telling the server once that message exists. Water bodies sent are held by id.
 2. Depth by distance per page. Tests: depth chosen for a camera path.
 3. Smooth mesher over the shape tree at a depth, material weights per vertex. Tests: closed
    surfaces on flat, slope, overhang and cave regions; vertices on the surface within tolerance.
