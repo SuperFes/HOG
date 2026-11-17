@@ -1,3 +1,5 @@
+#include "terms.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
@@ -83,6 +85,12 @@ public:
             here.water > 0.0 && here.radius - half < here.water && here.radius + half > here.ground;
         return grid::Tree<grid::Water>::Leaf{.value = wet ? body_value(here.body) : 0,
                                              .open = open(depth, here)};
+    }
+
+    // Whether the ground passes within `reach` metres of the filled node.
+    [[nodiscard]] bool near_ground(double reach) const {
+        const Probe& root = probes_.at(grid::code(key_));
+        return std::abs(root.distance) <= (half_diagonal * root.size) + reach;
     }
 
 private:
@@ -289,7 +297,7 @@ private:
         if (wanted.empty()) {
             return;
         }
-        std::vector<Generator::Column> made = generator_->columns(wanted, lod);
+        std::vector<Generator::Column> made = generator_->columns(wanted, lod, 1, false);
         for (std::size_t n = 0; n < wanted.size(); ++n) {
             columns_.emplace(slot(wanted[n]), made[n]);
         }
@@ -325,7 +333,26 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
         levels, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
             return filler.water(depth, x, y, z);
         });
-    return {.shape = std::move(shape), .material = std::move(material), .water = std::move(water)};
+    // The rocks the shape leaves out, as the finest detail filled lays them.
+    std::vector<Placed> placed;
+    if (filler.near_ground(terms::rock_cell)) {
+        const double size = grid.size(key.depth);
+        const DVec3 middle = grid.centre(key);
+        const double reach =
+            half_diagonal * size * generator.planet().body.radius / glm::length(middle);
+        const double lod = std::max(grid.size(static_cast<std::uint8_t>(key.depth + levels)),
+                                    voxel_lod(generator));
+        for (const Rock& rock : generator.rocks_within(middle, reach, lod)) {
+            if (grid.key_at(rock.middle, key.depth) == key) {
+                placed.push_back(placed_rock(rock));
+            }
+        }
+        std::ranges::sort(placed, {}, &Placed::key);
+    }
+    return {.shape = std::move(shape),
+            .material = std::move(material),
+            .water = std::move(water),
+            .placed = std::move(placed)};
 }
 
 } // namespace hog::globe

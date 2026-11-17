@@ -18,6 +18,7 @@
 #include <numbers>
 #include <optional>
 #include <queue>
+#include <set>
 #include <span>
 #include <thread>
 #include <unordered_map>
@@ -113,6 +114,28 @@ std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
     return found;
 }
 
+std::vector<Rock> Generator::rocks_within(DVec3 toward, double reach, double lod) const {
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const int level = terms::rock_level(planet_);
+    const DVec3 middle = glm::normalize(toward);
+    // A cell's every point lies within half its diagonal of its middle; none is wider than this.
+    const double slack = std::numbers::pi / 2.0 * planet_.body.radius / std::ldexp(1.0, level);
+    const auto near = [&](Cell cell) {
+        return glm::length(center(cell) - middle) * planet_.body.radius <= reach + slack;
+    };
+    std::vector<Cell> coarsest{cell_under(middle, level)};
+    std::set<Cell> seen{coarsest.front()};
+    for (std::size_t k = 0; k < coarsest.size(); ++k) {
+        const CellNeighbors beside = sides(coarsest[k]);
+        for (const Cell next : beside.all()) {
+            if (near(next) && seen.insert(next).second) {
+                coarsest.push_back(next);
+            }
+        }
+    }
+    return terms::rocks_in(context, coarsest, lod);
+}
+
 std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
     HOG_ASSERT(side > 0 && corner.is_valid() &&
                    std::cmp_less_equal(corner.i + static_cast<std::uint32_t>(side),
@@ -134,7 +157,7 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
 }
 
 std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod,
-                                                  int apart) const {
+                                                  int apart, bool rocks) const {
     HOG_ASSERT(
         std::ranges::all_of(
             cells, [&](Cell cell) { return cell.is_valid() && cell.level == cells.front().level; }),
@@ -197,9 +220,13 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double determinant = (xx * yy) - (xy * xy);
         const double across_east = ((yy * xh) - (xy * yh)) / determinant;
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
-        made.push_back(finish(
-            down, lod, found[k],
-            std::sqrt((across_east * across_east) + (across_north * across_north)), falls[k]));
+        terms::Fall fall = falls[k];
+        if (!rocks) {
+            fall.rock.reset();
+        }
+        made.push_back(
+            finish(down, lod, found[k],
+                   std::sqrt((across_east * across_east) + (across_north * across_north)), fall));
     }
     return made;
 }

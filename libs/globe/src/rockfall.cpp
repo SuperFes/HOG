@@ -321,6 +321,7 @@ std::optional<Rock> drawn_in(const Context& context, Cell cell, const Fallen& fa
     const double radius = planet.body.radius + found.height;
     rock.middle = (at * radius) + (rock.up * ((1.0 - (2.0 * sunk)) * rock.axes.z));
     rock.material = material_of(context, fallen);
+    rock.key = seed;
     return rock;
 }
 
@@ -486,6 +487,31 @@ double fallen_cover(const Context& context, Cell coarsest) noexcept {
 
 std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) {
     return Rocks{context, lod}.in(cell);
+}
+
+std::vector<Rock> rocks_in(const Context& context, std::span<const Cell> coarsest, double lod) {
+    const Planet& planet = *context.planet;
+    const int finest = rock_level(planet) + rock_sizes - 1;
+    Rocks rocks{context, lod};
+    std::vector<Rock> found;
+    std::vector<Cell> waiting{coarsest.begin(), coarsest.end()};
+    while (!waiting.empty()) {
+        const Cell cell = waiting.back();
+        waiting.pop_back();
+        // No block too small for the detail asked fits a cell this size, nor any inside it.
+        if (fits * width_of(planet, cell) < lod) {
+            continue;
+        }
+        if (const std::optional<Rock> rock = rocks.in(cell)) {
+            found.push_back(*rock);
+        }
+        if (std::cmp_less(cell.level, finest)) {
+            for (const Cell inside : children(cell)) {
+                waiting.push_back(inside);
+            }
+        }
+    }
+    return found;
 }
 
 std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod) {

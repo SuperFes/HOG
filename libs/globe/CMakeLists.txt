@@ -16,6 +16,7 @@ add_library(hog_globe
     src/weathering.cpp
     src/noise.cpp
     src/planet.cpp
+    src/placed.cpp
     src/planet_file.cpp
     src/pockets.cpp
     src/qef.cpp

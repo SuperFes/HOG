@@ -1,11 +1,13 @@
 #pragma once
 
 #include <hog/globe/generator.hpp>
+#include <hog/globe/placed.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/grid/tree.hpp>
 
 #include <cstdint>
+#include <vector>
 
 namespace hog::globe {
 
@@ -40,6 +42,8 @@ struct Filled {
     grid::Tree<grid::Shape> shape;
     grid::Tree<grid::Material> material;
     grid::Tree<grid::Water> water;
+    // What's placed apart from the ground's shape, its middle in the node.
+    std::vector<Placed> placed;
 };
 
 // The trees over the node at `key`, `levels` deep under it, from the generator. Each node is
@@ -49,7 +53,9 @@ struct Filled {
 // just inside the surface; water marks the open space over the ground under the sea, a lake or a
 // river, as high as it rises in the year, with the body it is. Leaves above
 // the grid's finest depth are open where finer detail can still come: near the surface, and in
-// solid where caves may lie. Precondition: key.depth + levels <= grid.depth().
+// solid where caves may lie. Fallen rocks big enough for the finest detail filled to show are
+// placed apart, left out of the shape; smaller ones lie spread as rubble in the ground.
+// Precondition: key.depth + levels <= grid.depth().
 [[nodiscard]] Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
                           std::uint8_t levels);
 

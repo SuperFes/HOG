@@ -107,6 +107,9 @@ inline constexpr int rock_sizes = 4;
 [[nodiscard]] double fallen_cover(const Context& context, Cell coarsest) noexcept;
 // The rock in one cell of any of those levels, wherever its columns stand.
 [[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod);
+// Every rock in the coarsest cells `coarsest` and the cells inside them.
+[[nodiscard]] std::vector<Rock> rocks_in(const Context& context, std::span<const Cell> coarsest,
+                                         double lod);
 [[nodiscard]] std::optional<Rock> rockfall(const Context& context, DVec3 direction, double lod);
 // What the blocks too small for `lod` to resolve make of the ground they lie on, spread evenly
 // over it as every level coarser holds them: metres of rubble of their rock, and the share of the

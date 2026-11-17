@@ -98,6 +98,7 @@ struct Rock {
     DVec3 axes{0.0};   // half-lengths in metres along `across`, square to it, and `up`
     double edge = 0.0; // metres its edges and corners are rounded off
     Material material = Material::Air;
+    std::uint64_t key = 0; // the same for the same block, whatever the detail it's laid at
 
     // Metres from `point` to the rock's surface, negative inside; `normal` takes the way out.
     [[nodiscard]] double distance(DVec3 point, DVec3& normal) const noexcept;
@@ -203,6 +204,9 @@ public:
     // The fallen rocks, as generated at `lod`, whose cells lie within about a cell of `point`;
     // those reaching further than that from it are among them too.
     [[nodiscard]] std::vector<Rock> rocks_near(DVec3 point, double lod) const;
+    // Every fallen rock, as generated at `lod`, whose cell lies within `reach` metres along the
+    // ground of the unit direction `toward`, each once.
+    [[nodiscard]] std::vector<Rock> rocks_within(DVec3 toward, double reach, double lod) const;
 
     // The columns through the middles of a square of cells `side` across from `corner`, on its
     // level, along i then j. Each takes the ground's slope from the cells beside it, so they
@@ -210,9 +214,10 @@ public:
     // square. Voxels are filled from these.
     [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
     // The same through any cells of one level, in their order, each taking the slope from the
-    // cells `apart` beside it, as where every so many cells are taken for coarser detail.
+    // cells `apart` beside it, as where every so many cells are taken for coarser detail. Without
+    // `rocks`, no fallen rock lies on any, for those placed apart from the ground.
     [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod,
-                                              int apart = 1) const;
+                                              int apart = 1, bool rocks = true) const;
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {

@@ -418,3 +418,74 @@ TEST_CASE("the largest rivers are their own bodies where their water stands", "[
     CHECK(crossed >= 3);
     CHECK(deep >= 2);
 }
+
+TEST_CASE("a placed rock's shape is its rock's", "[globe][grid]") {
+    hog::globe::Rock rock;
+    rock.middle = {3.0, -2.0, 1000.0};
+    rock.up = glm::normalize(DVec3{0.1, 0.0, 1.0});
+    rock.across = glm::normalize(glm::cross(DVec3{0.0, 1.0, 0.0}, rock.up));
+    rock.axes = {1.5, 0.8, 0.5};
+    rock.edge = 0.2;
+    rock.material = hog::globe::Material::Granite;
+    rock.key = 77;
+    const hog::globe::Placed placed = hog::globe::placed_rock(rock);
+    CHECK(placed.kind == hog::globe::Placed::Kind::Rock);
+    CHECK(placed.key == 77);
+    CHECK(placed.material == rock.material);
+    for (std::uint64_t n = 0; n < 200; ++n) {
+        const DVec3 point =
+            rock.middle + (DVec3{static_cast<double>(hog::hash_values(n, 1) % 1000),
+                                 static_cast<double>(hog::hash_values(n, 2) % 1000),
+                                 static_cast<double>(hog::hash_values(n, 3) % 1000)} /
+                               250.0) -
+            DVec3{2.0};
+        DVec3 normal{0.0};
+        CHECK(placed.distance(point) == Catch::Approx(rock.distance(point, normal)).margin(1e-9));
+    }
+}
+
+TEST_CASE("fallen rocks are placed apart from the ground, where and as big as they're laid",
+          "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const auto depth = static_cast<std::uint8_t>(grid.depth() - levels);
+    const double lod =
+        std::max(grid.size(static_cast<std::uint8_t>(depth + levels)), hog::globe::voxel_lod(world));
+    // A rock standing a metre or more over the ground.
+    std::optional<hog::globe::Rock> found;
+    for (std::uint64_t n = 0; !found; ++n) {
+        const DVec3 up =
+            hog::globe::center(hog::globe::cell_at_index(7, (n * 2'654'435'761U) % 98'304U));
+        // Sought among the bigger ones alone, as the smaller are many more to lay.
+        for (const hog::globe::Rock& rock : world.rocks_within(up, 10.0, 4.0 * lod)) {
+            if (rock.axes.z >= 0.5) {
+                found = rock;
+                break;
+            }
+        }
+    }
+    const hog::globe::Rock rock = found.value();
+    const Key key = grid.key_at(rock.middle, depth).value();
+    const Filled filled = fill(world, grid, key, levels);
+    // As the generator lays them at that detail, each of those in the node.
+    std::size_t inside = 0;
+    for (const hog::globe::Rock& laid : world.rocks_near(rock.middle, lod)) {
+        if (grid.key_at(laid.middle, depth) != key) {
+            continue;
+        }
+        ++inside;
+        const auto placed = std::ranges::find(filled.placed, laid.key, &hog::globe::Placed::key);
+        REQUIRE(placed != filled.placed.end());
+        CHECK(placed->middle == laid.middle);
+        CHECK(placed->half == laid.axes);
+        CHECK(placed->material == laid.material);
+    }
+    CHECK(inside >= 1);
+    CHECK(filled.placed.size() == inside);
+    // Its top is out of the ground's shape: the ground alone stands under it.
+    const DVec3 top = rock.middle + (rock.up * (rock.axes.z * 0.8));
+    DVec3 normal{0.0};
+    REQUIRE(rock.distance(top, normal) < 0.0);
+    CHECK(world.sample(top, lod).distance < 0.0);
+    CHECK(held(grid, key, filled, top) > 0.0);
+}
