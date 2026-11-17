@@ -112,11 +112,19 @@ public:
                                                 const Baking& baking) {
         return open(directory, baking, Options{});
     }
+    // Opens a store in a new directory of its own under the system's temporary one, removed when
+    // the store closes, so nothing an earlier run baked is read.
+    [[nodiscard]] static Result<PageStore> scratch(const Baking& baking, const Options& options);
+    [[nodiscard]] static Result<PageStore> scratch(const Baking& baking) {
+        return scratch(baking, Options{});
+    }
     PageStore(PageStore&&) noexcept;
     PageStore& operator=(PageStore&&) noexcept;
     PageStore(const PageStore&) = delete;
     PageStore& operator=(const PageStore&) = delete;
     ~PageStore();
+
+    [[nodiscard]] const std::filesystem::path& directory() const noexcept;
 
     [[nodiscard]] Result<Snapshot> read() const;
     // Runs `body` in one batch, committing it where it succeeds and dropping it where it fails.

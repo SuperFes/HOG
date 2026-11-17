@@ -7,6 +7,7 @@
 #include <array>
 #include <bit>
 #include <format>
+#include <random>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -149,9 +150,29 @@ Result<void> mark(const lmdb::txn& txn, Shared& shared, bool fresh) {
     return {};
 }
 
+// A directory removed when this is dropped.
+struct Removed {
+    std::filesystem::path directory;
+
+    Removed() = default;
+    Removed(Removed&& other) noexcept : directory{std::exchange(other.directory, {})} {}
+    Removed& operator=(Removed&&) = delete;
+    Removed(const Removed&) = delete;
+    Removed& operator=(const Removed&) = delete;
+    ~Removed() {
+        if (!directory.empty()) {
+            std::error_code failed;
+            std::filesystem::remove_all(directory, failed);
+        }
+    }
+};
+
 } // namespace
 
 struct PageStore::Impl {
+    // Ahead of the store, so it's removed only once the store is closed.
+    Removed scratch;
+    std::filesystem::path directory;
     Shared shared;
 };
 
@@ -296,7 +317,9 @@ Result<PageStore> PageStore::open(const std::filesystem::path& directory, const 
                 return make_error(ErrorCode::Io, failed.message());
             }
         }
-        auto impl = std::make_unique<Impl>(Impl{.shared = {.env = lmdb::env{nullptr},
+        auto impl = std::make_unique<Impl>(Impl{.scratch = {},
+                                                .directory = directory,
+                                                .shared = {.env = lmdb::env{nullptr},
                                                            .trees = {},
                                                            .about = {},
                                                            .options = options,
@@ -337,6 +360,40 @@ Result<PageStore> PageStore::open(const std::filesystem::path& directory, const 
         txn.commit();
         return PageStore{std::move(impl)};
     });
+}
+
+Result<PageStore> PageStore::scratch(const Baking& baking, const Options& options) {
+    std::error_code failed;
+    const std::filesystem::path temporary = std::filesystem::temp_directory_path(failed);
+    if (failed) {
+        return make_error(ErrorCode::Io, failed.message());
+    }
+    std::random_device entropy;
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        const std::uint64_t name = (std::uint64_t{entropy()} << 32U) | entropy();
+        const std::filesystem::path directory =
+            temporary / std::format("hog-scratch-{:016x}", name);
+        if (!std::filesystem::create_directory(directory, failed)) {
+            if (failed) {
+                return make_error(ErrorCode::Io, failed.message());
+            }
+            continue;
+        }
+        Options writable = options;
+        writable.read_only = false;
+        Result<PageStore> store = open(directory, baking, writable);
+        if (!store) {
+            std::filesystem::remove_all(directory, failed);
+            return store;
+        }
+        store->impl_->scratch.directory = directory;
+        return store;
+    }
+    return make_error(ErrorCode::Io, "no new scratch directory");
+}
+
+const std::filesystem::path& PageStore::directory() const noexcept {
+    return impl_->directory;
 }
 
 Result<PageStore::Snapshot> PageStore::read() const {

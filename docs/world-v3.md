@@ -307,7 +307,9 @@ step replaces something, the old and new are compared before the old goes.
    it isn't open. Pages are filled a depth at a time, never past what the page above says is
    there; two nodes needing one page share its fill. Stale pages fill again and keep their
    versions where the bytes come out the same.
-4. Scratch stores for dev runs.
+4. Scratch stores for dev runs. Done (`PageStore::scratch`): a store in a new directory of its
+   own under the system's temporary one, removed once the store closes. The server picks it up in
+   step 4.
 5. Later, once the generator settles: a full bake ahead, and the baker as its own process.
 
 ### 4 · Server streaming

@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 
 using hog::Result;
@@ -187,4 +188,22 @@ TEST_CASE("a page store refuses other worlds, other stores, and trees off their 
     PageStore::Options read_only = small();
     read_only.read_only = true;
     CHECK_FALSE(PageStore::open(empty.path(), baking(), read_only).has_value());
+}
+
+TEST_CASE("a scratch store is a new one of its own, gone once closed", "[baked]") {
+    std::filesystem::path first;
+    {
+        auto store = PageStore::scratch(baking(), small());
+        REQUIRE(store.has_value());
+        first = store->directory();
+        CHECK(std::filesystem::is_directory(first));
+        REQUIRE(put(*store, Key{}, layers(5, 3)).has_value());
+        auto other = PageStore::scratch(baking(), small());
+        REQUIRE(other.has_value());
+        CHECK(other->directory() != first);
+        auto snapshot = other->read();
+        REQUIRE(snapshot.has_value());
+        CHECK_FALSE(snapshot->page(Key{}).has_value());
+    }
+    CHECK_FALSE(std::filesystem::exists(first));
 }
