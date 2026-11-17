@@ -193,6 +193,7 @@ struct ValleyRiver {
     double water = 0.0;
     double bank = 0.0;
     Season season;
+    std::uint32_t stem = 0;
     double level = 0.0;
     double sheet = 0.0;
 };
@@ -233,6 +234,7 @@ struct RiverDepths {
     double level = 0.0;
     double flood_level = 0.0;
     Season season;
+    std::uint32_t stem = 0;
 };
 
 // A river's water stands only in the channel of the valley the ground lies in. Where another
@@ -255,6 +257,7 @@ RiverDepths river_depths(const std::vector<ValleyRiver>& rivers, double top, dou
             depths.level = river.water;
             depths.flood_level = std::max(river.bank, river.water);
             depths.season = river.season;
+            depths.stem = river.stem;
         }
         depths.flood =
             std::max(depths.flood, faded(river.ground, flood_spread) * (river.bank - river.ground));
@@ -322,8 +325,8 @@ double least_under(double floor, double walls, double away, double reaches) noex
 // level across its channel, wherever the ground's lower: bars in it stand dry. Where the ground
 // about was worn lower since, down towards a lake, say, its water went with it, no deeper than it
 // ran.
-std::optional<Formed::Here::River> river_over(double bed, double depth, double level,
-                                              double flood) noexcept {
+std::optional<Formed::Here::River> river_over(double bed, double depth, double level, double flood,
+                                              std::uint32_t stem) noexcept {
     if (depth <= 0.0) {
         return std::nullopt;
     }
@@ -331,7 +334,7 @@ std::optional<Formed::Here::River> river_over(double bed, double depth, double l
     if (stands <= bed) {
         return std::nullopt;
     }
-    return Formed::Here::River{.level = stands, .flood = std::max(stands, flood)};
+    return Formed::Here::River{.level = stands, .flood = std::max(stands, flood), .stem = stem};
 }
 
 double share_of(double run, double length, double none) noexcept {
@@ -443,6 +446,7 @@ Formed::Formed(const Planet& planet)
         }
     }
     fill_courses();
+    find_stems();
     // Lakes below the sea fill on what the sea laid there, under its waves.
     fill_shores();
     fill_lakes();
@@ -987,6 +991,31 @@ std::vector<Formed::Outlet> Formed::lake_outlets() const {
     return outlets;
 }
 
+std::vector<Formed::LakeAt> Formed::lakes() const {
+    std::vector<LakeAt> found;
+    found.reserve(lakes_.size());
+    for (const Lake& water : lakes_) {
+        const Pool& pool = water.pool;
+        const double middle_x = pool.x0 + ((pool.width - 1) / 2.0);
+        const double middle_y = pool.y0 + ((pool.height - 1) / 2.0);
+        double nearest = std::numeric_limits<double>::max();
+        DVec3 in = water.middle;
+        for (int y = pool.y0; y < pool.y0 + pool.height; ++y) {
+            for (int x = pool.x0; x < pool.x0 + pool.width; ++x) {
+                const double apart =
+                    ((x - middle_x) * (x - middle_x)) + ((y - middle_y) * (y - middle_y));
+                if (pool.at(static_cast<double>(x), static_cast<double>(y)) == Pool::Cell::Water &&
+                    apart < nearest) {
+                    nearest = apart;
+                    in = water.toward(x, y);
+                }
+            }
+        }
+        found.push_back({.in = in, .level = pool.level});
+    }
+    return found;
+}
+
 std::uint32_t Formed::start_near(DVec3 direction) const noexcept {
     const OnCube on = on_cube(direction);
     const auto across = static_cast<double>(starts_across);
@@ -1018,6 +1047,45 @@ void Formed::fill_courses() {
     }
     for (std::thread& worker : workers) {
         worker.join();
+    }
+}
+
+void Formed::find_stems() {
+    const formation::World& world = world_;
+    const std::vector<std::uint32_t>& receiver = world.rivers.receiver;
+    const std::vector<double>& flow = world.lakes.discharge;
+    const auto count = static_cast<std::uint32_t>(receiver.size());
+    constexpr std::uint32_t none = 0xFFFF'FFFFU;
+    // Of the points whose water comes to each, the one bringing the most, the lowest of those
+    // tied; and all of them.
+    std::vector<std::uint32_t> main(count, none);
+    std::vector<std::vector<std::uint32_t>> from(count);
+    std::vector<std::uint32_t> outlets;
+    for (std::uint32_t point = 0; point < count; ++point) {
+        const std::uint32_t down = receiver[point];
+        if (down == point) {
+            outlets.push_back(point);
+            continue;
+        }
+        from[down].push_back(point);
+        if (main[down] == none || flow[point] > flow[main[down]]) {
+            main[down] = point;
+        }
+    }
+    stems_.assign(count, 0);
+    std::vector<std::uint32_t> waiting = std::move(outlets);
+    for (const std::uint32_t outlet : waiting) {
+        stems_[outlet] = outlet;
+    }
+    while (!waiting.empty()) {
+        const std::uint32_t down = waiting.back();
+        waiting.pop_back();
+        const bool goes_on =
+            receiver[down] != down && world.lakes.lake[down] == formation::Lakes::none;
+        for (const std::uint32_t point : from[down]) {
+            stems_[point] = goes_on && main[down] == point ? stems_[down] : point;
+            waiting.push_back(point);
+        }
     }
 }
 
@@ -1189,6 +1257,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
                           .water = fade(wall.water),
                           .bank = fade(wall.bank),
                           .season = {.rise = reaching * wall.season.rise, .peak = wall.season.peak},
+                          .stem = stems_[point],
                           .level = fade(wall.floor + wall.cut),
                           .sheet = reaching * wall.sheet});
         banks = std::min(banks, fade(wall.standing + wall.cut));
@@ -1238,6 +1307,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     carved.river_level = depths.level;
     carved.flood_level = depths.flood_level;
     carved.season = depths.season;
+    carved.stem = depths.stem;
     carved.sheet = sheet_under(rivers, carved.top.value);
     const FloorHold hold = floor_hold(floors, carved.top.value, spread);
     carved.above_floor = hold.above;
@@ -1542,6 +1612,7 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
                 .river_level = ground.river_level,
                 .flood_level = ground.flood_level,
                 .season = ground.season,
+                .stem = ground.stem,
                 .bed = dissected.top.value,
                 .settled = 1.0,
                 .bedforms = Noise{},
@@ -1643,6 +1714,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
         if (water.pool.at(cell(water.east), cell(water.north)) != Pool::Cell::Dry &&
             water.pool.level > top.top.value + 0.01) {
             here.lake = water.pool.level;
+            here.lake_index = lake;
             here.season = {.rise = world.regimes.lake_rise[lake],
                            .peak = world.regimes.lake_peak[lake]};
             break;
@@ -1756,7 +1828,7 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     here.top = top.top;
     if (!here.lake) {
         here.river = river_over(here.top.value - here.crag, under.river, under.river_level,
-                                under.flood_level);
+                                under.flood_level, under.stem);
         if (here.river) {
             here.season = under.season;
         }

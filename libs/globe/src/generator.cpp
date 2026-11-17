@@ -214,12 +214,14 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.ground_ = planet_.body.radius + made.height + fall.rubble.depth;
     if (shape_.sea) {
         column.water_ = planet_.body.radius;
+        column.body_ = {.kind = WaterBody::Kind::Sea, .index = 0};
     }
     // A lake or river standing over the sea rises and falls with the year as it does; the sea's
     // tide is its own.
     const std::optional<double> inland = made.lake ? made.lake : made.river;
     if (derived_.liquid && inland && planet_.body.radius + *inland > column.water_) {
         column.water_ = planet_.body.radius + *inland;
+        column.body_ = made.body;
         column.water_rise_ = made.water_rise;
         column.water_peak_ = made.water_peak;
     }
@@ -518,8 +520,11 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     made.layers = here.layers;
     made.height = here.top.value;
     made.lake = here.lake;
-    if (here.river) {
+    if (here.lake) {
+        made.body = {.kind = WaterBody::Kind::Lake, .index = here.lake_index};
+    } else if (here.river) {
         made.river = here.river->level;
+        made.body = {.kind = WaterBody::Kind::River, .index = here.river->stem};
     }
     made.water_rise = here.season.rise;
     made.water_peak = here.season.peak;

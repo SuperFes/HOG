@@ -1,9 +1,12 @@
+#include "../src/formed.hpp"
+
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/testing/quick.hpp>
 #include <hog/testing/world.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -12,6 +15,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 using hog::DVec3;
 using hog::globe::fill;
@@ -52,6 +56,65 @@ double held(const hog::grid::Grid& grid, Key key, const Filled& filled, DVec3 po
     }
     return (leaf.value.distance() * side) +
            glm::dot(leaf.value.normal(), point - grid.centre(over));
+}
+
+// The water body the filled water tree has at a point.
+hog::grid::Water::Value body_at(const hog::grid::Grid& grid, Key key, const Filled& filled,
+                                DVec3 point) {
+    const Key foot = grid.key_at(point, static_cast<std::uint8_t>(key.depth + levels)).value();
+    const auto down = [&](std::uint32_t at, std::uint32_t from) { return at - (from << levels); };
+    return filled.water.at(levels, down(foot.x, key.x), down(foot.y, key.y), down(foot.z, key.z))
+        .value;
+}
+
+// Whether any of the finest nodes filled holds water of `body`.
+bool holds(const Filled& filled, hog::grid::Water::Value body) {
+    const std::uint32_t across = 1U << levels;
+    for (std::uint32_t z = 0; z < across; ++z) {
+        for (std::uint32_t y = 0; y < across; ++y) {
+            for (std::uint32_t x = 0; x < across; ++x) {
+                if (filled.water.at(levels, x, y, z).value == body) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// A river crossed a quarter, half and three quarters of the way from the point it runs from to
+// the next: where water stands, how much of it is the river's own, and where it stands deepest.
+struct Crossing {
+    int wet = 0;
+    int own = 0;
+    std::optional<DVec3> deepest;
+};
+
+Crossing cross(const hog::globe::Formed& formed, std::uint32_t point, double lod, double radius) {
+    const hog::formation::World& world = formed.world();
+    const DVec3 from = world.sphere.point(point);
+    const DVec3 to = world.sphere.point(world.rivers.receiver[point]);
+    const int half = static_cast<int>(0.5 * glm::length(to - from) * radius);
+    Crossing crossing;
+    double deepest = 0.0;
+    for (const double along : {0.25, 0.5, 0.75}) {
+        const DVec3 middle = glm::normalize(from + ((to - from) * along));
+        const DVec3 across = glm::normalize(glm::cross(to - from, middle));
+        for (int step = -half; step < half; ++step) {
+            const DVec3 here = glm::normalize(middle + (across * (step / radius)));
+            const hog::globe::Formed::Here read = formed.at(here, lod);
+            if (!read.river || read.lake) {
+                continue;
+            }
+            ++crossing.wet;
+            crossing.own += read.river->stem == formed.stem_of(point) ? 1 : 0;
+            if (const double standing = read.river->level - read.top.value; standing > deepest) {
+                deepest = standing;
+                crossing.deepest = here;
+            }
+        }
+    }
+    return crossing;
 }
 
 // How much of what two palette entries show differs, from 0 alike to 1 nothing shared.
@@ -266,4 +329,92 @@ TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][gr
     if (agreed.solid >= 10) {
         CHECK(4 * agreed.holds >= 3 * agreed.solid);
     }
+}
+
+TEST_CASE("every lake is its own body at its level", "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const double radius = world.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(world);
+    const auto depth = static_cast<std::uint8_t>(grid.depth() - levels);
+    const hog::globe::Formed& formed = *world.shape().formed;
+    // Filled about a point a metre under the water standing over `up`, the body it's in.
+    const auto filled_in = [&](DVec3 up, const hog::globe::Generator::Column& column) {
+        const DVec3 point = up * (column.water() - 1.0);
+        const Key key = grid.key_at(point, depth).value();
+        return body_at(grid, key, fill(world, grid, key, levels), point);
+    };
+
+    const std::vector<hog::globe::Formed::LakeAt> lakes = formed.lakes();
+    REQUIRE_FALSE(lakes.empty());
+    int found = 0;
+    for (std::uint32_t lake = 0; lake < lakes.size(); ++lake) {
+        CAPTURE(lake);
+        const hog::globe::Generator::Column column = world.column(lakes[lake].in, lod);
+        const hog::globe::WaterBody body{.kind = hog::globe::WaterBody::Kind::Lake, .index = lake};
+        if (column.water_body() != body || column.water() < column.ground() + 2.0) {
+            continue;
+        }
+        ++found;
+        CHECK(column.water() == Catch::Approx(radius + lakes[lake].level).margin(1e-6));
+        CHECK(filled_in(lakes[lake].in, column) == hog::globe::body_value(body));
+    }
+    // Some lakes' middles lie where another's water or the shore wins.
+    CHECK(4 * found >= 3 * static_cast<int>(lakes.size()));
+}
+
+TEST_CASE("the largest rivers are their own bodies where their water stands", "[globe][grid]") {
+    // The small world's rivers sized up, as most of its own are too small to stand in.
+    static const hog::globe::Generator world{[] {
+        hog::globe::Planet planet = hog::testing::small_planet();
+        planet.river_size = 100.0;
+        return planet;
+    }()};
+    const hog::grid::Grid grid = grid_of(world);
+    const double radius = world.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(world);
+    const auto depth = static_cast<std::uint8_t>(grid.depth() - levels);
+    const hog::globe::Formed& formed = *world.shape().formed;
+
+    // The rivers carrying the most water, crossed between the points they run between: where water
+    // stands, it's the river's own, but where a bigger one's runs beside it.
+    const hog::formation::World& formed_world = formed.world();
+    std::vector<std::uint32_t> largest;
+    for (std::uint32_t point = 0; point < formed_world.sphere.size(); ++point) {
+        const std::uint32_t down = formed_world.rivers.receiver[point];
+        if (down != point && formed_world.lakes.lake[point] == hog::formation::Lakes::none &&
+            formed_world.lakes.lake[down] == hog::formation::Lakes::none) {
+            largest.push_back(point);
+        }
+    }
+    std::ranges::sort(largest, [&](std::uint32_t a, std::uint32_t b) {
+        return formed_world.lakes.discharge[a] > formed_world.lakes.discharge[b];
+    });
+    largest.resize(std::min<std::size_t>(largest.size(), 20));
+    int crossed = 0;
+    int deep = 0;
+    for (const std::uint32_t point : largest) {
+        CAPTURE(point);
+        const Crossing crossing = cross(formed, point, lod, radius);
+        const std::optional<DVec3> deepest = crossing.deepest;
+        if (!deepest) {
+            continue;
+        }
+        ++crossed;
+        CHECK(2 * crossing.own >= crossing.wet);
+        const hog::globe::Generator::Column column = world.column(*deepest, lod);
+        if (column.water() > column.ground()) {
+            ++deep;
+            const auto body = column.water_body();
+            CHECK(body.kind == hog::globe::WaterBody::Kind::River);
+            CHECK(formed.stem_of(body.index) == body.index);
+            const DVec3 point_in = *deepest * ((column.water() + column.ground()) / 2.0);
+            const Key key = grid.key_at(point_in, depth).value();
+            // A channel narrower than a node may wind between the nodes' middles there, so
+            // anywhere in the node filled about it.
+            CHECK(holds(fill(world, grid, key, levels), hog::globe::body_value(body)));
+        }
+    }
+    CHECK(crossed >= 3);
+    CHECK(deep >= 2);
 }

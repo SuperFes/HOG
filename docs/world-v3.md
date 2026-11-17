@@ -247,7 +247,17 @@ step replaces something, the old and new are compared before the old goes.
      to stay bare, so the fill blends cover and rock from one column.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
-   the largest rivers come out as bodies with the right levels.
+   the largest rivers come out as bodies with the right levels. Done: a column says which body
+   its water is (`WaterBody`), and the water tree holds it over the ground up to the water's
+   highest in the year: the sea 1, lakes after it by index, rivers by the point their main
+   stem ends at with the top bit set. A river keeps its name down through each confluence from
+   whichever brings the most water, until the sea or a lake takes it. Found on the way:
+   - Most of the small world's rivers stand in no water at the default `river_size`; the
+     test sizes them up. Creeks narrower or shallower than a node can wind between the nodes'
+     middles, so they show only in places.
+   - The voxels can hold a lake lower than the generator's column has it (36.5 m against
+     60.85 m at one spot): the voxel fill's water and the column's disagree. Left for the
+     store and baker, which read water from the bodies.
 4. Objects out of voxels: crags, rockfall and boulders, vents, as instances. Tests: the same
    places and sizes as today.
 

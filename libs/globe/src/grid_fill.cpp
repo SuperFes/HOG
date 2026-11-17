@@ -28,9 +28,16 @@ struct Probe {
     double size = 0.0;                    // metres across the node
     double radius = 0.0;                  // of its middle, from the centre
     double ground = 0.0;                  // under it, metres from the centre
+    double water = 0.0;                   // over it at its highest in the year, likewise; 0 none
+    WaterBody body;                       // which that water is
     std::optional<grid::Surface> surface; // where the node is a leaf
     bool caves = false;                   // a cave may lie in it at finer detail
 };
+
+// Metres from the centre a column's water stands at its highest in the year; 0 where none does.
+double highest_water(const Generator::Column& column) noexcept {
+    return column.water() > 0.0 ? column.water() + column.water_rise() : 0.0;
+}
 
 // The four cells whose columns a direction lies between, and how much each counts.
 struct Between {
@@ -41,8 +48,7 @@ struct Between {
 class Filler {
 public:
     Filler(const Generator& generator, const grid::Grid& grid, grid::Key key, std::uint8_t levels)
-        : generator_{&generator}, grid_{&grid}, key_{key}, levels_{levels},
-          sea_{generator.sea_level()} {
+        : generator_{&generator}, grid_{&grid}, key_{key}, levels_{levels} {
         survey();
     }
 
@@ -73,8 +79,9 @@ public:
         // nor rock the surface clearly misses. Where in it water stands is the level's to say, so
         // it needn't split along the sea's top.
         const double half = half_diagonal * here.size;
-        const bool sea = sea_ && here.radius - half < *sea_ && here.radius + half > here.ground;
-        return grid::Tree<grid::Water>::Leaf{.value = sea ? sea_body : grid::Water::Value{0},
+        const bool wet =
+            here.water > 0.0 && here.radius - half < here.water && here.radius + half > here.ground;
+        return grid::Tree<grid::Water>::Leaf{.value = wet ? body_value(here.body) : 0,
                                              .open = open(depth, here)};
     }
 
@@ -112,13 +119,16 @@ private:
             std::vector<std::size_t> feet;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
                 const double radius = glm::length(middles[n]);
+                const Generator::Column& column = column_at(middles[n], radius, level);
                 Probe probe{.distance = distances[n],
                             .material = distances[n] > clear * size
                                             ? Material::Air
                                             : solid_at(middles[n], radius, level, size),
                             .size = size,
                             .radius = radius,
-                            .ground = column_at(middles[n], radius, level).ground(),
+                            .ground = column.ground(),
+                            .water = highest_water(column),
+                            .body = column.water_body(),
                             .surface = std::nullopt};
                 if (missed(probe, middles[n], level)) {
                     probe.surface =
@@ -289,7 +299,6 @@ private:
     const grid::Grid* grid_;
     grid::Key key_;
     std::uint8_t levels_;
-    std::optional<double> sea_;
     std::unordered_map<std::uint64_t, Probe> probes_;
     std::unordered_map<std::uint64_t, Generator::Column> columns_;
 };

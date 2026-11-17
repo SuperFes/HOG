@@ -27,13 +27,15 @@ public:
     explicit Formed(const Planet& planet);
 
     struct Here {
-        Noise top;                  // metres over the sea, slope per metre at the radius
-        std::optional<double> lake; // metres over the sea a lake's water stands at
+        Noise top;                    // metres over the sea, slope per metre at the radius
+        std::optional<double> lake;   // metres over the sea a lake's water stands at
+        std::uint32_t lake_index = 0; // which of the formed lakes that is
         // Metres over the sea a river's water stands at the year round, and in the floods that
-        // fill its channel bank to bank; none off its channel.
+        // fill its channel bank to bank; none off its channel. And which river it is, as stem_of.
         struct River {
             double level = 0.0;
             double flood = 0.0;
+            std::uint32_t stem = 0;
         };
         std::optional<River> river;
         // How the lake's or river's water rises over its level through the year.
@@ -69,6 +71,20 @@ public:
         double level = 0.0;
     };
     [[nodiscard]] std::vector<Outlet> lake_outlets() const;
+    // Each lake, by its index: a unit direction in its water, the middle of the cell it covers
+    // nearest the middle of all it covers, and the level it stands at, metres over the sea.
+    struct LakeAt {
+        DVec3 in{0.0};
+        double level = 0.0;
+    };
+    [[nodiscard]] std::vector<LakeAt> lakes() const;
+    // The course the river from `point` cuts down to the point it runs to: directions from one to
+    // the other.
+    [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const {
+        return courses_[point];
+    }
+    // The river the water from `point` runs in, named by the point its main stem ends at.
+    [[nodiscard]] std::uint32_t stem_of(std::uint32_t point) const { return stems_[point]; }
     [[nodiscard]] double lowest() const noexcept { return lowest_; }
     [[nodiscard]] double highest() const noexcept { return highest_; }
     [[nodiscard]] const formation::World& world() const noexcept { return world_; }
@@ -92,7 +108,8 @@ private:
         double flood = 0.0;
         double river_level = 0.0;
         double flood_level = 0.0;
-        Season season; // the river's
+        Season season;          // the river's
+        std::uint32_t stem = 0; // which river, as stem_of
         // Metres of its own alluvium a river left under it.
         double sheet = 0.0;
     };
@@ -104,12 +121,12 @@ private:
     [[nodiscard]] std::optional<Wall> valley_wall(std::uint32_t point, DVec3 direction,
                                                   double reach, double lod, double rounding,
                                                   double blend) const;
-    // The course the river from `point` cuts down to the point it runs to: directions from one to
-    // the other.
-    [[nodiscard]] const std::vector<DVec3>& course_of(std::uint32_t point) const {
-        return courses_[point];
-    }
     void fill_courses();
+    // Each river's main stem: water carries a river's name on down through the point it runs to
+    // from whichever brings the most, until the sea or a lake takes it. A point's river is named
+    // by the point its stem ends at.
+    void find_stems();
+    std::vector<std::uint32_t> stems_;
     [[nodiscard]] std::vector<DVec3> make_course(std::uint32_t point) const;
     [[nodiscard]] std::vector<double> floors_along(std::uint32_t point,
                                                    const std::vector<DVec3>& line) const;
@@ -122,6 +139,7 @@ private:
         double river_level = 0.0;
         double flood_level = 0.0;
         Season season;
+        std::uint32_t stem = 0; // as carved
         // Where the ground stood as cut, before what was carried settled on it.
         double bed = 0.0;
         // The share of the points' sand, alluvium, lake beds and till that settled here.

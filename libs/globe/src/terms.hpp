@@ -50,6 +50,7 @@ struct Ground {
     Layering layers;
     std::optional<double> lake;  // a lake's water, over the radius
     std::optional<double> river; // a river's, at its lowest in the year
+    WaterBody body;              // which that water is
     // How far either's water rises over that through the year, and when it's highest, as a share
     // of the year from the March equinox.
     double water_rise = 0.0;

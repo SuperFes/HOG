@@ -24,6 +24,16 @@ struct Ground;
 struct Fall;
 } // namespace terms
 
+// Which body of water stands somewhere: none, the sea, one of the formed lakes by its index, or a
+// river, named by the formed point its main stem ends at.
+struct WaterBody {
+    enum class Kind : std::uint8_t { None, Sea, Lake, River };
+    Kind kind = Kind::None;
+    std::uint32_t index = 0;
+
+    friend constexpr bool operator==(const WaterBody&, const WaterBody&) noexcept = default;
+};
+
 // What the world holds at a point before anything has changed it.
 struct Sample {
     // Metres to the nearest solid surface, negative inside it; near the surface, a true distance
@@ -129,6 +139,8 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
         [[nodiscard]] double water() const noexcept { return water_; }
+        // Which body that water is.
+        [[nodiscard]] WaterBody water_body() const noexcept { return body_; }
         // How a lake's or river's water rises over that through the year, as Sample has it.
         [[nodiscard]] double water_rise() const noexcept { return water_rise_; }
         [[nodiscard]] double water_peak() const noexcept { return water_peak_; }
@@ -174,8 +186,9 @@ public:
         const Generator* generator_ = nullptr;
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
-        double ground_ = 0.0;     // metres from the centre
-        double water_ = 0.0;      // metres from the centre to where open water stands; 0 none
+        double ground_ = 0.0; // metres from the centre
+        double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
+        WaterBody body_;
         double water_rise_ = 0.0; // as Sample's
         double water_peak_ = 0.0;
         double slope_ = 0.0;               // across the ground, at the radius

@@ -1328,3 +1328,41 @@ TEST_CASE("big rivers run over floors of the gravel they reworked their belts in
     CHECK(on_alluvium * 10 >= rivers * 9);
     CHECK(deep / rivers > 0.2);
 }
+
+TEST_CASE("a river keeps its name down its main stem, until the sea or a lake takes it",
+          "[globe][formed]") {
+    const Formed& formed = *formed_generator().shape().formed;
+    const hog::formation::World& world = formed.world();
+    const std::vector<std::uint32_t>& receiver = world.rivers.receiver;
+    const auto count = static_cast<std::uint32_t>(receiver.size());
+    // Of the points whose water comes to each, how many carry its name on, and the most any
+    // brings.
+    std::vector<int> carrying(count, 0);
+    std::vector<double> most(count, 0.0);
+    for (std::uint32_t point = 0; point < count; ++point) {
+        const std::uint32_t name = formed.stem_of(point);
+        CHECK(formed.stem_of(name) == name);
+        const std::uint32_t down = receiver[point];
+        if (down == point) {
+            CHECK(name == point);
+            continue;
+        }
+        most[down] = std::max(most[down], world.lakes.discharge[point]);
+        if (name == formed.stem_of(down)) {
+            ++carrying[down];
+        }
+    }
+    int joined = 0;
+    for (std::uint32_t point = 0; point < count; ++point) {
+        const std::uint32_t down = receiver[point];
+        if (down == point || formed.stem_of(point) != formed.stem_of(down)) {
+            continue;
+        }
+        ++joined;
+        CHECK(carrying[down] == 1);
+        CHECK(world.lakes.discharge[point] == most[down]);
+        CHECK(world.lakes.lake[down] == hog::formation::Lakes::none);
+        CHECK(receiver[down] != down);
+    }
+    CHECK(joined > 100);
+}
