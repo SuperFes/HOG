@@ -16,9 +16,6 @@
 
 namespace hog::bake {
 
-// What a page store of the generator's world is.
-[[nodiscard]] baked::Baking baking_of(const globe::Generator& generator);
-
 // Which pages a bake makes, down from the top page through the open leaves under each: every page
 // whose finest nodes are `coarse` metres across or wider where the surface runs, and every page
 // within `across` / 2 metres of `around` (metres from the centre) however fine, caves and all.

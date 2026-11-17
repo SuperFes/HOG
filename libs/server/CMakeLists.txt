@@ -6,6 +6,7 @@ add_library(hog_server
     src/held_ground.cpp
     src/move_check.cpp
     src/pacer.cpp
+    src/page_source.cpp
     src/persistence.cpp
     src/players.cpp
     src/server_config.cpp
@@ -18,7 +19,7 @@ add_library(hog::server ALIAS hog_server)
 
 target_include_directories(hog_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_server
-    PUBLIC hog::core hog::flow hog::globe hog::jobs hog::net hog::physics hog::planet hog::protocol
+    PUBLIC hog::baked hog::core hog::flow hog::globe hog::jobs hog::net hog::physics hog::planet hog::protocol
         hog::replication hog::save hog::sim hog::skies hog::waves hog::weather flecs::flecs_static
     PRIVATE tomlplusplus)
 hog_target_defaults(hog_server)
@@ -34,6 +35,7 @@ hog_add_tests(hog_server
     tests/move_check_tests.cpp
     tests/network_cost_bench.cpp
     tests/pacer_tests.cpp
+    tests/page_source_tests.cpp
     tests/persistence_tests.cpp
     tests/players_tests.cpp
     tests/server_config_tests.cpp

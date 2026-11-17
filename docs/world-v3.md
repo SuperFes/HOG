@@ -299,7 +299,7 @@ step replaces something, the old and new are compared before the old goes.
    the surface is followed only round a place, so the coarse bake leaves it to be filled live.
 3. Filling on demand: a queue of wanted nodes, the generator library filling it on worker threads
    and writing the store, the store telling readers. Tests: a node asked for appears and is read;
-   a stale generator version is filled again. Done (`bake::Filler`): nodes are wanted from any
+   a stale generator version is filled again. Done (`baked::Filler`): nodes are wanted from any
    thread; the owner pumps it (a server tick), which writes the fills finished in one batch, says
    which pages were written, and starts what each wanted node needs next. A node walks the pages
    over it from the top, stopping at the first not held whole as this generator makes it (filled
@@ -315,7 +315,12 @@ step replaces something, the old and new are compared before the old goes.
 ### 4 · Server streaming
 
 1. The server reads the store per tree, and fills only what it lacks through step 3.3. Tests: a
-   server on a fully baked small world serves a page with no generator running.
+   server on a fully baked small world serves a page with no generator running. Done
+   (`server::PageSource`): pages held whole as this generator makes them are read from the store;
+   one missing is asked of the filler where there is one, and read once a pump has written it.
+   Without a filler the store is all there is. The filler moved into `libs/baked` so the server
+   links it without the bake tool. The server app opens a store with 4.2, the first thing that
+   reads pages.
 2. Interest and order: coarse in view first, then nearest fine, then outward refinement within a
    byte budget per client. Tests: order of pages sent for a player standing still.
 3. What each client holds, by page and tree version; only newer sent. Tests: a water season

@@ -3,14 +3,24 @@
 #include <hog/baked/page_store.hpp>
 #include <hog/core/result.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/grid_fill.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/jobs/job_system.hpp>
 
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
-namespace hog::bake {
+namespace hog::baked {
+
+// What a page store of the generator's world is.
+[[nodiscard]] Baking baking_of(const globe::Generator& generator);
+
+// Writes each of `pages` as filled, in one batch.
+[[nodiscard]] Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
+                                        std::span<const std::optional<globe::Filled>> filled);
 
 // Fills the pages the nodes asked for need, as the store doesn't hold them as this generator makes
 // them yet, on the job system's workers, and writes them from `pump`, which says which were
@@ -19,7 +29,7 @@ namespace hog::bake {
 class Filler {
 public:
     // Made on a thread of `jobs`' pool, as `pump` is called.
-    Filler(const globe::Generator& generator, baked::PageStore& store, jobs::JobSystem& jobs);
+    Filler(const globe::Generator& generator, PageStore& store, jobs::JobSystem& jobs);
     Filler(const Filler&) = delete;
     Filler& operator=(const Filler&) = delete;
     Filler(Filler&&) = delete;
@@ -43,4 +53,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace hog::bake
+} // namespace hog::baked

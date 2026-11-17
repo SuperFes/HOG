@@ -1,5 +1,4 @@
-#include <hog/bake/bake.hpp>
-#include <hog/bake/filler.hpp>
+#include <hog/baked/filling.hpp>
 #include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grid_fill.hpp>
@@ -13,7 +12,7 @@
 #include <algorithm>
 #include <vector>
 
-using hog::bake::Filler;
+using hog::baked::Filler;
 using hog::grid::Key;
 
 namespace {
@@ -32,11 +31,11 @@ std::vector<Key> settle(Filler& filler) {
 
 } // namespace
 
-TEST_CASE("a node asked for is filled down to the page holding it, once", "[bake][filler]") {
+TEST_CASE("a node asked for is filled down to the page holding it, once", "[baked][filling]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
     const hog::testing::TemporaryDirectory directory;
-    auto store = hog::baked::PageStore::open(directory.path(), hog::bake::baking_of(generator));
+    auto store = hog::baked::PageStore::open(directory.path(), hog::baked::baking_of(generator));
     REQUIRE(store.has_value());
     hog::jobs::JobSystem jobs{3};
     Filler filler{generator, *store, jobs};
@@ -71,10 +70,11 @@ TEST_CASE("a node asked for is filled down to the page holding it, once", "[bake
     CHECK(settle(filler).empty());
 }
 
-TEST_CASE("a node under a leaf that isn't open is answered by the page over it", "[bake][filler]") {
+TEST_CASE("a node under a leaf that isn't open is answered by the page over it",
+          "[baked][filling]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::testing::TemporaryDirectory directory;
-    auto store = hog::baked::PageStore::open(directory.path(), hog::bake::baking_of(generator));
+    auto store = hog::baked::PageStore::open(directory.path(), hog::baked::baking_of(generator));
     REQUIRE(store.has_value());
     hog::jobs::JobSystem jobs{2};
     Filler filler{generator, *store, jobs};
@@ -83,12 +83,12 @@ TEST_CASE("a node under a leaf that isn't open is answered by the page over it",
     CHECK(settle(filler) == std::vector<Key>{Key{}});
 }
 
-TEST_CASE("pages another generator version made are filled again", "[bake][filler]") {
+TEST_CASE("pages another generator version made are filled again", "[baked][filling]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::testing::TemporaryDirectory directory;
     const Key corner{.depth = hog::globe::grid_of(generator).depth()};
     hog::jobs::JobSystem jobs{2};
-    hog::baked::Baking before = hog::bake::baking_of(generator);
+    hog::baked::Baking before = hog::baked::baking_of(generator);
     before.generator = hog::globe::generator_version + 1;
     {
         auto store = hog::baked::PageStore::open(directory.path(), before);
@@ -97,7 +97,7 @@ TEST_CASE("pages another generator version made are filled again", "[bake][fille
         filler.want(corner);
         REQUIRE(settle(filler) == std::vector<Key>{Key{}});
     }
-    auto store = hog::baked::PageStore::open(directory.path(), hog::bake::baking_of(generator));
+    auto store = hog::baked::PageStore::open(directory.path(), hog::baked::baking_of(generator));
     REQUIRE(store.has_value());
     {
         auto snapshot = store->read();

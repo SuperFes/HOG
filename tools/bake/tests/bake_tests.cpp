@@ -1,4 +1,5 @@
 #include <hog/bake/bake.hpp>
+#include <hog/baked/filling.hpp>
 #include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grid_fill.hpp>
@@ -53,7 +54,7 @@ TEST_CASE("a bake stores the pages down to a place as the generator fills them, 
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
     const hog::testing::TemporaryDirectory directory;
-    auto store = hog::baked::PageStore::open(directory.path(), hog::bake::baking_of(generator));
+    auto store = hog::baked::PageStore::open(directory.path(), hog::baked::baking_of(generator));
     REQUIRE(store.has_value());
     hog::jobs::JobSystem jobs{2};
     const hog::DVec3 direction = glm::normalize(hog::DVec3{0.3, -0.2, 0.93});

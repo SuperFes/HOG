@@ -1,7 +1,6 @@
-#include "pages.hpp"
-
-#include <hog/bake/filler.hpp>
+#include <hog/baked/filling.hpp>
 #include <hog/globe/grid_fill.hpp>
+#include <hog/globe/planet.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -10,7 +9,7 @@
 #include <optional>
 #include <utility>
 
-namespace hog::bake {
+namespace hog::baked {
 namespace {
 
 // What a node asked for needs next.
@@ -21,12 +20,35 @@ struct Next {
 
 } // namespace
 
+Baking baking_of(const globe::Generator& generator) {
+    return {.world = globe::world_id(generator.planet()),
+            .grid = globe::grid_of(generator),
+            .generator = globe::generator_version};
+}
+
+Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
+                          std::span<const std::optional<globe::Filled>> filled) {
+    return store.write([&](baked::PageStore::Batch& batch) -> Result<void> {
+        for (std::size_t n = 0; n < pages.size(); ++n) {
+            const globe::Filled& page = filled[n].value();
+            for (const Result<std::uint32_t>& put :
+                 {batch.put(pages[n], page.shape), batch.put(pages[n], page.material),
+                  batch.put(pages[n], page.water)}) {
+                if (!put) {
+                    return std::unexpected{put.error()};
+                }
+            }
+        }
+        return {};
+    });
+}
+
 struct Filler::Impl {
-    Impl(const globe::Generator& generator, baked::PageStore& store, jobs::JobSystem& jobs)
+    Impl(const globe::Generator& generator, PageStore& store, jobs::JobSystem& jobs)
         : generator(&generator), store(&store), jobs(&jobs), grid(globe::grid_of(generator)) {}
 
     const globe::Generator* generator;
-    baked::PageStore* store;
+    PageStore* store;
     jobs::JobSystem* jobs;
     grid::Grid grid;
 
@@ -38,13 +60,13 @@ struct Filler::Impl {
 
     // Down the pages over `node` to the first that isn't held whole as this generator makes it,
     // or that answers it.
-    [[nodiscard]] Next next(const baked::PageStore::Snapshot& snapshot, grid::Key node) const {
+    [[nodiscard]] Next next(const PageStore::Snapshot& snapshot, grid::Key node) const {
         grid::Key page{};
         while (true) {
             if (filling.contains(page)) {
                 return {.is = Next::Is::Filling, .page = page};
             }
-            const std::optional<baked::PageStore::Read> read = snapshot.page(page);
+            const std::optional<PageStore::Read> read = snapshot.page(page);
             if (!read || !read->page.shape || !read->page.material || !read->page.water) {
                 return {.is = Next::Is::Fill, .page = page};
             }
@@ -87,14 +109,14 @@ struct Filler::Impl {
         if (pages.empty()) {
             return pages;
         }
-        if (Result<void> written = write_pages(*store, pages, filled); !written) {
+        if (Result<void> written = write_filled(*store, pages, filled); !written) {
             return std::unexpected{written.error()};
         }
         return pages;
     }
 };
 
-Filler::Filler(const globe::Generator& generator, baked::PageStore& store, jobs::JobSystem& jobs)
+Filler::Filler(const globe::Generator& generator, PageStore& store, jobs::JobSystem& jobs)
     : impl_(std::make_unique<Impl>(generator, store, jobs)) {}
 
 Filler::~Filler() = default;
@@ -118,7 +140,7 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
     if (impl.waiting.empty()) {
         return written;
     }
-    Result<baked::PageStore::Snapshot> snapshot = impl.store->read();
+    Result<PageStore::Snapshot> snapshot = impl.store->read();
     if (!snapshot) {
         return std::unexpected{snapshot.error()};
     }
@@ -141,4 +163,4 @@ bool Filler::idle() const {
     return impl_->asked.empty() && impl_->waiting.empty() && impl_->filling.empty();
 }
 
-} // namespace hog::bake
+} // namespace hog::baked

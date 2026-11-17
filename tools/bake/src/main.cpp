@@ -1,4 +1,5 @@
 #include <hog/bake/bake.hpp>
+#include <hog/baked/filling.hpp>
 #include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
@@ -124,7 +125,7 @@ int run(std::span<const std::string_view> arguments) {
         "formed in {:.1f} s\n",
         std::chrono::duration<double>(std::chrono::steady_clock::now() - formed).count());
     auto store = hog::baked::PageStore::open(
-        *options.store, hog::bake::baking_of(generator),
+        *options.store, hog::baked::baking_of(generator),
         {.map_bytes = options.map_gb << 30U, .readers = 1024, .read_only = false});
     if (!store) {
         std::cerr << std::format("hog-bake: {}\n", store.error());

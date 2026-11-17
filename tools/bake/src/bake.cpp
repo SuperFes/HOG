@@ -1,6 +1,5 @@
-#include "pages.hpp"
-
 #include <hog/bake/bake.hpp>
+#include <hog/baked/filling.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
 
@@ -101,7 +100,7 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
                     globe::fill(generator, grid, missing[n], grid.levels_under(missing[n].depth));
             }
         });
-    if (Result<void> written = write_pages(store, missing, filled); !written) {
+    if (Result<void> written = baked::write_filled(store, missing, filled); !written) {
         return std::unexpected{written.error()};
     }
     for (std::size_t m = 0; m < missing.size(); ++m) {
@@ -122,12 +121,6 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
 }
 
 } // namespace
-
-baked::Baking baking_of(const globe::Generator& generator) {
-    return {.world = globe::world_id(generator.planet()),
-            .grid = globe::grid_of(generator),
-            .generator = globe::generator_version};
-}
 
 std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach, grid::Key page,
                                    grid::Key leaf, bool surface) {
