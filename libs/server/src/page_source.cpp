@@ -10,17 +10,41 @@ Result<PageSource> PageSource::open(baked::PageStore& store, baked::Filler* fill
     return PageSource{std::move(*snapshot), filler};
 }
 
-std::optional<grid::Page> PageSource::page(grid::Key root) {
+std::optional<grid::Page> PageSource::page(grid::Key root, std::uint8_t levels) {
     std::optional<baked::PageStore::Read> read = snapshot_.page(root);
-    if (read && read->page.shape && read->page.material && read->page.water) {
-        return std::move(read->page);
+    if (!read || !read->page.shape || !read->page.material || !read->page.water) {
+        ask(root, levels);
+        return std::nullopt;
     }
+    grid::Page& page = read->page;
+    if (page.shape->tree.levels() < levels) {
+        ask(root, levels);
+    }
+    page.shape->tree = page.shape->tree.trimmed(levels);
+    page.material->tree = page.material->tree.trimmed(levels);
+    page.water->tree = page.water->tree.trimmed(levels);
+    return std::move(page);
+}
+
+std::optional<grid::Tree<grid::Shape>> PageSource::shape(grid::Key root, std::uint8_t levels) {
+    std::optional<grid::Held<grid::Shape>> held = snapshot_.tree<grid::Shape>(root);
+    if (!held || held->tree.levels() < levels) {
+        ask(root, levels);
+    }
+    if (!held) {
+        return std::nullopt;
+    }
+    return held->tree.trimmed(levels);
+}
+
+void PageSource::ask(grid::Key root, std::uint8_t levels) {
     if (filler_ != nullptr) {
-        // A node under the root, so the filler goes down into the page and not just to its root
-        // as the foot of the page over it.
-        filler_->want(root.child(0));
+        // The corner node `levels` under the root, so the filler goes that deep into the page.
+        filler_->want({.depth = static_cast<std::uint8_t>(root.depth + levels),
+                       .x = root.x << levels,
+                       .y = root.y << levels,
+                       .z = root.z << levels});
     }
-    return std::nullopt;
 }
 
 Result<std::vector<grid::Key>> PageSource::pump(bool wait) {

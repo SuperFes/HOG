@@ -67,6 +67,9 @@ public:
 
         // The page rooted at `root`; none where none of its trees is held.
         [[nodiscard]] std::optional<Read> page(grid::Key root) const;
+        // The page's tree of `Kind`, where held as this generator makes it.
+        template <typename Kind>
+        [[nodiscard]] std::optional<grid::Held<Kind>> tree(grid::Key root) const;
         // The root of the deepest page over `key` holding a current tree of `Kind`: the page under
         // it where it's a page's root itself; none where no page over it holds one.
         template <typename Kind>
@@ -142,6 +145,12 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+extern template std::optional<grid::Held<grid::Shape>>
+    PageStore::Snapshot::tree<grid::Shape>(grid::Key) const;
+extern template std::optional<grid::Held<grid::Material>>
+    PageStore::Snapshot::tree<grid::Material>(grid::Key) const;
+extern template std::optional<grid::Held<grid::Water>>
+    PageStore::Snapshot::tree<grid::Water>(grid::Key) const;
 extern template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Shape>(grid::Key) const;
 extern template std::optional<grid::Key>
     PageStore::Snapshot::holder<grid::Material>(grid::Key) const;

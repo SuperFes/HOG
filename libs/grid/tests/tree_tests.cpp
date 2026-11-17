@@ -207,3 +207,26 @@ TEST_CASE("growing stops where a node is decided a leaf", "[grid]") {
           Tree<Water>::Found{.value = 2, .open = false, .depth = 1});
     CHECK(corner.at(1, 0, 0, 0) == Tree<Water>::Found{.value = 2, .open = false, .depth = 1});
 }
+
+TEST_CASE("a tree trimmed keeps what lies over the cut, the nodes split there opened", "[grid]") {
+    const Tree<Material> tree = patchy_tree();
+    CHECK(tree.trimmed(levels).same_as(tree));
+    for (std::uint8_t cut = 0; cut < levels; ++cut) {
+        CAPTURE(cut);
+        const Tree<Material> trimmed = tree.trimmed(cut);
+        CHECK(trimmed.levels() == cut);
+        const std::uint32_t side = 1U << cut;
+        for (std::uint32_t n = 0; n < side * side * side; ++n) {
+            const std::uint32_t x = n % side;
+            const std::uint32_t y = (n / side) % side;
+            const std::uint32_t z = n / (side * side);
+            const auto whole = tree.at(cut, x, y, z);
+            const auto kept = trimmed.at(cut, x, y, z);
+            CHECK(kept.value == whole.value);
+            // Opened alike, eight may merge into the node over them.
+            CHECK(kept.depth <= whole.depth);
+            const bool split = tree.at(cut + 1, 2 * x, 2 * y, 2 * z).depth > cut;
+            CHECK(kept.open == (whole.open || split));
+        }
+    }
+}

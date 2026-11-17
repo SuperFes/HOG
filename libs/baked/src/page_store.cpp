@@ -229,6 +229,32 @@ std::optional<PageStore::Read> PageStore::Snapshot::page(grid::Key root) const {
 }
 
 template <typename Kind>
+std::optional<grid::Held<Kind>> PageStore::Snapshot::tree(grid::Key root) const {
+    const Shared& shared = *impl_->shared;
+    try {
+        const std::optional<Held> held =
+            held_at(impl_->txn, shared.trees, key_of(tag_of<Kind>(), root));
+        if (!held || held->generator != shared.baking.generator) {
+            return std::nullopt;
+        }
+        auto decoded = grid::Tree<Kind>::decode(held->tree);
+        if (!decoded) {
+            return std::nullopt;
+        }
+        return grid::Held<Kind>{.version = held->version, .tree = std::move(*decoded)};
+    } catch (const lmdb::error&) {
+        return std::nullopt;
+    }
+}
+
+template std::optional<grid::Held<grid::Shape>>
+    PageStore::Snapshot::tree<grid::Shape>(grid::Key) const;
+template std::optional<grid::Held<grid::Material>>
+    PageStore::Snapshot::tree<grid::Material>(grid::Key) const;
+template std::optional<grid::Held<grid::Water>>
+    PageStore::Snapshot::tree<grid::Water>(grid::Key) const;
+
+template <typename Kind>
 std::optional<grid::Key> PageStore::Snapshot::holder(grid::Key key) const {
     const Shared& shared = *impl_->shared;
     const grid::Grid& grid = shared.baking.grid;

@@ -309,7 +309,8 @@ step replaces something, the old and new are compared before the old goes.
    on the workers, the node waiting on it), at the one holding its depth, or at one whose leaf over
    it isn't open. Pages are filled a depth at a time, never past what the page above says is
    there; two nodes needing one page share its fill. Stale pages fill again and keep their
-   versions where the bytes come out the same.
+   versions where the bytes come out the same. Since 4.2 a page is filled only as deep as the
+   nodes asked for under it reach, and deeper once one reaches further.
 4. Scratch stores for dev runs. Done (`PageStore::scratch`): a store in a new directory of its
    own under the system's temporary one, removed once the store closes. The server picks it up in
    step 4.
@@ -322,10 +323,20 @@ step replaces something, the old and new are compared before the old goes.
    (`server::PageSource`): pages held whole as this generator makes them are read from the store;
    one missing is asked of the filler where there is one, and read once a pump has written it.
    Without a filler the store is all there is. The filler moved into `libs/baked` so the server
-   links it without the bake tool. The server app opens a store with 4.2, the first thing that
-   reads pages.
+   links it without the bake tool. The server app opens a store with 4.4, once pages have a
+   message to go in.
 2. Interest and order: coarse in view first, then nearest fine, then outward refinement within a
-   byte budget per client. Tests: order of pages sent for a player standing still.
+   byte budget per client. Tests: order of pages sent for a player standing still. Done
+   (`server::PageSending`): from the top page down, under each open leaf of a page wanted whole,
+   the pages whose root node spans more than 8 pixels from the player (as `TileSending` judged
+   voxels); ground open for caves only within the finest nodes' reach. Decided: a page goes only
+   as deep as its nodes should be seen from the player, cut with `Tree::trimmed`, and deeper as
+   the player nears; the filler likewise fills a page only as deep as asked and deepens it later.
+   Whole six-level pages were far too much: one player on the small world wanted 57k fine pages
+   (~400 MB, ~30 min to fill). Cut to depth, the same 59k go 1 level (727), 2 (30k) or 3+ (29k)
+   deep. Order: by depth, then nearest first; `next` sends in order within a byte budget, one
+   page at least. Still to measure: the walk's cost per follow and bytes per player; the pixel
+   rule is a knob if they're too high.
 3. What each client holds, by page and tree version; only newer sent. Tests: a water season
    change sends only water trees.
 4. Protocol messages for pages, bodies and version bumps; protocol version bumped. Tests:

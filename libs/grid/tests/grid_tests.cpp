@@ -127,3 +127,14 @@ TEST_CASE("a page holds its nodes, and a step past its side is in the next page"
     CHECK(working().page_of(edge) == Key{.depth = 12, .x = 0, .y = 1, .z = 3});
     CHECK(working().page_of(across) == Key{.depth = 12, .x = 1, .y = 1, .z = 3});
 }
+
+TEST_CASE("the distance to a node is to its nearest point, none inside it", "[grid]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const hog::grid::Key key{.depth = 3, .x = 2, .y = 5, .z = 7};
+    const hog::DVec3 low = grid.low(key);
+    const double size = grid.size(key.depth);
+    CHECK(grid.distance(key, grid.centre(key)) == 0.0);
+    CHECK(grid.distance(key, low) == 0.0);
+    CHECK(grid.distance(key, low - hog::DVec3{3.0, 0.0, 0.0}) == 3.0);
+    CHECK(grid.distance(key, low + hog::DVec3{size + 3.0, size + 4.0, 1.0}) == 5.0);
+}

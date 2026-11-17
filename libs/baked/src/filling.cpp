@@ -16,6 +16,7 @@ namespace {
 struct Next {
     enum class Is : std::uint8_t { Answered, Filling, Fill } is = Is::Answered;
     grid::Key page;
+    std::uint8_t levels = 0; // to fill it to
 };
 
 } // namespace
@@ -59,35 +60,40 @@ struct Filler::Impl {
     std::map<grid::Key, std::unique_ptr<jobs::Async<globe::Filled>>> filling;
 
     // Down the pages over `node` to the first that isn't held whole as this generator makes it,
-    // or that answers it.
+    // as deep as the node needs, or that answers it.
     [[nodiscard]] Next next(const PageStore::Snapshot& snapshot, grid::Key node) const {
         grid::Key page{};
         while (true) {
+            const auto foot = static_cast<std::uint8_t>(page.depth + grid.levels_under(page.depth));
+            const auto needs = static_cast<std::uint8_t>(
+                std::clamp<int>(node.depth - page.depth, 1, foot - page.depth));
             if (filling.contains(page)) {
-                return {.is = Next::Is::Filling, .page = page};
+                return {.is = Next::Is::Filling, .page = page, .levels = needs};
             }
             const std::optional<PageStore::Read> read = snapshot.page(page);
-            if (!read || !read->page.shape || !read->page.material || !read->page.water) {
-                return {.is = Next::Is::Fill, .page = page};
+            if (!read || !read->page.shape || !read->page.material || !read->page.water ||
+                read->page.shape->tree.levels() < needs) {
+                return {.is = Next::Is::Fill, .page = page, .levels = needs};
             }
-            const std::uint8_t levels = grid.levels_under(page.depth);
-            const auto foot = static_cast<std::uint8_t>(page.depth + levels);
-            const grid::Key over = node.ancestor(std::min(node.depth, foot));
-            const auto below = static_cast<std::uint8_t>(over.depth - page.depth);
+            if (node.depth <= foot) {
+                return {.is = Next::Is::Answered, .page = page, .levels = needs};
+            }
+            const grid::Key over = node.ancestor(foot);
+            const auto below = static_cast<std::uint8_t>(foot - page.depth);
             const auto found =
                 read->page.shape->tree.at(below, over.x - (page.x << below),
                                           over.y - (page.y << below), over.z - (page.z << below));
-            if (node.depth <= foot || !found.open) {
-                return {.is = Next::Is::Answered, .page = page};
+            if (!found.open) {
+                return {.is = Next::Is::Answered, .page = page, .levels = needs};
             }
-            page = node.ancestor(foot);
+            page = over;
         }
     }
 
-    void start(grid::Key page) {
-        filling.emplace(page, std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, page] {
-                            return globe::fill(*generator, grid, page,
-                                               grid.levels_under(page.depth));
+    void start(grid::Key page, std::uint8_t levels) {
+        filling.emplace(page,
+                        std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, page, levels] {
+                            return globe::fill(*generator, grid, page, levels);
                         }));
     }
 
@@ -148,7 +154,7 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
     for (const grid::Key node : impl.waiting) {
         const Next next = impl.next(*snapshot, node);
         if (next.is == Next::Is::Fill) {
-            impl.start(next.page);
+            impl.start(next.page, next.levels);
         }
         if (next.is != Next::Is::Answered) {
             still.push_back(node);

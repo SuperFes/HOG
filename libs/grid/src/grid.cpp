@@ -28,6 +28,11 @@ DVec3 Grid::centre(Key key) const noexcept {
     return low(key) + DVec3{size(key.depth) / 2.0};
 }
 
+double Grid::distance(Key key, DVec3 point) const noexcept {
+    const DVec3 near = low(key);
+    return glm::length(point - glm::clamp(point, near, near + DVec3{size(key.depth)}));
+}
+
 std::optional<Key> Grid::key_at(DVec3 point, std::uint8_t at) const noexcept {
     const double half = size(0) / 2.0;
     const double step = size(at);

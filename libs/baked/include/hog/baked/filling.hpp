@@ -25,7 +25,8 @@ namespace hog::baked {
 // Fills the pages the nodes asked for need, as the store doesn't hold them as this generator makes
 // them yet, on the job system's workers, and writes them from `pump`, which says which were
 // written. A node is answered by the pages over it down to the one holding its depth, or to one
-// whose leaf over it isn't open: pages under such a leaf would only repeat it.
+// whose leaf over it isn't open: pages under such a leaf would only repeat it. A page is filled
+// only as deep as the nodes asked for under it reach, and filled deeper once one reaches further.
 class Filler {
 public:
     // Made on a thread of `jobs`' pool, as `pump` is called.

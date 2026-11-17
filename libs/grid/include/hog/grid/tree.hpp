@@ -150,6 +150,26 @@ public:
 
     [[nodiscard]] std::uint8_t levels() const noexcept { return levels_; }
 
+    // Cut to `levels` deep, where it's deeper: a node there that splits becomes an open leaf of its
+    // value.
+    [[nodiscard]] Tree trimmed(std::uint8_t levels) const {
+        if (levels >= levels_) {
+            return *this;
+        }
+        return grow(levels,
+                    [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                        std::uint32_t z) -> std::optional<Leaf> {
+                        const Found found = at(depth, x, y, z);
+                        if (at(depth + 1, 2 * x, 2 * y, 2 * z).depth == depth) {
+                            return Leaf{.value = found.value, .open = found.open};
+                        }
+                        if (depth == levels) {
+                            return Leaf{.value = found.value, .open = true};
+                        }
+                        return std::nullopt;
+                    });
+    }
+
     // The node `depth` below the root at (x, y, z) among that depth's, or the leaf over it.
     // Precondition: depth <= levels and x, y, z < 2^depth.
     [[nodiscard]] Found at(std::uint8_t depth, std::uint32_t x, std::uint32_t y,

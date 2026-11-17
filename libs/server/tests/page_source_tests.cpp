@@ -48,7 +48,7 @@ TEST_CASE("pages held are served from the store alone, and those missing filled 
         auto source = PageSource::open(*store);
         REQUIRE(source.has_value());
         const Key held = grid.page_of(finest);
-        const auto page = source->page(held);
+        const auto page = source->page(held, grid.levels_under(held.depth));
         REQUIRE(page.has_value());
         const hog::globe::Filled filled =
             hog::globe::fill(generator, grid, held, grid.levels_under(held.depth));
@@ -56,11 +56,11 @@ TEST_CASE("pages held are served from the store alone, and those missing filled 
         CHECK(page.value().material.value().tree.same_as(filled.material));
         CHECK(page.value().water.value().tree.same_as(filled.water));
         const Key elsewhere = ground_key(generator, {-0.6, 0.1, 0.79}, 4);
-        CHECK_FALSE(source->page(elsewhere).has_value());
+        CHECK_FALSE(source->page(elsewhere, grid.levels_under(elsewhere.depth)).has_value());
         const auto pumped = source->pump();
         REQUIRE(pumped.has_value());
         CHECK(pumped->empty());
-        CHECK_FALSE(source->page(elsewhere).has_value());
+        CHECK_FALSE(source->page(elsewhere, grid.levels_under(elsewhere.depth)).has_value());
     }
 
     // With a filler, a page missing is filled once asked for, and read on the next pump.
@@ -68,7 +68,7 @@ TEST_CASE("pages held are served from the store alone, and those missing filled 
     auto source = PageSource::open(*store, &filler);
     REQUIRE(source.has_value());
     const Key elsewhere = ground_key(generator, {-0.6, 0.1, 0.79}, 4);
-    CHECK_FALSE(source->page(elsewhere).has_value());
+    CHECK_FALSE(source->page(elsewhere, grid.levels_under(elsewhere.depth)).has_value());
     std::vector<Key> written;
     while (!filler.idle()) {
         const auto pumped = source->pump(true);
@@ -76,5 +76,5 @@ TEST_CASE("pages held are served from the store alone, and those missing filled 
         written.insert(written.end(), pumped->begin(), pumped->end());
     }
     CHECK(written == std::vector<Key>{elsewhere});
-    CHECK(source->page(elsewhere).has_value());
+    CHECK(source->page(elsewhere, grid.levels_under(elsewhere.depth)).has_value());
 }

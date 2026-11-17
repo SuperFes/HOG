@@ -27,6 +27,8 @@ public:
 
     [[nodiscard]] DVec3 low(Key key) const noexcept;
     [[nodiscard]] DVec3 centre(Key key) const noexcept;
+    // Metres from `point` to the nearest of the node; none inside it.
+    [[nodiscard]] double distance(Key key, DVec3 point) const noexcept;
     // The node at `at` deep holding `point`; none outside the root.
     [[nodiscard]] std::optional<Key> key_at(DVec3 point, std::uint8_t at) const noexcept;
 

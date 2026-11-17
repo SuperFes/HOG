@@ -6,6 +6,7 @@ add_library(hog_server
     src/held_ground.cpp
     src/move_check.cpp
     src/pacer.cpp
+    src/page_sending.cpp
     src/page_source.cpp
     src/persistence.cpp
     src/players.cpp
@@ -35,6 +36,7 @@ hog_add_tests(hog_server
     tests/move_check_tests.cpp
     tests/network_cost_bench.cpp
     tests/pacer_tests.cpp
+    tests/page_sending_tests.cpp
     tests/page_source_tests.cpp
     tests/persistence_tests.cpp
     tests/players_tests.cpp

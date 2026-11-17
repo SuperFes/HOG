@@ -116,3 +116,42 @@ TEST_CASE("pages another generator version made are filled again", "[baked][fill
     // The same bytes, so the same version, now stamped as this generator's.
     CHECK(read.value().page.shape.value().version == 1);
 }
+
+TEST_CASE("a page is filled as deep as the nodes asked for reach, and deeper once they reach on",
+          "[baked][filling]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    const hog::testing::TemporaryDirectory directory;
+    auto store = hog::baked::PageStore::open(directory.path(), hog::baked::baking_of(generator));
+    REQUIRE(store.has_value());
+    hog::jobs::JobSystem jobs{3};
+    Filler filler{generator, *store, jobs};
+    const hog::DVec3 direction = glm::normalize(hog::DVec3{0.7, 0.6, -0.39});
+    const hog::DVec3 place =
+        direction * generator.column(direction, hog::globe::voxel_lod(generator)).ground();
+    const Key finest = grid.key_at(place, grid.depth()).value();
+    const Key page = grid.page_of(finest);
+    const Key shallow = finest.ancestor(static_cast<std::uint8_t>(page.depth + 2));
+
+    filler.want(shallow);
+    CHECK(std::ranges::count(settle(filler), page) == 1);
+    {
+        auto snapshot = store->read();
+        REQUIRE(snapshot.has_value());
+        const auto shape = snapshot->tree<hog::grid::Shape>(page);
+        REQUIRE(shape.has_value());
+        CHECK(shape.value().tree.levels() == 2);
+        CHECK(shape.value().tree.same_as(hog::globe::fill(generator, grid, page, 2).shape));
+    }
+
+    filler.want(shallow);
+    CHECK(settle(filler).empty());
+    filler.want(finest);
+    CHECK(settle(filler) == std::vector<Key>{page});
+    auto snapshot = store->read();
+    REQUIRE(snapshot.has_value());
+    const auto shape = snapshot->tree<hog::grid::Shape>(page);
+    REQUIRE(shape.has_value());
+    CHECK(shape.value().tree.levels() == grid.levels_under(page.depth));
+    CHECK(shape.value().version == 2);
+}

@@ -1,7 +1,7 @@
 #include <hog/bake/bake.hpp>
 #include <hog/baked/filling.hpp>
 #include <hog/globe/grid_fill.hpp>
-#include <hog/globe/planet.hpp>
+#include <hog/grid/leaves.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -11,49 +11,6 @@
 
 namespace hog::bake {
 namespace {
-
-// Metres from `point` to the nearest of the node.
-double distance_to(const grid::Grid& grid, grid::Key key, DVec3 point) {
-    const DVec3 low = grid.low(key);
-    const DVec3 nearest = glm::clamp(point, low, low + DVec3{grid.size(key.depth)});
-    return glm::length(point - nearest);
-}
-
-// Each open leaf of a page's shape tree, as its key in the grid, and whether it's open for the
-// ground passing near rather than for caves in the solid.
-template <typename Visit>
-void open_leaves(const grid::Tree<grid::Shape>& tree, grid::Key root, const Visit& visit) {
-    struct At {
-        std::uint8_t depth = 0;
-        std::uint32_t x = 0;
-        std::uint32_t y = 0;
-        std::uint32_t z = 0;
-    };
-    std::vector<At> pending{{}};
-    while (!pending.empty()) {
-        const At at = pending.back();
-        pending.pop_back();
-        const auto found = tree.at(at.depth, at.x, at.y, at.z);
-        const bool leaf = at.depth == tree.levels() ||
-                          tree.at(at.depth + 1, 2 * at.x, 2 * at.y, 2 * at.z).depth == at.depth;
-        if (!leaf) {
-            for (std::uint32_t octant = 0; octant < 8; ++octant) {
-                pending.push_back({.depth = static_cast<std::uint8_t>(at.depth + 1),
-                                   .x = (2 * at.x) + (octant & 1U),
-                                   .y = (2 * at.y) + ((octant >> 1U) & 1U),
-                                   .z = (2 * at.z) + ((octant >> 2U) & 1U)});
-            }
-            continue;
-        }
-        if (found.open) {
-            visit(grid::Key{.depth = static_cast<std::uint8_t>(root.depth + at.depth),
-                            .x = (root.x << at.depth) + at.x,
-                            .y = (root.y << at.depth) + at.y,
-                            .z = (root.z << at.depth) + at.z},
-                  !found.value.is_solid());
-        }
-    }
-}
 
 // The pages of `pages` the store holds whole as this generator makes them, by their shape trees.
 Result<std::vector<std::optional<grid::Tree<grid::Shape>>>> held(const baked::PageStore& store,
@@ -133,7 +90,7 @@ std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach, g
         surface &&
         grid.size(static_cast<std::uint8_t>(roots + grid.levels_under(roots))) >= reach.coarse;
     const auto near = [&](grid::Key key) {
-        return reach.around && distance_to(grid, key, *reach.around) <= reach.across / 2.0;
+        return reach.around && grid.distance(key, *reach.around) <= reach.across / 2.0;
     };
     std::vector<grid::Key> found;
     std::vector<grid::Key> pending{leaf};
@@ -173,11 +130,13 @@ Result<Baked> bake(const globe::Generator& generator, baked::PageStore& store,
                 return std::unexpected{shapes.error()};
             }
             for (std::size_t n = 0; n < pages.size(); ++n) {
-                open_leaves((*shapes)[n], pages[n], [&](grid::Key leaf, bool surface) {
-                    const std::vector<grid::Key> under =
-                        pages_under(grid, reach, pages[n], leaf, surface);
-                    next.insert(next.end(), under.begin(), under.end());
-                });
+                grid::for_open_leaves((*shapes)[n], pages[n],
+                                      [&](grid::Key leaf, const auto& found) {
+                                          const bool surface = !found.value.is_solid();
+                                          const std::vector<grid::Key> under =
+                                              pages_under(grid, reach, pages[n], leaf, surface);
+                                          next.insert(next.end(), under.begin(), under.end());
+                                      });
             }
             if (progress) {
                 const std::size_t done = baked.filled + baked.kept;
