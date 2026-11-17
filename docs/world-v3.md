@@ -299,7 +299,14 @@ step replaces something, the old and new are compared before the old goes.
    the surface is followed only round a place, so the coarse bake leaves it to be filled live.
 3. Filling on demand: a queue of wanted nodes, the generator library filling it on worker threads
    and writing the store, the store telling readers. Tests: a node asked for appears and is read;
-   a stale generator version is filled again.
+   a stale generator version is filled again. Done (`bake::Filler`): nodes are wanted from any
+   thread; the owner pumps it (a server tick), which writes the fills finished in one batch, says
+   which pages were written, and starts what each wanted node needs next. A node walks the pages
+   over it from the top, stopping at the first not held whole as this generator makes it (filled
+   on the workers, the node waiting on it), at the one holding its depth, or at one whose leaf over
+   it isn't open. Pages are filled a depth at a time, never past what the page above says is
+   there; two nodes needing one page share its fill. Stale pages fill again and keep their
+   versions where the bytes come out the same.
 4. Scratch stores for dev runs.
 5. Later, once the generator settles: a full bake ahead, and the baker as its own process.
 

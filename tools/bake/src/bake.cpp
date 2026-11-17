@@ -1,3 +1,5 @@
+#include "pages.hpp"
+
 #include <hog/bake/bake.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
@@ -74,23 +76,6 @@ Result<std::vector<std::optional<grid::Tree<grid::Shape>>>> held(const baked::Pa
     return shapes;
 }
 
-Result<void> write(baked::PageStore& store, std::span<const grid::Key> pages,
-                   std::span<const std::optional<globe::Filled>> filled) {
-    return store.write([&](baked::PageStore::Batch& batch) -> Result<void> {
-        for (std::size_t n = 0; n < pages.size(); ++n) {
-            const globe::Filled& page = filled[n].value();
-            for (const Result<std::uint32_t>& put :
-                 {batch.put(pages[n], page.shape), batch.put(pages[n], page.material),
-                  batch.put(pages[n], page.water)}) {
-                if (!put) {
-                    return std::unexpected{put.error()};
-                }
-            }
-        }
-        return {};
-    });
-}
-
 // Fills those of `pages` the store doesn't hold yet and writes them together, giving each page's
 // shape tree, held or filled.
 Result<std::vector<grid::Tree<grid::Shape>>>
@@ -116,7 +101,7 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
                     globe::fill(generator, grid, missing[n], grid.levels_under(missing[n].depth));
             }
         });
-    if (Result<void> written = write(store, missing, filled); !written) {
+    if (Result<void> written = write_pages(store, missing, filled); !written) {
         return std::unexpected{written.error()};
     }
     for (std::size_t m = 0; m < missing.size(); ++m) {

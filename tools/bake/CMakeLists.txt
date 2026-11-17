@@ -1,4 +1,4 @@
-add_library(hog_bake src/bake.cpp)
+add_library(hog_bake src/bake.cpp src/filler.cpp)
 add_library(hog::bake ALIAS hog_bake)
 
 target_include_directories(hog_bake PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -10,7 +10,7 @@ set_target_properties(hog_bake_cli PROPERTIES OUTPUT_NAME hog-bake)
 target_link_libraries(hog_bake_cli PRIVATE hog::bake)
 hog_target_defaults(hog_bake_cli)
 
-hog_add_tests(hog_bake tests/bake_tests.cpp)
+hog_add_tests(hog_bake tests/bake_tests.cpp tests/filler_tests.cpp)
 if(TARGET hog_bake_tests)
     target_link_libraries(hog_bake_tests PRIVATE hog::test_world)
 endif()
