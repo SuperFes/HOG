@@ -275,7 +275,13 @@ step replaces something, the old and new are compared before the old goes.
 
 1. `libs/baked` on grid keys, per tree, with versions and the generator version; old store files
    refused by format version. Tests: put, get, the holder of any point, versions, a generator
-   version mismatch refused.
+   version mismatch refused. Done (`baked::PageStore`): each tree of each page is its own
+   record, keyed by kind and its page's root, holding the generator version that made it and its
+   own version, which steps on only when its bytes change. A store is of one world and grid and
+   refuses others, and refuses the face store's files. Trees another generator version made stay
+   held but read as stale, never as current, for 3.3 to fill again. The holder of a node is
+   found by trying each page over it, finest first, at most four. The face store stays until
+   `hog-bake` moves over in 3.2. Still to come: the water bodies table and placed objects.
 2. `hog-bake`: coarse for the whole planet, fine round a place, and the formed world. Measure size
    and time on the working world and the small world.
 3. Filling on demand: a queue of wanted nodes, the generator library filling it on worker threads

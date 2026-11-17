@@ -20,14 +20,16 @@ target_link_libraries(lmdbxx INTERFACE lmdb)
 add_library(hog_baked
     src/node.cpp
     src/page.cpp
+    src/page_store.cpp
     src/store.cpp)
 add_library(hog::baked ALIAS hog_baked)
 
 target_include_directories(hog_baked PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_baked PUBLIC hog::globe PRIVATE lmdbxx)
+target_link_libraries(hog_baked PUBLIC hog::globe hog::grid PRIVATE lmdbxx)
 hog_target_defaults(hog_baked)
 
 hog_add_tests(hog_baked
     tests/node_tests.cpp
+    tests/page_store_tests.cpp
     tests/page_tests.cpp
     tests/store_tests.cpp)
