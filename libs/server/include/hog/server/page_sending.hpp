@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -63,10 +64,11 @@ public:
         std::vector<std::byte> bytes;
     };
     // The next pages due to the player that `source` holds deeper than sent, or newer, in order,
-    // while they come to under `room` bytes, and one at least if any can go. Those sent as deep as
-    // wanted aren't due again.
-    [[nodiscard]] std::vector<Sent> next(net::ConnectionId player, std::size_t room,
-                                         PageSource& source);
+    // while they come to under `room` bytes, and one at least if any can go, `most` at most. Those
+    // sent as deep as wanted aren't due again.
+    [[nodiscard]] std::vector<Sent>
+    next(net::ConnectionId player, std::size_t room, PageSource& source,
+         std::size_t most = std::numeric_limits<std::size_t>::max());
     // Pages still due to the player, held or not.
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
 

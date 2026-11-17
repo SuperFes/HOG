@@ -294,6 +294,29 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_pages(const Table& pages, const std::filesystem::path& base,
+                                       PagesConfig& config) {
+    if (auto known = pages.only({"store", "scratch"}); !known) {
+        return known;
+    }
+    const auto store = pages.string("store");
+    if (!store) {
+        return std::unexpected(store.error());
+    }
+    const auto scratch = pages.boolean("scratch");
+    if (!scratch) {
+        return std::unexpected(scratch.error());
+    }
+    if (*store && scratch->value_or(false)) {
+        return invalid("pages takes a store or scratch, not both");
+    }
+    if (*store) {
+        config.store = (base / **store).lexically_normal();
+    }
+    config.scratch = scratch->value_or(false);
+    return {};
+}
+
 [[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
                                      NetSettings& config) {
     if (auto known = net.only({"port", "login_key", "simulate", "view_m", "snapshot_bytes"});
@@ -374,8 +397,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 7> names{"server", "save", "log",    "metrics",
-                                                    "debug",  "net",  "weather"};
+    constexpr std::array<std::string_view, 8> names{"server", "save", "log",     "metrics",
+                                                    "debug",  "net",  "weather", "pages"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -410,6 +433,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     }
     if (auto weather = parse_weather(Table{tables[6], "weather"}, config.weather); !weather) {
         return std::unexpected(weather.error());
+    }
+    if (auto pages = parse_pages(Table{tables[7], "pages"}, base, config.pages); !pages) {
+        return std::unexpected(pages.error());
     }
     return config;
 }

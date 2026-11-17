@@ -121,6 +121,10 @@ std::vector<Message> examples() {
                              .k = 0x8000'0001,
                              .bytes = bytes({1, 2, 3})},
                             {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
+            Pages{},
+            Pages{.pages = {bytes({1, 2, 3}), {}, bytes({250})}},
+            Bodies{},
+            Bodies{.bytes = bytes({1, 0, 7})},
             Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
             Grains{},
             Grains{.tick = 7,
@@ -450,6 +454,32 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
     auto short_tile = encode(Tiles{.tiles = {{.level = 1, .bytes = bytes({1, 2})}}});
     short_tile.pop_back();
     CHECK(decode(short_tile).error().code == ErrorCode::Parse);
+    // Pages: a count over the most, one claiming more bytes than allowed, and one cut short.
+    CHECK(decode(bytes({19, 0, static_cast<int>((most_pages + 1) & 0xFFU),
+                        static_cast<int>((most_pages + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto big_page = bytes({19, 0, 1, 0});
+    const auto page_length = static_cast<std::uint32_t>(most_page + 1);
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        big_page.push_back(static_cast<std::byte>((page_length >> shift) & 0xFFU));
+    }
+    big_page.resize(big_page.size() + page_length);
+    CHECK(decode(big_page).error().code == ErrorCode::OutOfRange);
+    auto short_page = encode(Pages{.pages = {bytes({1, 2})}});
+    short_page.pop_back();
+    CHECK(decode(short_page).error().code == ErrorCode::Parse);
+    // Bodies: more bytes than allowed, and cut short.
+    auto many_bodies = bytes({20, 0});
+    const auto bodies_length = static_cast<std::uint32_t>(most_bodies + 1);
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        many_bodies.push_back(static_cast<std::byte>((bodies_length >> shift) & 0xFFU));
+    }
+    many_bodies.resize(many_bodies.size() + bodies_length);
+    CHECK(decode(many_bodies).error().code == ErrorCode::OutOfRange);
+    auto short_bodies = encode(Bodies{.bytes = bytes({1, 2})});
+    short_bodies.pop_back();
+    CHECK(decode(short_bodies).error().code == ErrorCode::Parse);
     // Grains: a count over the most, ids not going up, and one cut short.
     CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
           ErrorCode::OutOfRange);

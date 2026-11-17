@@ -147,6 +147,9 @@ private:
     // Sends each player the tiles due to them, as their connection has room, and cuts the land
     // afresh for one that's moved on, in the background, the land left to it meanwhile.
     void tell_tiles();
+    // Sends players the grid pages due to them, following them where they've moved or pages were
+    // filled since.
+    void tell_pages();
     // Tells each player the grain in flight near them, and once more when there's none.
     void tell_grains();
     // Sends each player a snapshot of those near them.
@@ -193,6 +196,9 @@ private:
     server::TileSending tiles_;
     // The land being cut for a player, after the land and the jobs it uses.
     std::unique_ptr<jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>> cutting_;
+    // The grid pages streamed, where the config asks for them; after the jobs that fill them.
+    struct PageStreaming;
+    std::unique_ptr<PageStreaming> pages_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
@@ -229,6 +235,7 @@ private:
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
     metrics::Counter& tiles_sent_;
+    metrics::Counter& pages_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

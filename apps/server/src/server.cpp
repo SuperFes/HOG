@@ -1,7 +1,10 @@
 #include <hog/app/server.hpp>
+#include <hog/baked/filling.hpp>
+#include <hog/baked/page_store.hpp>
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/text_file.hpp>
+#include <hog/globe/grid_fill.hpp>
 #include <hog/globe/grip.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
@@ -9,6 +12,8 @@
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/grain_sharing.hpp>
 #include <hog/server/ground_wetting.hpp>
+#include <hog/server/page_sending.hpp>
+#include <hog/server/page_source.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
 #include <glm/geometric.hpp>
@@ -37,6 +42,10 @@ constexpr double vent_reach = 4'000.0;
 // Bytes a connection may have queued before tiles wait; one more may go over it, and it
 // holds far more.
 constexpr std::size_t tile_queue = std::size_t{256} * 1'024;
+// Address space a page store may grow into; it takes only what's written.
+constexpr std::uint64_t page_store_bytes = std::uint64_t{1} << 36U;
+// How often a player standing still is followed again for the pages filled since.
+constexpr std::chrono::seconds refollow{1};
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
 
@@ -60,6 +69,49 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 }
 
 } // namespace
+
+struct Server::PageStreaming {
+    PageStreaming(baked::PageStore opened, const globe::Generator& generator, jobs::JobSystem& jobs)
+        : store{std::move(opened)}, filler{generator, store, jobs},
+          sending{globe::grid_of(generator)} {}
+
+    struct Follow {
+        std::chrono::steady_clock::time_point at;
+        bool filled = false; // pages were filled since
+    };
+
+    // Opens the store the config names, or a scratch one, to fill from `generator`; none where
+    // the config streams no pages.
+    [[nodiscard]] static Result<std::unique_ptr<PageStreaming>>
+    open(const server::PagesConfig& config, const globe::Generator& generator,
+         jobs::JobSystem& jobs) {
+        if (!config.on()) {
+            return nullptr;
+        }
+        const baked::Baking baking = baked::baking_of(generator);
+        const baked::PageStore::Options options{
+            .map_bytes = page_store_bytes, .readers = 1024, .read_only = false};
+        auto store = config.store ? baked::PageStore::open(*config.store, baking, options)
+                                  : baked::PageStore::scratch(baking, options);
+        if (!store) {
+            return std::unexpected(store.error());
+        }
+        log::info(server_log, "streaming grid pages from {}", store->directory().string());
+        auto pages = std::make_unique<PageStreaming>(std::move(*store), generator, jobs);
+        auto source = server::PageSource::open(pages->store, &pages->filler);
+        if (!source) {
+            return std::unexpected(source.error());
+        }
+        pages->source.emplace(std::move(*source));
+        return pages;
+    }
+
+    baked::PageStore store;
+    baked::Filler filler;
+    std::optional<server::PageSource> source;
+    server::PageSending sending;
+    std::map<net::ConnectionId, Follow> followed;
+};
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
                store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
@@ -101,6 +153,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
                                        "Lines of hate speech reported, sent on as small talk.")),
       tiles_sent_(
           registry_.counter("hog_tiles_sent_total", "Tiles of the voxel world sent to players.")),
+      pages_sent_(registry_.counter("hog_pages_sent_total", "Grid pages sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -180,6 +233,11 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
             }
         }
     }
+    auto pages = PageStreaming::open(config.pages, server->generator_, server->jobs_);
+    if (!pages) {
+        return context("page store", pages.error());
+    }
+    server->pages_ = std::move(*pages);
     server->open_players();
     return server;
 }
@@ -343,6 +401,10 @@ void Server::serve_players() {
                       lost->reason);
             handshakes_.erase(lost->connection);
             tiles_.leave(lost->connection);
+            if (pages_) {
+                pages_->sending.leave(lost->connection);
+                pages_->followed.erase(lost->connection);
+            }
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
             }
@@ -394,6 +456,9 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         }
         handshakes_.erase(shaking);
         tiles_.join(connection);
+        if (pages_) {
+            pages_->sending.join(connection);
+        }
         if (weather_ && weather_->latest()) {
             send_weather(connection, *weather_->latest());
         }
@@ -598,6 +663,55 @@ void Server::tell_tiles() {
     }
 }
 
+void Server::tell_pages() {
+    if (!pages_ || !players_) {
+        return;
+    }
+    PageStreaming& pages = *pages_;
+    server::PageSource& source = pages.source.value();
+    if (auto written = source.pump(); !written) {
+        log::warn(server_log, "couldn't fill grid pages: {}", written.error());
+    } else if (!written->empty()) {
+        pages.sending.changed(*written);
+        for (auto& [connection, follow] : pages.followed) {
+            follow.filled = true;
+        }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [connection, look] : joined_.looks()) {
+        const DVec3 at = look.at.metres();
+        PageStreaming::Follow& follow = pages.followed[connection];
+        if (pages.sending.moved(connection, at) || (follow.filled && now - follow.at >= refollow)) {
+            pages.sending.follow(connection, at, source);
+            follow = {.at = now, .filled = false};
+        }
+        const std::optional<net::Stats> stats = players_->stats(connection);
+        const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
+        if (queued >= tile_queue || pages.sending.due(connection) == 0) {
+            continue;
+        }
+        protocol::Pages next;
+        for (server::PageSending::Sent& sent :
+             pages.sending.next(connection, tile_queue - queued, source, protocol::most_pages)) {
+            if (sent.bytes.size() > protocol::most_page) {
+                log::warn(server_log, "a grid page of {} bytes too big to send", sent.bytes.size());
+                continue;
+            }
+            next.pages.push_back(std::move(sent.bytes));
+        }
+        if (next.pages.empty()) {
+            continue;
+        }
+        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(next));
+            !sent) {
+            log::debug(server_log, "couldn't send connection {} grid pages: {}",
+                       std::to_underlying(connection), sent.error());
+            continue;
+        }
+        pages_sent_.add(next.pages.size());
+    }
+}
+
 void Server::tell_grains() {
     const std::vector<flow::Parcel>& parcels = flow_.region().parcels();
     if (!players_ || (parcels.empty() && grains_told_.empty())) {
@@ -632,6 +746,7 @@ void Server::share() {
     tell_grains();
     hold_ground();
     tell_tiles();
+    tell_pages();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }

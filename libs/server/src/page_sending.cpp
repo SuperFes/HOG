@@ -164,7 +164,7 @@ bool PageSending::worth_sending(grid::Page& page, const Holding& holding) {
 }
 
 std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::size_t room,
-                                                 PageSource& source) {
+                                                 PageSource& source, std::size_t most) {
     std::vector<Sent> sent;
     const auto found = players_.find(player);
     if (found == players_.end()) {
@@ -174,8 +174,8 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
     std::size_t bytes = 0;
     std::vector<Want> still;
     for (const Want& want : held.due) {
-        std::optional<grid::Page> page =
-            sent.empty() || bytes < room ? source.page(want.page, want.levels) : std::nullopt;
+        const bool open = sent.size() < most && (sent.empty() || bytes < room);
+        std::optional<grid::Page> page = open ? source.page(want.page, want.levels) : std::nullopt;
         if (!page || !page->shape) {
             still.push_back(want);
             continue;

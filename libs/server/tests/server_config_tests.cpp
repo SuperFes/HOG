@@ -55,6 +55,7 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->net.view.budget == 1'200);
     CHECK_FALSE(config->debug.time_control);
     CHECK_FALSE(config->debug.start);
+    CHECK_FALSE(config->pages.on());
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {
@@ -93,6 +94,9 @@ spin_up_hours = 12
 [debug]
 time_control = true
 start = 2030-06-01T12:00:00+02:00
+
+[pages]
+store = "../var/pages"
 )",
                                             base());
     REQUIRE(config);
@@ -124,6 +128,15 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->debug.time_control);
     CHECK(config->debug.start ==
           hog::to_game_time(std::chrono::sys_days{std::chrono::year{2030} / 6 / 1} + 10h));
+    CHECK(config->pages.store == (base() / "../var/pages").lexically_normal());
+    CHECK_FALSE(config->pages.scratch);
+    CHECK(config->pages.on());
+
+    const auto scratch = parse_server_config(with("[pages]\nscratch = true\n"), base());
+    REQUIRE(scratch);
+    CHECK(scratch->pages.scratch);
+    CHECK_FALSE(scratch->pages.store);
+    CHECK(scratch->pages.on());
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -188,6 +201,10 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[debug]\ntime_control = \"yes\"\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nstart = 2030-06-01T12:00:00\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nstart = 2030-06-01\n"), ErrorCode::InvalidArgument},
+        {with("[pages]\nstore = 3\n"), ErrorCode::InvalidArgument},
+        {with("[pages]\nscratch = 1\n"), ErrorCode::InvalidArgument},
+        {with("[pages]\nstore = \"p\"\nscratch = true\n"), ErrorCode::InvalidArgument},
+        {with("[pages]\nsize = 3\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);
     const auto config = parse_server_config(text, base());

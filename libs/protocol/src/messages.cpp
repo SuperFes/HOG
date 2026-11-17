@@ -37,6 +37,8 @@ enum class Kind : std::uint16_t {
     Built = 15,
     Grains = 17,
     Tiles = 18,
+    Pages = 19,
+    Bodies = 20,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -600,6 +602,52 @@ struct Ball {
     return finished(in, std::move(tiles));
 }
 
+[[nodiscard]] Result<Message> read_pages(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "pages");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_pages) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} pages in a message; {} allowed", *count, most_pages));
+    }
+    Pages pages;
+    pages.pages.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto length = read<std::uint32_t>(in, "a page");
+        if (!length) {
+            return make_error(ErrorCode::Parse, "a page cut short");
+        }
+        if (*length > most_page) {
+            return make_error(
+                ErrorCode::OutOfRange,
+                std::format("a page of {} bytes is over the {} allowed", *length, most_page));
+        }
+        const auto bytes = in.read_bytes(*length);
+        if (!bytes) {
+            return make_error(ErrorCode::Parse, "a page cut short");
+        }
+        pages.pages.emplace_back(bytes->begin(), bytes->end());
+    }
+    return finished(in, std::move(pages));
+}
+
+[[nodiscard]] Result<Message> read_bodies(ByteReader& in) {
+    const auto length = read<std::uint32_t>(in, "bodies");
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+    if (*length > most_bodies) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} bytes of bodies; {} allowed", *length, most_bodies));
+    }
+    const auto bytes = in.read_bytes(*length);
+    if (!bytes) {
+        return make_error(ErrorCode::Parse, "bodies cut short");
+    }
+    return finished(in, Bodies{.bytes = {bytes->begin(), bytes->end()}});
+}
+
 [[nodiscard]] Result<Message> read_grains(ByteReader& in) {
     const auto tick = read<std::uint32_t>(in, "grains");
     const auto count = read<std::uint16_t>(in, "grains");
@@ -776,6 +824,24 @@ void write_tiles(ByteWriter& out, const Tiles& tiles) {
     }
 }
 
+void write_pages(ByteWriter& out, const Pages& pages) {
+    HOG_ASSERT(pages.pages.size() <= most_pages, "too many pages to send at once");
+    out.write(static_cast<std::uint16_t>(Kind::Pages));
+    out.write(static_cast<std::uint16_t>(pages.pages.size()));
+    for (const std::vector<std::byte>& page : pages.pages) {
+        HOG_ASSERT(page.size() <= most_page, "a page too big to send");
+        out.write(static_cast<std::uint32_t>(page.size()));
+        out.write_bytes(page);
+    }
+}
+
+void write_bodies(ByteWriter& out, const Bodies& bodies) {
+    HOG_ASSERT(bodies.bytes.size() <= most_bodies, "too many bodies to send at once");
+    out.write(static_cast<std::uint16_t>(Kind::Bodies));
+    out.write(static_cast<std::uint32_t>(bodies.bytes.size()));
+    out.write_bytes(bodies.bytes);
+}
+
 void write_grains(ByteWriter& out, const Grains& grains) {
     HOG_ASSERT(grains.flying.size() <= most_grains, "too much grain to send at once");
     out.write(static_cast<std::uint16_t>(Kind::Grains));
@@ -904,6 +970,10 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(body.material);
             } else if constexpr (std::is_same_v<Body, Tiles>) {
                 write_tiles(out, body);
+            } else if constexpr (std::is_same_v<Body, Pages>) {
+                write_pages(out, body);
+            } else if constexpr (std::is_same_v<Body, Bodies>) {
+                write_bodies(out, body);
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 write_grains(out, body);
             } else if constexpr (std::is_same_v<Body, Ack>) {
@@ -989,6 +1059,10 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_grains(in);
     case Kind::Tiles:
         return read_tiles(in);
+    case Kind::Pages:
+        return read_pages(in);
+    case Kind::Bodies:
+        return read_bodies(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {

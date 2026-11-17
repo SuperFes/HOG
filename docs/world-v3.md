@@ -323,8 +323,7 @@ step replaces something, the old and new are compared before the old goes.
    (`server::PageSource`): pages held whole as this generator makes them are read from the store;
    one missing is asked of the filler where there is one, and read once a pump has written it.
    Without a filler the store is all there is. The filler moved into `libs/baked` so the server
-   links it without the bake tool. The server app opens a store with 4.4, once pages have a
-   message to go in.
+   links it without the bake tool. The server app opens a store with 4.4.
 2. Interest and order: coarse in view first, then nearest fine, then outward refinement within a
    byte budget per client. Tests: order of pages sent for a player standing still. Done
    (`server::PageSending`): from the top page down, under each open leaf of a page wanted whole,
@@ -348,7 +347,14 @@ step replaces something, the old and new are compared before the old goes.
    in line for every player holding them. A player never tells the server what it let go of yet;
    that comes with the client's memory budget (5.1).
 4. Protocol messages for pages, bodies and version bumps; protocol version bumped. Tests:
-   round trips, refusal of a cut message.
+   round trips, refusal of a cut message. Done (protocol 41): `Pages` carries pages as
+   `grid::Page::encode` codes them, only the trees the client didn't hold as they are now;
+   `Bodies` carries water bodies as `grid::WaterBodies::encode` codes them, for when a bodies
+   table is made (none is yet). No version bump message: a changed tree is sent in place, first in
+   line. The server streams pages where its config has a `[pages]` table (`store = "..."` or
+   `scratch = true`): it pumps the filler each tick, follows a player where it moved, or once a
+   second while pages were filled, and sends within the queue room tiles use. Tiles still go
+   alongside until the client draws pages (step 5).
 5. Bot and load tests streaming the new way.
 
 ### 5 · Client

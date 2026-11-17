@@ -54,6 +54,16 @@ struct WeatherConfig {
     GameDuration spin_up = std::chrono::hours{48};
 };
 
+// The grid pages the server streams, from a page store it fills as players need. Without one,
+// none are streamed.
+struct PagesConfig {
+    std::optional<std::filesystem::path> store;
+    // A store of its own, gone when the server stops, so a dev run never reads stale ground.
+    bool scratch = false;
+
+    [[nodiscard]] bool on() const noexcept { return store.has_value() || scratch; }
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -69,6 +79,7 @@ struct ServerConfig {
     NetSettings net;
     DebugSettings debug;
     WeatherConfig weather;
+    PagesConfig pages;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -107,6 +118,10 @@ struct ServerConfig {
 //     vegetation = "forest.toml"
 //     step_hours = 1.0           # game time
 //     burned_years_ago = 8       # optional: the woods by the start burned that long ago
+//
+//     [pages]                    # optional: stream grid pages
+//     store = "../var/pages"     # the page store, filled as players need
+//     scratch = true             # or a store of its own, gone when the server stops
 //
 //     [net]                      # optional
 //     port = 7675                # for players, on every address

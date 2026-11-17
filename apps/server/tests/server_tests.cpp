@@ -7,6 +7,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/grid/page.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/login/token.hpp>
@@ -682,6 +683,61 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
     REQUIRE(echoed);
     CHECK_FALSE(clock_told);
     CHECK(server->time() - start < 1min);
+}
+
+TEST_CASE("a player is streamed grid pages, the top page first, when the server streams them",
+          "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.pages.scratch = true;
+    const auto server = playing(config);
+    auto connected =
+        hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(connected);
+    hog::net::Client& client = *connected;
+    std::optional<hog::grid::Page> first;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 60s;
+    Visited timer{[&] {
+        client.poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                // Pages follow where the player is, so it says.
+                if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                    const hog::DVec3 at = hog::planet::start_direction *
+                                          (server->generator().planet().body.radius + 3'000.0);
+                    REQUIRE(
+                        client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::Moved{
+                                        .sequence = 1,
+                                        .at = hog::protocol::to_millimetres(hog::WorldPosition{at}),
+                                        .stance = hog::protocol::Stance::Flying})));
+                }
+                if (const auto* pages = std::get_if<hog::protocol::Pages>(&*decoded);
+                    pages != nullptr && !first) {
+                    REQUIRE_FALSE(pages->pages.empty());
+                    auto page = hog::grid::Page::decode(pages->pages.front());
+                    REQUIRE(page);
+                    first = std::move(*page);
+                }
+            }
+        }
+        if (first || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(first);
+    CHECK(first->root == hog::grid::Key{});
+    CHECK(first->shape.has_value());
+    CHECK(first->material.has_value());
+    CHECK(first->water.has_value());
 }
 
 TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {

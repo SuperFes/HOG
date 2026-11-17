@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 40;
+inline constexpr std::uint32_t version = 41;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -309,6 +309,28 @@ struct Tiles {
     friend bool operator==(const Tiles&, const Tiles&) = default;
 };
 
+// Bytes a page's coding may take, the pages a message may carry, and the bytes of water bodies.
+inline constexpr std::size_t most_page = std::size_t{1} << 20U;
+inline constexpr std::size_t most_pages = 1024;
+inline constexpr std::size_t most_bodies = std::size_t{1} << 20U;
+
+// Server to client: grid pages about the player, each as `grid::Page::encode` codes it, nearest
+// first within a depth; a page carries only the trees the client didn't hold as they are now, and
+// goes deeper than held when it carries them all. Sent bulk, so they never hold up moves.
+struct Pages {
+    std::vector<std::vector<std::byte>> pages; // at most most_pages, each at most most_page
+
+    friend bool operator==(const Pages&, const Pages&) = default;
+};
+
+// Server to client: water bodies the pages' water trees mark, as `grid::WaterBodies::encode`
+// codes them, held in place of those of the same ids.
+struct Bodies {
+    std::vector<std::byte> bytes; // at most most_bodies
+
+    friend bool operator==(const Bodies&, const Bodies&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -342,13 +364,13 @@ struct Grains {
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell);
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles>;
+                             Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
-// characters, a stance it doesn't know, an edit of no width or too wide, or tiles too many or too
-// big.
+// characters, a stance it doesn't know, an edit of no width or too wide, or tiles, pages or
+// bodies too many or too big.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.
