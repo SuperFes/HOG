@@ -1,4 +1,5 @@
 #include "formed.hpp"
+#include "joints.hpp"
 #include "terms.hpp"
 
 #include <hog/core/assert.hpp>
@@ -7,6 +8,7 @@
 #include <hog/globe/drainage.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/maths.hpp>
+#include <hog/globe/placed.hpp>
 #include <hog/globe/voxel.hpp>
 
 #include <algorithm>
@@ -14,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -136,6 +139,95 @@ std::vector<Rock> Generator::rocks_within(DVec3 toward, double reach, double lod
     return terms::rocks_in(context, coarsest, lod);
 }
 
+std::vector<Crag> Generator::crags_within(DVec3 toward, double reach, double lod) const {
+    const double radius = planet_.body.radius;
+    // Columns no further apart than the narrowest block standing, or the detail asked, so each
+    // block with a crag shown is met.
+    const double apart = std::max(lod, closest_joints);
+    const int level =
+        static_cast<int>(std::ceil(std::log2(std::numbers::pi / 2.0 * radius / apart)));
+    const double slack = std::numbers::pi / 2.0 * radius / std::ldexp(1.0, level);
+    const DVec3 middle = glm::normalize(toward);
+    std::vector<Cell> cells{cell_under(middle, level)};
+    std::set<Cell> seen{cells.front()};
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        const CellNeighbors beside = sides(cells[k]);
+        for (const Cell next : beside.all()) {
+            if (glm::length(center(next) - middle) * radius <= reach + slack &&
+                seen.insert(next).second) {
+                cells.push_back(next);
+            }
+        }
+    }
+    const std::vector<Column> made = columns(cells, lod, 1, false);
+    std::vector<const Column*> standing;
+    for (const Column& column : made) {
+        if (column.crag()) {
+            standing.push_back(&column);
+        }
+    }
+    return crags_from(standing, lod);
+}
+
+namespace {
+
+// Metres from the centre the top of `core` stands along the unit direction `up`, found coming
+// down it; none where it misses.
+std::optional<double> top_along(const Placed& core, DVec3 up) {
+    const double across = 2.0 * glm::length(core.half);
+    const double step = std::max(core.rounding, 0.05);
+    const auto inside = [&](double radius) { return core.distance(up * radius) < 0.0; };
+    const double highest = glm::dot(core.middle, up) + across;
+    double below = highest;
+    while (below > highest - (2.0 * across) && !inside(below)) {
+        below -= step;
+    }
+    if (!inside(below)) {
+        return std::nullopt;
+    }
+    double above = highest;
+    for (int halving = 0; halving < 40; ++halving) {
+        const double between = 0.5 * (above + below);
+        (inside(between) ? below : above) = between;
+    }
+    return below;
+}
+
+} // namespace
+
+std::vector<Crag> Generator::crags_from(std::span<const Column* const> columns, double lod) {
+    // The columns each block stands out of, by its key.
+    std::map<std::uint64_t, std::vector<std::pair<const Column*, CragStanding>>> blocks;
+    for (const Column* column : columns) {
+        if (const std::optional<CragStanding>& standing = column->crag()) {
+            blocks[standing->core.key].emplace_back(column, *standing);
+        }
+    }
+    std::vector<Crag> crags;
+    crags.reserve(blocks.size());
+    for (const auto& [key, over] : blocks) {
+        Crag crag = over.front().second.core;
+        const Placed core = placed_crag(crag);
+        // Lowered to stand as high at its highest as the crag stood out of the ground, the rotted
+        // rock stripped from about it no deeper than it rotted; of the rock it stood highest over.
+        double stood = -1e300;
+        double stands = -1e300;
+        const std::pair<const Column*, CragStanding>* highest = &over.front();
+        for (const auto& standing : over) {
+            if (const double top = standing.second.rock_top + standing.second.height; top > stood) {
+                stood = top;
+                highest = &standing;
+            }
+            stands =
+                std::max(stands, top_along(core, standing.first->direction()).value_or(stands));
+        }
+        crag.middle -= glm::normalize(crag.middle) * std::max(0.0, stands - stood);
+        crag.material = highest->first->inside(highest->second.rock_top - lod);
+        crags.push_back(crag);
+    }
+    return crags;
+}
+
 std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
     HOG_ASSERT(side > 0 && corner.is_valid() &&
                    std::cmp_less_equal(corner.i + static_cast<std::uint32_t>(side),
@@ -157,12 +249,13 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
 }
 
 std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod,
-                                                  int apart, bool rocks) const {
+                                                  int apart, bool placed) const {
     HOG_ASSERT(
         std::ranges::all_of(
             cells, [&](Cell cell) { return cell.is_valid() && cell.level == cells.front().level; }),
         "the cells must be of one level");
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const terms::Context context{
+        .planet = &planet_, .derived = &derived_, .shape = &shape_, .crags = placed};
     const std::size_t count = cells.size();
     const std::vector<terms::Ground> found = terms::ground(context, cells, lod);
     std::unordered_map<std::uint64_t, double> heights;
@@ -221,7 +314,7 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double across_east = ((yy * xh) - (xy * yh)) / determinant;
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
         terms::Fall fall = falls[k];
-        if (!rocks) {
+        if (!placed) {
             fall.rock.reset();
         }
         made.push_back(
@@ -253,6 +346,7 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.water_peak_ = made.water_peak;
     }
     column.slope_ = slope;
+    column.crag_ = made.crag;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
@@ -537,9 +631,24 @@ namespace terms {
 
 namespace {
 
+// The rounded core left of a block rotted `rotted` in from its joints, before it's lowered onto
+// the ground.
+Crag core_of(const Block& block, double rotted) noexcept {
+    const DVec3 half = block.size() / 2.0;
+    const double thinnest = std::min({half.x, half.y, half.z});
+    const DVec3 centre = (block.low + block.high) / 2.0;
+    return {.middle = block.origin + (block.sets[0] * centre.x) + (block.sets[1] * centre.y) +
+                      (block.sets[2] * centre.z),
+            .faces = block.sets,
+            .half = half - rotted,
+            .rounding = std::min(rotted, thinnest - rotted),
+            .material = Material::Air,
+            .key = block.id};
+}
+
 // A formed world's ground: its heights, layers and lakes all read from what formed it.
 Ground formed_ground(const Context& context, DVec3 direction, double lod) {
-    const Formed::Here here = context.shape->formed->at(direction, lod);
+    const Formed::Here here = context.shape->formed->at(direction, lod, context.crags);
     Ground made;
     const double latitude = maths::atan2(
         direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
@@ -555,6 +664,11 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     }
     made.water_rise = here.season.rise;
     made.water_peak = here.season.peak;
+    if (here.standing) {
+        made.crag = CragStanding{.core = core_of(here.standing->block, here.standing->rotted),
+                                 .rock_top = here.standing->rock_top,
+                                 .height = here.standing->height};
+    }
     made.rise = tangential(here.top.gradient, direction);
     made.loosening = here.weathering.loosening;
     made.weathering = here.weathering.rate;

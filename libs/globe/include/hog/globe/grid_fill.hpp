@@ -53,8 +53,9 @@ struct Filled {
 // just inside the surface; water marks the open space over the ground under the sea, a lake or a
 // river, as high as it rises in the year, with the body it is. Leaves above
 // the grid's finest depth are open where finer detail can still come: near the surface, and in
-// solid where caves may lie. Fallen rocks big enough for the finest detail filled to show are
-// placed apart, left out of the shape; smaller ones lie spread as rubble in the ground.
+// solid where caves may lie. Fallen rocks big enough for the finest detail filled to show, and
+// crags, are placed apart, left out of the shape, as are vents; smaller rocks lie spread as
+// rubble in the ground.
 // Precondition: key.depth + levels <= grid.depth().
 [[nodiscard]] Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
                           std::uint8_t levels);

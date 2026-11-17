@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/vents.hpp>
 
 #include <array>
 #include <cstdint>
@@ -28,5 +29,8 @@ struct Placed {
 };
 
 [[nodiscard]] Placed placed_rock(const Rock& rock) noexcept;
+[[nodiscard]] Placed placed_crag(const Crag& crag) noexcept;
+// At the vent's opening, or the pool's floor.
+[[nodiscard]] Placed placed_vent(const VentSite& site) noexcept;
 
 } // namespace hog::globe

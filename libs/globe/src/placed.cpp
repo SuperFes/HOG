@@ -25,4 +25,24 @@ Placed placed_rock(const Rock& rock) noexcept {
             .rounding = rock.edge};
 }
 
+Placed placed_crag(const Crag& crag) noexcept {
+    return {.kind = Placed::Kind::Crag,
+            .key = crag.key,
+            .material = crag.material,
+            .middle = crag.middle,
+            .faces = crag.faces,
+            .half = crag.half,
+            .rounding = crag.rounding};
+}
+
+Placed placed_vent(const VentSite& site) noexcept {
+    return {.kind = site.pool ? Placed::Kind::Pool : Placed::Kind::Vent,
+            .key = site.key,
+            .material = Material::Air,
+            .middle = site.direction * site.ground,
+            .faces = {},
+            .half = DVec3{0.0},
+            .rounding = 0.0};
+}
+
 } // namespace hog::globe

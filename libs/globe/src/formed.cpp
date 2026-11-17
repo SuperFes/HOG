@@ -1690,7 +1690,25 @@ Noise Formed::draping(DVec3 direction, const formation::Smooth::Weights& weights
             .gradient = (sharing * (1.0 + (0.5 * patches.value))) + (patching * (0.5 * share))};
 }
 
-Formed::Here Formed::at(DVec3 direction, double lod) const {
+namespace {
+
+// The ground raised over a crag standing `relief` metres over the rock's top, which lay `over`
+// deep under what covered it, climbing as `rise` has it; nothing loose lies on it.
+void raise_crag(Formed::Here& here, Noise& top, double relief, double over, DVec3 rise) noexcept {
+    here.crag = relief - over;
+    top.value += here.crag;
+    top.gradient += rise;
+    Strata& layers = here.layers;
+    for (double* loose : {&layers.organic, &layers.topsoil, &layers.subsoil, &layers.loess,
+                          &layers.sand, &layers.alluvium, &layers.channel_belt, &layers.lake_beds,
+                          &layers.till, &layers.lava, &layers.saprolite}) {
+        *loose = 0.0;
+    }
+}
+
+} // namespace
+
+Formed::Here Formed::at(DVec3 direction, double lod, bool crags) const {
     formation::Smooth::Weights weights;
     smooth_.weigh(direction, weights, start_near(direction));
     const auto value = [&](const std::vector<double>& field) {
@@ -1806,21 +1824,18 @@ Formed::Here Formed::at(DVec3 direction, double lod) const {
     const bool flowing = under.river > 0.0 && top.top.value - over < under.flood_level;
     if (rotted > 0.0 && !flowing) {
         const DVec3 ground = direction * (radius_ + top.top.value - over);
-        const Core core = core_over(block_at(ground - (direction * 1e-3), strength, joints_seed_),
-                                    rotted, ground, direction);
+        const Block block = block_at(ground - (direction * 1e-3), strength, joints_seed_);
+        const Core core = core_over(block, rotted, ground, direction);
         // Cores too narrow for the detail asked fade out, as gullies do.
         const double fade = std::clamp((core.breadth / (2.0 * lod)) - 1.0, 0.0, 1.0);
-        if (const double relief = core.height * fade; relief > over) {
-            here.crag = relief - over;
+        if (const double relief = core.height * fade; relief > over && crags) {
+            raise_crag(here, top.top, relief, over, core.rise * fade);
             rock_rises = relief;
-            top.top.value += here.crag;
-            top.top.gradient += core.rise * fade;
-            for (double* loose :
-                 {&layers.organic, &layers.topsoil, &layers.subsoil, &layers.loess, &layers.sand,
-                  &layers.alluvium, &layers.channel_belt, &layers.lake_beds, &layers.till,
-                  &layers.lava, &layers.saprolite}) {
-                *loose = 0.0;
-            }
+        } else if (relief > over) {
+            here.standing = {.block = block,
+                             .rotted = rotted,
+                             .rock_top = glm::length(ground),
+                             .height = core.height};
         }
     }
     const double rock_cover = std::max(0.0, value(rock_cover_) - cut + rock_rises);

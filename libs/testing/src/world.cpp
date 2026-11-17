@@ -27,4 +27,13 @@ const globe::Generator& small_world() {
     return generator;
 }
 
+const globe::Generator& small_world_sized_rivers() {
+    static const globe::Generator generator{[] {
+        globe::Planet planet = small_planet();
+        planet.river_size = sized_rivers;
+        return planet;
+    }()};
+    return generator;
+}
+
 } // namespace hog::testing

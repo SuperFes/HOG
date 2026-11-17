@@ -108,6 +108,27 @@ struct Rock {
     [[nodiscard]] double volume() const noexcept;
 };
 
+// The rounded core of a block of rock standing out of the ground as a crag, where the rotted rock
+// about it was carried off: a box between three pairs of faces square to each other, its edges
+// rounded off.
+struct Crag {
+    DVec3 middle{0.0};            // metres from the planet's centre
+    std::array<DVec3, 3> faces{}; // unit, square to each pair of faces
+    DVec3 half{0.0};              // metres from the middle to each pair
+    double rounding = 0.0;
+    Material material = Material::Air;
+    std::uint64_t key = 0; // the block's
+};
+
+// A crag left out of a column's ground: its block's core as it stands before it's lowered onto
+// the ground, metres from the centre the rock's top lies at in the column, and metres the crag
+// stood over that there.
+struct CragStanding {
+    Crag core;
+    double rock_top = 0.0;
+    double height = 0.0;
+};
+
 // The world as maths: a pure function of the planet's description and a point, the same bits on
 // every platform. The planet's centre is the origin and its spin axis +z.
 class Generator {
@@ -149,6 +170,10 @@ public:
         [[nodiscard]] double surface_temperature() const noexcept { return surface_temperature_; }
         // Rise per metre across the ground.
         [[nodiscard]] double slope() const noexcept { return slope_; }
+        // The unit direction it runs down.
+        [[nodiscard]] DVec3 direction() const noexcept { return direction_; }
+        // The crag left out of its ground, made without `placed`, where one stands.
+        [[nodiscard]] const std::optional<CragStanding>& crag() const noexcept { return crag_; }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;
@@ -192,7 +217,8 @@ public:
         WaterBody body_;
         double water_rise_ = 0.0; // as Sample's
         double water_peak_ = 0.0;
-        double slope_ = 0.0;               // across the ground, at the radius
+        double slope_ = 0.0; // across the ground, at the radius
+        std::optional<CragStanding> crag_;
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
         Scatter scatter_;
@@ -207,6 +233,13 @@ public:
     // Every fallen rock, as generated at `lod`, whose cell lies within `reach` metres along the
     // ground of the unit direction `toward`, each once.
     [[nodiscard]] std::vector<Rock> rocks_within(DVec3 toward, double reach, double lod) const;
+    // Every crag shown at `lod` on a block met within `reach` metres along the ground of the unit
+    // direction `toward`, each once: standing over the column through its block where it stands
+    // highest, as high as the ground left out of columns() without `placed` would raise there.
+    [[nodiscard]] std::vector<Crag> crags_within(DVec3 toward, double reach, double lod) const;
+    // The crags standing out of `columns`, made at `lod` without `placed`, each once.
+    [[nodiscard]] static std::vector<Crag> crags_from(std::span<const Column* const> columns,
+                                                      double lod);
 
     // The columns through the middles of a square of cells `side` across from `corner`, on its
     // level, along i then j. Each takes the ground's slope from the cells beside it, so they
@@ -215,9 +248,9 @@ public:
     [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
     // The same through any cells of one level, in their order, each taking the slope from the
     // cells `apart` beside it, as where every so many cells are taken for coarser detail. Without
-    // `rocks`, no fallen rock lies on any, for those placed apart from the ground.
+    // `placed`, no fallen rock lies on any nor crag stands out of it, for those placed apart.
     [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod,
-                                              int apart = 1, bool rocks = true) const;
+                                              int apart = 1, bool placed = true) const;
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {

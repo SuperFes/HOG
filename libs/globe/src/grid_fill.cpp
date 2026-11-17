@@ -87,6 +87,24 @@ public:
                                              .open = open(depth, here)};
     }
 
+    // The finest columns made with a crag left out of their ground.
+    [[nodiscard]] std::vector<const Generator::Column*> standing() const {
+        const int level =
+            std::max(generator_->layers().level - (grid_->depth() - (key_.depth + levels_)), 0);
+        std::vector<const Generator::Column*> found;
+        for (const auto& [slot, column] : columns_) {
+            if (std::cmp_equal(slot & 31U, level) && column.crag()) {
+                found.push_back(&column);
+            }
+        }
+        // In one order however they're held, for the material each takes from the first tied.
+        std::ranges::sort(found, {}, [](const Generator::Column* column) {
+            const DVec3 way = column->direction();
+            return std::array{way.x, way.y, way.z};
+        });
+        return found;
+    }
+
     // Whether the ground passes within `reach` metres of the filled node.
     [[nodiscard]] bool near_ground(double reach) const {
         const Probe& root = probes_.at(grid::code(key_));
@@ -333,13 +351,13 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
         levels, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
             return filler.water(depth, x, y, z);
         });
-    // The rocks the shape leaves out, as the finest detail filled lays them.
+    // What the shape leaves out, its middle in the node, within this far along the ground.
+    const DVec3 middle = grid.centre(key);
+    const double reach =
+        half_diagonal * grid.size(key.depth) * generator.planet().body.radius / glm::length(middle);
     std::vector<Placed> placed;
+    // Rocks and crags, as the finest detail filled lays them.
     if (filler.near_ground(terms::rock_cell)) {
-        const double size = grid.size(key.depth);
-        const DVec3 middle = grid.centre(key);
-        const double reach =
-            half_diagonal * size * generator.planet().body.radius / glm::length(middle);
         const double lod = std::max(grid.size(static_cast<std::uint8_t>(key.depth + levels)),
                                     voxel_lod(generator));
         for (const Rock& rock : generator.rocks_within(middle, reach, lod)) {
@@ -347,8 +365,20 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
                 placed.push_back(placed_rock(rock));
             }
         }
-        std::ranges::sort(placed, {}, &Placed::key);
+        // Crags as the finest columns made stand them.
+        for (const Crag& crag : Generator::crags_from(filler.standing(), lod)) {
+            if (grid.key_at(crag.middle, key.depth) == key) {
+                placed.push_back(placed_crag(crag));
+            }
+        }
     }
+    // Vents, and pools on cavern floors however deep under the ground.
+    for (const VentSite& site : vent_sites_within(generator, middle, reach)) {
+        if (grid.key_at(site.direction * site.ground, key.depth) == key) {
+            placed.push_back(placed_vent(site));
+        }
+    }
+    std::ranges::sort(placed, {}, &Placed::key);
     return {.shape = std::move(shape),
             .material = std::move(material),
             .water = std::move(water),

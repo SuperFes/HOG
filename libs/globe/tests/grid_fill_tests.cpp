@@ -364,12 +364,7 @@ TEST_CASE("every lake is its own body at its level", "[globe][grid]") {
 }
 
 TEST_CASE("the largest rivers are their own bodies where their water stands", "[globe][grid]") {
-    // The small world's rivers sized up, as most of its own are too small to stand in.
-    static const hog::globe::Generator world{[] {
-        hog::globe::Planet planet = hog::testing::small_planet();
-        planet.river_size = 100.0;
-        return planet;
-    }()};
+    const hog::globe::Generator& world = hog::testing::small_world_sized_rivers();
     const hog::grid::Grid grid = grid_of(world);
     const double radius = world.planet().body.radius;
     const double lod = hog::globe::voxel_lod(world);
@@ -433,12 +428,12 @@ TEST_CASE("a placed rock's shape is its rock's", "[globe][grid]") {
     CHECK(placed.key == 77);
     CHECK(placed.material == rock.material);
     for (std::uint64_t n = 0; n < 200; ++n) {
-        const DVec3 point =
-            rock.middle + (DVec3{static_cast<double>(hog::hash_values(n, 1) % 1000),
-                                 static_cast<double>(hog::hash_values(n, 2) % 1000),
-                                 static_cast<double>(hog::hash_values(n, 3) % 1000)} /
-                               250.0) -
-            DVec3{2.0};
+        const DVec3 point = rock.middle +
+                            (DVec3{static_cast<double>(hog::hash_values(n, 1) % 1000),
+                                   static_cast<double>(hog::hash_values(n, 2) % 1000),
+                                   static_cast<double>(hog::hash_values(n, 3) % 1000)} /
+                             250.0) -
+                            DVec3{2.0};
         DVec3 normal{0.0};
         CHECK(placed.distance(point) == Catch::Approx(rock.distance(point, normal)).margin(1e-9));
     }
@@ -449,8 +444,8 @@ TEST_CASE("fallen rocks are placed apart from the ground, where and as big as th
     const auto& world = hog::testing::small_world();
     const hog::grid::Grid grid = grid_of(world);
     const auto depth = static_cast<std::uint8_t>(grid.depth() - levels);
-    const double lod =
-        std::max(grid.size(static_cast<std::uint8_t>(depth + levels)), hog::globe::voxel_lod(world));
+    const double lod = std::max(grid.size(static_cast<std::uint8_t>(depth + levels)),
+                                hog::globe::voxel_lod(world));
     // A rock standing a metre or more over the ground.
     std::optional<hog::globe::Rock> found;
     for (std::uint64_t n = 0; !found; ++n) {
@@ -488,4 +483,102 @@ TEST_CASE("fallen rocks are placed apart from the ground, where and as big as th
     REQUIRE(rock.distance(top, normal) < 0.0);
     CHECK(world.sample(top, lod).distance < 0.0);
     CHECK(held(grid, key, filled, top) > 0.0);
+}
+
+TEST_CASE("crags are placed apart, where and as high as they stood out of the ground",
+          "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const hog::globe::Formed& formed = *world.shape().formed;
+    const double radius = world.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(world);
+    // A crag standing half a metre or more out of the ground.
+    DVec3 up{0.0};
+    for (std::uint64_t n = 0;; ++n) {
+        up = hog::globe::center(
+            hog::globe::cell_at_index(12, (n * 2'654'435'761ULL) % 100'663'296ULL));
+        if (formed.at(up, lod).crag > 0.5) {
+            break;
+        }
+    }
+    // Left out of the ground, which stands as it would without it.
+    const hog::globe::Formed::Here bare = formed.at(up, lod, false);
+    REQUIRE(bare.standing);
+    const hog::globe::Formed::Here::Standing standing = bare.standing.value();
+    CHECK(bare.top.value ==
+          Catch::Approx(formed.at(up, lod).top.value - formed.at(up, lod).crag).margin(1e-6));
+    const std::uint64_t block = standing.block.id;
+    const std::vector<hog::globe::Crag> crags = world.crags_within(up, 1.0, lod);
+    const auto crag = std::ranges::find(crags, block, &hog::globe::Crag::key);
+    REQUIRE(crag != crags.end());
+    const hog::globe::Placed placed = hog::globe::placed_crag(*crag);
+    CHECK(placed.material != hog::globe::Material::Air);
+
+    // As high at its highest as it stood, over the columns its block stood out of.
+    const DVec3 axis = std::abs(up.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 east = glm::normalize(glm::cross(axis, up));
+    const DVec3 north = glm::cross(up, east);
+    const double reach = glm::length(crag->half) + 1.0;
+    double stood = -1e30;
+    double stands = -1e30;
+    const int steps = static_cast<int>(reach / 0.25);
+    for (int i = -steps; i <= steps; ++i) {
+        for (int j = -steps; j <= steps; ++j) {
+            const DVec3 there =
+                glm::normalize(up + (((east * (i * 0.25)) + (north * (j * 0.25))) / radius));
+            const hog::globe::Formed::Here out = formed.at(there, lod);
+            const hog::globe::Formed::Here left = formed.at(there, lod, false);
+            if (out.crag <= 0.0 || !left.standing || left.standing->block.id != block) {
+                continue;
+            }
+            stood = std::max(stood, radius + out.top.value);
+            // Its top over the column, found coming down it.
+            double over = left.standing->rock_top + 20.0;
+            while (over > left.standing->rock_top - 20.0 && placed.distance(there * over) >= 0.0) {
+                over -= 0.01;
+            }
+            stands = std::max(stands, over);
+        }
+    }
+    CHECK(stands == Catch::Approx(stood).margin(0.25));
+
+    // A grid fill about it places it apart from the ground.
+    const auto depth = static_cast<std::uint8_t>(grid.depth() - levels);
+    const Key key = grid.key_at(crag->middle, depth).value();
+    const Filled filled = fill(world, grid, key, levels);
+    const auto in_fill = std::ranges::find(filled.placed, block, &hog::globe::Placed::key);
+    REQUIRE(in_fill != filled.placed.end());
+    CHECK(in_fill->kind == hog::globe::Placed::Kind::Crag);
+}
+
+TEST_CASE("vents and pools are placed apart where they open", "[globe][grid]") {
+    // The small world hot enough for volcanoes and pools to be found on it.
+    static const hog::globe::Generator world{[] {
+        hog::globe::Planet planet = hog::testing::small_planet();
+        planet.heat_flow = 0.35;
+        return planet;
+    }()};
+    const hog::grid::Grid grid = grid_of(world);
+    const std::vector<hog::globe::VentSite> sites = hog::globe::vent_sites(world);
+    REQUIRE_FALSE(sites.empty());
+    for (const hog::globe::VentSite& site : sites) {
+        CAPTURE(site.key);
+        // Found near it as over the whole planet.
+        const std::vector<hog::globe::VentSite> near =
+            hog::globe::vent_sites_within(world, site.direction, 10.0);
+        const auto found = std::ranges::find(near, site.key, &hog::globe::VentSite::key);
+        REQUIRE(found != near.end());
+        CHECK(found->ground == site.ground);
+        CHECK(found->pool == site.pool);
+        // A fill about it places it there.
+        const DVec3 opening = site.direction * site.ground;
+        const Key key =
+            grid.key_at(opening, static_cast<std::uint8_t>(grid.depth() - levels)).value();
+        const Filled filled = fill(world, grid, key, 0);
+        const auto placed = std::ranges::find(filled.placed, site.key, &hog::globe::Placed::key);
+        REQUIRE(placed != filled.placed.end());
+        CHECK(placed->kind ==
+              (site.pool ? hog::globe::Placed::Kind::Pool : hog::globe::Placed::Kind::Vent));
+        CHECK(placed->middle == opening);
+    }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dissection.hpp"
+#include "joints.hpp"
 #include "lake_fill.hpp"
 #include "shoreface.hpp"
 #include "valleys.hpp"
@@ -48,6 +49,16 @@ public:
         double cut = 0.0;
         // Metres the rotted core of a block of rock stands out of the ground about it as a crag.
         double crag = 0.0;
+        // Where a crag stands that was left out of the ground as asked: the block whose core it
+        // is, metres it rotted in from its joints, metres from the centre the rock's top lies at
+        // under it, and metres its core stands over that.
+        struct Standing {
+            Block block;
+            double rotted = 0.0;
+            double rock_top = 0.0;
+            double height = 0.0;
+        };
+        std::optional<Standing> standing;
         // How the rock at the top weathers where it stands bare, which crags and the rock that
         // falls off them come of.
         struct Weathering {
@@ -61,7 +72,8 @@ public:
         } weathering;
     };
     // Gullies and river channels narrower than twice `lod` are left out.
-    [[nodiscard]] Here at(DVec3 direction, double lod = 0.0) const;
+    // Without `crags`, none stands out of the ground, each noted as `standing` instead.
+    [[nodiscard]] Here at(DVec3 direction, double lod = 0.0, bool crags = true) const;
 
     [[nodiscard]] bool has_sea() const noexcept { return has_sea_; }
     // Where a lake that brims runs out over its rim, where a river leaves it: a unit direction,

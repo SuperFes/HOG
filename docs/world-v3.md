@@ -259,7 +259,17 @@ step replaces something, the old and new are compared before the old goes.
      60.85 m at one spot): the voxel fill's water and the column's disagree. Left for the
      store and baker, which read water from the bodies.
 4. Objects out of voxels: crags, rockfall and boulders, vents, as instances. Tests: the same
-   places and sizes as today.
+   places and sizes as today. Done: a fill places them apart from the shape (`Placed`: a
+   rounded box or an opening, keyed so the same object has the same key from any node):
+   - Fallen rocks big enough for the finest detail filled; smaller ones stay rubble in the
+     ground, as today.
+   - Crags: the ground leaves them out, and each is its joint block's core, rotted in and
+     rounded, lowered so its peak over the columns it stands on is today's. It is taken from
+     the columns the fill already makes; reading the formed world apart for it cost 3.5 s a
+     fill. Today a crag is cut flat where its height caps it; the placed block is rigid, so
+     off its peak it can stand a little higher or lower.
+   - Vents and pools, at their openings, however deep a pool's cavern lies. Their search runs
+     over the scatter cells near a node rather than the whole planet.
 
 ### 3 · Store and baker
 

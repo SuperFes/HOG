@@ -18,4 +18,9 @@ namespace hog::testing {
 // The small planet, formed once for the whole test run.
 [[nodiscard]] const globe::Generator& small_world();
 
+// The small planet with its rivers sized up a hundredfold, as most of its own are too small to
+// stand in: formed once for the whole test run.
+inline constexpr double sized_rivers = 100.0;
+[[nodiscard]] const globe::Generator& small_world_sized_rivers();
+
 } // namespace hog::testing

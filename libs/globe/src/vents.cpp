@@ -9,6 +9,9 @@
 #include <cstdint>
 #include <numbers>
 #include <optional>
+#include <set>
+#include <span>
+#include <vector>
 
 namespace hog::globe {
 namespace {
@@ -102,25 +105,23 @@ std::optional<double> pool_floor(const Generator::Column& column) {
     return std::nullopt;
 }
 
-// The vents of the volcanoes not yet extinct, on land.
-void add_vents(const Generator& generator, std::vector<VentSite>& sites) {
-    const std::uint64_t cells = 6ULL << (2 * scatter_level);
-    const double sea = generator.sea_level().value_or(0.0);
-    for (std::uint64_t index = 0; index < cells; ++index) {
-        const auto volcano = volcano_in(generator.planet(), cell_at_index(scatter_level, index));
-        if (!volcano || volcano->extinct) {
-            continue;
-        }
-        const auto ground = ground_below(generator, volcano->centre, 0.5);
-        // Land only: a vent under the sea is the sea's, not ours.
-        if (ground && (!generator.sea_level() || *ground > sea)) {
-            sites.push_back({.direction = volcano->centre, .ground = *ground, .key = volcano->key});
-        }
+// The vent of the volcano in `cell` if it has one not yet extinct, on land.
+std::optional<VentSite> vent_in(const Generator& generator, Cell cell) {
+    const auto volcano = volcano_in(generator.planet(), cell);
+    if (!volcano || volcano->extinct) {
+        return std::nullopt;
     }
+    const auto ground = ground_below(generator, volcano->centre, 0.5);
+    // Land only: a vent under the sea is the sea's, not ours.
+    if (!ground || (generator.sea_level() && *ground <= *generator.sea_level())) {
+        return std::nullopt;
+    }
+    return VentSite{.direction = volcano->centre, .ground = *ground, .key = volcano->key};
 }
 
-// Pools on cavern floors, in whatever rock holds a cave open near the surface.
-void add_pools(const Generator& generator, std::vector<VentSite>& sites) {
+// The pool on a cavern floor in `cell`, if one of its tries finds rock holding a cave open near
+// the surface.
+std::optional<VentSite> pool_in(const Generator& generator, Cell cell) {
     const Planet& planet = generator.planet();
     const std::uint64_t cells = 6ULL << (2 * scatter_level);
     const double sea = generator.sea_level().value_or(0.0);
@@ -129,42 +130,80 @@ void add_pools(const Generator& generator, std::vector<VentSite>& sites) {
     const double chance = pools_per_km2 * ratio * ratio * area_km2 / static_cast<double>(cells);
     const double side = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.body.radius /
                         static_cast<double>(1 << scatter_level);
-    for (std::uint64_t index = 0; index < cells; ++index) {
-        const Cell cell = cell_at_index(scatter_level, index);
-        const std::uint64_t key = hash_values(planet.body.seed, pool_salt, index);
-        if (unit(key) >= chance) {
+    const std::uint64_t key = hash_values(planet.body.seed, pool_salt, index_of(cell));
+    if (unit(key) >= chance) {
+        return std::nullopt;
+    }
+    const DVec3 middle = center(cell);
+    const DVec3 side_axis = std::abs(middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 east = glm::normalize(glm::cross(side_axis, middle));
+    const DVec3 north = glm::cross(middle, east);
+    for (int attempt = 0; attempt < pool_tries; ++attempt) {
+        const std::uint64_t own = hash_values(key, attempt);
+        const DVec3 direction =
+            glm::normalize(middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
+                                      ((unit(hash_values(own, 2)) - 0.5) * north)) *
+                                     (side / planet.body.radius)));
+        const Generator::Column column = generator.column(direction, 0.5);
+        if (column.ground() <= sea) {
             continue;
         }
-        const DVec3 middle = center(cell);
-        const DVec3 side_axis =
-            std::abs(middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
-        const DVec3 east = glm::normalize(glm::cross(side_axis, middle));
-        const DVec3 north = glm::cross(middle, east);
-        for (int attempt = 0; attempt < pool_tries; ++attempt) {
-            const std::uint64_t own = hash_values(key, attempt);
-            const DVec3 direction =
-                glm::normalize(middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
-                                          ((unit(hash_values(own, 2)) - 0.5) * north)) *
-                                         (side / planet.body.radius)));
-            const Generator::Column column = generator.column(direction, 0.5);
-            if (column.ground() <= sea) {
-                continue;
-            }
-            if (const std::optional<double> floor = pool_floor(column)) {
-                sites.push_back(
-                    {.direction = direction, .ground = *floor, .pool = true, .key = own});
-                break;
-            }
+        if (const std::optional<double> floor = pool_floor(column)) {
+            return VentSite{.direction = direction, .ground = *floor, .pool = true, .key = own};
         }
     }
+    return std::nullopt;
+}
+
+// The vents and pools of `cells`, vents first.
+std::vector<VentSite> sites_in(const Generator& generator, std::span<const Cell> cells) {
+    std::vector<VentSite> sites;
+    for (const Cell cell : cells) {
+        if (const std::optional<VentSite> vent = vent_in(generator, cell)) {
+            sites.push_back(*vent);
+        }
+    }
+    for (const Cell cell : cells) {
+        if (const std::optional<VentSite> pool = pool_in(generator, cell)) {
+            sites.push_back(*pool);
+        }
+    }
+    return sites;
 }
 
 } // namespace
 
 std::vector<VentSite> vent_sites(const Generator& generator) {
-    std::vector<VentSite> sites;
-    add_vents(generator, sites);
-    add_pools(generator, sites);
+    const std::uint64_t count = 6ULL << (2 * scatter_level);
+    std::vector<Cell> cells;
+    cells.reserve(count);
+    for (std::uint64_t index = 0; index < count; ++index) {
+        cells.push_back(cell_at_index(scatter_level, index));
+    }
+    return sites_in(generator, cells);
+}
+
+std::vector<VentSite> vent_sites_within(const Generator& generator, DVec3 toward, double reach) {
+    const double radius = generator.planet().body.radius;
+    const DVec3 middle = glm::normalize(toward);
+    // A cell's every point lies within half its diagonal of its middle; none is wider than this.
+    const double slack = std::numbers::pi / 2.0 * radius / std::ldexp(1.0, scatter_level);
+    std::vector<Cell> cells{cell_under(middle, scatter_level)};
+    std::set<Cell> seen{cells.front()};
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        const CellNeighbors beside = sides(cells[k]);
+        for (const Cell next : beside.all()) {
+            if (glm::length(center(next) - middle) * radius <= reach + slack &&
+                seen.insert(next).second) {
+                cells.push_back(next);
+            }
+        }
+    }
+    std::ranges::sort(cells);
+    std::vector<VentSite> sites = sites_in(generator, cells);
+    std::erase_if(sites, [&](const VentSite& site) {
+        return glm::length(site.direction - middle) * radius > reach;
+    });
     return sites;
 }
 

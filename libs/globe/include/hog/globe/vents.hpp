@@ -53,5 +53,8 @@ inline constexpr double pools_per_km2 = 1.0 / 400.0;
 // Every vent on the planet, the same list each time: scattered over the surface by seed, and kept
 // where the ground stands over the sea.
 [[nodiscard]] std::vector<VentSite> vent_sites(const Generator& generator);
+// The same, those within `reach` metres along the ground of the unit direction `toward`.
+[[nodiscard]] std::vector<VentSite> vent_sites_within(const Generator& generator, DVec3 toward,
+                                                      double reach);
 
 } // namespace hog::globe

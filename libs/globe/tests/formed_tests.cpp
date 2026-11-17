@@ -1254,9 +1254,8 @@ TEST_CASE("what stands out of the ground round a place", "[.probe_spikes]") {
 
 TEST_CASE("rivers sized up run wider and deeper over the same courses", "[globe][formed]") {
     const Formed& plain = *formed_generator().shape().formed;
-    Planet planet = formed_planet();
-    planet.river_size = 100.0;
-    const Formed sized{planet};
+    const Planet planet = formed_planet();
+    const Formed& sized = *hog::testing::small_world_sized_rivers().shape().formed;
     const hog::formation::World& world = plain.world();
     const double lod = planet.voxel;
     const double radius = planet.body.radius;

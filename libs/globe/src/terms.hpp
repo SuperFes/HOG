@@ -29,9 +29,10 @@ enum class Term : std::uint8_t {
 };
 
 struct Context {
-    const Planet* planet;
-    const Derived* derived;
-    const Generator::Shape* shape;
+    const Planet* planet = nullptr;
+    const Derived* derived = nullptr;
+    const Generator::Shape* shape = nullptr;
+    bool crags = true; // standing out of the ground, rather than placed apart
 
     [[nodiscard]] std::uint64_t seed(Term term) const noexcept;
 };
@@ -48,9 +49,10 @@ struct Ground {
     double height = 0.0;              // over the radius
     double surface_temperature = 0.0; // kelvin, at the reference level
     Layering layers;
-    std::optional<double> lake;  // a lake's water, over the radius
-    std::optional<double> river; // a river's, at its lowest in the year
-    WaterBody body;              // which that water is
+    std::optional<double> lake;       // a lake's water, over the radius
+    std::optional<double> river;      // a river's, at its lowest in the year
+    WaterBody body;                   // which that water is
+    std::optional<CragStanding> crag; // left out of it, where one stands
     // How far either's water rises over that through the year, and when it's highest, as a share
     // of the year from the March equinox.
     double water_rise = 0.0;
