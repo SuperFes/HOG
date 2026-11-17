@@ -380,6 +380,13 @@ step replaces something, the old and new are compared before the old goes.
    its own depth.
 3. Smooth mesher over the shape tree at a depth, material weights per vertex. Tests: closed
    surfaces on flat, slope, overhang and cave regions; vertices on the surface within tolerance.
+   Done (`client::mesh_shape`): adaptive dual contouring over a page's leaves, drawn no wider
+   than four nodes of the drawn depth. Each vertex sits on its leaf's plane, nearest the crossings
+   around it, and shows its leaf's blend of two materials. A corner's side comes only from the
+   page's own leaves: solid where it touches solid and nothing open, and the other way round;
+   otherwise from the smallest planes over it. So a page's mesh depends on its tree and depth
+   alone. Edges on the page's sides make no polygons. They're left for 5.4, where stitching the
+   border leaves of neighbours fits this scheme better than skirts.
 4. Seams between depths. Tests: no gaps along every shared edge of mixed-depth neighbours.
 5. Morph or fade between depths. Tests: vertex positions at the start and end of a swap.
 6. Mesh cache and jobs: meshed once, kept until a version or depth changes, nearest first.
