@@ -223,6 +223,8 @@ constexpr double highest_crest = 40.0;
 // As sea_laid.slang has them.
 struct LaidPush {
     glm::uvec4 laying{0U};
+    // As sea_laid.slang's.
+    glm::vec4 still{0.0F};
 };
 
 constexpr std::array laid_descriptors{
@@ -912,7 +914,11 @@ Result<> Ocean::lay_water(VkCommandBuffer commands, const OceanView& view, std::
     // After all that read the frame's lighting before.
     memory_barrier(commands, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_NONE);
-    const LaidPush push{.laying = {sea_laying_at, seen_through ? 1U : 0U, sea_water_at, 0U}};
+    const LaidPush push{.laying = {sea_laying_at, seen_through ? 1U : 0U, sea_water_at, 0U},
+                        .still = view.still ? glm::vec4{static_cast<float>(view.still->level),
+                                                        static_cast<float>(view.still->rise),
+                                                        static_cast<float>(view.still->peak), 1.0F}
+                                            : glm::vec4{0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, laid_.handle());
     push_uniform_buffer(commands, laid_, 0, waves_.at(frame).handle());
     push_sampled_image(commands, laid_, 1,

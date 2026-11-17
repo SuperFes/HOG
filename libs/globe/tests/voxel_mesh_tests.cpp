@@ -7,6 +7,7 @@
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_mesh.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/testing/quick.hpp>
 #include <hog/testing/world.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -18,9 +19,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <initializer_list>
 #include <map>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -636,4 +640,77 @@ TEST_CASE("generated water at a gentle shore is drawn no higher than its level",
         CHECK(glm::length(at) < level + 0.01);
     }
     CHECK(tops > 100);
+}
+
+TEST_CASE("liquid stands in a column as the mesh draws it, body by body", "[globe][voxel_mesh]") {
+    const Voxel rock{.solid = Material::Granite, .solid_amount = Voxel::full};
+    const Voxel water{
+        .liquid = Material::Water, .liquid_amount = Voxel::full, .rise = 20, .peak = 64};
+    Voxel quarter = water;
+    quarter.liquid_amount = Voxel::full / 4;
+    const std::array column{rock, rock, rock, water, water, quarter, Voxel{}, rock, water, Voxel{}};
+    const std::vector<hog::globe::DrawnLiquid> bodies = hog::globe::liquid_drawn(column);
+    REQUIRE(bodies.size() == 2);
+    CHECK(bodies[0].bottom == 3.0);
+    CHECK(bodies[0].top == Catch::Approx(5.25));
+    CHECK(bodies[0].liquid == Material::Water);
+    CHECK(bodies[0].rise == 20);
+    CHECK(bodies[0].peak == 64);
+    CHECK(bodies[1].bottom == 8.0);
+    CHECK(bodies[1].top == 9.0);
+    CHECK(hog::globe::liquid_drawn(std::array{rock, Voxel{}}).empty());
+}
+
+TEST_CASE("the water drawn round a point is found where the point lies in it",
+          "[globe][voxel_mesh]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::globe::Layers& layers = generator.layers();
+    const double radius = generator.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(generator);
+    hog::globe::MadeWorld made{generator};
+    const hog::globe::World& world = made.world();
+    // The top of the open water the voxels hold in the column under `up`, read voxel by voxel.
+    const auto water_top = [&](hog::DVec3 up) -> std::optional<double> {
+        const hog::globe::Cell cell = hog::globe::cell_under(up, layers.level);
+        const int from = layers.layer_at(radius - 100.0);
+        const int count = layers.layer_at(radius + 400.0) - from;
+        const std::vector<Voxel> voxels = world.fill(std::span{&cell, 1}, from, count);
+        for (int k = count - 1; k >= 0; --k) {
+            const Voxel& voxel = voxels[static_cast<std::size_t>(k)];
+            if (voxel.liquid == Material::Water && voxel.solid == Material::Air) {
+                return layers.bottom(from + k) +
+                       (voxel.liquid_amount / double{Voxel::full} * layers.thickness);
+            }
+        }
+        return std::nullopt;
+    };
+    // Where the generator has a lake's or river's water a few metres deep on land, and the sea.
+    for (const bool inland : {true, false}) {
+        CAPTURE(inland);
+        int checked = 0;
+        for (std::uint64_t n = 0; checked < hog::testing::full_or(3, 1); ++n) {
+            const hog::DVec3 up =
+                hog::globe::center(hog::globe::cell_at_index(7, (n * 2'654'435'761U) % 98'304U));
+            const hog::globe::Generator::Column column = generator.column(up, lod);
+            const bool sea = std::abs(column.water() - radius) < layers.thickness;
+            const bool land = column.ground() > radius + layers.thickness;
+            if (column.water() < column.ground() + 3.0 || sea == inland || land != inland) {
+                continue;
+            }
+            made.cover(up, 1);
+            const std::optional<double> top = water_top(up);
+            if (!top || *top < column.ground() + 2.0) {
+                continue;
+            }
+            CAPTURE(*top - radius);
+            ++checked;
+            const auto in = hog::globe::water_around(world, up * (*top - 1.0));
+            REQUIRE(in);
+            const hog::globe::StandingWater found = in.value();
+            CHECK(std::abs(found.top - *top) < layers.thickness);
+            // Over it past its highest, and in the ground under it, the point's in none.
+            CHECK_FALSE(hog::globe::water_around(world, up * (found.top + found.rise + 1.0)));
+            CHECK_FALSE(hog::globe::water_around(world, up * (column.ground() - 2.0)));
+        }
+    }
 }

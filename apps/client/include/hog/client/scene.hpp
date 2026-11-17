@@ -75,6 +75,9 @@ struct Shot {
     // Drawn on its own, with no frames before it: what's kept over frames is caught up on at once,
     // which would stall a frame in play.
     bool still = false;
+    // The lake's or river's water round the eye it may be in; else only the sea's.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::optional<render::StillAtEye> still_water = {};
 };
 
 // The weather at the eye as the shot shows it: a clear sky while none is known.

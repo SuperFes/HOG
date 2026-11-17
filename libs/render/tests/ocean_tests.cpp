@@ -415,8 +415,10 @@ struct WavySea {
 };
 
 // The plane of the sea's surface at the eye, as the sea writes it into the frame's Lighting: how it
-// faces, and how far the eye stands above it along that.
-glm::vec4 water_at_eye(hog::render::Device& device, const WavySea& sea) {
+// faces, and how far the eye stands above it along that; or of `still` water's, where the eye's in
+// that.
+glm::vec4 water_at_eye(hog::render::Device& device, const WavySea& sea,
+                       std::optional<hog::render::StillAtEye> still = std::nullopt) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -430,8 +432,12 @@ glm::vec4 water_at_eye(hog::render::Device& device, const WavySea& sea) {
     const hog::render::SkyView seen{
         .camera = camera, .sun = sea.bend.up, .bend = sea.bend, .exposure = 10.0};
     const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
-    const OceanView view{
-        .camera = camera, .sun = sea.bend.up, .bend = sea.bend, .air = air, .waves = sea.drawn};
+    const OceanView view{.camera = camera,
+                         .sun = sea.bend.up,
+                         .bend = sea.bend,
+                         .air = air,
+                         .waves = sea.drawn,
+                         .still = still};
     auto read = hog::render::make_buffer(
         device, sizeof(glm::vec4), VK_BUFFER_USAGE_TRANSFER_DST_BIT, hog::render::Memory::Readback);
     REQUIRE(read);
@@ -483,6 +489,27 @@ TEST_CASE("the sea finds its surface at the eye, over it or under it", "[render]
             }
         }
     }
+}
+
+TEST_CASE("under a lake's or river's water the eye is in it, at its level through the year",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const WavySea sea{6.0, 30.0};
+    const auto now = static_cast<double>(sea.drawn.year.x);
+    // At its highest now, it stands its rise over its lowest.
+    const glm::vec4 highest = water_at_eye(
+        *device, sea, hog::render::StillAtEye{.level = 31.0, .rise = 2.0, .peak = now});
+    CHECK(glm::dot(DVec3{hog::Vec3{highest}}, sea.bend.up) > 1.0 - 1e-6);
+    CHECK_THAT(static_cast<double>(highest.w), WithinAbs(-3.0, 1e-3));
+    // Half a year on, at its lowest.
+    const glm::vec4 lowest = water_at_eye(
+        *device, sea, hog::render::StillAtEye{.level = 31.0, .rise = 2.0, .peak = now + 0.5});
+    CHECK_THAT(static_cast<double>(lowest.w), WithinAbs(-1.0, 1e-3));
+    // Over it, the eye's over the sea as ever.
+    const glm::vec4 over = water_at_eye(
+        *device, sea, hog::render::StillAtEye{.level = 20.0, .rise = 2.0, .peak = now});
+    CHECK(over == water_at_eye(*device, sea));
+    CHECK(over.w > 20.0F);
 }
 
 TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[render][gpu]") {

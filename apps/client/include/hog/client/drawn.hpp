@@ -24,4 +24,10 @@ inline constexpr std::uint8_t shore_corner = 2;
 [[nodiscard]] Drawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea,
                              double thickness);
 
+// The lake's or river's water drawn round `eye` that the eye's in, or would be at the water's
+// highest in the year: none in the sea, told apart as drawn_of tells it, which finds the eye in
+// it from its own surface.
+[[nodiscard]] std::optional<globe::StandingWater>
+still_water_at(const globe::World& world, DVec3 eye, std::optional<double> sea, double thickness);
+
 } // namespace hog::client

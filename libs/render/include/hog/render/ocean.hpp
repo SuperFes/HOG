@@ -163,6 +163,15 @@ struct SeaBehind {
     VkImageView environment = VK_NULL_HANDLE;
 };
 
+// A lake's or river's water the eye may be in, as the water drawn round it holds it: metres over
+// sea level its top stands at its lowest in the year, metres it rises over that at its highest,
+// and when, as a share of the year from the March equinox.
+struct StillAtEye {
+    double level = 0.0;
+    double rise = 0.0;
+    double peak = 0.0;
+};
+
 // Where the sea is seen from and what it reflects.
 struct OceanView {
     Camera camera;
@@ -184,6 +193,9 @@ struct OceanView {
     // the voxels' own surface, among still water, where it meets the ground they mesh; past it,
     // the sea's disc. None draws only the disc.
     double voxel_sea = 0.0;
+    // Where the eye's under a lake's or river's water, it's in that, not the sea.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::optional<StillAtEye> still = {};
 };
 
 // The sea's surface, moved by its waves about sea level, out to the horizon round the point under

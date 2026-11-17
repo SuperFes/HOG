@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::globe {
@@ -47,5 +48,31 @@ using TileAt = std::function<const VoxelTree*(TileKey)>;
 [[nodiscard]] VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile,
                                   const TileAt& beside = {},
                                   std::optional<double> shore_rise = std::nullopt);
+
+// Liquid standing in a column of voxels, as the mesh draws it: its bottom and top in voxels up from
+// the column's bottom, what it is, and how its water rises through the year, as voxels hold it.
+struct DrawnLiquid {
+    double bottom = 0.0;
+    double top = 0.0;
+    Material liquid = Material::Air;
+    std::uint8_t rise = 0;
+    std::uint8_t peak = 0;
+};
+
+// Each body of liquid standing in `column`, voxels from the bottom, lowest first.
+[[nodiscard]] std::vector<DrawnLiquid> liquid_drawn(std::span<const Voxel> column);
+
+// Open water as the mesh draws it round a point: metres from the centre its top stands at its
+// lowest in the year, metres it rises over that at its highest, and when, as a share of the year
+// from the March equinox.
+struct StandingWater {
+    double top = 0.0;
+    double rise = 0.0;
+    double peak = 0.0;
+};
+
+// The water drawn in the column under `at`, metres from the centre, that `at` lies in, or would
+// at the water's highest in the year; none where it lies in none.
+[[nodiscard]] std::optional<StandingWater> water_around(const World& world, DVec3 at);
 
 } // namespace hog::globe

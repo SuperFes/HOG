@@ -861,4 +861,66 @@ VoxelMesh mesh_tile(const Layers& layers, TileKey key, const VoxelTree& tile, co
     return mesh;
 }
 
+std::vector<DrawnLiquid> liquid_drawn(std::span<const Voxel> column) {
+    std::vector<Held> held;
+    held.reserve(column.size());
+    for (const Voxel& voxel : column) {
+        held.push_back(held_of(voxel));
+    }
+    const std::vector<Slot> slots = stood(held);
+    std::vector<DrawnLiquid> found;
+    bool running = false;
+    for (std::size_t z = 0; z < slots.size(); ++z) {
+        const Piece& liquid = slots[z].liquid;
+        if (liquid.empty()) {
+            running = false;
+            continue;
+        }
+        const double bottom = static_cast<double>(z) + liquid.from;
+        // On from the one under it where that fills its voxel to the top and this from the bottom.
+        if (running && liquid.from <= 0.0 && found.back().top >= bottom) {
+            found.back().top = static_cast<double>(z) + liquid.to;
+        } else {
+            found.push_back({.bottom = bottom,
+                             .top = static_cast<double>(z) + liquid.to,
+                             .liquid = liquid.material,
+                             .rise = slots[z].rise,
+                             .peak = slots[z].peak});
+        }
+        running = true;
+    }
+    return found;
+}
+
+std::optional<StandingWater> water_around(const World& world, DVec3 at) {
+    // Decimetres a voxel's water rises, at most.
+    constexpr double highest_rise = std::numeric_limits<std::uint8_t>::max() / 10.0;
+    constexpr int stretch = 32;
+    const Layers& layers = world.layers();
+    const double from = glm::length(at);
+    const Cell cell = cell_under(at / from, layers.level);
+    const int lowest = std::clamp(layers.layer_at(from - highest_rise) - 1, 0, layers.count - 1);
+    int highest = std::clamp(layers.layer_at(from) + stretch, lowest, layers.count - 1);
+    while (true) {
+        const std::vector<Voxel> voxels =
+            world.fill(std::span{&cell, 1}, lowest, highest - lowest + 1);
+        const std::vector<DrawnLiquid> bodies = liquid_drawn(voxels);
+        // Water up to the top read may stand higher.
+        if (!bodies.empty() && bodies.back().top >= static_cast<double>(voxels.size()) &&
+            highest < layers.count - 1) {
+            highest = std::min(highest + stretch, layers.count - 1);
+            continue;
+        }
+        for (const DrawnLiquid& body : bodies) {
+            const double bottom = layers.bottom(lowest) + (body.bottom * layers.thickness);
+            const double top = layers.bottom(lowest) + (body.top * layers.thickness);
+            const double rise = body.rise / 10.0;
+            if (body.liquid == Material::Water && bottom <= from && from <= top + rise) {
+                return StandingWater{.top = top, .rise = rise, .peak = body.peak / 256.0};
+            }
+        }
+        return std::nullopt;
+    }
+}
+
 } // namespace hog::globe

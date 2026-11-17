@@ -64,4 +64,13 @@ Drawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, double t
     return drawn;
 }
 
+std::optional<globe::StandingWater> still_water_at(const globe::World& world, DVec3 eye,
+                                                   std::optional<double> sea, double thickness) {
+    const std::optional<globe::StandingWater> water = globe::water_around(world, eye);
+    if (!water || (sea && std::abs(water->top - *sea) <= thickness)) {
+        return std::nullopt;
+    }
+    return water;
+}
+
 } // namespace hog::client

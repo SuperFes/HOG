@@ -1,6 +1,7 @@
 #include <hog/chat/filter.hpp>
 #include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
+#include <hog/client/drawn.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
@@ -990,6 +991,20 @@ struct StreamedGround {
     client::TileMeshes meshes;
 };
 
+// The lake's or river's water the eye may be in, as the ground held round it draws it.
+std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, WorldPosition eye) {
+    const double radius = ground.planet.body.radius;
+    const std::optional<double> sea =
+        globe::derive(ground.planet).liquid ? std::optional{radius} : std::nullopt;
+    const std::optional<globe::StandingWater> water =
+        client::still_water_at(ground.world, eye.metres(), sea, ground.world.layers().thickness);
+    if (!water) {
+        return std::nullopt;
+    }
+    return render::StillAtEye{
+        .level = water->top - radius, .rise = water->rise, .peak = water->peak};
+}
+
 // Takes in the tiles the server sent, held for the world and the player's footing and meshed to
 // draw.
 void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene,
@@ -1101,7 +1116,8 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                                 .companion = std::nullopt,
                                 .others = std::move(avatars),
                                 .forecast = &forecast,
-                                .now = now};
+                                .now = now,
+                                .still_water = still_at_eye(ground, camera.eye)};
         const Overlay overlay{.times = &times,
                               .timings = controls.timings,
                               .clouds = scene.cloud_quality(),

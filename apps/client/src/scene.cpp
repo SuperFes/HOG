@@ -509,7 +509,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                 .air = through,
                                 .waves = drawn_waves,
                                 .behind = std::nullopt,
-                                .voxel_sea = ground_covered_};
+                                .voxel_sea = ground_covered_,
+                                .still = shot.still_water};
     graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
         return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
                                 shot.still);
