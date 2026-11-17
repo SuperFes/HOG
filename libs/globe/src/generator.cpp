@@ -237,17 +237,25 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     return column;
 }
 
+bool Generator::Column::caves_may_lie(double lowest, double highest) const noexcept {
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    return std::max(lowest, ground_ - terms::cave_floor(context)) < std::min(highest, ground_) &&
+           terms::cave_district(context, direction_) > 0.0;
+}
+
 std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, double highest,
                                                                 double within) const {
     std::vector<std::pair<double, double>> found;
     const terms::Context context{.planet = &generator_->planet_,
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
-    const double deepest = std::max(lowest, ground_ - terms::cave_floor(context));
-    const double top_most = std::min(highest, ground_);
-    if (deepest >= top_most || terms::cave_district(context, direction_) <= 0.0) {
+    if (!caves_may_lie(lowest, highest)) {
         return found;
     }
+    const double deepest = std::max(lowest, ground_ - terms::cave_floor(context));
+    const double top_most = std::min(highest, ground_);
     // Down by as far as no cave can lie within `within`. Nearer than a voxel's step counts as
     // within, so every step outside a stretch is one no cave lies across.
     const double least = std::max(lod_ / 2.0, 1.0);
@@ -354,11 +362,15 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
                                  .shape = &generator_->shape_};
     const double depth = ground_ - radius;
 
-    // A cave takes its voxels out of the rock, and opens the ground where it reaches it.
+    // A cave takes its voxels out of the rock, and opens the ground where it reaches it. Only one
+    // within reach counts: at the reach, none is known to be near, and the ground's distance
+    // stands.
     if (caves && sample.distance < cave_surface_reach) {
-        sample.distance =
-            std::max(sample.distance,
-                     -terms::cave_distance(context, strata_, direction_, radius, ground_, lod_));
+        const double cave =
+            terms::cave_distance(context, strata_, direction_, radius, ground_, lod_);
+        if (cave < terms::cave_reach) {
+            sample.distance = std::max(sample.distance, -cave);
+        }
     }
     // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
     // ground.

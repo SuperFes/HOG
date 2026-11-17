@@ -220,7 +220,17 @@ step replaces something, the old and new are compared before the old goes.
    a batched column 0.025 ms, a point along a made column 0.9 µs. A 32³ node on the ground
    fills in ~0.2 s on one core. Water marks only the sea's basin until 2.3.
 2. Coarse agrees with fine: a node filled coarse equals the fine ones under it summed up, so
-   detail filled later never jumps. Tests: every level of a small world.
+   detail filled later never jumps. Tests: every level of a small world. Measured from 1 m to
+   2 km nodes: the coarse plane lies within 0.1 of a side of the fine ones' summary on average,
+   0.76 at worst, and no node left closed coarse gains detail finer. Found on the way: the cave
+   term held the distance at -50 m anywhere in solid, so coarse nodes deep in rock looked near
+   a surface; caves now count only within their reach, and a node is left whole only where none
+   shows at its detail, kept open where one may show finer. Materials and water bodies sum up
+   as the most common but none (air, no body), so a coarse node shows what's in it. Still apart:
+   - Caves showing only finer turn a few summaries' normals (cave roofs average in with the
+     ground). Idea: sum planes up by how much of each child is solid, so a cave counts little.
+   - A coarse node's material is the surface's (what's seen), its summary the most common
+     inside (what's dug), so far ground can change colour once finer is filled. Open question.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
    the largest rivers come out as bodies with the right levels.

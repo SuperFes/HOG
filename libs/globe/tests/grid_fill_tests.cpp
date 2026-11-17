@@ -1,13 +1,17 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
+#include <hog/testing/quick.hpp>
 #include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 using hog::DVec3;
 using hog::globe::fill;
@@ -158,4 +162,59 @@ TEST_CASE("open space under the sea is the sea's basin", "[globe][grid]") {
 
     const Key sky = grid.key_at(up * (sea + 200.0), depth).value();
     CHECK(fill(world, grid, sky, levels).water.root().value == 0);
+}
+
+TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const double ground = hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    // Over every depth, as caves showing only finer turn a few nodes' planes.
+    int crossing = 0;
+    double apart = 0.0;
+    double alike = 0.0;
+    const int step = hog::testing::full_or(1, 4);
+    for (int at = 4; std::cmp_less(at, grid.depth()); at += step) {
+        CAPTURE(at);
+        const auto depth = static_cast<std::uint8_t>(at);
+        const auto under = static_cast<std::uint8_t>(std::min(3, grid.depth() - depth));
+        const Key middle = grid.key_at(up * ground, depth).value();
+        // The node on the ground and those beside its faces.
+        const std::array<std::array<int, 3>, 7> around{
+            {{0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}}};
+        for (const auto& [dx, dy, dz] : around) {
+            const auto key = middle.beside(dx, dy, dz);
+            if (!key) {
+                continue;
+            }
+            const Filled coarse = fill(world, grid, *key, 0);
+            const Filled fine = fill(world, grid, *key, under);
+            const auto was = coarse.shape.root();
+            const auto is = fine.shape.root();
+            // Nothing finer comes where the coarse said none would, and solid never turns open.
+            if (!was.value.crosses() && !was.open) {
+                CHECK(fine.shape.nodes() == 1);
+                CHECK(is.value == was.value);
+            }
+            CHECK_FALSE((was.value.is_solid() && is.value.is_open()));
+            CHECK_FALSE((was.value.is_open() && is.value.is_solid()));
+            if (was.value.crosses() && is.value.crosses()) {
+                ++crossing;
+                const double off = std::abs(was.value.distance() - is.value.distance());
+                CHECK(off < 1.0);
+                apart += off;
+                alike += glm::dot(was.value.normal(), is.value.normal());
+            }
+            // The sea's basin is never missed coarse, and solid shows its material at both.
+            if (fine.water.root().value != 0) {
+                CHECK(coarse.water.root().value == fine.water.root().value);
+            }
+            const auto air = hog::globe::palette_of(hog::globe::Material::Air);
+            CHECK((coarse.material.root().value == air) == was.value.is_open());
+            CHECK((fine.material.root().value == air) == is.value.is_open());
+        }
+    }
+    REQUIRE(crossing > 0);
+    CHECK(apart / crossing < 0.25);
+    CHECK(alike / crossing > 0.8);
 }

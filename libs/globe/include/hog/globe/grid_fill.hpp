@@ -28,11 +28,12 @@ struct Filled {
 };
 
 // The trees over the node at `key`, `levels` deep under it, from the generator. Each node is
-// sampled at its middle with detail no finer than itself; one the surface clearly misses is a
-// leaf all solid or all open, so only nodes near the surface split, down to `levels`, where each
-// holds the surface's plane. Material is the solid's just inside the surface; water marks the
-// open space under the sea. Leaves near the surface above the grid's finest depth are open, as
-// finer detail can still come there. Precondition: key.depth + levels <= grid.depth().
+// sampled at its middle with detail no finer than itself; one the surface clearly misses, with no
+// cave shown in it at that detail, is a leaf all solid or all open, so only nodes near the
+// surface split, down to `levels`, where each holds the surface's plane. Material is the solid's
+// just inside the surface; water marks the open space over the ground under the sea. Leaves above
+// the grid's finest depth are open where finer detail can still come: near the surface, and in
+// solid where caves may lie. Precondition: key.depth + levels <= grid.depth().
 [[nodiscard]] Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
                           std::uint8_t levels);
 

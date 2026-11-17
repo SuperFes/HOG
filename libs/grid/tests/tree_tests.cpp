@@ -59,11 +59,13 @@ void check_summaries(const Tree<Kind>& tree) {
 
 } // namespace
 
-TEST_CASE("material and water summarise as the most common", "[grid]") {
+TEST_CASE("material and water summarise as the most common but none", "[grid]") {
     CHECK(Material::summary({1, 2, 2, 3, 3, 3, 0, 0}) == 3);
     CHECK(Material::summary({5, 4, 5, 4, 1, 2, 6, 7}) == 4);
-    CHECK(Water::summary({0, 0, 0, 0, 0, 9, 9, 9}) == 0);
-    CHECK(Water::summary({9, 9, 9, 9, 0, 0, 0, 0}) == 0);
+    CHECK(Material::summary({0, 0, 0, 0, 0, 2, 1, 2}) == 2);
+    CHECK(Material::summary({0, 0, 0, 0, 0, 0, 0, 0}) == 0);
+    CHECK(Water::summary({0, 0, 0, 0, 0, 9, 9, 9}) == 9);
+    CHECK(Water::summary({9, 9, 9, 9, 0, 0, 0, 0}) == 9);
 }
 
 TEST_CASE("eight alike merge into one", "[grid]") {

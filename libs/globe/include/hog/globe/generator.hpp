@@ -147,6 +147,9 @@ public:
         // with none near is cheap.
         [[nodiscard]] std::vector<std::pair<double, double>> caves(double lowest, double highest,
                                                                    double within) const;
+        // Whether a cave at any detail may lie between `lowest` and `highest` metres from the
+        // centre: under the ground, above the deepest caves reach, where caves gather.
+        [[nodiscard]] bool caves_may_lie(double lowest, double highest) const noexcept;
         // A stretch of radius, from its bottom to its top, and whether a cave may be in it.
         struct Boundary {
             double bottom = 0.0;

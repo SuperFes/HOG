@@ -27,7 +27,9 @@ struct Probe {
     Material material = Material::Air;
     double size = 0.0;                    // metres across the node
     double radius = 0.0;                  // of its middle, from the centre
+    double ground = 0.0;                  // under it, metres from the centre
     std::optional<grid::Surface> surface; // where the node is a leaf
+    bool caves = false;                   // a cave may lie in it at finer detail
 };
 
 // The four cells whose columns a direction lies between, and how much each counts.
@@ -67,10 +69,11 @@ public:
         if (!here.surface) {
             return std::nullopt;
         }
-        // The sea's basin: open space reaching under its level. Where in it water stands is the
-        // level's to say, so it needn't split along the sea's top.
-        const bool sea =
-            sea_ && !here.surface->is_solid() && here.radius - (half_diagonal * here.size) < *sea_;
+        // The sea's basin: reaching under its level and over the ground, so not a cave under it,
+        // nor rock the surface clearly misses. Where in it water stands is the level's to say, so
+        // it needn't split along the sea's top.
+        const double half = half_diagonal * here.size;
+        const bool sea = sea_ && here.radius - half < *sea_ && here.radius + half > here.ground;
         return grid::Tree<grid::Water>::Leaf{.value = sea ? sea_body : grid::Water::Value{0},
                                              .open = open(depth, here)};
     }
@@ -85,7 +88,8 @@ private:
     }
 
     [[nodiscard]] bool open(std::uint8_t depth, const Probe& here) const noexcept {
-        return key_.depth + depth < grid_->depth() && std::abs(here.distance) < near * here.size;
+        return key_.depth + depth < grid_->depth() &&
+               (std::abs(here.distance) < near * here.size || here.caves);
     }
 
     // Each depth's nodes down from the filled one, probed together: only those the surface may
@@ -114,8 +118,9 @@ private:
                                             : solid_at(middles[n], radius, level, size),
                             .size = size,
                             .radius = radius,
+                            .ground = column_at(middles[n], radius, level).ground(),
                             .surface = std::nullopt};
-                if (std::abs(probe.distance) > clear * size) {
+                if (missed(probe, middles[n], level)) {
                     probe.surface =
                         probe.distance < 0.0 ? grid::Surface::solid() : grid::Surface::open();
                 } else if (depth == levels_) {
@@ -132,6 +137,25 @@ private:
             }
             nodes = std::move(next);
         }
+    }
+
+    // Whether no surface crosses the node: the ground's far from it, and in the solid, no cave
+    // shown at its detail lies in it. One that may show finer is noted.
+    bool missed(Probe& probe, DVec3 middle, int level) const {
+        const double reach = clear * probe.size;
+        if (std::abs(probe.distance) <= reach) {
+            return false;
+        }
+        if (probe.distance > 0.0) {
+            return true;
+        }
+        const Generator::Column& column = column_at(middle, probe.radius, level);
+        if (!column.caves(probe.radius - reach, probe.radius + reach, reach).empty()) {
+            return false;
+        }
+        const double half = half_diagonal * probe.size;
+        probe.caves = column.caves_may_lie(probe.radius - half, probe.radius + half);
+        return true;
     }
 
     // The feet's planes: each one's normal the way the distance rises across it.
@@ -206,6 +230,11 @@ private:
             sample = found->second.sample(radius - sample.distance - (size / 4.0));
         }
         return sample.distance < 0.0 ? sample.material : Material::Air;
+    }
+
+    // The column made nearest a point, among those about it.
+    [[nodiscard]] const Generator::Column& column_at(DVec3 point, double radius, int level) const {
+        return columns_.at(slot(cell_under(point / radius, level)));
     }
 
     static Between around(DVec3 point, int level) {

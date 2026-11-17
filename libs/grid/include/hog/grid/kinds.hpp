@@ -76,16 +76,20 @@ struct Shape {
     [[nodiscard]] static Result<Value> read(ByteReader& in);
 };
 
-// Values that are one thing or another, never between: a coarse node holds the most common of
-// its eight, the lowest of those tied; eight merge only when alike.
+// Values that are one thing or another, never between, 0 for none: a coarse node holds the most
+// common of its eight but none, the lowest of those tied, so it shows what's in it; none only
+// where all are. Eight merge only when alike.
 template <std::unsigned_integral Integer>
 struct Discrete {
     using Value = Integer;
 
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept {
-        Value best = children[0];
+        Value best = 0;
         int best_count = 0;
         for (const Value candidate : children) {
+            if (candidate == 0) {
+                continue;
+            }
             int count = 0;
             for (const Value other : children) {
                 count += other == candidate ? 1 : 0;
