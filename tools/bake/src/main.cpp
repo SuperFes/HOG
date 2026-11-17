@@ -23,12 +23,13 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-bake --store DIR [--planet FILE] [--threads N] [--map-gb N]\n"
-    "                [--coarse METRES] [--at LAT,LON [--across METRES]]\n"
+    "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both)\n"
+    "                [--planet FILE] [--threads N] [--map-gb N]\n"
     "Bakes the world's grid pages into the store at DIR ahead of play: over the whole planet\n"
     "those whose finest nodes are --coarse metres across or wider, and every page within\n"
     "--across metres (1000 by default) about --at down to the finest. Pages already held as\n"
-    "this generator makes them are kept, so a stopped bake carries on.\n";
+    "this generator makes them are kept, so a stopped bake carries on. The planet is\n"
+    "config/planet.toml where that's found, else the default.\n";
 
 struct Options {
     hog::globe::Planet planet;
@@ -107,15 +108,23 @@ int run(std::span<const std::string_view> arguments) {
             options.planet = *loaded;
         }
     }
+    const auto refuse = [](std::string_view why) {
+        std::cerr << std::format("hog-bake: {}\n\n{}", why, usage);
+        return EXIT_FAILURE;
+    };
     for (std::size_t k = 0; k < arguments.size(); k += 2) {
-        if (k + 1 >= arguments.size() || !apply(options, arguments[k], arguments[k + 1])) {
-            std::cerr << usage;
-            return EXIT_FAILURE;
+        if (k + 1 >= arguments.size()) {
+            return refuse(std::format("{} needs a value", arguments[k]));
+        }
+        if (!apply(options, arguments[k], arguments[k + 1])) {
+            return refuse(std::format("can't take {} {}", arguments[k], arguments[k + 1]));
         }
     }
-    if (!options.store || (!options.coarse && !options.at)) {
-        std::cerr << usage;
-        return EXIT_FAILURE;
+    if (!options.store) {
+        return refuse("--store is required");
+    }
+    if (!options.coarse && !options.at) {
+        return refuse("give --coarse, --at, or both, to say what to bake");
     }
     const auto formed = std::chrono::steady_clock::now();
     const hog::globe::Generator generator{options.planet, [](std::string_view stage) {
