@@ -40,6 +40,7 @@ public:
     template <typename Kind>
     [[nodiscard]] std::optional<Known<Kind>> at(grid::Key node) const;
 
+    [[nodiscard]] const grid::Grid& grid() const noexcept { return grid_; }
     // The page rooted at `root`, if held.
     [[nodiscard]] const grid::Page* page(grid::Key root) const;
     [[nodiscard]] std::size_t pages() const noexcept { return count_; }

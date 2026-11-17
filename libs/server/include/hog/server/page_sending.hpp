@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
+#include <hog/grid/view.hpp>
 #include <hog/net/events.hpp>
 #include <hog/server/page_source.hpp>
 
@@ -22,13 +23,7 @@ namespace hog::server {
 // Coarse pages go first, then finer ones, nearest first within a depth.
 class PageSending {
 public:
-    // Pixels a node may span before the page under it is wanted, in a picture 900 texels high
-    // seen through a vertical field of view of one radian, as the client draws it.
-    static constexpr double node_pixels = 8.0;
-    static constexpr double view_height = 900.0;
-    static constexpr double view_fov = 1.0;
-
-    explicit PageSending(const grid::Grid& grid, double pixels = node_pixels);
+    explicit PageSending(const grid::Grid& grid, const grid::View& view = grid::View{});
 
     void join(net::ConnectionId player);
     void leave(net::ConnectionId player);
@@ -47,9 +42,6 @@ public:
     // The pages standing for the world as seen from `at`, in the order they're sent, as far down
     // as `source` holds them; those it lacks are asked of its filler on the way.
     [[nodiscard]] std::vector<Want> wanted(DVec3 at, PageSource& source) const;
-    // Levels of the page rooted at `root` wanted from `metres` away: down to nodes spanning the
-    // pixels allowed, but at least one.
-    [[nodiscard]] std::uint8_t levels_at(grid::Key root, double metres) const noexcept;
 
     // Has the player sent the pages wanted from `at` it hasn't been sent as deep yet, in order.
     void follow(net::ConnectionId player, DVec3 at, PageSource& source);
@@ -87,21 +79,14 @@ private:
     };
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
-    // Whether the page at `foot` should be sent, its nodes as the page over it ends seen from
-    // `metres` away.
-    [[nodiscard]] bool refined(std::uint8_t foot, double metres) const noexcept;
 
-    // Into `pages`, the pages at `foot` under an open leaf at `leaf` wanted from `at`, within
-    // `reach` metres.
-    void gather(grid::Key leaf, std::uint8_t foot, DVec3 at, double reach,
-                std::vector<grid::Key>& pages) const;
     // Whether any of `page` is newer to a player holding it as `holding`, leaving only that.
     [[nodiscard]] static bool worth_sending(grid::Page& page, const Holding& holding);
     // Has `holding` hold what's sent of `page`, `levels` deep.
     static void hold(Holding& holding, const grid::Page& page, std::uint8_t levels);
 
     grid::Grid grid_;
-    double angle_; // radians a node may span
+    grid::View view_;
     std::map<net::ConnectionId, Player> players_;
 };
 

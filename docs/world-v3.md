@@ -372,7 +372,12 @@ step replaces something, the old and new are compared before the old goes.
    holding that kind, as deep as it's held, saying which page. `evict` lets go of the farthest
    pages from the eye until under a byte budget, never the top page, and gives their roots for
    telling the server once that message exists. Water bodies sent are held by id.
-2. Depth by distance per page. Tests: depth chosen for a camera path.
+2. Depth by distance per page. Tests: depth chosen for a camera path. Done
+   (`client::drawn_pages`, `grid::View`): the pixel rule is shared with the server, so a page is
+   drawn as deep as its nodes still span more than the pixels allowed from the eye, never deeper
+   than held. Where a page is drawn whole, the held pages under its open leaves that the view
+   wants are drawn in place of those leaves and listed under it; the rest of the page is drawn at
+   its own depth.
 3. Smooth mesher over the shape tree at a depth, material weights per vertex. Tests: closed
    surfaces on flat, slope, overhang and cave regions; vertices on the surface within tolerance.
 4. Seams between depths. Tests: no gaps along every shared edge of mixed-depth neighbours.

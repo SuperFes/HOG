@@ -2,15 +2,14 @@
 #include <hog/server/page_sending.hpp>
 
 #include <algorithm>
-#include <limits>
 #include <span>
 #include <tuple>
 #include <utility>
 
 namespace hog::server {
 
-PageSending::PageSending(const grid::Grid& grid, double pixels)
-    : grid_{grid}, angle_{pixels * view_fov / view_height} {}
+PageSending::PageSending(const grid::Grid& grid, const grid::View& view)
+    : grid_{grid}, view_{view} {}
 
 void PageSending::join(net::ConnectionId player) {
     players_.try_emplace(player);
@@ -30,52 +29,14 @@ bool PageSending::moved(net::ConnectionId player, DVec3 at) const {
     return found == players_.end() || found->second.over != over(at);
 }
 
-bool PageSending::refined(std::uint8_t foot, double metres) const noexcept {
-    return grid_.size(foot) > angle_ * metres;
-}
-
-std::uint8_t PageSending::levels_at(grid::Key root, double metres) const noexcept {
-    const std::uint8_t whole = grid_.levels_under(root.depth);
-    for (std::uint8_t levels = 1; levels < whole; ++levels) {
-        if (grid_.size(static_cast<std::uint8_t>(root.depth + levels)) <= angle_ * metres) {
-            return levels;
-        }
-    }
-    return whole;
-}
-
-void PageSending::gather(grid::Key leaf, std::uint8_t foot, DVec3 at, double reach,
-                         std::vector<grid::Key>& pages) const {
-    std::vector<grid::Key> under{leaf};
-    while (!under.empty()) {
-        const grid::Key key = under.back();
-        under.pop_back();
-        // Nothing inside is nearer, so nothing inside is wanted either.
-        const double metres = grid_.distance(key, at);
-        if (!refined(foot, metres) || metres > reach) {
-            continue;
-        }
-        if (key.depth == foot) {
-            pages.push_back(key);
-            continue;
-        }
-        for (std::size_t octant = 0; octant < 8; ++octant) {
-            under.push_back(key.child(octant));
-        }
-    }
-}
-
 std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source) const {
-    // Ground open for caves shows only through openings in it, so it's followed only where the
-    // finest nodes are wanted.
-    const double cave_reach = grid_.finest() / angle_;
     std::vector<std::tuple<std::uint8_t, double, grid::Key, std::uint8_t>> found;
     std::vector<grid::Key> pending{grid::Key{}};
     while (!pending.empty()) {
         const grid::Key page = pending.back();
         pending.pop_back();
         const double away = grid_.distance(page, at);
-        const std::uint8_t levels = levels_at(page, away);
+        const std::uint8_t levels = view_.levels_at(grid_, page, away);
         found.emplace_back(page.depth, away, page, levels);
         const std::uint8_t whole = grid_.levels_under(page.depth);
         const auto foot = static_cast<std::uint8_t>(page.depth + whole);
@@ -87,11 +48,7 @@ std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source)
             continue;
         }
         grid::for_open_leaves(*shape, page, [&](grid::Key leaf, const auto& open) {
-            // Above the foot, a leaf is open only in case the ground lies nearer than its distance
-            // says, so it's followed only near, as caves are.
-            const bool surface = !open.value.is_solid() && leaf.depth == foot;
-            gather(leaf, foot, at, surface ? std::numeric_limits<double>::infinity() : cave_reach,
-                   pending);
+            view_.under(grid_, leaf, foot, open.value.is_solid(), at, pending);
         });
     }
     std::ranges::sort(found);

@@ -5,6 +5,7 @@ add_library(hog_grid
     src/kinds.cpp
     src/page.cpp
     src/tree.cpp
+    src/view.cpp
     src/water_bodies.cpp)
 add_library(hog::grid ALIAS hog_grid)
 
@@ -20,4 +21,5 @@ hog_add_tests(hog_grid
     tests/key_tests.cpp
     tests/page_tests.cpp
     tests/tree_tests.cpp
+    tests/view_tests.cpp
     tests/water_bodies_tests.cpp)

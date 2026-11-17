@@ -45,27 +45,27 @@ public:
     [[nodiscard]] static Tree build(std::uint8_t levels, const ValueAt& value_at) {
         Tree tree;
         tree.levels_ = levels;
-        int across = 1 << levels;
+        int per_side = 1 << levels;
         std::vector<Id> level;
-        level.reserve(static_cast<std::size_t>(across) * static_cast<std::size_t>(across) *
-                      static_cast<std::size_t>(across));
-        for (int z = 0; z < across; ++z) {
-            for (int y = 0; y < across; ++y) {
-                for (int x = 0; x < across; ++x) {
+        level.reserve(static_cast<std::size_t>(per_side) * static_cast<std::size_t>(per_side) *
+                      static_cast<std::size_t>(per_side));
+        for (int z = 0; z < per_side; ++z) {
+            for (int y = 0; y < per_side; ++y) {
+                for (int x = 0; x < per_side; ++x) {
                     level.push_back(tree.leaf_of(value_at(x, y, z), false));
                 }
             }
         }
-        while (across > 1) {
-            const int half = across / 2;
-            const double side = std::ldexp(1.0, levels) / across;
+        while (per_side > 1) {
+            const int half = per_side / 2;
+            const double side = std::ldexp(1.0, levels) / per_side;
             std::vector<Id> coarser;
             coarser.reserve(static_cast<std::size_t>(half) * static_cast<std::size_t>(half) *
                             static_cast<std::size_t>(half));
             const auto at = [&](int x, int y, int z) {
-                return level[(((static_cast<std::size_t>(z) * static_cast<std::size_t>(across)) +
+                return level[(((static_cast<std::size_t>(z) * static_cast<std::size_t>(per_side)) +
                                static_cast<std::size_t>(y)) *
-                              static_cast<std::size_t>(across)) +
+                              static_cast<std::size_t>(per_side)) +
                              static_cast<std::size_t>(x)];
             };
             for (int z = 0; z < half; ++z) {
@@ -82,7 +82,7 @@ public:
                 }
             }
             level = std::move(coarser);
-            across = half;
+            per_side = half;
         }
         tree.root_ = level.front();
         return tree;

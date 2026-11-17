@@ -3,6 +3,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/grid/grid.hpp>
+#include <hog/grid/view.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/server/page_sending.hpp>
 #include <hog/server/page_source.hpp>
@@ -67,17 +68,17 @@ TEST_CASE("pages are sent to a player standing still coarse first, then nearest 
     }
     // Each finer page wanted lies near enough for the node it refines to span more than the
     // pixels allowed, and goes as deep as its nodes should be seen from there.
-    const double angle =
-        PageSending::node_pixels * PageSending::view_fov / PageSending::view_height;
+    const hog::grid::View view;
+    const double angle = view.angle;
     for (const auto& want : wanted) {
         CAPTURE(want.page.depth);
         const double away = grid.distance(want.page, at);
         CHECK(away * angle < grid.size(want.page.depth));
-        CHECK(want.levels == sending.levels_at(want.page, away));
+        CHECK(want.levels == view.levels_at(grid, want.page, away));
     }
     const Key fine = chain.back();
-    CHECK(sending.levels_at(fine, 0.0) == grid.levels_under(fine.depth));
-    CHECK(sending.levels_at(fine, grid.size(fine.depth) / angle) == 1);
+    CHECK(view.levels_at(grid, fine, 0.0) == grid.levels_under(fine.depth));
+    CHECK(view.levels_at(grid, fine, grid.size(fine.depth) / angle) == 1);
     CHECK(std::ranges::count_if(wanted, [&](const auto& want) {
               return want.page.depth == fine.depth && want.levels < grid.levels_under(fine.depth);
           }) > 1);

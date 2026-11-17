@@ -91,7 +91,7 @@ std::vector<TileKey> surface_tiles(const hog::globe::Generator& generator, int c
     std::vector<TileKey> keys;
     for (int n = 0; n < count; ++n) {
         const hog::DVec3 up = hog::globe::center(hog::globe::cell_at_index(
-            7, (static_cast<std::uint64_t>(n) * 2'654'435'761ULL) % 98'304));
+            7, (static_cast<std::uint64_t>(n) * std::uint64_t{2'654'435'761}) % 98'304));
         const auto ground = hog::globe::ground_below(generator, up, 0.5);
         if (!ground) {
             continue;

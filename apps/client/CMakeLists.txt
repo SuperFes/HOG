@@ -8,6 +8,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 add_library(hog_client
     src/chat.cpp
     src/drawn.cpp
+    src/drawn_pages.cpp
     src/tile_meshes.cpp
     src/cutaway.cpp
     src/daylight.cpp
@@ -38,6 +39,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/drawn_tests.cpp
+    tests/drawn_pages_tests.cpp
     tests/tile_meshes_tests.cpp
     tests/tile_look_tests.cpp
     tests/lod_look_tests.cpp
