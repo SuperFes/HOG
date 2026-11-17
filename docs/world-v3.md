@@ -195,7 +195,8 @@ step replaces something, the old and new are compared before the old goes.
    16-bit material index, a water body id), with node summaries and versions; a page record holding its
    trees; encode and decode. Tests: round trips, identical nodes give identical bytes, a split
    leaf's summary matches its children. Loose water's amount waits for live water.
-   Shape leaves hold a plane (normal and distance) so flat and straight ground stays coarse:
+   Shape leaves hold a plane (normal, distance, and the material the surface shows) so flat
+   and straight ground stays coarse:
    eight merge where one plane runs within a quarter of a finest node of theirs. Measured on a
    ball 40 finest nodes round: within 0.4 of a finest node of the true surface. Curvature per
    leaf is an idea to try if gentle curves still split too much.
@@ -229,8 +230,13 @@ step replaces something, the old and new are compared before the old goes.
    as the most common but none (air, no body), so a coarse node shows what's in it. Still apart:
    - Caves showing only finer turn a few summaries' normals (cave roofs average in with the
      ground). Idea: sum planes up by how much of each child is solid, so a cave counts little.
-   - A coarse node's material is the surface's (what's seen), its summary the most common
-     inside (what's dug), so far ground can change colour once finer is filled. Open question.
+   - Decided: shape leaves carry the material their surface shows, summed up as the most
+     common the crossed children show, so ground looks alike at every depth; the material tree
+     holds what digging gives, a coarse node the most common inside. Neither keeps eight from
+     merging. Up to 8 m nodes they agree (14 of 15 shown, 23 of 26 held). Coarser, the
+     generator itself disagrees: it lays cover by its slope smoothed to the detail asked, so
+     ground bare and steep at 32 m and finer reads as gentle clay-covered ground at 128 m.
+     Leaning: the generator covers coarse ground by the share of it steep enough to stay bare.
 3. Water bodies emitted by the generator: the sea, lakes from the formed lake fill, rivers from
    the valleys' courses with `river_size` applied. Tests: on the small world, every lake and
    the largest rivers come out as bodies with the right levels.

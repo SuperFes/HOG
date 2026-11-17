@@ -182,15 +182,34 @@ private:
             Probe& probe = probes_.at(grid::code(nodes[n]));
             const double length = glm::length(rise);
             const DVec3 normal = length > 0.0 ? rise / length : middles[n] / probe.radius;
-            probe.surface = grid::Surface::plane(normal, probe.distance / size);
+            // It shows the solid just inside the surface, along its normal from the middle.
+            const DVec3 inside = middles[n] - (normal * (probe.distance + (size / 4.0)));
+            const Material shown = solid_at(inside, glm::length(inside), level, size);
+            probe.surface = grid::Surface::plane(normal, probe.distance / size, palette_of(shown));
             if (probe.surface->is_open()) {
                 probe.material = Material::Air;
-            } else if (probe.distance >= 0.0) {
-                // The solid's just inside the surface, along its normal from the middle.
-                const DVec3 inside = middles[n] - (normal * (probe.distance + (size / 4.0)));
-                probe.material = solid_at(inside, glm::length(inside), level, size);
+                continue;
             }
+            // Digging gives what most of it holds, as the nodes under it would sum up: the solid
+            // at its middle and its faces' middles, with what it shows.
+            std::array<grid::Material::Value, 8> held{palette_of(shown),
+                                                      palette_of(solid_in(middles[n], level))};
+            for (std::size_t k = 0; k < 6; ++k) {
+                held.at(2 + k) = palette_of(solid_in(points[first + k], level));
+            }
+            probe.material = static_cast<Material>(grid::Material::summary(held));
         }
+    }
+
+    // The solid at a point as the nearest column made has it; air where it's open.
+    [[nodiscard]] Material solid_in(DVec3 point, int level) const {
+        const double radius = glm::length(point);
+        const auto found = columns_.find(slot(cell_under(point / radius, level)));
+        if (found == columns_.end()) {
+            return Material::Air;
+        }
+        const Sample sample = found->second.sample(radius);
+        return sample.distance < 0.0 ? sample.material : Material::Air;
     }
 
     // The distance at each point, between the columns about it.

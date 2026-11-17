@@ -61,7 +61,7 @@ Surface between(const std::array<Surface, 8>& children) noexcept {
 
 } // namespace
 
-Surface Surface::plane(DVec3 normal, double distance) noexcept {
+Surface Surface::plane(DVec3 normal, double distance, std::uint16_t material) noexcept {
     const double out = reach(normal);
     if (distance >= out) {
         return open();
@@ -79,7 +79,7 @@ Surface Surface::plane(DVec3 normal, double distance) noexcept {
     }
     constexpr double most = std::numeric_limits<std::int32_t>::max() - 1.0;
     return Surface{static_cast<std::int32_t>(std::clamp(std::round(distance * scale), -most, most)),
-                   flattened(u), flattened(v)};
+                   flattened(u), flattened(v), material};
 }
 
 DVec3 Surface::normal() const noexcept {
@@ -92,22 +92,25 @@ DVec3 Surface::normal() const noexcept {
     return glm::normalize(DVec3{x, y, z});
 }
 
-Result<Surface> Surface::from_raw(std::int32_t distance, std::uint16_t u, std::uint16_t v) {
+Result<Surface> Surface::from_raw(std::int32_t distance, std::uint16_t u, std::uint16_t v,
+                                  std::uint16_t material) {
     const bool uniform = distance == std::numeric_limits<std::int32_t>::min() ||
                          distance == std::numeric_limits<std::int32_t>::max();
-    if (uniform && (u != 0 || v != 0)) {
-        return make_error(ErrorCode::Parse, "a surface missing its node with a normal");
+    if (uniform && (u != 0 || v != 0 || material != 0)) {
+        return make_error(ErrorCode::Parse, "a surface missing its node with a normal or material");
     }
-    return Surface{distance, u, v};
+    return Surface{distance, u, v, material};
 }
 
 Surface Shape::summary(const std::array<Value, 8>& children) noexcept {
     DVec3 normals{0.0};
     double distances = 0.0;
     int crossing = 0;
+    std::array<std::uint16_t, 8> shown{};
     for (std::size_t k = 0; k < 8; ++k) {
         const Surface& child = children.at(k);
         if (child.crosses()) {
+            shown.at(k) = child.material();
             const DVec3 normal = child.normal();
             normals += normal;
             // A child's distance in its parent's sides, at its parent's middle.
@@ -121,7 +124,8 @@ Surface Shape::summary(const std::array<Value, 8>& children) noexcept {
     if (glm::dot(normals, normals) < 1e-12) {
         return between(children);
     }
-    return Surface::plane(glm::normalize(normals), distances / crossing);
+    return Surface::plane(glm::normalize(normals), distances / crossing,
+                          Discrete<std::uint16_t>::summary(shown));
 }
 
 std::optional<Shape::Value> Shape::merged(const std::array<Value, 8>& children,
@@ -161,24 +165,28 @@ std::optional<Shape::Value> Shape::merged(const std::array<Value, 8>& children,
 }
 
 std::uint64_t Shape::hash(const Value& value) noexcept {
-    return (std::uint64_t{std::bit_cast<std::uint32_t>(value.raw_distance())} << 32U) |
-           (std::uint64_t{value.raw_u()} << 16U) | value.raw_v();
+    const std::uint64_t place =
+        (std::uint64_t{std::bit_cast<std::uint32_t>(value.raw_distance())} << 32U) |
+        (std::uint64_t{value.raw_u()} << 16U) | value.raw_v();
+    return place ^ (value.material() * 0x9e37'79b9'7f4a'7c15ULL);
 }
 
 void Shape::write(ByteWriter& out, const Value& value) {
     out.write(std::bit_cast<std::uint32_t>(value.raw_distance()));
     out.write(value.raw_u());
     out.write(value.raw_v());
+    out.write(value.material());
 }
 
 Result<Shape::Value> Shape::read(ByteReader& in) {
     const auto distance = in.read<std::uint32_t>();
     const auto u = in.read<std::uint16_t>();
     const auto v = in.read<std::uint16_t>();
-    if (!distance || !u || !v) {
+    const auto material = in.read<std::uint16_t>();
+    if (!distance || !u || !v || !material) {
         return make_error(ErrorCode::Parse, "a surface cut short");
     }
-    return Surface::from_raw(std::bit_cast<std::int32_t>(*distance), *u, *v);
+    return Surface::from_raw(std::bit_cast<std::int32_t>(*distance), *u, *v, *material);
 }
 
 } // namespace hog::grid

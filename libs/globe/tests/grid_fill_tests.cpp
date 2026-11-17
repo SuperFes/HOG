@@ -54,6 +54,53 @@ double held(const hog::grid::Grid& grid, Key key, const Filled& filled, DVec3 po
            glm::dot(leaf.value.normal(), point - grid.centre(over));
 }
 
+// How a node filled coarse compares with it filled finer, over many nodes. Materials count only
+// on nodes up to 8 m: the generator covers coarser ground by its smoothed slope, gentler than the
+// finer, so it lays clay where finer shows bare rock.
+struct Agreement {
+    int crossing = 0;
+    double apart = 0.0; // the planes' distances, in sides
+    double alike = 0.0; // their normals' dot
+    int crossing_fine = 0;
+    int shows = 0; // of those, showing the same material
+    int solid = 0;
+    int holds = 0; // of nodes not all open, holding the same material
+
+    void add(const Filled& coarse, const Filled& fine, bool fine_enough) {
+        const auto was = coarse.shape.root();
+        const auto is = fine.shape.root();
+        // Nothing finer comes where the coarse said none would, and solid never turns open.
+        if (!was.value.crosses() && !was.open) {
+            CHECK(fine.shape.nodes() == 1);
+            CHECK(is.value == was.value);
+        }
+        CHECK_FALSE((was.value.is_solid() && is.value.is_open()));
+        CHECK_FALSE((was.value.is_open() && is.value.is_solid()));
+        if (was.value.crosses() && is.value.crosses()) {
+            ++crossing;
+            const double off = std::abs(was.value.distance() - is.value.distance());
+            CHECK(off < 1.0);
+            apart += off;
+            alike += glm::dot(was.value.normal(), is.value.normal());
+            if (fine_enough) {
+                ++crossing_fine;
+                shows += was.value.material() == is.value.material() ? 1 : 0;
+            }
+        }
+        // The sea's basin is never missed coarse, and solid holds its material at both.
+        if (fine.water.root().value != 0) {
+            CHECK(coarse.water.root().value == fine.water.root().value);
+        }
+        const auto air = hog::globe::palette_of(hog::globe::Material::Air);
+        CHECK((coarse.material.root().value == air) == was.value.is_open());
+        CHECK((fine.material.root().value == air) == is.value.is_open());
+        if (fine_enough && !was.value.is_open() && !is.value.is_open()) {
+            ++solid;
+            holds += coarse.material.root().value == fine.material.root().value ? 1 : 0;
+        }
+    }
+};
+
 } // namespace
 
 TEST_CASE("the grid holds the world down to the layers' thickness", "[globe][grid]") {
@@ -169,10 +216,7 @@ TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][gr
     const hog::grid::Grid grid = grid_of(world);
     const DVec3 up = spread_until(true);
     const double ground = hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
-    // Over every depth, as caves showing only finer turn a few nodes' planes.
-    int crossing = 0;
-    double apart = 0.0;
-    double alike = 0.0;
+    Agreement agreed;
     const int step = hog::testing::full_or(1, 4);
     for (int at = 4; std::cmp_less(at, grid.depth()); at += step) {
         CAPTURE(at);
@@ -183,38 +227,21 @@ TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][gr
         const std::array<std::array<int, 3>, 7> around{
             {{0, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}}};
         for (const auto& [dx, dy, dz] : around) {
-            const auto key = middle.beside(dx, dy, dz);
-            if (!key) {
-                continue;
+            if (const auto key = middle.beside(dx, dy, dz)) {
+                agreed.add(fill(world, grid, *key, 0), fill(world, grid, *key, under),
+                           grid.size(depth) <= 8.0);
             }
-            const Filled coarse = fill(world, grid, *key, 0);
-            const Filled fine = fill(world, grid, *key, under);
-            const auto was = coarse.shape.root();
-            const auto is = fine.shape.root();
-            // Nothing finer comes where the coarse said none would, and solid never turns open.
-            if (!was.value.crosses() && !was.open) {
-                CHECK(fine.shape.nodes() == 1);
-                CHECK(is.value == was.value);
-            }
-            CHECK_FALSE((was.value.is_solid() && is.value.is_open()));
-            CHECK_FALSE((was.value.is_open() && is.value.is_solid()));
-            if (was.value.crosses() && is.value.crosses()) {
-                ++crossing;
-                const double off = std::abs(was.value.distance() - is.value.distance());
-                CHECK(off < 1.0);
-                apart += off;
-                alike += glm::dot(was.value.normal(), is.value.normal());
-            }
-            // The sea's basin is never missed coarse, and solid shows its material at both.
-            if (fine.water.root().value != 0) {
-                CHECK(coarse.water.root().value == fine.water.root().value);
-            }
-            const auto air = hog::globe::palette_of(hog::globe::Material::Air);
-            CHECK((coarse.material.root().value == air) == was.value.is_open());
-            CHECK((fine.material.root().value == air) == is.value.is_open());
         }
     }
-    REQUIRE(crossing > 0);
-    CHECK(apart / crossing < 0.25);
-    CHECK(alike / crossing > 0.8);
+    // Over every depth, as caves showing only finer turn a few nodes' planes.
+    REQUIRE(agreed.crossing > 0);
+    CHECK(agreed.apart / agreed.crossing < 0.25);
+    CHECK(agreed.alike / agreed.crossing > 0.8);
+    // As shares only with enough nodes to tell, which quick runs haven't.
+    if (agreed.crossing_fine >= 10) {
+        CHECK(4 * agreed.shows >= 3 * agreed.crossing_fine);
+    }
+    if (agreed.solid >= 10) {
+        CHECK(4 * agreed.holds >= 3 * agreed.solid);
+    }
 }

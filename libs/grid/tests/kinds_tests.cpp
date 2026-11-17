@@ -81,8 +81,38 @@ TEST_CASE("a plane missing its node leaves it all solid or all open", "[grid]") 
     CHECK(Surface::plane(corner, 0.8).crosses());
     CHECK(Surface::plane(corner, 0.9).is_open());
     CHECK(Surface{}.is_open());
-    CHECK_FALSE(Surface::from_raw(Surface::solid().raw_distance(), 1, 0));
-    CHECK(Surface::from_raw(Surface::solid().raw_distance(), 0, 0) == Surface::solid());
+    CHECK(Surface::plane(up, -0.6, 7) == Surface::solid());
+    CHECK_FALSE(Surface::from_raw(Surface::solid().raw_distance(), 1, 0, 0));
+    CHECK_FALSE(Surface::from_raw(Surface::solid().raw_distance(), 0, 0, 7));
+    CHECK(Surface::from_raw(Surface::solid().raw_distance(), 0, 0, 0) == Surface::solid());
+}
+
+TEST_CASE("a coarse plane shows what most of the planes under it show", "[grid]") {
+    const DVec3 up{0.0, 0.0, 1.0};
+    const Surface solid = Surface::solid();
+    const Surface open = Surface::open();
+    // Flat ground low through the lower four, showing sand mostly, then soil.
+    const auto showing = [&](std::uint16_t material) { return Surface::plane(up, 0.4, material); };
+    const Surface summed =
+        Shape::summary({showing(4), showing(3), showing(4), showing(4), open, open, open, open});
+    REQUIRE(summed.crosses());
+    CHECK(summed.material() == 4);
+    // Unknown where none crossed shows anything.
+    CHECK(Shape::summary({solid, solid, solid, solid, open, open, open, open}).material() == 0);
+    // What the ground shows never keeps it from merging: the material tree holds it finer.
+    const auto merged = Shape::merged(
+        {showing(4), showing(3), showing(4), showing(4), open, open, open, open}, 1.0);
+    REQUIRE(merged);
+    CHECK(merged.value().material() == 4);
+
+    const Tree<Shape> tree = Tree<Shape>::build(levels, [&](int x, int y, int z) {
+        return Surface::plane(up, middle(x, y, z).z - 20.3,
+                              static_cast<std::uint16_t>(1 + (x % 3)));
+    });
+    const auto back = Tree<Shape>::decode(tree.encode());
+    REQUIRE(back);
+    CHECK(back->same_as(tree));
+    CHECK(tree.root().value.material() != 0);
 }
 
 TEST_CASE("eight solid and open with no plane between sum up to one between them", "[grid]") {
