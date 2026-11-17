@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::server {
@@ -52,30 +53,50 @@ public:
     // Has the player sent the pages wanted from `at` it hasn't been sent as deep yet, in order.
     void follow(net::ConnectionId player, DVec3 at, PageSource& source);
 
-    // A page as sent: its root and its bytes as `grid::Page::encode` gives them.
+    // Has the players holding any of `pages` sent what's changed of them, first.
+    void changed(std::span<const grid::Key> pages);
+
+    // A page as sent: its root and its bytes as `grid::Page::encode` gives them, holding only the
+    // trees the player didn't hold as they are now.
     struct Sent {
         grid::Key root;
         std::vector<std::byte> bytes;
     };
-    // The next pages due to the player that `source` holds deeper than sent, in order, while they
-    // come to under `room` bytes, and one at least if any can go. Those sent as deep as wanted
-    // aren't due again.
+    // The next pages due to the player that `source` holds deeper than sent, or newer, in order,
+    // while they come to under `room` bytes, and one at least if any can go. Those sent as deep as
+    // wanted aren't due again.
     [[nodiscard]] std::vector<Sent> next(net::ConnectionId player, std::size_t room,
                                          PageSource& source);
     // Pages still due to the player, held or not.
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
 
 private:
+    // What a player holds of a page: how deep, and each tree's version.
+    struct Holding {
+        std::uint8_t levels = 0;
+        std::uint32_t shape = 0;
+        std::uint32_t material = 0;
+        std::uint32_t water = 0;
+    };
     struct Player {
-        std::optional<grid::Key> over;          // the finest page it was last followed over
-        std::map<grid::Key, std::uint8_t> sent; // levels of each
-        std::vector<Want> due;                  // in order
+        std::optional<grid::Key> over; // the finest page it was last followed over
+        std::map<grid::Key, Holding> sent;
+        std::vector<Want> due; // in order
     };
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
     // Whether the page at `foot` should be sent, its nodes as the page over it ends seen from
     // `metres` away.
     [[nodiscard]] bool refined(std::uint8_t foot, double metres) const noexcept;
+
+    // Into `pages`, the pages at `foot` under an open leaf at `leaf` wanted from `at`, within
+    // `reach` metres.
+    void gather(grid::Key leaf, std::uint8_t foot, DVec3 at, double reach,
+                std::vector<grid::Key>& pages) const;
+    // Whether any of `page` is newer to a player holding it as `holding`, leaving only that.
+    [[nodiscard]] static bool worth_sending(grid::Page& page, const Holding& holding);
+    // Has `holding` hold what's sent of `page`, `levels` deep.
+    static void hold(Holding& holding, const grid::Page& page, std::uint8_t levels);
 
     grid::Grid grid_;
     double angle_; // radians a node may span

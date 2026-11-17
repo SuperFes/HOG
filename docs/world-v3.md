@@ -335,10 +335,18 @@ step replaces something, the old and new are compared before the old goes.
    Whole six-level pages were far too much: one player on the small world wanted 57k fine pages
    (~400 MB, ~30 min to fill). Cut to depth, the same 59k go 1 level (727), 2 (30k) or 3+ (29k)
    deep. Order: by depth, then nearest first; `next` sends in order within a byte budget, one
-   page at least. Still to measure: the walk's cost per follow and bytes per player; the pixel
-   rule is a knob if they're too high.
+   page at least. A leaf above a page's foot is open only in case the ground lies nearer than its
+   distance says, so it's followed only near, as caves are: followed like the ground, it made
+   2.1 M pages (174 MB, 2¼ h to fill) for one player, nearly all air. Measured (hidden
+   `[.bench]` test): a player arriving on an empty small world store is sent 15304 pages, 16.6
+   MB, in 302 s of filling on 4 threads (mostly the 2326 coarse pages a coarse bake makes ahead);
+   the four follows took 0.07 s together.
 3. What each client holds, by page and tree version; only newer sent. Tests: a water season
-   change sends only water trees.
+   change sends only water trees. Done: each player's holding of a page is its levels and each tree's version.
+   A page deeper than held goes whole; as deep, only its trees with newer versions go, and
+   nothing if none is. `changed(pages)` puts pages written since (an edit, a season's water) first
+   in line for every player holding them. A player never tells the server what it let go of yet;
+   that comes with the client's memory budget (5.1).
 4. Protocol messages for pages, bodies and version bumps; protocol version bumped. Tests:
    round trips, refusal of a cut message.
 5. Bot and load tests streaming the new way.

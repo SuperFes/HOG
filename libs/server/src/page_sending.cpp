@@ -2,6 +2,8 @@
 #include <hog/server/page_sending.hpp>
 
 #include <algorithm>
+#include <limits>
+#include <span>
 #include <tuple>
 #include <utility>
 
@@ -42,6 +44,27 @@ std::uint8_t PageSending::levels_at(grid::Key root, double metres) const noexcep
     return whole;
 }
 
+void PageSending::gather(grid::Key leaf, std::uint8_t foot, DVec3 at, double reach,
+                         std::vector<grid::Key>& pages) const {
+    std::vector<grid::Key> under{leaf};
+    while (!under.empty()) {
+        const grid::Key key = under.back();
+        under.pop_back();
+        // Nothing inside is nearer, so nothing inside is wanted either.
+        const double metres = grid_.distance(key, at);
+        if (!refined(foot, metres) || metres > reach) {
+            continue;
+        }
+        if (key.depth == foot) {
+            pages.push_back(key);
+            continue;
+        }
+        for (std::size_t octant = 0; octant < 8; ++octant) {
+            under.push_back(key.child(octant));
+        }
+    }
+}
+
 std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source) const {
     // Ground open for caves shows only through openings in it, so it's followed only where the
     // finest nodes are wanted.
@@ -64,24 +87,11 @@ std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source)
             continue;
         }
         grid::for_open_leaves(*shape, page, [&](grid::Key leaf, const auto& open) {
-            const bool surface = !open.value.is_solid();
-            std::vector<grid::Key> under{leaf};
-            while (!under.empty()) {
-                const grid::Key key = under.back();
-                under.pop_back();
-                // Nothing inside is nearer, so nothing inside is wanted either.
-                const double metres = grid_.distance(key, at);
-                if (!refined(foot, metres) || (!surface && metres > cave_reach)) {
-                    continue;
-                }
-                if (key.depth == foot) {
-                    pending.push_back(key);
-                    continue;
-                }
-                for (std::size_t octant = 0; octant < 8; ++octant) {
-                    under.push_back(key.child(octant));
-                }
-            }
+            // Above the foot, a leaf is open only in case the ground lies nearer than its distance
+            // says, so it's followed only near, as caves are.
+            const bool surface = !open.value.is_solid() && leaf.depth == foot;
+            gather(leaf, foot, at, surface ? std::numeric_limits<double>::infinity() : cave_reach,
+                   pending);
         });
     }
     std::ranges::sort(found);
@@ -99,10 +109,58 @@ void PageSending::follow(net::ConnectionId player, DVec3 at, PageSource& source)
     held.due.clear();
     for (const Want& want : wanted(at, source)) {
         const auto sent = held.sent.find(want.page);
-        if (sent == held.sent.end() || sent->second < want.levels) {
+        if (sent == held.sent.end() || sent->second.levels < want.levels) {
             held.due.push_back(want);
         }
     }
+}
+
+void PageSending::changed(std::span<const grid::Key> pages) {
+    for (auto& [id, held] : players_) {
+        for (const grid::Key page : pages) {
+            const auto sent = held.sent.find(page);
+            if (sent == held.sent.end() || std::ranges::any_of(held.due, [&](const Want& want) {
+                    return want.page == page;
+                })) {
+                continue;
+            }
+            held.due.insert(held.due.begin(), {.page = page, .levels = sent->second.levels});
+        }
+    }
+}
+
+namespace {
+
+// Drops the trees of `page` no newer than those held, giving whether any is left.
+bool keep_newer(grid::Page& page, std::uint32_t shape, std::uint32_t material,
+                std::uint32_t water) {
+    const auto keep = [](auto& tree, std::uint32_t held) {
+        if (tree && tree->version <= held) {
+            tree.reset();
+        }
+        return tree.has_value();
+    };
+    const bool any = keep(page.shape, shape);
+    return keep(page.material, material) || keep(page.water, water) || any;
+}
+
+} // namespace
+
+void PageSending::hold(Holding& holding, const grid::Page& page, std::uint8_t levels) {
+    holding.levels = levels;
+    holding.shape = page.shape ? page.shape->version : holding.shape;
+    holding.material = page.material ? page.material->version : holding.material;
+    holding.water = page.water ? page.water->version : holding.water;
+}
+
+bool PageSending::worth_sending(grid::Page& page, const Holding& holding) {
+    // As deep as it's held, only what's changed goes; deeper, all of it does.
+    const std::uint8_t levels = page.shape.value().tree.levels();
+    if (levels > holding.levels) {
+        return true;
+    }
+    return levels == holding.levels &&
+           keep_newer(page, holding.shape, holding.material, holding.water);
 }
 
 std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::size_t room,
@@ -116,27 +174,31 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
     std::size_t bytes = 0;
     std::vector<Want> still;
     for (const Want& want : held.due) {
-        const bool full = !sent.empty() && bytes >= room;
-        std::optional<grid::Page> page = full ? std::nullopt : source.page(want.page, want.levels);
-        const std::uint8_t had = held.sent.contains(want.page) ? held.sent[want.page] : 0;
-        const std::uint8_t levels =
-            page && page->shape ? page->shape.value().tree.levels() : std::uint8_t{0};
-        if (!page || levels <= had) {
+        std::optional<grid::Page> page =
+            sent.empty() || bytes < room ? source.page(want.page, want.levels) : std::nullopt;
+        if (!page || !page->shape) {
             still.push_back(want);
+            continue;
+        }
+        const auto had = held.sent.find(want.page);
+        const std::uint8_t levels = page->shape.value().tree.levels();
+        if (levels < want.levels) {
+            still.push_back(want);
+        }
+        if (!worth_sending(*page, had == held.sent.end() ? Holding{} : had->second)) {
             continue;
         }
         std::vector<std::byte> coded = page.value().encode();
         if (!sent.empty() && bytes + coded.size() > room) {
             bytes = room;
-            still.push_back(want);
+            if (levels >= want.levels) {
+                still.push_back(want);
+            }
             continue;
         }
         bytes += coded.size();
-        held.sent[want.page] = levels;
+        hold(held.sent[want.page], *page, levels);
         sent.push_back({.root = want.page, .bytes = std::move(coded)});
-        if (levels < want.levels) {
-            still.push_back(want);
-        }
     }
     held.due = std::move(still);
     return sent;
