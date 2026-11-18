@@ -10,6 +10,7 @@ add_library(hog_globe
     src/valleys.cpp
     src/generator.cpp
     src/grid_fill.cpp
+    src/water_bodies.cpp
     src/grip.cpp
     src/layers.cpp
     src/material.cpp

@@ -19,10 +19,11 @@ namespace {
 
 // East a hundred metres, then north two hundred, falling and gathering water as it goes.
 River bent() {
-    return River{.course = {{.place = DVec3{0.0, 0.0, 0.0}, .level = 100.0, .flow = 10.0},
-                            {.place = DVec3{100.0, 0.0, 0.0}, .level = 90.0, .flow = 20.0},
-                            {.place = DVec3{100.0, 200.0, 0.0}, .level = 50.0, .flow = 40.0}},
-                 .season = Season{.rise = 2.0, .peak = 0.3}};
+    return River{
+        .course = {{.place = DVec3{0.0, 0.0, 0.0}, .level = 100.0, .flow = 10.0, .rise = 0.5},
+                   {.place = DVec3{100.0, 0.0, 0.0}, .level = 90.0, .flow = 20.0, .rise = 1.0},
+                   {.place = DVec3{100.0, 200.0, 0.0}, .level = 50.0, .flow = 40.0, .rise = 3.0}},
+        .peak = 0.3};
 }
 
 WaterBodies some() {
@@ -41,6 +42,7 @@ TEST_CASE("a river's level and flow change evenly along its course", "[grid]") {
     const River::Along first = river.along(DVec3{50.0, 5.0, 0.0});
     CHECK(first.level == Approx(95.0));
     CHECK(first.flow == Approx(15.0));
+    CHECK(first.rise == Approx(0.75));
     CHECK(first.from_head == Approx(50.0));
     CHECK(first.off == Approx(5.0));
     CHECK(first.downstream.x == Approx(1.0));
@@ -48,6 +50,7 @@ TEST_CASE("a river's level and flow change evenly along its course", "[grid]") {
     const River::Along second = river.along(DVec3{100.0, 100.0, 3.0});
     CHECK(second.level == Approx(70.0));
     CHECK(second.flow == Approx(30.0));
+    CHECK(second.rise == Approx(2.0));
     CHECK(second.from_head == Approx(200.0));
     CHECK(second.off == Approx(3.0));
     CHECK(second.downstream.y == Approx(1.0));
@@ -109,6 +112,6 @@ TEST_CASE("broken water body bytes are refused", "[grid]") {
     CHECK_FALSE(WaterBodies::decode(kind));
 
     WaterBodies spring;
-    spring.bodies.emplace(4, River{.course = {River::Point{}}, .season = {}});
+    spring.bodies.emplace(4, River{.course = {River::Point{}}, .peak = 0.0});
     CHECK_FALSE(WaterBodies::decode(spring.encode()));
 }

@@ -5,6 +5,7 @@
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/grid/tree.hpp>
+#include <hog/grid/water_bodies.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -37,6 +38,11 @@ inline constexpr grid::Water::Value river_bodies = 0x8000'0000U;
     }
     return 0;
 }
+
+// Each body of water the generator's water trees mark, by the value they mark it with: the sea at
+// its level, each lake at its level, and each river along its main stem, its water as the finest
+// detail shows it, with how each rises through the year.
+[[nodiscard]] grid::WaterBodies water_bodies(const Generator& generator);
 
 struct Filled {
     grid::Tree<grid::Shape> shape;

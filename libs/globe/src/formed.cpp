@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <ranges>
 #include <span>
 #include <thread>
 #include <utility>
@@ -65,23 +66,6 @@ struct OnCube {
     bool negative = false;
     double u = 0.0;
     double v = 0.0;
-};
-
-// A river's channel, as wide and deep as what wears it makes it at its mean (Leopold and
-// Maddock's hydraulic geometry down rivers), cut out to hold the floods that overtop its banks
-// every year or two, `bankfull` times that mean (the same at one place as its flow rises),
-// bending a bend every eleven widths (Leopold and Wolman), more the gentler its fall and the
-// looser its banks, its floor as wide as it wanders. The water passing it stands `water` deep in
-// its lowest month, and `rise` deeper in its highest: a river's stage goes as its flow to the
-// 0.4, as its depth down rivers does.
-struct Channel {
-    double width = 0.0;
-    double depth = 0.0;
-    double water = 0.0;
-    double rise = 0.0;
-    double meander = 0.0;
-    double meander_length = 0.0;
-    double belt = 0.0;
 };
 
 constexpr double bankfull = 4.0;
@@ -1011,7 +995,11 @@ std::vector<Formed::LakeAt> Formed::lakes() const {
                 }
             }
         }
-        found.push_back({.in = in, .level = pool.level});
+        const auto lake = static_cast<std::size_t>(&water - lakes_.data());
+        found.push_back({.in = in,
+                         .level = pool.level,
+                         .season = {.rise = world_.regimes.lake_rise[lake],
+                                    .peak = world_.regimes.lake_peak[lake]}});
     }
     return found;
 }
@@ -1091,10 +1079,7 @@ void Formed::find_stems() {
 
 std::vector<double> Formed::floors_along(std::uint32_t point,
                                          const std::vector<DVec3>& line) const {
-    const formation::World& world = world_;
-    const std::uint32_t down = world.rivers.receiver[point];
-    const bool mouth = world.rivers.receiver[down] == down;
-    const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+    const double floor_to = course_foot(point);
     std::vector<double> runs(line.size(), 0.0);
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         runs[k + 1] = runs[k] + glm::length(line[k + 1] - line[k]);
@@ -1123,8 +1108,7 @@ std::vector<DVec3> Formed::make_course(std::uint32_t point) const {
     const std::uint32_t down = world.rivers.receiver[point];
     const DVec3 from = sphere.point(point);
     const DVec3 to = sphere.point(down);
-    const bool mouth = world.rivers.receiver[down] == down;
-    const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
+    const double floor_to = course_foot(point);
     // The rock about it varies from place to place, finer than its points can tell, at every
     // scale down to what its lanes tell apart; faults crush it.
     const Octaves rocks{
@@ -1316,6 +1300,108 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     return carved;
 }
 
+double Formed::course_foot(std::uint32_t point) const noexcept {
+    const std::vector<std::uint32_t>& receiver = world_.rivers.receiver;
+    const std::uint32_t down = receiver[point];
+    // A river's bed meets the sea at its level, not down on the sea floor past its mouth.
+    return receiver[down] == down ? std::min(top_[point], 0.0) : top_[down];
+}
+
+Formed::Stretch Formed::stretch_of(std::uint32_t point, double fall, double lod) const {
+    const formation::World& world = world_;
+    const std::uint32_t down = world.rivers.receiver[point];
+    // The sheet its channel reworks the belt into lies as deep whatever the detail: floods scour
+    // its bends half as deep again as its banks stand.
+    const auto channel_at = [&](std::uint32_t at, double& sheet) {
+        Channel made = channel_of(
+            river_size_ * world.rivers.flood[at], river_size_ * world.lakes.discharge[at], fall,
+            alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
+            0.6 * world.sphere.spacing() * radius_, world.regimes.low[at], world.regimes.high[at]);
+        sheet = 1.5 * made.depth;
+        // Channels too narrow for the detail asked fade out with their water, as gullies do.
+        const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
+        made.depth *= shown;
+        made.water *= shown;
+        made.rise *= shown;
+        return made;
+    };
+    Stretch stretch;
+    stretch.least_water = -std::numeric_limits<double>::infinity();
+    stretch.channel = channel_at(point, stretch.sheet);
+    // Its channel and water meet the next one's as they are where it runs into it; at the sea, it
+    // brims to the sea's level.
+    stretch.next = stretch.channel;
+    stretch.sheet_to = stretch.sheet;
+    if (world.rivers.receiver[down] == down) {
+        stretch.next.water = stretch.channel.depth;
+        stretch.next.rise = 0.0;
+    } else {
+        stretch.next = channel_at(down, stretch.sheet_to);
+    }
+    // Running into a lake, its water stands no lower than the lake's, and comes down to it where
+    // it runs in: as deep in its channel there as the lake stands over its floor, brimming at most.
+    if (const std::uint32_t lake = world.lakes.lake[down]; lake != formation::Lakes::none &&
+                                                           lake < lake_levels_.size() &&
+                                                           lake_levels_[lake].has_value()) {
+        stretch.least_water = lake_levels_[lake].value();
+        stretch.next.water = std::clamp(
+            stretch.least_water - course_foot(point) + stretch.next.depth, 0.0, stretch.next.depth);
+        stretch.next.rise = world.regimes.lake_rise[lake];
+    }
+    return stretch;
+}
+
+std::vector<Formed::Turn> Formed::river_course(std::uint32_t stem, double lod) const {
+    const formation::World& world = world_;
+    const std::vector<std::uint32_t>& receiver = world.rivers.receiver;
+    if (receiver[stem] == stem || stems_[stem] != stem) {
+        return {};
+    }
+    // Up from its foot, through whichever point running in carries its name.
+    std::vector<std::uint32_t> stretches{stem};
+    for (bool climbing = true; climbing;) {
+        climbing = false;
+        for (const std::uint32_t up : world.sphere.neighbors(stretches.back())) {
+            if (receiver[up] == stretches.back() && stems_[up] == stem) {
+                stretches.push_back(up);
+                climbing = true;
+                break;
+            }
+        }
+    }
+    constexpr double seconds_a_year = 31'557'600.0;
+    std::vector<Turn> course;
+    bool wet = false;
+    for (const std::uint32_t point : std::views::reverse(stretches)) {
+        const std::vector<DVec3>& line = course_of(point);
+        const std::vector<double>& floors = course_floors_[point];
+        std::vector<double> runs(line.size(), 0.0);
+        for (std::size_t k = 0; k + 1 < line.size(); ++k) {
+            runs[k + 1] = runs[k] + glm::length(line[k + 1] - line[k]);
+        }
+        const double metres = runs.back() * radius_;
+        const double fall = metres > 0.0 ? (top_[point] - course_foot(point)) / metres : 0.0;
+        const Stretch stretch = stretch_of(point, fall, lod);
+        const double flow = river_size_ * world.lakes.discharge[point] / seconds_a_year;
+        // Each turn after the first carries on from where the last stretch ended.
+        for (std::size_t k = course.empty() ? 0 : 1; k < line.size(); ++k) {
+            const double whole = share_of(runs[k], runs.back(), 0.0);
+            const auto along = [&](double from, double to) { return from + ((to - from) * whole); };
+            const double depth = along(stretch.channel.depth, stretch.next.depth);
+            const double water = along(stretch.channel.water, stretch.next.water);
+            wet = wet || water > 0.0;
+            course.push_back({.direction = glm::normalize(line[k]),
+                              .level = std::max(floors[k] - depth + water, stretch.least_water),
+                              .flow = flow,
+                              .rise = along(stretch.channel.rise, stretch.next.rise)});
+        }
+    }
+    if (!wet) {
+        course.clear();
+    }
+    return course;
+}
+
 std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, double reach,
                                         double lod, double rounding, double blend) const {
     const formation::World& world = world_;
@@ -1324,9 +1410,6 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     if (down == point) {
         return std::nullopt;
     }
-    // A river's bed meets the sea at its level, not down on the sea floor past its mouth.
-    const bool mouth = world.rivers.receiver[down] == down;
-    const double floor_to = mouth ? std::min(top_[point], 0.0) : top_[down];
     // Out of reach of all its course, it's faded into the ground here.
     const DVec3 from = sphere.point(point);
     const DVec3 to = sphere.point(down);
@@ -1344,44 +1427,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     }
     const double length = runs.back();
     const double metres = length * radius_;
-    const double fall = metres > 0.0 ? (top_[point] - floor_to) / metres : 0.0;
-    // The sheet its channel reworks the belt into lies as deep whatever the detail: floods scour
-    // its bends half as deep again as its banks stand.
-    const auto channel_at = [&](std::uint32_t at, double falling, double& sheet) {
-        Channel made = channel_of(
-            river_size_ * world.rivers.flood[at], river_size_ * world.lakes.discharge[at], falling,
-            alluvium_[at] + lake_beds_[at] + till_[at] > loose_deep,
-            0.6 * sphere.spacing() * radius_, world.regimes.low[at], world.regimes.high[at]);
-        sheet = 1.5 * made.depth;
-        // Channels too narrow for the detail asked fade out with their water, as gullies do.
-        const double shown = std::clamp((made.width / (2.0 * lod)) - 1.0, 0.0, 1.0);
-        made.depth *= shown;
-        made.water *= shown;
-        made.rise *= shown;
-        return made;
-    };
-    double sheet = 0.0;
-    const Channel channel = channel_at(point, fall, sheet);
-    // Its channel and water meet the next one's as they are where it runs into it; at the sea, it
-    // brims to the sea's level.
-    Channel next = channel;
-    double sheet_to = sheet;
-    if (mouth) {
-        next.water = channel.depth;
-        next.rise = 0.0;
-    } else {
-        next = channel_at(down, fall, sheet_to);
-    }
-    // Running into a lake, its water stands no lower than the lake's, and comes down to it where
-    // it runs in: as deep in its channel there as the lake stands over its floor, brimming at most.
-    double least_water = -std::numeric_limits<double>::infinity();
-    if (const std::uint32_t lake = world.lakes.lake[down]; lake != formation::Lakes::none &&
-                                                           lake < lake_levels_.size() &&
-                                                           lake_levels_[lake].has_value()) {
-        least_water = lake_levels_[lake].value();
-        next.water = std::clamp(least_water - floor_to + next.depth, 0.0, next.depth);
-        next.rise = world.regimes.lake_rise[lake];
-    }
+    const double fall = metres > 0.0 ? (top_[point] - course_foot(point)) / metres : 0.0;
+    const auto [channel, next, sheet, sheet_to, least_water] = stretch_of(point, fall, lod);
     // Its walls stand less steep than their rock lets them in places, as each has been worn,
     // so where they meet another valley's the crest between runs ragged.
     const Noise worn =

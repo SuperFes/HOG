@@ -71,13 +71,13 @@ Result<Body> read_body(ByteReader& in) {
     }
     case Kind::River: {
         River river;
-        river.season = doubles.season();
+        river.peak = doubles.next();
         const auto count = in.read_varint();
         if (!doubles.ok() || !count) {
             break;
         }
-        // Each point is five doubles.
-        if (*count < 2 || *count > in.remaining() / 40) {
+        // Each point is six doubles.
+        if (*count < 2 || *count > in.remaining() / 48) {
             return make_error(ErrorCode::Parse, "a river's points past its bytes, or too few");
         }
         river.course.resize(*count);
@@ -86,7 +86,8 @@ Result<Body> read_body(ByteReader& in) {
             const double y = doubles.next();
             const double z = doubles.next();
             const double level = doubles.next();
-            point = {.place = DVec3{x, y, z}, .level = level, .flow = doubles.next()};
+            const double flow = doubles.next();
+            point = {.place = DVec3{x, y, z}, .level = level, .flow = flow, .rise = doubles.next()};
         }
         if (doubles.ok()) {
             return river;
@@ -114,6 +115,7 @@ River::Along River::along(DVec3 place) const noexcept {
         if (off < best.off) {
             best = {.level = a.level + ((b.level - a.level) * t),
                     .flow = a.flow + ((b.flow - a.flow) * t),
+                    .rise = a.rise + ((b.rise - a.rise) * t),
                     .downstream = run / length,
                     .from_head = from_head + (length * t),
                     .off = off};
@@ -138,7 +140,7 @@ std::vector<std::byte> WaterBodies::encode() const {
             write(out, lake->season);
         } else if (const auto* river = std::get_if<River>(&body)) {
             out.write(std::to_underlying(Kind::River));
-            write(out, river->season);
+            write(out, river->peak);
             out.write_varint(river->course.size());
             for (const River::Point& point : river->course) {
                 write(out, point.place.x);
@@ -146,6 +148,7 @@ std::vector<std::byte> WaterBodies::encode() const {
                 write(out, point.place.z);
                 write(out, point.level);
                 write(out, point.flow);
+                write(out, point.rise);
             }
         }
     }

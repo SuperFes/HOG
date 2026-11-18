@@ -21,6 +21,23 @@
 
 namespace hog::globe {
 
+// A river's channel, as wide and deep as what wears it makes it at its mean (Leopold and
+// Maddock's hydraulic geometry down rivers), cut out to hold the floods that overtop its banks
+// every year or two, `bankfull` times that mean (the same at one place as its flow rises),
+// bending a bend every eleven widths (Leopold and Wolman), more the gentler its fall and the
+// looser its banks, its floor as wide as it wanders. The water passing it stands `water` deep in
+// its lowest month, and `rise` deeper in its highest: a river's stage goes as its flow to the
+// 0.4, as its depth down rivers does.
+struct Channel {
+    double width = 0.0;
+    double depth = 0.0;
+    double water = 0.0;
+    double rise = 0.0;
+    double meander = 0.0;
+    double meander_length = 0.0;
+    double belt = 0.0;
+};
+
 // A planet's land formed stage by stage, from plates to soil, at the planet's own size, read
 // anywhere on it.
 class Formed {
@@ -88,6 +105,7 @@ public:
     struct LakeAt {
         DVec3 in{0.0};
         double level = 0.0;
+        Season season;
     };
     [[nodiscard]] std::vector<LakeAt> lakes() const;
     // The course the river from `point` cuts down to the point it runs to: directions from one to
@@ -97,6 +115,18 @@ public:
     }
     // The river the water from `point` runs in, named by the point its main stem ends at.
     [[nodiscard]] std::uint32_t stem_of(std::uint32_t point) const { return stems_[point]; }
+    // A turn of a river's course: a unit direction, the level its water stands at there in its
+    // lowest month, metres over the sea, the cubic metres a second passing, and how far it rises.
+    struct Turn {
+        DVec3 direction{0.0};
+        double level = 0.0;
+        double flow = 0.0;
+        double rise = 0.0;
+    };
+    // The course of the river named `stem` as stem_of names them, from its head down to where
+    // the sea or a lake takes it, its water as shown at `lod`; empty for a point naming none, or
+    // one with no water shown anywhere along it.
+    [[nodiscard]] std::vector<Turn> river_course(std::uint32_t stem, double lod) const;
     [[nodiscard]] double lowest() const noexcept { return lowest_; }
     [[nodiscard]] double highest() const noexcept { return highest_; }
     [[nodiscard]] const formation::World& world() const noexcept { return world_; }
@@ -133,6 +163,20 @@ private:
     [[nodiscard]] std::optional<Wall> valley_wall(std::uint32_t point, DVec3 direction,
                                                   double reach, double lod, double rounding,
                                                   double blend) const;
+    // The channel and water at either end of the course from `point` to the point it runs to,
+    // falling `fall` per metre, as shown at `lod`: each as deep as it scours its sheet, and the
+    // lowest its water stands, as where it runs into a lake that holds it up.
+    struct Stretch {
+        Channel channel;
+        Channel next;
+        double sheet = 0.0;
+        double sheet_to = 0.0;
+        double least_water = 0.0;
+    };
+    [[nodiscard]] Stretch stretch_of(std::uint32_t point, double fall, double lod) const;
+    // Where the course from `point` comes down to, metres over the sea: the next point's ground,
+    // or at a mouth the sea's level.
+    [[nodiscard]] double course_foot(std::uint32_t point) const noexcept;
     void fill_courses();
     // Each river's main stem: water carries a river's name on down through the point it runs to
     // from whichever brings the most, until the sea or a lake takes it. A point's river is named

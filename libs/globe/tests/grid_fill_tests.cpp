@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using hog::DVec3;
@@ -411,6 +412,87 @@ TEST_CASE("the largest rivers are their own bodies where their water stands", "[
         }
     }
     CHECK(crossed >= 3);
+    CHECK(deep >= 2);
+}
+
+TEST_CASE("the bodies table holds the sea and every lake at its level", "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const double radius = world.planet().body.radius;
+    const hog::grid::WaterBodies table = hog::globe::water_bodies(world);
+
+    const auto* sea = std::get_if<hog::grid::Sea>(&table.bodies.at(hog::globe::sea_body));
+    REQUIRE(sea != nullptr);
+    CHECK(sea->level == world.sea_level().value());
+    const std::vector<hog::globe::Formed::LakeAt> lakes = world.shape().formed->lakes();
+    REQUIRE_FALSE(lakes.empty());
+    for (std::uint32_t lake = 0; lake < lakes.size(); ++lake) {
+        CAPTURE(lake);
+        const auto found = table.bodies.find(
+            hog::globe::body_value({.kind = hog::globe::WaterBody::Kind::Lake, .index = lake}));
+        REQUIRE(found != table.bodies.end());
+        const auto* body = std::get_if<hog::grid::Lake>(&found->second);
+        REQUIRE(body != nullptr);
+        CHECK(body->level == Catch::Approx(radius + lakes[lake].level).margin(1e-6));
+        CHECK(body->season.rise >= 0.0);
+    }
+    CHECK(table == *hog::grid::WaterBodies::decode(table.encode()));
+}
+
+TEST_CASE("each river whose water stands has a body along its course", "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world_sized_rivers();
+    const double radius = world.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(world);
+    const hog::globe::Formed& formed = *world.shape().formed;
+    const hog::grid::WaterBodies table = hog::globe::water_bodies(world);
+
+    int rivers = 0;
+    for (const auto& [id, body] : table.bodies) {
+        if (const auto* river = std::get_if<hog::grid::River>(&body)) {
+            ++rivers;
+            CAPTURE(id);
+            REQUIRE(river->course.size() >= 2);
+            for (const hog::grid::River::Point& point : river->course) {
+                CHECK(glm::length(point.place) == Catch::Approx(point.level));
+                CHECK(point.flow >= 0.0);
+                CHECK(point.rise >= 0.0);
+            }
+        }
+    }
+    CHECK(rivers > 0);
+
+    // Where the largest rivers' water stands deepest across them, their bodies run by.
+    const hog::formation::World& formed_world = formed.world();
+    std::vector<std::uint32_t> largest;
+    for (std::uint32_t point = 0; point < formed_world.sphere.size(); ++point) {
+        const std::uint32_t down = formed_world.rivers.receiver[point];
+        if (down != point && formed_world.lakes.lake[point] == hog::formation::Lakes::none &&
+            formed_world.lakes.lake[down] == hog::formation::Lakes::none) {
+            largest.push_back(point);
+        }
+    }
+    std::ranges::sort(largest, [&](std::uint32_t a, std::uint32_t b) {
+        return formed_world.lakes.discharge[a] > formed_world.lakes.discharge[b];
+    });
+    largest.resize(std::min<std::size_t>(largest.size(), 20));
+    int deep = 0;
+    for (const std::uint32_t point : largest) {
+        CAPTURE(point);
+        const std::optional<DVec3> deepest = cross(formed, point, lod, radius).deepest;
+        if (!deepest) {
+            continue;
+        }
+        const hog::globe::Generator::Column column = world.column(*deepest, lod);
+        if (column.water() <= column.ground()) {
+            continue;
+        }
+        ++deep;
+        const auto found = table.bodies.find(hog::globe::body_value(column.water_body()));
+        REQUIRE(found != table.bodies.end());
+        const auto* river = std::get_if<hog::grid::River>(&found->second);
+        REQUIRE(river != nullptr);
+        // A channel winds about its course out to a few times its width.
+        CHECK(river->along(*deepest * column.water()).off < 100.0);
+    }
     CHECK(deep >= 2);
 }
 
