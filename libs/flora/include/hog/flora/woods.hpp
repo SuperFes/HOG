@@ -52,10 +52,22 @@ struct Warmth {
 // much as the groundwater in reach gives.
 [[nodiscard]] double moisture_of(const Habitat& habitat, const Warmth& warmth) noexcept;
 
+// How a place's stands lean off what its habitat alone would grow, as noise wandering a few
+// hundred metres across gives it, so kinds gather into groves and the woods open in glades rather
+// than lying in even belts. For each kind, a wander, about -1 to 1, by which it's more or less at
+// home than the habitat says; and a chance, 0 to 1, of an outlying grove of it where the habitat
+// suits it only a little. Glades, 0 to 1, thin the cover. None leaves the habitat's woods as they
+// are.
+struct Lean {
+    std::array<double, kinds> wander{};
+    std::array<double, kinds> outlier{};
+    double glade = 0.0;
+};
+
 // The woods a habitat grows. Cover is the least that each limit lets stand: too little warmth to
 // grow in (under the treeline), too little water, thin soil and bare rock, steep ground, ice, and
 // open water too deep to stand in. Each kind's share is how well the habitat suits it against how
 // well it suits the others, every range fading rather than stopping.
-[[nodiscard]] Woods woods_of(const Habitat& habitat) noexcept;
+[[nodiscard]] Woods woods_of(const Habitat& habitat, const Lean& lean = {}) noexcept;
 
 } // namespace hog::flora

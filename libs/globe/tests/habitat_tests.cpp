@@ -8,7 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -117,4 +119,38 @@ TEST_CASE("the water under the ground lies near in lakes' basins and far down on
         }
     }
     CHECK(hog::globe::habitat(world, highest).over_drainage > 10.0);
+}
+
+TEST_CASE("stands lean every way over the world, outliers rare", "[globe][habitat]") {
+    const auto& world = hog::testing::small_world();
+    const double lod = hog::globe::voxel_lod(world);
+    std::array<int, hog::flora::kinds> more{};
+    std::array<int, hog::flora::kinds> less{};
+    int outliers = 0;
+    int glades = 0;
+    const std::vector<DVec3> places = spread(500);
+    for (const DVec3& up : places) {
+        const hog::flora::Lean lean = hog::globe::lean(world, up, lod);
+        CHECK(lean.glade >= 0.0);
+        CHECK(lean.glade <= 1.0);
+        glades += lean.glade > 0.5 ? 1 : 0;
+        for (std::size_t kind = 0; kind < hog::flora::kinds; ++kind) {
+            more.at(kind) += lean.wander.at(kind) > 0.3 ? 1 : 0;
+            less.at(kind) += lean.wander.at(kind) < -0.3 ? 1 : 0;
+            CHECK(lean.outlier.at(kind) >= 0.0);
+            CHECK(lean.outlier.at(kind) <= 1.0);
+            outliers += lean.outlier.at(kind) > 0.5 ? 1 : 0;
+        }
+        CHECK(lean.wander == hog::globe::lean(world, up, lod).wander);
+    }
+    for (std::size_t kind = 0; kind < hog::flora::kinds; ++kind) {
+        CAPTURE(kind);
+        CHECK(more.at(kind) > 50);
+        CHECK(less.at(kind) > 50);
+    }
+    const auto chances = static_cast<int>(places.size() * hog::flora::kinds);
+    CHECK(outliers > 0);
+    CHECK(outliers < chances / 10);
+    CHECK(glades > 0);
+    CHECK(glades < static_cast<int>(places.size()) / 2);
 }

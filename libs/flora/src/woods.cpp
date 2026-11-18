@@ -36,6 +36,27 @@ double fed(const Habitat& habitat) noexcept {
     return std::max(rise(habitat.rain, 0.3, 0.8), rise(habitat.flow, 0.5, 5.0));
 }
 
+// How far a wander of 1 makes a kind more at home: a little over twice, so groves stay mixed but
+// at their strongest.
+constexpr double wandering = 0.8;
+// What share of the cover the deepest glade takes away.
+constexpr double glades = 0.6;
+
+// Leans each kind's suitability, by its wander, and where it's an outlier, up to as much as the
+// best's: only for a kind the habitat suits at least a little against the best, so outliers stand
+// where they could live, never palms in the boreal woods.
+void leaned(std::array<double, kinds>& suits, const Lean& lean, double best) noexcept {
+    if (best <= 0.0) {
+        return;
+    }
+    for (std::size_t kind = 0; kind < kinds; ++kind) {
+        double& suit = suits.at(kind);
+        const double possible = rise(suit / best, 0.02, 0.15);
+        suit *= maths::exp(wandering * std::clamp(lean.wander.at(kind), -1.5, 1.5));
+        suit = std::max(suit, 1.2 * best * possible * std::clamp(lean.outlier.at(kind), 0.0, 1.0));
+    }
+}
+
 } // namespace
 
 Warmth warmth_of(const Habitat& habitat) noexcept {
@@ -67,7 +88,7 @@ double moisture_of(const Habitat& habitat, const Warmth& warmth) noexcept {
     return std::max(rained, 2.0 * groundwater_of(habitat));
 }
 
-Woods woods_of(const Habitat& habitat) noexcept {
+Woods woods_of(const Habitat& habitat, const Lean& lean) noexcept {
     const Warmth warmth = warmth_of(habitat);
     const double moisture = moisture_of(habitat, warmth);
     const double reached = groundwater_of(habitat);
@@ -99,6 +120,7 @@ Woods woods_of(const Habitat& habitat) noexcept {
 
     const double best = *std::ranges::max_element(suits);
     double cover = rise(best, 0.05, 0.3);
+    leaned(suits, lean, best);
     // Under the treeline: warm enough for long enough to grow wood.
     cover = std::min(cover, rise(warmth.growing_mean, 5.4, 7.9) * rise(warmth.growing, 0.2, 0.3));
     cover = std::min(cover, rise(moisture, 0.15, 0.9));
@@ -107,6 +129,7 @@ Woods woods_of(const Habitat& habitat) noexcept {
                                 (1.0 - (0.85 * habitat.bare)));
     cover = std::min(cover, 1.0 - rise(habitat.slope, 1.0, 2.0));
     cover = std::min(cover, 1.0 - rise(habitat.ice, 0.0, 0.3));
+    cover *= 1.0 - (glades * std::clamp(lean.glade, 0.0, 1.0));
     if (flooded) {
         cover = std::min(cover, 1.0 - rise(habitat.water, 0.5, 2.0));
         // In the sea, only mangroves, where it never comes near frost.

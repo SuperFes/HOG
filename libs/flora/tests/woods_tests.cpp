@@ -189,3 +189,63 @@ TEST_CASE("woods fade from one climate to the next, never stepping", "[flora][wo
         last = here;
     }
 }
+
+TEST_CASE("stands lean off the habitat into groves, glades and the odd outlier", "[flora][woods]") {
+    const Habitat temperate = climate(10.0, 10.0, 0.9);
+    const Woods even = woods_of(temperate);
+    REQUIRE(most(even) == Kind::Deciduous);
+    REQUIRE(even.share(Kind::Needleleaf) > 0.0);
+
+    // A wander gathers a kind already there into a grove of its own, the rest still mixed in.
+    hog::flora::Lean conifers;
+    conifers.wander.at(static_cast<std::size_t>(Kind::Needleleaf)) = 1.0;
+    conifers.wander.at(static_cast<std::size_t>(Kind::Deciduous)) = -1.0;
+    const Woods grove = woods_of(temperate, conifers);
+    CHECK(grove.cover == even.cover);
+    CHECK(grove.share(Kind::Needleleaf) > even.share(Kind::Needleleaf));
+    CHECK(grove.share(Kind::Deciduous) > 0.05);
+    CHECK(total(grove) == Approx(1.0));
+
+    // An outlier stands where the habitat suits it a little, never where it can't live: oaks in
+    // the conifers' cool margin, never palms.
+    const Habitat boreal = climate(1.0, 16.0, 0.6);
+    REQUIRE(woods_of(boreal).share(Kind::Deciduous) < 0.05);
+    for (const Kind kind : {Kind::Deciduous, Kind::Palm, Kind::Evergreen}) {
+        CAPTURE(kind);
+        hog::flora::Lean odd;
+        odd.outlier.at(static_cast<std::size_t>(kind)) = 1.0;
+        const Woods outlying = woods_of(boreal, odd);
+        if (kind == Kind::Deciduous) {
+            CHECK(most(outlying) == Kind::Deciduous);
+        } else {
+            CHECK(outlying.share(kind) == 0.0);
+        }
+        CHECK(outlying.cover == woods_of(boreal).cover);
+    }
+
+    hog::flora::Lean glade;
+    glade.glade = 1.0;
+    CHECK(woods_of(temperate, glade).cover < 0.5 * even.cover);
+    CHECK(woods_of(temperate, glade).shares == even.shares);
+}
+
+TEST_CASE("stands fade as their lean wanders, never stepping", "[flora][woods]") {
+    const Habitat temperate = climate(12.0, 8.0, 1.0);
+    for (std::size_t kind = 0; kind < hog::flora::kinds; ++kind) {
+        CAPTURE(kind);
+        hog::flora::Lean lean;
+        lean.wander.at(kind) = -1.0;
+        Woods last = woods_of(temperate, lean);
+        for (int step = -100; step <= 100; ++step) {
+            lean.wander.at(kind) = 0.01 * step;
+            lean.outlier.at(kind) = 0.005 * (step + 100);
+            lean.glade = 0.005 * (step + 100);
+            const Woods here = woods_of(temperate, lean);
+            CHECK(std::abs(here.cover - last.cover) < 0.02);
+            for (std::size_t other = 0; other < hog::flora::kinds; ++other) {
+                CHECK(std::abs(here.shares.at(other) - last.shares.at(other)) < 0.05);
+            }
+            last = here;
+        }
+    }
+}

@@ -170,7 +170,7 @@ std::vector<Spot> survey(const globe::Generator& generator, int level, const glo
                 spot.top = column.sample(column.ground() - (generator.planet().voxel / 2.0), false)
                                .material;
                 if (woods) {
-                    spot.woods = flora::woods_of(globe::habitat(generator, globe::center(cell)));
+                    spot.woods = globe::woods(generator, globe::center(cell), lod);
                 }
             }
         }

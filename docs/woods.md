@@ -52,7 +52,9 @@ What a tree there lives with, read from the formed world at the ground's own hei
   each kind has a range of warmth, water, wet feet, frost and salt it does best in, fading out
   past it. Shares sum to one where there's any cover.
 - **Stands**: the shares wander by noise a few hundred metres across, so kinds gather into
-  groves and stands, not an even mix.
+  groves and stands, still mixed but for the strongest; now and then a kind the habitat suits
+  only a little stands as an outlying grove (oaks in the conifers' cool margin, never palms
+  there); and glades thin the cover (`globe::lean`).
 
 ## Steps
 
@@ -68,7 +70,8 @@ What a tree there lives with, read from the formed world at the ground's own hei
    heights, kinds by latitude and height; judged by the map before going on. Done
    (`hog-census --woods FILE`): on the working world a fifth of the land under crowns, in belts
    by climate, treeless over 3.1 km, gallery forest along the big river crossing the desert.
-   Still to judge: whether stands need the noise above to break up belts this even.
+   The belts were too even, so stands lean them as above (`globe::woods`): on the map, three
+   tenths of the land wooded, read at the map's own detail.
 4. The woods carried in the pages, so clients and the server read the same: a grid kind holding
    cover and the kinds' shares per node, filled by the generator, summed up coarse, versioned to
    change with fire and felling.
