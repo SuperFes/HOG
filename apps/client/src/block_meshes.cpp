@@ -1,23 +1,45 @@
 #include <hog/client/block_meshes.hpp>
 #include <hog/client/ground_blocks.hpp>
 #include <hog/client/ground_field.hpp>
+#include <hog/client/water_field.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/globe/material.hpp>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <utility>
 
 namespace hog::client {
 namespace {
 
-// Past the tiles' keys, whose level takes the top bits but never this high, and the cutaway's.
-constexpr std::uint64_t block_keys = std::uint64_t{0b110} << 61U;
-
-const std::shared_ptr<const terrain::BlockMesh>& no_water() {
+const std::shared_ptr<const terrain::BlockMesh>& empty() {
     static const auto none = std::make_shared<const terrain::BlockMesh>();
     return none;
 }
+
+using Pair = std::array<std::shared_ptr<const terrain::BlockMesh>, 2>; // ground, water
+
+bool drawn(const Pair& meshes) {
+    return std::ranges::any_of(meshes,
+                               [](const auto& mesh) { return mesh && !mesh->indices.empty(); });
+}
+
+// Into `changes`, what's drawn under `key` now in place of what was.
+void changed(GroundChanges& changes, std::uint64_t key, const Pair& now, const Pair& before) {
+    if (now == before) {
+        return;
+    }
+    if (drawn(now)) {
+        changes.shown.push_back(
+            {.key = key, .ground = now[0] ? now[0] : empty(), .water = now[1] ? now[1] : empty()});
+    } else if (drawn(before)) {
+        changes.gone.push_back(key);
+    }
+}
+
+// Past the tiles' keys, whose level takes the top bits but never this high, and the cutaway's.
+constexpr std::uint64_t block_keys = std::uint64_t{0b110} << 61U;
 
 } // namespace
 
@@ -71,11 +93,12 @@ void BlockMeshes::want(const HeldPages& held, DVec3 eye) {
     HOG_ASSERT(settled(), "a drawing wanted while the last is still meshing");
     wanted_.clear();
     planning_ = std::make_unique<jobs::Async<Plan>>(
-        *jobs_,
-        [grid = grid_, cells = cells_, entries = held.entries(), eye, was = &drawn_] mutable {
+        *jobs_, [grid = grid_, cells = cells_, entries = held.entries(),
+                 bodies = held.shared_bodies(), eye, was = &drawn_] mutable {
             Plan plan{.wanted = {},
                       .queued = {},
-                      .pages = std::make_shared<const PagesSnapshot>(grid, std::move(entries))};
+                      .pages = std::make_shared<const PagesSnapshot>(grid, std::move(entries)),
+                      .bodies = std::move(bodies)};
             std::vector<std::pair<double, grid::Key>> to_mesh;
             for (const Block& block : ground_blocks(*plan.pages, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
@@ -101,14 +124,22 @@ void BlockMeshes::start() {
     while (!queued_.empty() && working_.size() < most_working_) {
         const grid::Key node = queued_.front();
         queued_.pop_front();
-        working_.push_back(
-            {.node = node,
-             .job = std::make_unique<jobs::Async<std::shared_ptr<const terrain::BlockMesh>>>(
-                 *jobs_, [grid = grid_, pages = pages_, block = wanted_.at(node).look.block] {
-                     GroundField field{*pages};
-                     return std::make_shared<const terrain::BlockMesh>(
-                         block_of(mesh_block(grid, block, field.field())));
-                 })});
+        working_.push_back({.node = node,
+                            .job = std::make_unique<jobs::Async<Meshed>>(
+                                *jobs_, [grid = grid_, pages = pages_, bodies = bodies_,
+                                         block = wanted_.at(node).look.block] {
+                                    GroundField ground{*pages};
+                                    Meshed meshed{
+                                        .ground = std::make_shared<const terrain::BlockMesh>(
+                                            block_of(mesh_block(grid, block, ground.field()))),
+                                        .water = std::make_shared<const terrain::BlockMesh>()};
+                                    if (may_hold_water(*pages, block.node)) {
+                                        WaterField water{*pages, *bodies};
+                                        meshed.water = std::make_shared<const terrain::BlockMesh>(
+                                            water_of(mesh_block(grid, block, water.field())));
+                                    }
+                                    return meshed;
+                                })});
     }
 }
 
@@ -133,6 +164,7 @@ void BlockMeshes::advance(bool wait) {
         planning_.reset();
         wanted_ = std::move(plan.wanted);
         pages_ = std::move(plan.pages);
+        bodies_ = std::move(plan.bodies);
         queued_.insert(queued_.end(), plan.queued.begin(), plan.queued.end());
         stage_ = Stage::Meshing;
     }
@@ -149,6 +181,7 @@ void BlockMeshes::advance(bool wait) {
     }
     if (stage_ == Stage::Meshing && queued_.empty() && working_.empty()) {
         pages_.reset();
+        bodies_.reset();
         showing_ = show();
         stage_ = Stage::Showing;
     }
@@ -156,32 +189,24 @@ void BlockMeshes::advance(bool wait) {
 }
 
 std::unique_ptr<jobs::Async<BlockMeshes::Shown>> BlockMeshes::show() {
-    return std::make_unique<jobs::Async<Shown>>(*jobs_, [wanted = std::move(wanted_),
-                                                         was = std::move(drawn_)] mutable {
-        GroundChanges changes;
-        const auto place = [&](grid::Key node, const std::shared_ptr<const terrain::BlockMesh>& now,
-                               const std::shared_ptr<const terrain::BlockMesh>& before) {
-            if (now == before) {
-                return;
+    return std::make_unique<jobs::Async<Shown>>(
+        *jobs_, [wanted = std::move(wanted_), was = std::move(drawn_)] mutable {
+            GroundChanges changes;
+            const auto place = [&](grid::Key node, const Meshed& now, const Meshed& before) {
+                changed(changes, block_key(node), {now.ground, now.water},
+                        {before.ground, before.water});
+            };
+            for (const auto& [node, drawing] : wanted) {
+                const auto found = was.find(node);
+                place(node, drawing.mesh, found == was.end() ? Meshed{} : found->second.mesh);
             }
-            if (now && !now->indices.empty()) {
-                changes.shown.push_back(
-                    {.key = block_key(node), .ground = now, .water = no_water()});
-            } else if (before && !before->indices.empty()) {
-                changes.gone.push_back(block_key(node));
+            for (const auto& [node, drawing] : was) {
+                if (!wanted.contains(node)) {
+                    place(node, Meshed{}, drawing.mesh);
+                }
             }
-        };
-        for (const auto& [node, drawing] : wanted) {
-            const auto found = was.find(node);
-            place(node, drawing.mesh, found == was.end() ? nullptr : found->second.mesh);
-        }
-        for (const auto& [node, drawing] : was) {
-            if (!wanted.contains(node)) {
-                place(node, nullptr, drawing.mesh);
-            }
-        }
-        return Shown{.drawn = std::move(wanted), .changes = std::move(changes)};
-    });
+            return Shown{.drawn = std::move(wanted), .changes = std::move(changes)};
+        });
 }
 
 GroundChanges BlockMeshes::collect() {

@@ -423,6 +423,24 @@ step replaces something, the old and new are compared before the old goes.
 7. Water surfaces from bodies: level surfaces clipped to the water tree, river ribbons with flow,
    the water shader moving along the flow with wind on top. Tests: tops at the body's level;
    flow along the course.
+   1. The bodies table from the generator (`globe::water_bodies`): the sea and each lake at its
+      level and season, each river whose water shows along its main stem, head to foot, each turn
+      with its level, flow and rise (river points carry their own rise now, bodies format 2).
+      Done. Found on the way: the course's level stands well over the water the ground holds in
+      most of the small world's rivers (by 1–19 m where the largest ones' water stands, 1 km at
+      one's head), the water there a film of a few centimetres: see carried over.
+   2. The server sends a page's bodies the player hasn't been told of just before it, in
+      messages no bigger than the connection lets go (`PageSending::Sent::bodies`,
+      `bodies_coded`). Done.
+   3. Water meshed per block beside the ground by the same Transvoxel (`client::WaterField`,
+      `water_of`): a point is in the water its finest leaves mark, valued by how far it stands over
+      that body's level, so a sea or lake meets the sphere of its level exactly and seams between
+      depths close as the ground's do. Where the marks end, the water ends: those cells are left
+      out and the vertices by them marked as its edge. Drawn as still water, the sea's marked as
+      its own. Done.
+   4. In `--pages`, the sea is drawn from the blocks all round once any are shown, and the lake or
+      river the eye is in comes from the marks and bodies (`still_water_in`). Done.
+   5. River flow: the water shader moving along the course's direction with wind on top.
 8. Grass, plant cover and anything else placed on the ground read the new surface.
 9. Physics and the player's footing on the shape tree or collision meshes; the bot too. Tests:
    standing, walking a slope, falling into water.
@@ -467,7 +485,10 @@ superseded.
 Open from the river work, to fold in where they fit:
 
 - About one in seven of the largest rivers runs dry, perched over ground formed lower than its
-  course; the generator needs rivers to follow or fill that ground (step 2.3).
+  course; the generator needs rivers to follow or fill that ground (step 2.3). It's wider than
+  that: along the small world's largest rivers the ground lies under the course's floor almost
+  everywhere, so the water fades to a film over it. Drawn from their bodies, rivers show only
+  where the two agree, until the generator holds its rivers' water at their course's level.
 - Rivers still small: joining catchments and melt from frozen peaks; the small world lost its
   ice cap.
 - The sea's run-up over the shore (open question above).

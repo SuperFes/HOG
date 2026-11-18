@@ -87,6 +87,7 @@ std::optional<KnownAt<Kind>> PagesSnapshot::at(grid::Key node) const {
 }
 
 template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
+template std::optional<KnownAt<grid::Water>> PagesSnapshot::at<grid::Water>(grid::Key) const;
 
 std::vector<PagesSnapshot::Entry> PagesSnapshot::around(grid::Key node) const {
     std::vector<Entry> found;
@@ -194,9 +195,11 @@ Result<void> HeldPages::take_bodies(std::span<const std::byte> bytes) {
     if (!sent) {
         return std::unexpected{sent.error()};
     }
+    auto bodies = std::make_shared<grid::WaterBodies>(*bodies_);
     for (auto& [id, body] : sent->bodies) {
-        bodies_.bodies.insert_or_assign(id, std::move(body));
+        bodies->bodies.insert_or_assign(id, std::move(body));
     }
+    bodies_ = std::move(bodies);
     return {};
 }
 

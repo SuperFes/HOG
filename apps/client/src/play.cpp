@@ -16,6 +16,7 @@
 #include <hog/client/session.hpp>
 #include <hog/client/sonar.hpp>
 #include <hog/client/tile_meshes.hpp>
+#include <hog/client/water_field.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
@@ -1011,6 +1012,7 @@ struct StreamedGround {
     bool from_pages = false;
     bool pages_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pages_seen; // where from
+    bool blocks_shown = false;       // any drawn from the pages yet
 };
 
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
@@ -1019,7 +1021,9 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
     const std::optional<double> sea =
         globe::derive(ground.planet).liquid ? std::optional{radius} : std::nullopt;
     const std::optional<globe::StandingWater> water =
-        client::still_water_at(ground.world, eye.metres(), sea, ground.world.layers().thickness);
+        ground.from_pages ? client::still_water_in(ground.pages, eye.metres())
+                          : client::still_water_at(ground.world, eye.metres(), sea,
+                                                   ground.world.layers().thickness);
     if (!water) {
         return std::nullopt;
     }
@@ -1057,6 +1061,7 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
     }
     if (client::GroundChanges changes = ground.block_meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
+        ground.blocks_shown = true;
     }
 }
 
@@ -1083,9 +1088,13 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
         scene.show_ground(std::move(changes));
     }
     take_pages(connection, ground, scene, eye);
-    // Drawn from the pages, the tiles aren't meshed, their water standing over ground it wasn't
-    // made for: the sea is the disc all round.
-    scene.set_ground_state(ground.from_pages ? 0.0 : ground.meshes.covered(eye, streamed_ground),
+    // Drawn from the pages, which reach all round the planet, the sea is its own surface everywhere
+    // once any is drawn; till then, the disc.
+    double covered = ground.blocks_shown ? std::numbers::pi * ground.planet.body.radius : 0.0;
+    if (!ground.from_pages) {
+        covered = ground.meshes.covered(eye, streamed_ground);
+    }
+    scene.set_ground_state(covered,
                            ground.meshes.in_flight() > 0 || ground.block_meshes.in_flight() > 0);
 }
 

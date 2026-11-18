@@ -84,7 +84,11 @@ public:
     [[nodiscard]] std::size_t pages() const noexcept { return count_; }
     // Of the pages held, as coded.
     [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
-    [[nodiscard]] const grid::WaterBodies& bodies() const noexcept { return bodies_; }
+    [[nodiscard]] const grid::WaterBodies& bodies() const noexcept { return *bodies_; }
+    // The same, kept as they are for as long as they're wanted.
+    [[nodiscard]] std::shared_ptr<const grid::WaterBodies> shared_bodies() const noexcept {
+        return bodies_;
+    }
 
     // Lets go of the pages farthest from `eye`, metres from the planet's centre, until those held
     // come to `budget` bytes or under, but never the top page; gives the roots let go.
@@ -108,7 +112,7 @@ private:
     std::vector<Depth> held_; // by the depth of the pages' roots
     std::size_t count_ = 0;
     std::size_t bytes_ = 0;
-    grid::WaterBodies bodies_;
+    std::shared_ptr<const grid::WaterBodies> bodies_ = std::make_shared<const grid::WaterBodies>();
 };
 
 extern template std::optional<HeldPages::Known<grid::Shape>>
@@ -118,5 +122,6 @@ extern template std::optional<HeldPages::Known<grid::Material>>
 extern template std::optional<HeldPages::Known<grid::Water>>
     HeldPages::at<grid::Water>(grid::Key) const;
 extern template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
+extern template std::optional<KnownAt<grid::Water>> PagesSnapshot::at<grid::Water>(grid::Key) const;
 
 } // namespace hog::client

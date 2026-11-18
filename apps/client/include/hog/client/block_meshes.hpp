@@ -26,8 +26,9 @@ namespace hog::client {
 // blended across triangles whose corners differ.
 [[nodiscard]] terrain::BlockMesh block_of(const ShapeMesh& mesh);
 
-// The held ground drawn in blocks as ground_blocks chooses them, meshed on the jobs and kept
-// until how a block's drawn or a page it reads changes, for the scene to draw. What's drawn
+// The held ground drawn in blocks as ground_blocks chooses them, with the water standing in each,
+// meshed on the jobs and kept until how a block's drawn or a page it reads changes, for the scene
+// to draw. The water bodies a page marks come before it, so they're held by then. What's drawn
 // changes all at once, once all that's wanted is meshed, so the ground never shows a hole. All
 // but taking in what the jobs give is done on them, so a frame never waits on it.
 class BlockMeshes {
@@ -65,15 +66,20 @@ private:
 
         [[nodiscard]] bool same(const Look& other) const noexcept;
     };
+    struct Meshed {
+        std::shared_ptr<const terrain::BlockMesh> ground;
+        std::shared_ptr<const terrain::BlockMesh> water;
+    };
     struct Drawing {
         Look look;
-        std::shared_ptr<const terrain::BlockMesh> mesh;
+        Meshed mesh;
     };
     using Drawings = std::map<grid::Key, Drawing>;
     struct Plan {
         Drawings wanted;
         std::vector<grid::Key> queued; // nearest first
         std::shared_ptr<const PagesSnapshot> pages;
+        std::shared_ptr<const grid::WaterBodies> bodies;
     };
     struct Shown {
         Drawings drawn;
@@ -81,7 +87,7 @@ private:
     };
     struct Work {
         grid::Key node;
-        std::unique_ptr<jobs::Async<std::shared_ptr<const terrain::BlockMesh>>> job;
+        std::unique_ptr<jobs::Async<Meshed>> job;
     };
 
     // Starts what's queued, as many as may be in flight.
@@ -100,7 +106,8 @@ private:
     Drawings drawn_;
     Drawings wanted_;
     std::shared_ptr<const PagesSnapshot> pages_; // what's wanted is meshed from
-    std::deque<grid::Key> queued_;               // nearest first
+    std::shared_ptr<const grid::WaterBodies> bodies_;
+    std::deque<grid::Key> queued_; // nearest first
     std::vector<Work> working_;
     std::size_t most_working_;
     std::unique_ptr<jobs::Async<Plan>> planning_;
