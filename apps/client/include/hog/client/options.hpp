@@ -48,6 +48,7 @@ struct Options {
     std::optional<std::filesystem::path> capture;
     bool timings = false; // shown over the picture
     bool through = false; // flying through the ground from the start
+    bool pages = false;   // the ground drawn from the grid pages sent, not the tiles
     // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
     // reads as small talk whatever this says.
     bool chat_filter = true;

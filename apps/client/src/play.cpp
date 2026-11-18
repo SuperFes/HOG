@@ -2,12 +2,15 @@
 #include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/drawn.hpp>
+#include <hog/client/drawn_pages.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
 #include <hog/client/globe_view.hpp>
+#include <hog/client/held_pages.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
+#include <hog/client/page_meshes.hpp>
 #include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
@@ -23,6 +26,7 @@
 #include <hog/globe/volume.hpp>
 #include <hog/globe/volume_archive.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/grid/grid.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
 #include <hog/net/client.hpp>
@@ -631,6 +635,13 @@ public:
     [[nodiscard]] std::vector<protocol::SentTile> take_tiles() {
         return session_ ? session_->take_tiles() : std::vector<protocol::SentTile>{};
     }
+    // The grid pages and water bodies the server sent since last asked, as coded.
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_pages() {
+        return session_ ? session_->take_pages() : std::vector<std::vector<std::byte>>{};
+    }
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() {
+        return session_ ? session_->take_bodies() : std::vector<std::vector<std::byte>>{};
+    }
 
     // Answers the server and the login service, with nothing yet to say of where the player is.
     void pump(MonotonicClock::time_point now) {
@@ -970,12 +981,15 @@ Result<void> show_frame(client::Scene& scene, const client::Shot& shot,
 // Metres from the eye the server sends the ground.
 constexpr double streamed_ground = 8'000.0;
 
-// The ground the server sends, held as it comes: tiles alone, over the planet and its layers,
-// read by the world and meshed to draw, the same trees shared.
+// The ground the server sends, held as it comes: tiles, over the planet and its layers, read by
+// the world and meshed to draw, the same trees shared; and grid pages, drawn in the tiles' place
+// where asked.
 struct StreamedGround {
-    StreamedGround(globe::Planet held, const globe::Layers& layers, jobs::JobSystem& jobs)
+    StreamedGround(globe::Planet held, const globe::Layers& layers, jobs::JobSystem& jobs,
+                   bool drawn_from_pages)
         : planet{std::move(held)}, world{this->planet, layers, volume},
-          meshes{this->planet, layers, jobs} {
+          meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness}, pages{grid},
+          page_meshes{grid, jobs}, from_pages{drawn_from_pages} {
         world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -989,6 +1003,12 @@ struct StreamedGround {
     globe::HeldTiles tiles;
     globe::World world;
     client::TileMeshes meshes;
+    grid::Grid grid;
+    client::HeldPages pages;
+    client::PageMeshes page_meshes;
+    bool from_pages = false;
+    bool pages_came = false;         // since what's drawn of them was last worked out
+    std::optional<DVec3> pages_seen; // where from
 };
 
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
@@ -1005,8 +1025,41 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
         .level = water->top - radius, .rise = water->rise, .peak = water->peak};
 }
 
+// Metres the eye moves before what's drawn of the pages is worked out again.
+constexpr double pages_moved = 4.0;
+
+// Takes in the pages the server sent, and draws them as seen from `eye` once what was last
+// wanted of them is drawn.
+void take_pages(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye) {
+    HOG_ZONE("pages");
+    for (const std::vector<std::byte>& bytes : connection.take_pages()) {
+        if (auto taken = ground.pages.take(bytes); !taken) {
+            log::warn(connection_log, "can't hold a page sent: {}", taken.error());
+        } else {
+            ground.pages_came = true;
+        }
+    }
+    for (const std::vector<std::byte>& bytes : connection.take_bodies()) {
+        if (auto taken = ground.pages.take_bodies(bytes); !taken) {
+            log::warn(connection_log, "can't hold water bodies sent: {}", taken.error());
+        }
+    }
+    if (!ground.from_pages) {
+        return;
+    }
+    if (ground.page_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
+                                         glm::length(eye - *ground.pages_seen) > pages_moved)) {
+        ground.page_meshes.want(ground.pages, client::drawn_pages(ground.pages, eye), eye);
+        ground.pages_came = false;
+        ground.pages_seen = eye;
+    }
+    if (client::GroundChanges changes = ground.page_meshes.collect(); !changes.empty()) {
+        scene.show_ground(std::move(changes));
+    }
+}
+
 // Takes in the tiles the server sent, held for the world and the player's footing and meshed to
-// draw.
+// draw, and the pages.
 void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene,
                  std::optional<client::Player>& player, DVec3 eye) {
     HOG_ZONE("ground");
@@ -1022,11 +1075,15 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
             player->changed(tile->key);
         }
     }
-    if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
+    // Drawn from the pages, the tiles' ground and water are left out, their water now standing
+    // over ground it wasn't made for.
+    if (client::GroundChanges changes = ground.meshes.collect();
+        !changes.empty() && !ground.from_pages) {
         scene.show_ground(std::move(changes));
     }
+    take_pages(connection, ground, scene, eye);
     scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
-                           ground.meshes.in_flight() > 0);
+                           ground.meshes.in_flight() > 0 || ground.page_meshes.in_flight() > 0);
 }
 
 // Starts or stops playing the character as asked, as take_part does; walking waits for the ground
@@ -1240,7 +1297,7 @@ int show_streamed_world(const client::Options& options, render::Device& device,
         std::cerr << std::format("{}: the server's voxel layers: {}\n", program, origin.error());
         return EXIT_FAILURE;
     }
-    StreamedGround ground{*planet, origin->layers, jobs};
+    StreamedGround ground{*planet, origin->layers, jobs, options.pages};
     startup("ready");
     const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
                                             device, presenter, window);

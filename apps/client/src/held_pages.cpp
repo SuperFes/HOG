@@ -50,27 +50,30 @@ Result<void> HeldPages::take(std::span<const std::byte> bytes) {
     Depth& depth = held_.at(root.depth);
     const auto found = depth.find(root);
     if (found == depth.end()) {
-        depth.emplace(root, Held{.page = std::move(*page), .bytes = bytes.size()});
+        depth.emplace(root, Held{.page = std::make_shared<const grid::Page>(std::move(*page)),
+                                 .bytes = bytes.size()});
         ++count_;
         bytes_ += bytes.size();
         return {};
     }
     Held& held = found->second;
-    if (levels_of(*page) > levels_of(held.page)) {
-        held.page = std::move(*page);
-    } else {
-        held.page.generator = page->generator;
+    // Held pages are shared with what reads them, so a page changed is a new one.
+    if (levels_of(*page) <= levels_of(*held.page)) {
+        grid::Page kept = *held.page;
+        kept.generator = page->generator;
         const auto replace = [](auto& tree, auto& sent) {
             if (sent) {
                 tree = std::move(sent);
             }
         };
-        replace(held.page.shape, page->shape);
-        replace(held.page.material, page->material);
-        replace(held.page.water, page->water);
+        replace(kept.shape, page->shape);
+        replace(kept.material, page->material);
+        replace(kept.water, page->water);
+        *page = std::move(kept);
     }
+    held.page = std::make_shared<const grid::Page>(std::move(*page));
     bytes_ -= held.bytes;
-    held.bytes = held.page.encode().size();
+    held.bytes = held.page->encode().size();
     bytes_ += held.bytes;
     return {};
 }
@@ -97,7 +100,12 @@ const HeldPages::Held* HeldPages::find(grid::Key root) const {
 
 const grid::Page* HeldPages::page(grid::Key root) const {
     const Held* held = find(root);
-    return held == nullptr ? nullptr : &held->page;
+    return held == nullptr ? nullptr : held->page.get();
+}
+
+std::shared_ptr<const grid::Page> HeldPages::shared(grid::Key root) const {
+    const Held* held = find(root);
+    return held == nullptr ? nullptr : held->page;
 }
 
 template <typename Kind>
@@ -110,7 +118,7 @@ std::optional<HeldPages::Known<Kind>> HeldPages::at(grid::Key node) const {
         node.depth < grid_.depth() ? grid_.page_of(node.child(0)) : grid_.page_of(node);
     while (true) {
         const Held* held = find(root);
-        if (const auto* tree = held == nullptr ? nullptr : &tree_of<Kind>(held->page);
+        if (const auto* tree = held == nullptr ? nullptr : &tree_of<Kind>(*held->page);
             tree != nullptr && tree->has_value()) {
             const auto below = static_cast<std::uint8_t>(
                 std::min<int>(node.depth - root.depth, tree->value().tree.levels()));

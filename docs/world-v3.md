@@ -399,6 +399,14 @@ step replaces something, the old and new are compared before the old goes.
    pages at three depths meet at a corner, a leaf may join two sheets at its vertex.
 5. Morph or fade between depths. Tests: vertex positions at the start and end of a swap.
 6. Mesh cache and jobs: meshed once, kept until a version or depth changes, nearest first.
+   Done (`client::PageMeshes`): page meshes on the jobs nearest first, each kept until its shape
+   tree's version, its depth or the pages drawn under it change; seams once every page is meshed,
+   each kept until a page touching it is meshed anew. What's drawn swaps all at once when all
+   that's wanted is meshed, so nothing shows a hole meanwhile; the next drawing is worked out
+   only then. `hog-client --pages` draws the ground this way in place of the tiles, still with no
+   water or plants. Running it found the view rule stopping at coarse leaves the ground crosses
+   (merged planes, open beneath): they're now followed like leaves at the foot, by the server
+   too, so a kilometre leaf no longer sits beside 16 m detail.
 7. Water surfaces from bodies: level surfaces clipped to the water tree, river ribbons with flow,
    the water shader moving along the flow with wind on top. Tests: tops at the body's level;
    flow along the course.

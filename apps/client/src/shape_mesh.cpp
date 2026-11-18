@@ -622,11 +622,43 @@ private:
         return glm::clamp(point, low, low + side);
     }
 
+    // The mean of where the surface crosses the leaf's own edges, as the leaves round their ends
+    // have it, so the same whichever seam asks; its middle where none crosses.
+    [[nodiscard]] DVec3 crossed(grid::Key leaf) {
+        const std::uint64_t side = span(leaf.depth);
+        const Place low{leaf.x * side, leaf.y * side, leaf.z * side};
+        std::array<double, 8> out{};
+        for (std::uint32_t k = 0; k < 8; ++k) {
+            out.at(k) = value({low[0] + ((k & 1U) * side), low[1] + (((k >> 1U) & 1U) * side),
+                               low[2] + ((k >> 2U) * side)})
+                            .out;
+        }
+        DVec3 sum{0.0};
+        int count = 0;
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            const std::uint32_t bit = 1U << axis;
+            for (std::uint32_t k = 0; k < 8; ++k) {
+                const std::uint32_t far = k | bit;
+                if ((k & bit) != 0 || (out.at(k) < 0.0) == (out.at(far) < 0.0)) {
+                    continue;
+                }
+                DVec3 point{static_cast<double>(low[0] + ((k & 1U) * side)),
+                            static_cast<double>(low[1] + (((k >> 1U) & 1U) * side)),
+                            static_cast<double>(low[2] + ((k >> 2U) * side))};
+                point[static_cast<glm::length_t>(axis)] +=
+                    static_cast<double>(side) * out.at(k) / (out.at(k) - out.at(far));
+                sum += point;
+                ++count;
+            }
+        }
+        return count > 0 ? sum / static_cast<double>(count) : middle(leaf);
+    }
+
     // Where a leaf's vertex lies and what it shows: from the mesh of the page it's in, where
     // that has it, else on its plane nearest the crossings round it; a normal of nothing where
     // its plane doesn't cross it. A seam meets only part of a leaf's crossings, and others may
     // meet it too, so where its page hasn't placed it, it's placed by the leaf alone.
-    [[nodiscard]] ShapeVertex vertex_of(const Node& node) const {
+    [[nodiscard]] ShapeVertex vertex_of(const Node& node) {
         const std::uint64_t code = grid::code(node.leaf);
         if (drawn_ != nullptr && node.page->mesh != nullptr) {
             if (const auto found = node.page->mesh->border.find(code);
@@ -643,7 +675,7 @@ private:
         const auto crossings = drawn_ == nullptr ? crossings_.find(code) : crossings_.end();
         const DVec3 mass =
             crossings == crossings_.end()
-                ? middle(node.leaf)
+                ? crossed(node.leaf)
                 : crossings->second.sum / static_cast<double>(crossings->second.count);
         ShapeVertex vertex;
         const DVec3 low{static_cast<double>(box_.low[0]), static_cast<double>(box_.low[1]),

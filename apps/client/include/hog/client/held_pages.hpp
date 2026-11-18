@@ -10,6 +10,7 @@
 #include <hog/grid/water_bodies.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -41,8 +42,10 @@ public:
     [[nodiscard]] std::optional<Known<Kind>> at(grid::Key node) const;
 
     [[nodiscard]] const grid::Grid& grid() const noexcept { return grid_; }
-    // The page rooted at `root`, if held.
+    // The page rooted at `root`, if held: as it's held now, which another taken in replaces.
     [[nodiscard]] const grid::Page* page(grid::Key root) const;
+    // The same, kept as it is for as long as it's wanted.
+    [[nodiscard]] std::shared_ptr<const grid::Page> shared(grid::Key root) const;
     [[nodiscard]] std::size_t pages() const noexcept { return count_; }
     // Of the pages held, as coded.
     [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
@@ -54,7 +57,7 @@ public:
 
 private:
     struct Held {
-        grid::Page page;
+        std::shared_ptr<const grid::Page> page;
         std::size_t bytes = 0;
     };
     struct Hash {

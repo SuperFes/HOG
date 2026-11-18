@@ -24,6 +24,7 @@ add_library(hog_client
     src/picture.cpp
     src/player.cpp
     src/scene.cpp
+    src/page_meshes.cpp
     src/shape_mesh.cpp
     src/sonar.cpp
     src/session.cpp
@@ -59,6 +60,7 @@ hog_add_tests(hog_client
     tests/picture_tests.cpp
     tests/player_tests.cpp
     tests/scene_tests.cpp
+    tests/page_meshes_tests.cpp
     tests/shape_mesh_tests.cpp
     tests/sonar_tests.cpp
     tests/session_tests.cpp
