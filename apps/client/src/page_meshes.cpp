@@ -72,31 +72,54 @@ PageMeshes::PageMeshes(const grid::Grid& grid, jobs::JobSystem& jobs)
 
 PageMeshes::~PageMeshes() {
     gather(true);
+    planning_.reset();
+    showing_.reset();
 }
 
-void PageMeshes::want(const HeldPages& held, const std::vector<DrawnPage>& drawn, DVec3 eye) {
+void PageMeshes::want(const HeldPages& held, DVec3 eye) {
+    plan(held.entries(), std::nullopt, eye);
+}
+
+void PageMeshes::want(const HeldPages& held, std::vector<DrawnPage> drawn, DVec3 eye) {
+    plan(held.entries(), std::move(drawn), eye);
+}
+
+void PageMeshes::plan(std::vector<PagesSnapshot::Entry> pages,
+                      std::optional<std::vector<DrawnPage>> drawn, DVec3 eye) {
     HOG_ASSERT(settled(), "a drawing wanted while the last is still meshing");
     wanted_.clear();
-    touching_.clear();
-    std::vector<std::pair<double, grid::Key>> to_mesh;
-    for (const DrawnPage& page : drawn) {
-        Look look{.page = held.shared(page.page), .levels = page.levels, .under = page.under};
-        HOG_ASSERT(look.page != nullptr && look.page->shape, "a page drawn held with its shape");
-        Drawing& drawing = wanted_[page.page];
-        if (const auto found = drawn_.find(page.page);
-            found != drawn_.end() && found->second.look.same(look)) {
-            drawing.own = found->second.own;
-        } else {
-            to_mesh.emplace_back(grid_.distance(page.page, eye), page.page);
+    planning_ = std::make_unique<jobs::Async<Plan>>(*jobs_, [grid = grid_, pages = std::move(pages),
+                                                             drawn = std::move(drawn), eye,
+                                                             was = &drawn_] mutable {
+        const PagesSnapshot held{grid, std::move(pages)};
+        if (!drawn) {
+            drawn = drawn_pages(held, eye);
         }
-        drawing.look = std::move(look);
-    }
-    std::ranges::sort(to_mesh);
-    for (const auto& [metres, root] : to_mesh) {
-        queued_.push_back({.root = root, .seam = false});
-    }
-    stage_ = Stage::Pages;
-    advance();
+        Plan plan;
+        std::vector<std::pair<double, grid::Key>> to_mesh;
+        for (DrawnPage& page : *drawn) {
+            Look look{.page = held.shared(page.page),
+                      .levels = page.levels,
+                      .under = std::move(page.under)};
+            HOG_ASSERT(look.page != nullptr && look.page->shape,
+                       "a page drawn held with its shape");
+            Drawing& drawing = plan.wanted[page.page];
+            if (const auto found = was->find(page.page);
+                found != was->end() && found->second.look.same(look)) {
+                drawing.own = found->second.own;
+            } else {
+                to_mesh.emplace_back(grid.distance(page.page, eye), page.page);
+            }
+            drawing.look = std::move(look);
+        }
+        std::ranges::sort(to_mesh);
+        plan.queued.reserve(to_mesh.size());
+        for (const auto& [metres, root] : to_mesh) {
+            plan.queued.push_back({.root = root, .seam = false});
+        }
+        return plan;
+    });
+    stage_ = Stage::Planning;
 }
 
 std::unique_ptr<jobs::Async<PageMeshes::Meshed>> PageMeshes::mesh_page(grid::Key root) const {
@@ -141,6 +164,36 @@ std::unique_ptr<jobs::Async<PageMeshes::Meshed>> PageMeshes::mesh_seam(grid::Key
         });
 }
 
+std::unique_ptr<jobs::Async<PageMeshes::Plan>> PageMeshes::link() {
+    return std::make_unique<jobs::Async<Plan>>(
+        *jobs_, [grid = grid_, wanted = std::move(wanted_), was = &drawn_] mutable {
+            ShapesDrawn drawn{grid};
+            for (const auto& [root, drawing] : wanted) {
+                drawn.add({.page = root,
+                           .tree = &shape_of(*drawing.look.page).tree,
+                           .levels = drawing.look.levels,
+                           .under = drawing.look.under,
+                           .mesh = drawing.own.shape.get()});
+            }
+            Plan plan;
+            for (auto& [root, drawing] : wanted) {
+                drawing.reads = {{root, drawing.own.shape.get()}};
+                for (const grid::Key next : drawn.touching(root)) {
+                    drawing.reads.emplace_back(next, wanted.at(next).own.shape.get());
+                }
+                std::ranges::sort(drawing.reads);
+                if (const auto found = was->find(root);
+                    found != was->end() && found->second.reads == drawing.reads) {
+                    drawing.seam = found->second.seam;
+                } else {
+                    plan.queued.push_back({.root = root, .seam = true});
+                }
+            }
+            plan.wanted = std::move(wanted);
+            return plan;
+        });
+}
+
 void PageMeshes::start() {
     while (!queued_.empty() && working_.size() < most_working_) {
         const Queued next = queued_.front();
@@ -172,79 +225,80 @@ void PageMeshes::gather(bool wait) {
     working_ = std::move(still);
 }
 
-void PageMeshes::advance() {
-    if (stage_ == Stage::Pages && in_flight() == 0) {
-        // Seams read every page meshed, so they're met once all are.
-        ShapesDrawn drawn{grid_};
-        for (const auto& [root, drawing] : wanted_) {
-            drawn.add({.page = root,
-                       .tree = &shape_of(*drawing.look.page).tree,
-                       .levels = drawing.look.levels,
-                       .under = drawing.look.under,
-                       .mesh = drawing.own.shape.get()});
-        }
-        for (auto& [root, drawing] : wanted_) {
-            drawing.reads = {{root, drawing.own.shape.get()}};
-            for (const grid::Key next : drawn.touching(root)) {
-                drawing.reads.emplace_back(next, wanted_.at(next).own.shape.get());
-            }
-            std::ranges::sort(drawing.reads);
-            if (const auto found = drawn_.find(root);
-                found != drawn_.end() && found->second.reads == drawing.reads) {
-                drawing.seam = found->second.seam;
-            } else {
-                queued_.push_back({.root = root, .seam = true});
-            }
-        }
-        stage_ = Stage::Seams;
+void PageMeshes::advance(bool wait) {
+    if (planning_ && (wait || planning_->done())) {
+        Plan plan = planning_->take();
+        planning_.reset();
+        wanted_ = std::move(plan.wanted);
+        queued_.insert(queued_.end(), plan.queued.begin(), plan.queued.end());
+        stage_ = stage_ == Stage::Planning ? Stage::Pages : Stage::Seams;
     }
-    if (stage_ == Stage::Seams && in_flight() == 0) {
-        show();
+    if (showing_ && (wait || showing_->done())) {
+        Shown shown = showing_->take();
+        showing_.reset();
+        drawn_ = std::move(shown.drawn);
+        changes_.shown.insert(changes_.shown.end(),
+                              std::make_move_iterator(shown.changes.shown.begin()),
+                              std::make_move_iterator(shown.changes.shown.end()));
+        changes_.gone.insert(changes_.gone.end(), shown.changes.gone.begin(),
+                             shown.changes.gone.end());
         stage_ = Stage::Settled;
+    }
+    // Seams read every page meshed, so they're linked once all are.
+    if (stage_ == Stage::Pages && queued_.empty() && working_.empty()) {
+        planning_ = link();
+        stage_ = Stage::Linking;
+    }
+    if (stage_ == Stage::Seams && queued_.empty() && working_.empty()) {
+        showing_ = show();
+        stage_ = Stage::Showing;
     }
     start();
 }
 
-void PageMeshes::show() {
-    const auto place = [&](grid::Key root, bool seam,
-                           const std::shared_ptr<const terrain::BlockMesh>& now,
-                           const std::shared_ptr<const terrain::BlockMesh>& was) {
-        if (now == was) {
-            return;
+std::unique_ptr<jobs::Async<PageMeshes::Shown>> PageMeshes::show() {
+    return std::make_unique<jobs::Async<Shown>>(*jobs_, [wanted = std::move(wanted_),
+                                                         was = std::move(drawn_)] mutable {
+        GroundChanges changes;
+        const auto place = [&](grid::Key root, bool seam,
+                               const std::shared_ptr<const terrain::BlockMesh>& now,
+                               const std::shared_ptr<const terrain::BlockMesh>& before) {
+            if (now == before) {
+                return;
+            }
+            if (now && !now->indices.empty()) {
+                changes.shown.push_back(
+                    {.key = page_key(root, seam), .ground = now, .water = no_water()});
+            } else if (before && !before->indices.empty()) {
+                changes.gone.push_back(page_key(root, seam));
+            }
+        };
+        for (const auto& [root, drawing] : wanted) {
+            const auto found = was.find(root);
+            const Drawing* before = found == was.end() ? nullptr : &found->second;
+            place(root, false, drawing.own.block, before != nullptr ? before->own.block : nullptr);
+            place(root, true, drawing.seam, before != nullptr ? before->seam : nullptr);
         }
-        if (now && !now->indices.empty()) {
-            changes_.shown.push_back(
-                {.key = page_key(root, seam), .ground = now, .water = no_water()});
-        } else if (was && !was->indices.empty()) {
-            changes_.gone.push_back(page_key(root, seam));
+        for (const auto& [root, drawing] : was) {
+            if (!wanted.contains(root)) {
+                place(root, false, nullptr, drawing.own.block);
+                place(root, true, nullptr, drawing.seam);
+            }
         }
-    };
-    for (const auto& [root, drawing] : wanted_) {
-        const auto found = drawn_.find(root);
-        const Drawing* was = found == drawn_.end() ? nullptr : &found->second;
-        place(root, false, drawing.own.block, was != nullptr ? was->own.block : nullptr);
-        place(root, true, drawing.seam, was != nullptr ? was->seam : nullptr);
-    }
-    for (const auto& [root, drawing] : drawn_) {
-        if (!wanted_.contains(root)) {
-            place(root, false, nullptr, drawing.own.block);
-            place(root, true, nullptr, drawing.seam);
-        }
-    }
-    drawn_ = std::move(wanted_);
-    wanted_.clear();
+        return Shown{.drawn = std::move(wanted), .changes = std::move(changes)};
+    });
 }
 
 GroundChanges PageMeshes::collect() {
     gather(false);
-    advance();
+    advance(false);
     return std::exchange(changes_, {});
 }
 
 void PageMeshes::finish() {
     while (!settled()) {
         gather(true);
-        advance();
+        advance(true);
     }
 }
 

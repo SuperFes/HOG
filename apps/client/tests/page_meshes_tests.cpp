@@ -81,9 +81,17 @@ TEST_CASE("page meshes are kept until a page or how it's drawn changes", "[clien
 
     SECTION("wanted again as it is, nothing's meshed or changed") {
         meshes.want(held, drawn, eye);
-        CHECK(meshes.in_flight() == 0);
-        CHECK(meshes.settled());
+        meshes.finish();
         CHECK(meshes.collect().empty());
+    }
+    // Drawn as seen, pages are drawn from the top page down, which isn't held.
+    SECTION("wanted as seen without the top page, nothing's drawn") {
+        meshes.want(held, eye);
+        meshes.finish();
+        changes = meshes.collect();
+        CHECK(changes.shown.empty());
+        std::ranges::sort(changes.gone);
+        CHECK(changes.gone == expected);
     }
     // The side they share is drawn by the low page's seam, as it reads both.
     SECTION("one drawn coarser meshes it again, and the seams by it") {

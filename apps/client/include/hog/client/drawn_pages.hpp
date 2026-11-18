@@ -23,7 +23,12 @@ struct DrawnPage {
 // drawn once: from the top page down, each as deep as `view` sees it from there and as deep as
 // it's held; under a page drawn whole, the held pages its open leaves lead to where the view
 // wants them, in its place. In order of the pages' roots.
-[[nodiscard]] std::vector<DrawnPage> drawn_pages(const HeldPages& held, DVec3 eye,
+// `Pages` is HeldPages or a PagesSnapshot of them.
+template <typename Pages>
+[[nodiscard]] std::vector<DrawnPage> drawn_pages(const Pages& held, DVec3 eye,
                                                  const grid::View& view = grid::View{});
+
+extern template std::vector<DrawnPage> drawn_pages(const HeldPages&, DVec3, const grid::View&);
+extern template std::vector<DrawnPage> drawn_pages(const PagesSnapshot&, DVec3, const grid::View&);
 
 } // namespace hog::client

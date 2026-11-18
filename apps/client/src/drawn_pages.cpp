@@ -5,7 +5,8 @@
 
 namespace hog::client {
 
-std::vector<DrawnPage> drawn_pages(const HeldPages& held, DVec3 eye, const grid::View& view) {
+template <typename Pages>
+std::vector<DrawnPage> drawn_pages(const Pages& held, DVec3 eye, const grid::View& view) {
     const grid::Grid& grid = held.grid();
     const auto drawable = [&](grid::Key root) {
         const grid::Page* page = held.page(root);
@@ -47,5 +48,8 @@ std::vector<DrawnPage> drawn_pages(const HeldPages& held, DVec3 eye, const grid:
     std::ranges::sort(drawn, {}, &DrawnPage::page);
     return drawn;
 }
+
+template std::vector<DrawnPage> drawn_pages(const HeldPages&, DVec3, const grid::View&);
+template std::vector<DrawnPage> drawn_pages(const PagesSnapshot&, DVec3, const grid::View&);
 
 } // namespace hog::client

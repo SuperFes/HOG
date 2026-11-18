@@ -77,6 +77,11 @@ TEST_CASE("pages are drawn deeper and finer as the eye nears them", "[client][dr
     REQUIRE(top != nullptr);
     CHECK(top->levels == 5);
     CHECK(std::ranges::find(top->under, target) != top->under.end());
+    // A snapshot of the pages held draws them as they do.
+    const hog::client::PagesSnapshot snapshot{grid, held.entries()};
+    CHECK(hog::client::drawn_pages(snapshot, grid.centre(target)) == at);
+    CHECK(snapshot.page(target) == held.page(target));
+    CHECK(snapshot.page(Key{.depth = 5, .x = 1, .y = 1, .z = 1}) == nullptr);
     const DrawnPage* here = find(at, target);
     REQUIRE(here != nullptr);
     CHECK(here->levels == 6);

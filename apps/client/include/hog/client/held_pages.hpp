@@ -14,9 +14,28 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hog::client {
+
+// The pages held at a moment, as they were then, for reading on another thread while more come.
+class PagesSnapshot {
+public:
+    using Entry = std::pair<grid::Key, std::shared_ptr<const grid::Page>>;
+
+    PagesSnapshot(const grid::Grid& grid, std::vector<Entry> pages);
+
+    [[nodiscard]] const grid::Grid& grid() const noexcept { return grid_; }
+    [[nodiscard]] const grid::Page* page(grid::Key root) const;
+    [[nodiscard]] std::shared_ptr<const grid::Page> shared(grid::Key root) const;
+
+private:
+    [[nodiscard]] const Entry* find(grid::Key root) const;
+
+    grid::Grid grid_;
+    std::vector<Entry> pages_; // by root
+};
 
 // The grid pages the server has sent, each as deep and as new as last sent, and the water bodies
 // their water trees mark. What's known at a node is the finest page over it holding that kind.
@@ -46,6 +65,8 @@ public:
     [[nodiscard]] const grid::Page* page(grid::Key root) const;
     // The same, kept as it is for as long as it's wanted.
     [[nodiscard]] std::shared_ptr<const grid::Page> shared(grid::Key root) const;
+    // Every page held, as it's held now, for a snapshot.
+    [[nodiscard]] std::vector<PagesSnapshot::Entry> entries() const;
     [[nodiscard]] std::size_t pages() const noexcept { return count_; }
     // Of the pages held, as coded.
     [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }

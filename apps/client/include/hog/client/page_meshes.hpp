@@ -16,6 +16,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace hog::client {
@@ -30,7 +31,8 @@ namespace hog::client {
 // The held pages as drawn, meshed on the jobs and kept until their shape trees or how they're
 // drawn change, each page's seam until a page touching it changes, for the scene to draw. What's
 // drawn changes all at once, once all that's wanted is meshed, so the ground never shows a hole
-// or a crack between pages.
+// or a crack between pages. All but taking in what the jobs give is done on them, so a frame
+// never waits on it.
 class PageMeshes {
 public:
     // The jobs must outlive it.
@@ -43,20 +45,23 @@ public:
 
     // Whether what was last wanted is drawn, so another drawing may be wanted.
     [[nodiscard]] bool settled() const noexcept { return stage_ == Stage::Settled; }
-    // Wants the held pages drawn as `drawn` has them, meshing what's changed, nearest `eye`
-    // first. Precondition: settled(), and every page drawn held with a shape tree.
-    void want(const HeldPages& held, const std::vector<DrawnPage>& drawn, DVec3 eye);
+    // Wants the held pages drawn as seen from `eye`, as drawn_pages has them, meshing what's
+    // changed, nearest first. Precondition: settled().
+    void want(const HeldPages& held, DVec3 eye);
+    // The same, drawn as `drawn` has them. Precondition: every page drawn held with a shape tree.
+    void want(const HeldPages& held, std::vector<DrawnPage> drawn, DVec3 eye);
     // Meshes on; what's to be drawn since last asked, and what's gone.
     [[nodiscard]] GroundChanges collect();
     // Meshes all that's wanted, waiting for it.
     void finish();
 
     [[nodiscard]] std::size_t in_flight() const noexcept {
-        return queued_.size() + working_.size();
+        return queued_.size() + working_.size() + (planning_ ? 1 : 0) + (showing_ ? 1 : 0);
     }
 
 private:
-    enum class Stage : std::uint8_t { Settled, Pages, Seams };
+    // Planning what's wanted, meshing pages, linking seams, meshing them, then showing them.
+    enum class Stage : std::uint8_t { Settled, Planning, Pages, Linking, Seams, Showing };
 
     // How a page is drawn: all its mesh depends on.
     struct Look {
@@ -87,27 +92,43 @@ private:
         grid::Key root;
         bool seam = false;
     };
+    using Drawings = std::map<grid::Key, Drawing>;
+    // What's wanted, and what of it is still to mesh, nearest first.
+    struct Plan {
+        Drawings wanted;
+        std::vector<Queued> queued;
+    };
+    struct Shown {
+        Drawings drawn;
+        GroundChanges changes;
+    };
 
+    void plan(std::vector<PagesSnapshot::Entry> pages, std::optional<std::vector<DrawnPage>> drawn,
+              DVec3 eye);
     // Starts what's queued, as many as may be in flight.
     void start();
     // Takes in what's meshed, waiting for it all if `wait`.
     void gather(bool wait);
-    // On to seams once every page is meshed, and to drawing once every seam is.
-    void advance();
+    // On through the stages as each is done, waiting for a plan or what's shown if `wait`.
+    void advance(bool wait);
     [[nodiscard]] std::unique_ptr<jobs::Async<Meshed>> mesh_page(grid::Key root) const;
     [[nodiscard]] std::unique_ptr<jobs::Async<Meshed>> mesh_seam(grid::Key root) const;
-    // Puts what's wanted in place of what's drawn.
-    void show();
+    // The seams each page wanted reads, and those to mesh again.
+    [[nodiscard]] std::unique_ptr<jobs::Async<Plan>> link();
+    // What's wanted put in place of what's drawn.
+    [[nodiscard]] std::unique_ptr<jobs::Async<Shown>> show();
 
     grid::Grid grid_;
     jobs::JobSystem* jobs_;
     Stage stage_ = Stage::Settled;
-    std::map<grid::Key, Drawing> drawn_;
-    std::map<grid::Key, Drawing> wanted_;
-    std::map<grid::Key, std::vector<grid::Key>> touching_; // of those wanted
-    std::deque<Queued> queued_;                            // nearest first
+    // Read by the jobs planning and linking, and only changed once they're done.
+    Drawings drawn_;
+    Drawings wanted_;
+    std::deque<Queued> queued_; // nearest first
     std::vector<Work> working_;
     std::size_t most_working_;
+    std::unique_ptr<jobs::Async<Plan>> planning_;
+    std::unique_ptr<jobs::Async<Shown>> showing_;
     GroundChanges changes_;
 };
 

@@ -2,7 +2,6 @@
 #include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/drawn.hpp>
-#include <hog/client/drawn_pages.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
@@ -1049,7 +1048,7 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
     }
     if (ground.page_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
                                          glm::length(eye - *ground.pages_seen) > pages_moved)) {
-        ground.page_meshes.want(ground.pages, client::drawn_pages(ground.pages, eye), eye);
+        ground.page_meshes.want(ground.pages, eye);
         ground.pages_came = false;
         ground.pages_seen = eye;
     }

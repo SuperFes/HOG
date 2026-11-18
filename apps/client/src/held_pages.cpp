@@ -32,6 +32,26 @@ int levels_of(const grid::Page& page) {
 
 } // namespace
 
+PagesSnapshot::PagesSnapshot(const grid::Grid& grid, std::vector<Entry> pages)
+    : grid_{grid}, pages_{std::move(pages)} {
+    std::ranges::sort(pages_, {}, &Entry::first);
+}
+
+const PagesSnapshot::Entry* PagesSnapshot::find(grid::Key root) const {
+    const auto found = std::ranges::lower_bound(pages_, root, {}, &Entry::first);
+    return found == pages_.end() || found->first != root ? nullptr : &*found;
+}
+
+const grid::Page* PagesSnapshot::page(grid::Key root) const {
+    const Entry* entry = find(root);
+    return entry == nullptr ? nullptr : entry->second.get();
+}
+
+std::shared_ptr<const grid::Page> PagesSnapshot::shared(grid::Key root) const {
+    const Entry* entry = find(root);
+    return entry == nullptr ? nullptr : entry->second;
+}
+
 HeldPages::HeldPages(const grid::Grid& grid)
     : grid_{grid}, held_(static_cast<std::size_t>(grid.depth()) + 1) {}
 
@@ -106,6 +126,17 @@ const grid::Page* HeldPages::page(grid::Key root) const {
 std::shared_ptr<const grid::Page> HeldPages::shared(grid::Key root) const {
     const Held* held = find(root);
     return held == nullptr ? nullptr : held->page;
+}
+
+std::vector<PagesSnapshot::Entry> HeldPages::entries() const {
+    std::vector<PagesSnapshot::Entry> entries;
+    entries.reserve(count_);
+    for (const Depth& depth : held_) {
+        for (const auto& [root, held] : depth) {
+            entries.emplace_back(root, held.page);
+        }
+    }
+    return entries;
 }
 
 template <typename Kind>
