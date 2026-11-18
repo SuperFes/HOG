@@ -61,6 +61,15 @@ TEST_CASE("a river's level and flow change evenly along its course", "[grid]") {
     CHECK(bend.off == Approx(0.0));
 }
 
+TEST_CASE("rivers run faster as more passes, slowly", "[grid]") {
+    CHECK(hog::grid::running_speed(0.0) == 0.0);
+    CHECK(hog::grid::running_speed(1.0) == Approx(1.0 / 0.81));
+    CHECK(hog::grid::running_speed(20.0) > hog::grid::running_speed(1.0));
+    // A thousand times the water, only twice as fast.
+    CHECK(hog::grid::running_speed(1000.0) / hog::grid::running_speed(1.0) ==
+          Approx(2.0).epsilon(0.01));
+}
+
 TEST_CASE("past a river's ends it reads as at them", "[grid]") {
     const River river = bent();
     const River::Along above = river.along(DVec3{-30.0, 0.0, 0.0});

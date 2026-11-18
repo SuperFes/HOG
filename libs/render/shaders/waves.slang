@@ -729,6 +729,32 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     return surface;
 }
 
+// Seconds over which running water carries its waves, as hog::render::current_cycle.
+static const float current_cycle = 2.0;
+
+// As wave_surface, on water running at `current`, metres a second along the ground, `seconds` as
+// hog::render::current_seconds counts them: drawn twice half a cycle apart, each carried along
+// with the water over its cycle and faded in and out over it, so neither strays more than a
+// cycle's run from where it was drawn (Vlachos's flow maps). The rest is the nearer drawing's.
+public WaveSurface carried_wave_surface(Waves waves, float3 rest, float footprint, float3 floor,
+                                        float4 reach, float3 current, float seconds) {
+    if (dot(current, current) <= 0.0) {
+        return wave_surface(waves, rest, footprint, floor, reach);
+    }
+    const float first = frac(seconds / current_cycle);
+    const float second = frac(first + 0.5);
+    const WaveSurface one =
+        wave_surface(waves, rest - (current * (first * current_cycle)), footprint, floor, reach);
+    const WaveSurface other =
+        wave_surface(waves, rest - (current * (second * current_cycle)), footprint, floor, reach);
+    const float weight = 1.0 - abs((2.0 * first) - 1.0);
+    WaveSurface carried = weight >= 0.5 ? one : other;
+    carried.moved = lerp(other.moved, one.moved, weight);
+    carried.normal = normalize(lerp(other.normal, one.normal, weight));
+    carried.roughness = lerp(other.roughness, one.roughness, weight);
+    return carried;
+}
+
 // The foam's pattern at a point of sea level, as much of it as is seen: of its coarse waves and its
 // fine, fields of unit variance of what's seen of them, the share of their variance that's seen,
 // and the mean square of their slope, per metre; and another of each, a quarter turn on.

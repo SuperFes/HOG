@@ -72,6 +72,8 @@ struct Surface {
     // Which water this is: the sea's disc, the sea's own surface as the voxels hold it, or still
     // water standing clear of the sea.
     nointerpolation float kind;
+    // How fast and which way the water runs, metres a second along the ground; none but in rivers.
+    float3 current;
 };
 
 static const float disc_kind = 0.0;
@@ -152,6 +154,7 @@ Surface vertex_main(Vertex vertex) {
     const float half = small_sin(turned / 2.0);
     const float turned_sin = small_sin(turned);
     Surface surface;
+    surface.current = float3(0.0);
     surface.from_eye =
         (up * ((-2.0 * faked * half * half) - push.up_height.w)) + (towards * (faked * turned_sin));
     surface.normal = (up * (1.0 - (2.0 * half * half))) + (towards * turned_sin);
@@ -204,6 +207,8 @@ Surface vertex_still(StillVertex vertex) {
     const float radius = waves.count_left_radius.z;
     const float faked = push.east_faked.w;
     Surface surface;
+    // A still mesh's normal is its water's current; only along the ground.
+    surface.current = vertex.normal - (up * dot(vertex.normal, up));
     surface.rest = vertex.position + vertex.origin.xyz;
     surface.from_eye = bent(surface.rest, push.up_height, float2(radius, faked));
     surface.normal = normalize(surface.from_eye + (up * (faked + push.up_height.w)));
@@ -388,8 +393,8 @@ bool over_dry(Surface surface) {
 // From `beneath`, its underside is what faces the eye.
 Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
-    const WaveSurface water =
-        wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.reach);
+    const WaveSurface water = carried_wave_surface(waves, surface.rest, footprint, surface.floor.xyz,
+                                                   surface.reach, surface.current, waves.year.y);
     float unseen;
     float unseen_rain;
     const float2 slope = ripple_slope_at(surface.rest, footprint, unseen) +

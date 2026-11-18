@@ -67,6 +67,11 @@ struct River {
     friend bool operator==(const River&, const River&) = default;
 };
 
+// How fast a river's water runs, metres a second, `flow` cubic metres a second passing: as wide
+// as 3 Q^0.5 and as deep as 0.27 Q^0.4, as Leopold and Maddock's hydraulic geometry down rivers
+// has a channel, and as the generator cuts them; none where nothing passes.
+[[nodiscard]] double running_speed(double flow) noexcept;
+
 using Body = std::variant<Sea, Lake, River>;
 
 // Every water body by the id the water tree marks its basin with. Ids are never 0, which marks no

@@ -84,7 +84,7 @@ struct DrawnWaves {
     // Of rain ringing the water: x rain_ring_chance, y seconds, counted round now and then.
     glm::vec4 rain{0.0F};
     // x how far through the year it is, as a share of it from the March equinox, which lakes and
-    // rivers rise and fall by.
+    // rivers rise and fall by; y current_seconds.
     glm::vec4 year{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
@@ -198,6 +198,12 @@ struct OceanView {
     std::optional<StillAtEye> still = {};
 };
 
+// Running water carries its waves along over a cycle of so many seconds, drawn twice half a cycle
+// apart, each fading out as it's carried furthest.
+inline constexpr double current_cycle = 2.0;
+// Seconds at `time`, counted round every so many cycles, as running water's waves are carried by.
+[[nodiscard]] double current_seconds(GameTime time) noexcept;
+
 // The sea's surface, moved by its waves about sea level, out to the horizon round the point under
 // the eye. It reflects the sky and the sun over what's drawn beneath it, more the more glancing the
 // view, and hides what's drawn after it below.
@@ -222,6 +228,8 @@ public:
     // next drawn, as the ground's chunks are; placing one under a key already held replaces it,
     // and an empty one takes it away. Drawn as the sea is, lit and seen through the same, with
     // the waves the wind grows on still water.
+    // A vertex's normal is its water's current, metres a second along the ground in the planet's
+    // frame, which carries its waves along.
     void place_still(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh);
     void remove_still(std::uint64_t key);
     [[nodiscard]] std::size_t still_placed() const noexcept { return still_.size(); }

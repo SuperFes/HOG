@@ -21,6 +21,11 @@ std::array<std::uint8_t, 3> tiles_of(const globe::VoxelVertex& vertex, std::uint
     return {tile, tile, tile};
 }
 
+// A face's normal at a corner; water drawn from voxels runs nowhere, so its current is none.
+Vec3 normal_of(const globe::VoxelVertex& vertex, bool liquid) {
+    return liquid ? Vec3{0.0F} : vertex.normal;
+}
+
 } // namespace
 
 Drawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, double thickness) {
@@ -50,7 +55,7 @@ Drawn drawn_of(const globe::VoxelMesh& mesh, std::optional<double> sea, double t
                            mesh.origin}
                     : vertex.position;
             into.vertices.push_back({.position = position,
-                                     .normal = vertex.normal,
+                                     .normal = normal_of(vertex, liquid),
                                      .tiles = tiles_of(vertex, tile, liquid),
                                      .corner = static_cast<std::uint8_t>(
                                          corner | (liquid && vertex.shore ? shore_corner : 0U))});

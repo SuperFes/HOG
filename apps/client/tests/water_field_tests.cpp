@@ -89,7 +89,8 @@ struct Water {
 hog::terrain::BlockMesh meshed(const Water& water, const hog::grid::WaterBodies& bodies,
                                hog::client::Block block) {
     WaterField field{water.pages, bodies};
-    return hog::client::water_of(mesh_block(water.grid, block, field.field()));
+    const hog::client::ShapeMesh shape = mesh_block(water.grid, block, field.field());
+    return hog::client::water_of(shape, field);
 }
 
 DVec3 placed(const hog::terrain::BlockMesh& mesh, const hog::terrain::BlockVertex& vertex) {
@@ -113,7 +114,8 @@ TEST_CASE("the sea's surface stands at its level over what's marked as it",
         CHECK(at.y < shore + 2.0);
         CHECK((vertex.corner & hog::client::sea_corner) != 0);
         CHECK(vertex.tiles[0] == static_cast<std::uint8_t>(hog::globe::Material::Water));
-        CHECK(glm::dot(DVec3{vertex.normal}, glm::normalize(at)) > 0.999);
+        // Still, with no current.
+        CHECK(vertex.normal == hog::Vec3{0.0F});
         edge += (vertex.corner & hog::client::shore_corner) != 0 ? 1 : 0;
     }
     // Where the marks stop short of the shore, the water's edge.
@@ -146,15 +148,17 @@ TEST_CASE("a lake's surface rises as its season has it, and an unknown body is d
     CHECK(meshed(water, {}, {.node = page_root, .cells = 4}).indices.empty());
 }
 
-TEST_CASE("a river's surface falls along its course", "[client][water_field]") {
+TEST_CASE("a river's surface falls along its course, its current running down it",
+          "[client][water_field]") {
     const Water water{0x8000'0002U};
     hog::grid::WaterBodies bodies;
     // Down the page along z, a metre lower at its foot.
     bodies.bodies.emplace(
         0x8000'0002U,
-        hog::grid::River{.course = {{.place = DVec3{-30.0, 20.0, 0.0}, .level = level + 0.5},
-                                    {.place = DVec3{-30.0, 20.0, 64.0}, .level = level - 0.5}},
-                         .peak = 0.0});
+        hog::grid::River{
+            .course = {{.place = DVec3{-30.0, 20.0, 0.0}, .level = level + 0.5, .flow = 8.0},
+                       {.place = DVec3{-30.0, 20.0, 64.0}, .level = level - 0.5, .flow = 8.0}},
+            .peak = 0.0});
 
     const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = page_root, .cells = 5});
     REQUIRE_FALSE(mesh.indices.empty());
@@ -162,6 +166,15 @@ TEST_CASE("a river's surface falls along its course", "[client][water_field]") {
         const DVec3 at = placed(mesh, vertex);
         const double standing = level + 0.5 - (std::clamp(at.z, 0.0, 64.0) / 64.0);
         CHECK(std::abs(glm::length(at) - standing) < 0.05);
+        const DVec3 current{vertex.normal};
+        const DVec3 up = glm::normalize(at);
+        // On this small a planet, the course climbs straight up from its middle in places.
+        if (std::abs(up.z) > 0.5) {
+            continue;
+        }
+        CHECK(std::abs(glm::length(current) - hog::grid::running_speed(8.0)) < 1e-5);
+        CHECK(std::abs(glm::dot(current, up)) < 1e-5);
+        CHECK(glm::dot(current, DVec3{0.0, 0.0, 1.0}) > 0.0);
     }
 }
 
@@ -174,7 +187,7 @@ TEST_CASE("blocks of water meet finer ones on the sea's surface", "[client][wate
     std::size_t triangles = 0;
     for (const hog::client::Block& block : hog::welding::blocks_of(page_root, split, 3)) {
         const hog::terrain::BlockMesh mesh =
-            hog::client::water_of(mesh_block(water.grid, block, field.field()));
+            hog::client::water_of(mesh_block(water.grid, block, field.field()), field);
         triangles += mesh.indices.size() / 3;
         for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
             // Moved in along finer sides only across the surface, never off it by much.

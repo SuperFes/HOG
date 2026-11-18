@@ -440,7 +440,13 @@ step replaces something, the old and new are compared before the old goes.
       its own. Done.
    4. In `--pages`, the sea is drawn from the blocks all round once any are shown, and the lake or
       river the eye is in comes from the marks and bodies (`still_water_in`). Done.
-   5. River flow: the water shader moving along the course's direction with wind on top.
+   5. River flow: the water shader moving along the course's direction with wind on top. Done:
+      each river vertex carries its current, downstream along the ground as fast as its flow runs
+      through the channel the generator cuts for it (`grid::running_speed`), in the still mesh's
+      normal; the wind's waves on it are drawn twice half a cycle apart, each carried along with
+      the water and faded in and out over its cycle (`carried_wave_surface`, flow maps), so none
+      strays more than a cycle's run. Tests: drawn halfway through, one drawing carried half a
+      cycle's run; a quarter through, both alike.
 8. Grass, plant cover and anything else placed on the ground read the new surface.
 9. Physics and the player's footing on the shape tree or collision meshes; the bot too. Tests:
    standing, walking a slope, falling into water.

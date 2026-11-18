@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace hog::client {
 
@@ -34,14 +35,20 @@ public:
     // Reading this, which must outlive what's returned.
     [[nodiscard]] BlockField field();
 
+    // Of the bodies found, as a crossing names them in its second material, from 1: whether it's
+    // the sea, and how fast and which way its water runs at `place`, metres a second along the
+    // ground, none but in a river.
+    [[nodiscard]] bool sea(std::uint16_t body) const noexcept;
+    [[nodiscard]] DVec3 current(std::uint16_t body, DVec3 place) const noexcept;
+
 private:
     // The water a point is in: metres from the planet's centre its surface stands, at its lowest,
-    // how far it rises and when, and whether it's the sea.
+    // how far it rises and when, and which of those found it is.
     struct Wet {
         double level = 0.0;
         double rise = 0.0;
         double peak = 0.0;
-        bool sea = false;
+        std::uint16_t body = 0;
     };
     struct Leaf {
         grid::Water::Value body = 0;
@@ -61,6 +68,8 @@ private:
     std::int64_t across_;                            // finest nodes along a side of the root
     std::unordered_map<std::uint64_t, Leaf> leaves_; // by the finest node's code
     std::unordered_map<std::uint64_t, std::optional<Wet>> wets_;
+    std::unordered_map<grid::Water::Value, std::uint16_t> seen_;
+    std::vector<const grid::Body*> seen_bodies_;
     std::array<const Leaf*, 4> recent_{};
     std::size_t next_recent_ = 0;
 };
@@ -72,9 +81,9 @@ private:
 // mark it there and its body has it; none in the sea, which is drawn as its own, or in none.
 [[nodiscard]] std::optional<globe::StandingWater> still_water_in(const HeldPages& held, DVec3 eye);
 
-// A block's water surface, meshed from a WaterField, as still water draws it: each vertex rising
-// as its water does through the year, the sea's marked as its own, and those where the water ends
-// marked as its edge, which waves may lower but never lift.
-[[nodiscard]] terrain::BlockMesh water_of(const ShapeMesh& mesh);
+// A block's water surface, meshed from `field`, as still water draws it: each vertex rising as its
+// water does through the year, its normal the current there, the sea's marked as its own, and
+// those where the water ends marked as its edge, which waves may lower but never lift.
+[[nodiscard]] terrain::BlockMesh water_of(const ShapeMesh& mesh, const WaterField& field);
 
 } // namespace hog::client

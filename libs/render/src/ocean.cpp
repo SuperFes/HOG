@@ -343,6 +343,12 @@ glm::vec4 swash_at(const Swash& swash, double turning, WorldPosition eye, GameTi
 
 } // namespace
 
+double current_seconds(GameTime time) noexcept {
+    // Short enough to carry the waves to a hair in a float, and whole cycles, so none jumps.
+    constexpr double round = current_cycle * 1'000.0;
+    return std::fmod(std::chrono::duration<double>(time.time_since_epoch()).count(), round);
+}
+
 DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const waves::Wave> waves,
                           const waves::SeaState& sea, WorldPosition eye, const terrain::Bend& bend,
                           GameTime time, DVec3 drifted, std::span<const waves::Pull> pulls) {

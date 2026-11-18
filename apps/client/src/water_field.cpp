@@ -15,9 +15,9 @@ namespace {
 // A dry point's value: over any water, so an edge to it never crosses a surface.
 constexpr double dry = 1.0;
 
-// How a crossing carries its water to water_of: how far it rises in its first material, when in
-// the second with the sea's bit over it, and a share under nothing where the water only ends.
-constexpr std::uint16_t sea_bit = 0x100;
+// How a crossing carries its water to water_of: how far it rises and when in its first material, a
+// byte each, which of the field's bodies it is in its second, and a share under nothing where the
+// water only ends.
 constexpr float water_ends = -1.0F;
 
 // How far along from `a` to `b` the segment meets the sphere of `radius` about the centre, where
@@ -99,15 +99,23 @@ const std::optional<WaterField::Wet>& WaterField::wet(I64Vec3 point) {
     if (lowest == 0) {
         return found->second;
     }
-    const grid::Body& body = bodies_->bodies.at(lowest);
+    const auto [seen, first] =
+        seen_.try_emplace(lowest, static_cast<std::uint16_t>(seen_.size() + 1));
+    if (first) {
+        seen_bodies_.push_back(&bodies_->bodies.at(lowest));
+    }
+    const grid::Body& body = *seen_bodies_[seen->second - 1];
     if (const auto* sea = std::get_if<grid::Sea>(&body)) {
-        found->second = Wet{.level = sea->level, .sea = true};
+        found->second = Wet{.level = sea->level, .body = seen->second};
     } else if (const auto* lake = std::get_if<grid::Lake>(&body)) {
-        found->second =
-            Wet{.level = lake->level, .rise = lake->season.rise, .peak = lake->season.peak};
+        found->second = Wet{.level = lake->level,
+                            .rise = lake->season.rise,
+                            .peak = lake->season.peak,
+                            .body = seen->second};
     } else if (const auto& river = std::get<grid::River>(body); river.course.size() >= 2) {
         const grid::River::Along along = river.along(at(point));
-        found->second = Wet{.level = along.level, .rise = along.rise, .peak = river.peak};
+        found->second =
+            Wet{.level = along.level, .rise = along.rise, .peak = river.peak, .body = seen->second};
     }
     return found->second;
 }
@@ -136,10 +144,27 @@ Crossed WaterField::crossing(I64Vec3 low, I64Vec3 high) {
     const Wet& under = over_a < 0.0 ? *from : *to;
     return {.at = crossed,
             .normal = Vec3{glm::normalize(crossed)},
-            .materials = {globe::rise_of(under.rise),
-                          static_cast<std::uint16_t>(globe::peak_of(under.peak) |
-                                                     (under.sea ? sea_bit : 0U))},
+            .materials = {static_cast<std::uint16_t>(globe::rise_of(under.rise) |
+                                                     (globe::peak_of(under.peak) << 8U)),
+                          under.body},
             .share = 1.0F};
+}
+
+bool WaterField::sea(std::uint16_t body) const noexcept {
+    return body > 0 && std::holds_alternative<grid::Sea>(*seen_bodies_[body - 1]);
+}
+
+DVec3 WaterField::current(std::uint16_t body, DVec3 place) const noexcept {
+    const auto* river = body > 0 ? std::get_if<grid::River>(seen_bodies_[body - 1]) : nullptr;
+    if (river == nullptr || river->course.size() < 2) {
+        return DVec3{0.0};
+    }
+    const grid::River::Along along = river->along(place);
+    // Along the ground, however its course falls.
+    const DVec3 up = glm::normalize(place);
+    const DVec3 level = along.downstream - (up * glm::dot(along.downstream, up));
+    const double length = glm::length(level);
+    return length > 0.0 ? level * (grid::running_speed(along.flow) / length) : DVec3{0.0};
 }
 
 BlockField WaterField::field() {
@@ -175,7 +200,7 @@ std::optional<globe::StandingWater> still_water_in(const HeldPages& held, DVec3 
     return std::nullopt;
 }
 
-terrain::BlockMesh water_of(const ShapeMesh& mesh) {
+terrain::BlockMesh water_of(const ShapeMesh& mesh, const WaterField& field) {
     terrain::BlockMesh water{.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}};
     std::vector<bool> edge(mesh.vertices.size(), false);
     std::vector<std::uint32_t> kept;
@@ -206,14 +231,15 @@ terrain::BlockMesh water_of(const ShapeMesh& mesh) {
     for (const std::uint32_t at : kept) {
         if (index[at] == unused) {
             const ShapeVertex& vertex = mesh.vertices[at];
-            const bool sea = (vertex.materials[1] & sea_bit) != 0;
+            const std::uint16_t body = vertex.materials[1];
+            const bool sea = field.sea(body);
             index[at] = static_cast<std::uint32_t>(water.vertices.size());
             water.vertices.push_back(
                 {.position = vertex.position,
-                 .normal = vertex.normal,
+                 .normal = Vec3{field.current(body, mesh.origin + DVec3{vertex.position})},
                  .tiles = {static_cast<std::uint8_t>(globe::Material::Water),
-                           static_cast<std::uint8_t>(vertex.materials[0]),
-                           static_cast<std::uint8_t>(vertex.materials[1] & 0xFFU)},
+                           static_cast<std::uint8_t>(vertex.materials[0] & 0xFFU),
+                           static_cast<std::uint8_t>(vertex.materials[0] >> 8U)},
                  .corner = static_cast<std::uint8_t>((sea ? sea_corner : 0U) |
                                                      (edge[at] ? shore_corner : 0U))});
         }

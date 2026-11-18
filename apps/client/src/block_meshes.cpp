@@ -124,22 +124,22 @@ void BlockMeshes::start() {
     while (!queued_.empty() && working_.size() < most_working_) {
         const grid::Key node = queued_.front();
         queued_.pop_front();
-        working_.push_back({.node = node,
-                            .job = std::make_unique<jobs::Async<Meshed>>(
-                                *jobs_, [grid = grid_, pages = pages_, bodies = bodies_,
-                                         block = wanted_.at(node).look.block] {
-                                    GroundField ground{*pages};
-                                    Meshed meshed{
-                                        .ground = std::make_shared<const terrain::BlockMesh>(
-                                            block_of(mesh_block(grid, block, ground.field()))),
-                                        .water = std::make_shared<const terrain::BlockMesh>()};
-                                    if (may_hold_water(*pages, block.node)) {
-                                        WaterField water{*pages, *bodies};
-                                        meshed.water = std::make_shared<const terrain::BlockMesh>(
-                                            water_of(mesh_block(grid, block, water.field())));
-                                    }
-                                    return meshed;
-                                })});
+        working_.push_back(
+            {.node = node,
+             .job = std::make_unique<jobs::Async<Meshed>>(
+                 *jobs_, [grid = grid_, pages = pages_, bodies = bodies_,
+                          block = wanted_.at(node).look.block] {
+                     GroundField ground{*pages};
+                     Meshed meshed{.ground = std::make_shared<const terrain::BlockMesh>(
+                                       block_of(mesh_block(grid, block, ground.field()))),
+                                   .water = std::make_shared<const terrain::BlockMesh>()};
+                     if (may_hold_water(*pages, block.node)) {
+                         WaterField water{*pages, *bodies};
+                         meshed.water = std::make_shared<const terrain::BlockMesh>(
+                             water_of(mesh_block(grid, block, water.field()), water));
+                     }
+                     return meshed;
+                 })});
     }
 }
 

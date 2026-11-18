@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <limits>
@@ -101,6 +102,14 @@ Result<Body> read_body(ByteReader& in) {
 }
 
 } // namespace
+
+double running_speed(double flow) noexcept {
+    if (flow <= 0.0) {
+        return 0.0;
+    }
+    // Flow over the channel's width times its depth.
+    return std::pow(flow, 0.1) / (3.0 * 0.27);
+}
 
 River::Along River::along(DVec3 place) const noexcept {
     Along best{.off = std::numeric_limits<double>::infinity()};

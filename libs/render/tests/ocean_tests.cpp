@@ -305,7 +305,8 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
                                 std::span<const DVec3> rest, double footprint,
                                 std::span<const hog::Vec3> floors = {},
                                 std::span<const float> fetches = {},
-                                std::span<const hog::Vec3> offshore = {}) {
+                                std::span<const hog::Vec3> offshore = {},
+                                hog::Vec3 current = hog::Vec3{0.0F}, float seconds = 0.0F) {
     std::vector<std::array<float, 4>> asked;
     for (std::size_t i = 0; i < rest.size(); ++i) {
         const DVec3& point = rest[i];
@@ -316,6 +317,7 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
         const hog::Vec3 out =
             offshore.empty() ? hog::Vec3{hog::terrain::farthest_offshore, 0.0F, 0.0F} : offshore[i];
         asked.push_back({0.0F, out.x, out.y, out.z});
+        asked.push_back({current.x, current.y, current.z, seconds});
     }
     constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
         return VkDescriptorSetLayoutBinding{.binding = at,
@@ -552,6 +554,77 @@ TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[ren
                              0.01));
     }
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("running water carries its waves along, drawn twice half a cycle apart",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Inland, with no sea, under a wind of 9 m/s, over 400 m of still water upwind.
+    WavySea sea{9.0};
+    sea.sea.systems.clear();
+    sea.waves.clear();
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    std::mt19937_64 random{5};
+    std::uniform_real_distribution<double> spot{-50.0, 50.0};
+    std::vector<DVec3> rest;
+    rest.reserve(20);
+    for (int i = 0; i < 20; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    const std::vector<hog::Vec3> deep(rest.size(), hog::Vec3{1.0e6F, 0.0F, 0.0F});
+    const std::vector<float> fetches(rest.size(), 400.0F);
+    const DVec3 across = glm::normalize(glm::cross(sea.bend.up, DVec3{0.3, 0.5, 0.8}));
+    const DVec3 current = across * 1.5;
+    const double cycle = hog::render::current_cycle;
+    const auto carried = [&](double seconds) {
+        return probe_waves(*device, sea.drawn, rest, 1e-3, deep, fetches, {}, hog::Vec3{current},
+                           static_cast<float>(seconds));
+    };
+    const auto still_at = [&](double carried_for) {
+        std::vector<DVec3> back;
+        back.reserve(rest.size());
+        for (const DVec3& point : rest) {
+            back.push_back(point - (current * carried_for));
+        }
+        return probe_waves(*device, sea.drawn, back, 1e-3, deep, fetches);
+    };
+
+    // Halfway through its cycle, one drawing is all there is, carried half a cycle's run.
+    const std::vector<Probed> half = carried(cycle / 2.0);
+    const std::vector<Probed> run_half = still_at(cycle / 2.0);
+    // A quarter through, both are drawn alike, a quarter and three quarters of a cycle's run.
+    const std::vector<Probed> quarter = carried(cycle / 4.0);
+    const std::vector<Probed> run_quarter = still_at(cycle / 4.0);
+    const std::vector<Probed> run_three = still_at(3.0 * cycle / 4.0);
+    // A whole cycle on, the same again.
+    const std::vector<Probed> again = carried((cycle * 1.5) + 0.0);
+    double differ = 0.0;
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        CAPTURE(i);
+        CHECK(glm::length(half[i].moved - run_half[i].moved) < 1e-4);
+        CHECK(glm::dot(half[i].normal, run_half[i].normal) > 0.99999);
+        CHECK(glm::dot(again[i].normal, half[i].normal) > 0.99999);
+        const DVec3 both = glm::normalize(run_quarter[i].normal + run_three[i].normal);
+        CHECK(glm::dot(quarter[i].normal, both) > 0.99999);
+        differ += 1.0 - glm::dot(quarter[i].normal, half[i].normal);
+    }
+    // And the waves move.
+    CHECK(differ > 0.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the current's seconds count round in whole cycles", "[render]") {
+    const hog::GameTime now{std::chrono::seconds{1'792'000'000}};
+    const double seconds = hog::render::current_seconds(now);
+    CHECK(seconds >= 0.0);
+    CHECK(seconds < hog::render::current_cycle * 1'000.0);
+    // Counted round on a whole cycle, so where through its cycle it is never jumps.
+    const double cycle = hog::render::current_cycle;
+    CHECK_THAT(
+        std::fmod(seconds, cycle),
+        WithinAbs(std::fmod(std::chrono::duration<double>(now.time_since_epoch()).count(), cycle),
+                  1e-6));
 }
 
 TEST_CASE("still water rises only in the waves the wind has grown over it", "[render][gpu]") {
