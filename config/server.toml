@@ -30,3 +30,6 @@ snapshot_bytes = 1200
 # up to real time on start.
 time_control = true
 # start = 2026-01-01T00:00:00Z   # a new world's first moment, instead of now
+
+[pages]
+store = "../var/store"
