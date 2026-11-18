@@ -1072,19 +1072,20 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
             continue;
         }
         ground.tiles.put(tile->key, tile->tree);
-        ground.meshes.take(*tile);
+        if (!ground.from_pages) {
+            ground.meshes.take(*tile);
+        }
         if (player) {
             player->changed(tile->key);
         }
     }
-    // Drawn from the pages, the tiles' ground and water are left out, their water now standing
-    // over ground it wasn't made for.
-    if (client::GroundChanges changes = ground.meshes.collect();
-        !changes.empty() && !ground.from_pages) {
+    if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
     take_pages(connection, ground, scene, eye);
-    scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
+    // Drawn from the pages, the tiles aren't meshed, their water standing over ground it wasn't
+    // made for: the sea is the disc all round.
+    scene.set_ground_state(ground.from_pages ? 0.0 : ground.meshes.covered(eye, streamed_ground),
                            ground.meshes.in_flight() > 0 || ground.block_meshes.in_flight() > 0);
 }
 
