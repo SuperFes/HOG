@@ -30,6 +30,35 @@ int levels_of(const grid::Page& page) {
     return page.water ? page.water->tree.levels() : -1;
 }
 
+// What's known at `node` among the pages `page_at` finds by their roots, as HeldPages::at has it.
+template <typename Kind, typename PageAt>
+std::optional<KnownAt<Kind>> known_at(const grid::Grid& grid, grid::Key node,
+                                      const PageAt& page_at) {
+    if (!node.is_valid() || node.depth > grid.depth()) {
+        return std::nullopt;
+    }
+    // Finest first: the page under the node where it's a page's root itself.
+    grid::Key root = node.depth < grid.depth() ? grid.page_of(node.child(0)) : grid.page_of(node);
+    while (true) {
+        const grid::Page* page = page_at(root);
+        if (const auto* tree = page == nullptr ? nullptr : &tree_of<Kind>(*page);
+            tree != nullptr && tree->has_value()) {
+            const auto below = static_cast<std::uint8_t>(
+                std::min<int>(node.depth - root.depth, tree->value().tree.levels()));
+            const grid::Key over = node.ancestor(static_cast<std::uint8_t>(root.depth + below));
+            auto found =
+                tree->value().tree.at(below, over.x - (root.x << below), over.y - (root.y << below),
+                                      over.z - (root.z << below));
+            found.depth = static_cast<std::uint8_t>(found.depth + root.depth);
+            return KnownAt<Kind>{.found = found, .page = root};
+        }
+        if (root.depth == 0) {
+            return std::nullopt;
+        }
+        root = grid.page_of(root);
+    }
+}
+
 } // namespace
 
 PagesSnapshot::PagesSnapshot(const grid::Grid& grid, std::vector<Entry> pages)
@@ -51,6 +80,13 @@ std::shared_ptr<const grid::Page> PagesSnapshot::shared(grid::Key root) const {
     const Entry* entry = find(root);
     return entry == nullptr ? nullptr : entry->second;
 }
+
+template <typename Kind>
+std::optional<KnownAt<Kind>> PagesSnapshot::at(grid::Key node) const {
+    return known_at<Kind>(grid_, node, [this](grid::Key root) { return page(root); });
+}
+
+template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
 
 HeldPages::HeldPages(const grid::Grid& grid)
     : grid_{grid}, held_(static_cast<std::size_t>(grid.depth()) + 1) {}
@@ -141,30 +177,10 @@ std::vector<PagesSnapshot::Entry> HeldPages::entries() const {
 
 template <typename Kind>
 std::optional<HeldPages::Known<Kind>> HeldPages::at(grid::Key node) const {
-    if (!node.is_valid() || node.depth > grid_.depth()) {
-        return std::nullopt;
-    }
-    // Finest first: the page under the node where it's a page's root itself.
-    grid::Key root =
-        node.depth < grid_.depth() ? grid_.page_of(node.child(0)) : grid_.page_of(node);
-    while (true) {
+    return known_at<Kind>(grid_, node, [this](grid::Key root) {
         const Held* held = find(root);
-        if (const auto* tree = held == nullptr ? nullptr : &tree_of<Kind>(*held->page);
-            tree != nullptr && tree->has_value()) {
-            const auto below = static_cast<std::uint8_t>(
-                std::min<int>(node.depth - root.depth, tree->value().tree.levels()));
-            const grid::Key over = node.ancestor(static_cast<std::uint8_t>(root.depth + below));
-            auto found =
-                tree->value().tree.at(below, over.x - (root.x << below), over.y - (root.y << below),
-                                      over.z - (root.z << below));
-            found.depth = static_cast<std::uint8_t>(found.depth + root.depth);
-            return Known<Kind>{.found = found, .page = root};
-        }
-        if (root.depth == 0) {
-            return std::nullopt;
-        }
-        root = grid_.page_of(root);
-    }
+        return held == nullptr ? nullptr : held->page.get();
+    });
 }
 
 template std::optional<HeldPages::Known<grid::Shape>> HeldPages::at<grid::Shape>(grid::Key) const;

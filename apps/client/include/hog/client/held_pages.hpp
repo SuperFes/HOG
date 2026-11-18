@@ -19,6 +19,14 @@
 
 namespace hog::client {
 
+// What's known at a node: the node, or the leaf over it, in the finest page holding `Kind` over
+// it, with its depth in the grid, and which page that is.
+template <typename Kind>
+struct KnownAt {
+    grid::Tree<Kind>::Found found;
+    grid::Key page;
+};
+
 // The pages held at a moment, as they were then, for reading on another thread while more come.
 class PagesSnapshot {
 public:
@@ -29,6 +37,9 @@ public:
     [[nodiscard]] const grid::Grid& grid() const noexcept { return grid_; }
     [[nodiscard]] const grid::Page* page(grid::Key root) const;
     [[nodiscard]] std::shared_ptr<const grid::Page> shared(grid::Key root) const;
+    // As HeldPages::at.
+    template <typename Kind>
+    [[nodiscard]] std::optional<KnownAt<Kind>> at(grid::Key node) const;
 
 private:
     [[nodiscard]] const Entry* find(grid::Key root) const;
@@ -50,13 +61,9 @@ public:
     // Takes in bodies as `grid::WaterBodies::encode` codes them, in place of those of the same ids.
     [[nodiscard]] Result<void> take_bodies(std::span<const std::byte> bytes);
 
-    // What's known at `node`: the node, or the leaf over it, in the finest page holding `Kind` over
-    // it, with its depth in the grid, and which page that is.
+    // What's known at `node`, as KnownAt has it.
     template <typename Kind>
-    struct Known {
-        grid::Tree<Kind>::Found found;
-        grid::Key page;
-    };
+    using Known = KnownAt<Kind>;
     template <typename Kind>
     [[nodiscard]] std::optional<Known<Kind>> at(grid::Key node) const;
 
@@ -103,5 +110,6 @@ extern template std::optional<HeldPages::Known<grid::Material>>
     HeldPages::at<grid::Material>(grid::Key) const;
 extern template std::optional<HeldPages::Known<grid::Water>>
     HeldPages::at<grid::Water>(grid::Key) const;
+extern template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
 
 } // namespace hog::client
