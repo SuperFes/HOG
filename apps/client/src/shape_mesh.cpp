@@ -759,8 +759,11 @@ void ShapesDrawn::nested(const ShapeDrawn& page, const std::function<bool(grid::
                          std::unordered_set<grid::Key, Hash>& seen,
                          std::vector<grid::Key>& found) const {
     for (const grid::Key under : page.under) {
+        if (!wanted(under)) {
+            continue;
+        }
         const ShapeDrawn* drawn = this->page(under);
-        if (drawn == nullptr || !wanted(under) || !seen.insert(under).second) {
+        if (drawn == nullptr || !seen.insert(under).second) {
             continue;
         }
         found.push_back(under);
@@ -788,23 +791,25 @@ std::vector<grid::Key> ShapesDrawn::touching(grid::Key root) const {
             },
             seen, found);
     }
-    const Box box = box_of(root, finest);
+    // Most of the nodes beside it lie in the same few pages, each looked through once.
+    std::vector<const ShapeDrawn*> beside;
     for (int dx = -1; dx <= 1; ++dx) {
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dz = -1; dz <= 1; ++dz) {
                 const std::optional<grid::Key> next = root.beside(dx, dy, dz);
                 const ShapeDrawn* drawn = next ? over(*next) : nullptr;
-                if (drawn == nullptr) {
-                    continue;
-                }
-                if (seen.insert(drawn->page).second) {
+                if (drawn != nullptr && seen.insert(drawn->page).second) {
                     found.push_back(drawn->page);
+                    beside.push_back(drawn);
                 }
-                nested(
-                    *drawn, [&](grid::Key inner) { return touch(box_of(inner, finest), box); },
-                    seen, found);
             }
         }
+    }
+    const Box box = box_of(root, finest);
+    for (const ShapeDrawn* drawn : beside) {
+        nested(
+            *drawn, [&](grid::Key inner) { return touch(box_of(inner, finest), box); }, seen,
+            found);
     }
     return found;
 }
