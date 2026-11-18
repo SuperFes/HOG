@@ -1,4 +1,5 @@
 #include <hog/chat/filter.hpp>
+#include <hog/client/block_meshes.hpp>
 #include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/drawn.hpp>
@@ -9,7 +10,6 @@
 #include <hog/client/held_pages.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
-#include <hog/client/page_meshes.hpp>
 #include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
@@ -980,6 +980,9 @@ Result<void> show_frame(client::Scene& scene, const client::Shot& shot,
 // Metres from the eye the server sends the ground.
 constexpr double streamed_ground = 8'000.0;
 
+// Levels of cells in a block the ground's drawn in from the pages: 16 a side.
+constexpr std::uint8_t block_cells = 4;
+
 // The ground the server sends, held as it comes: tiles, over the planet and its layers, read by
 // the world and meshed to draw, the same trees shared; and grid pages, drawn in the tiles' place
 // where asked.
@@ -988,7 +991,7 @@ struct StreamedGround {
                    bool drawn_from_pages)
         : planet{std::move(held)}, world{this->planet, layers, volume},
           meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness}, pages{grid},
-          page_meshes{grid, jobs}, from_pages{drawn_from_pages} {
+          page_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
         world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -1004,7 +1007,7 @@ struct StreamedGround {
     client::TileMeshes meshes;
     grid::Grid grid;
     client::HeldPages pages;
-    client::PageMeshes page_meshes;
+    client::BlockMeshes page_meshes;
     bool from_pages = false;
     bool pages_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pages_seen; // where from

@@ -28,41 +28,47 @@ DVec3 GroundField::at(I64Vec3 point) const noexcept {
     return origin_ + (DVec3{point} * grid_.finest());
 }
 
-double GroundField::distance(const Leaf& leaf, DVec3 point) const noexcept {
-    return (leaf.value.distance() * grid_.size(leaf.node.depth)) +
-           glm::dot(leaf.value.normal(), point - grid_.centre(leaf.node));
+double GroundField::distance(const Leaf& leaf, DVec3 point) noexcept {
+    return leaf.out + glm::dot(leaf.normal, point - leaf.centre);
 }
 
 const GroundField::Leaf& GroundField::leaf(I64Vec3 point) {
+    for (const Leaf* seen : recent_) {
+        if (seen != nullptr && glm::all(glm::lessThanEqual(seen->low, point)) &&
+            glm::all(glm::lessThan(point, seen->high))) {
+            return *seen;
+        }
+    }
     const grid::Key node{.depth = grid_.depth(),
                          .x = static_cast<std::uint32_t>(point.x),
                          .y = static_cast<std::uint32_t>(point.y),
                          .z = static_cast<std::uint32_t>(point.z)};
     const auto [found, made] = leaves_.try_emplace(grid::code(node));
     if (made) {
-        if (const auto known = pages_->at<grid::Shape>(node)) {
-            found->second = {.node = node.ancestor(known->found.depth),
-                             .value = known->found.value,
-                             .held = true};
-        } else {
-            found->second = {.node = grid::Key{}, .value = grid::Surface::open(), .held = false};
+        Leaf& made_leaf = found->second;
+        const auto known = pages_->at<grid::Shape>(node);
+        made_leaf.node = known ? node.ancestor(known->found.depth) : grid::Key{};
+        made_leaf.value = known ? known->found.value : grid::Surface::open();
+        const auto shift = static_cast<unsigned>(grid_.depth() - made_leaf.node.depth);
+        made_leaf.low = I64Vec3{made_leaf.node.x, made_leaf.node.y, made_leaf.node.z} *
+                        (std::int64_t{1} << shift);
+        made_leaf.high = made_leaf.low + I64Vec3{std::int64_t{1} << shift};
+        if (made_leaf.value.crosses()) {
+            made_leaf.normal = made_leaf.value.normal();
+            made_leaf.centre = grid_.centre(made_leaf.node);
+            made_leaf.out = made_leaf.value.distance() * grid_.size(made_leaf.node.depth);
         }
     }
+    recent_[next_recent_] = &found->second;
+    next_recent_ = (next_recent_ + 1) % recent_.size();
     return found->second;
 }
 
-bool GroundField::holds(const Leaf& leaf, I64Vec3 point, bool inside) const noexcept {
-    const auto shift = static_cast<unsigned>(grid_.depth() - leaf.node.depth);
-    const I64Vec3 low = I64Vec3{leaf.node.x, leaf.node.y, leaf.node.z} * (std::int64_t{1} << shift);
-    const I64Vec3 high = low + I64Vec3{std::int64_t{1} << shift};
-    for (glm::length_t axis = 0; axis < 3; ++axis) {
-        const bool within = inside ? low[axis] < point[axis] && point[axis] < high[axis]
-                                   : low[axis] <= point[axis] && point[axis] <= high[axis];
-        if (!within) {
-            return false;
-        }
-    }
-    return true;
+bool GroundField::holds(const Leaf& leaf, I64Vec3 point, bool inside) noexcept {
+    return inside ? glm::all(glm::lessThan(leaf.low, point)) &&
+                        glm::all(glm::lessThan(point, leaf.high))
+                  : glm::all(glm::lessThanEqual(leaf.low, point)) &&
+                        glm::all(glm::lessThanEqual(point, leaf.high));
 }
 
 GroundField::Sample GroundField::sample(I64Vec3 point) {
@@ -90,7 +96,7 @@ GroundField::Sample GroundField::sample(I64Vec3 point) {
             crossing[crossings++] = found.node;
             const double away = distance(found, at(point));
             sampled.value += away;
-            sampled.normal += found.value.normal();
+            sampled.normal += found.normal;
             if (std::abs(away) < nearest) {
                 nearest = std::abs(away);
                 sampled.material = found.value.material();
@@ -169,7 +175,7 @@ Crossed GroundField::crossing(I64Vec3 low, I64Vec3 high) {
             if ((a < 0.0) != (b < 0.0)) {
                 const DVec3 point = glm::mix(at(from), at(to), a / (a - b));
                 return {.at = point,
-                        .normal = Vec3{whole->value.normal()},
+                        .normal = Vec3{whole->normal},
                         .materials = {whole->value.material(), whole->value.material()},
                         .share = 1.0F};
             }

@@ -131,3 +131,20 @@ TEST_CASE("the ground is drawn in the blocks it may cross", "[client][ground_blo
         return block.node.contains(under) && block.node.depth == sloped.grid.depth() - 3;
     }));
 }
+
+TEST_CASE("a node reads the pages over it, in it and beside it", "[client][ground_blocks]") {
+    const hog::sloped::Sloped sloped;
+    const auto roots = [&](Key node) {
+        std::vector<Key> found;
+        for (const auto& [root, page] : sloped.pages.around(node)) {
+            found.push_back(root);
+        }
+        return found;
+    };
+    const Key page = hog::sloped::page_root;
+    CHECK(roots(page.child(3)) == std::vector<Key>{Key{}, page});
+    CHECK(roots(page.parent()) == std::vector<Key>{Key{}, page});
+    // Touching it from beside, to the finest node.
+    CHECK(roots(page.beside(1, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}, page});
+    CHECK(roots(page.beside(2, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}});
+}

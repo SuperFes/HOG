@@ -34,7 +34,8 @@ inline double above_ground(DVec3 point) {
 }
 
 // A slope through a page, as its finest nodes have it.
-inline std::shared_ptr<const hog::grid::Page> sloped(const hog::grid::Grid& grid, Key root) {
+inline std::shared_ptr<const hog::grid::Page> sloped(const hog::grid::Grid& grid, Key root,
+                                                     std::uint32_t version = 1) {
     const DVec3 low = grid.low(root);
     const std::uint8_t levels = grid.levels_under(root.depth);
     const double side = grid.size(static_cast<std::uint8_t>(root.depth + levels));
@@ -46,7 +47,7 @@ inline std::shared_ptr<const hog::grid::Page> sloped(const hog::grid::Grid& grid
     return std::make_shared<const hog::grid::Page>(hog::grid::Page{
         .root = root,
         .generator = 1,
-        .shape = hog::grid::Held<hog::grid::Shape>{.version = 1, .tree = std::move(tree)},
+        .shape = hog::grid::Held<hog::grid::Shape>{.version = version, .tree = std::move(tree)},
         .material = std::nullopt,
         .water = std::nullopt});
 }

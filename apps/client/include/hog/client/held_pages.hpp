@@ -40,9 +40,16 @@ public:
     // As HeldPages::at.
     template <typename Kind>
     [[nodiscard]] std::optional<KnownAt<Kind>> at(grid::Key node) const;
+    // The pages whose places hold, lie in or touch the node's, to the finest node: all that's
+    // read of the ground through it and along its sides. In order of their roots.
+    [[nodiscard]] std::vector<Entry> around(grid::Key node) const;
 
 private:
     [[nodiscard]] const Entry* find(grid::Key root) const;
+    // Into `found`, those over the node and the nodes beside it.
+    void over_around(grid::Key node, std::vector<Entry>& found) const;
+    // Into `found`, those finer than the node, in it or touching it.
+    void finer_around(grid::Key node, std::vector<Entry>& found) const;
 
     grid::Grid grid_;
     std::vector<Entry> pages_; // by root

@@ -7,6 +7,8 @@
 #include <hog/grid/key.hpp>
 #include <hog/grid/kinds.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <unordered_map>
 
@@ -29,10 +31,15 @@ public:
     [[nodiscard]] BlockField field();
 
 private:
+    // With its plane read out, and its place on the lattice.
     struct Leaf {
         grid::Key node;
         grid::Surface value;
-        bool held = false;
+        I64Vec3 low{0};
+        I64Vec3 high{0};
+        DVec3 normal{0.0};
+        DVec3 centre{0.0};
+        double out = 0.0; // metres its middle lies out from its plane
     };
     // At a point: its value, and the leaves round it that hold a plane, their mean normal and
     // what the nearest shows.
@@ -43,10 +50,10 @@ private:
     };
 
     [[nodiscard]] DVec3 at(I64Vec3 point) const noexcept;
-    [[nodiscard]] double distance(const Leaf& leaf, DVec3 point) const noexcept;
+    [[nodiscard]] static double distance(const Leaf& leaf, DVec3 point) noexcept;
     // Of the finest node at `point`, its low corner.
     [[nodiscard]] const Leaf& leaf(I64Vec3 point);
-    [[nodiscard]] bool holds(const Leaf& leaf, I64Vec3 point, bool inside) const noexcept;
+    [[nodiscard]] static bool holds(const Leaf& leaf, I64Vec3 point, bool inside) noexcept;
     [[nodiscard]] Sample sample(I64Vec3 point);
     // The leaf holding all of the edge, if the finest nodes along it all lie in one.
     [[nodiscard]] const Leaf* holding(I64Vec3 low, I64Vec3 high);
@@ -58,6 +65,9 @@ private:
     DVec3 origin_;
     std::int64_t across_;                            // finest nodes along a side of the root
     std::unordered_map<std::uint64_t, Leaf> leaves_; // by the finest node's code
+    // The last few found, as points looked up one after another mostly lie in one.
+    std::array<const Leaf*, 4> recent_{};
+    std::size_t next_recent_ = 0;
 };
 
 } // namespace hog::client

@@ -88,6 +88,61 @@ std::optional<KnownAt<Kind>> PagesSnapshot::at(grid::Key node) const {
 
 template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
 
+std::vector<PagesSnapshot::Entry> PagesSnapshot::around(grid::Key node) const {
+    std::vector<Entry> found;
+    over_around(node, found);
+    finer_around(node, found);
+    std::ranges::sort(found, {}, &Entry::first);
+    const auto [from, to] = std::ranges::unique(found, {}, &Entry::first);
+    found.erase(from, to);
+    return found;
+}
+
+void PagesSnapshot::over_around(grid::Key node, std::vector<Entry>& found) const {
+    const auto add = [&](grid::Key root) {
+        if (const Entry* entry = find(root)) {
+            found.push_back(*entry);
+        }
+    };
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                const auto next = node.beside(dx, dy, dz);
+                if (!next) {
+                    continue;
+                }
+                grid::Key root = next->depth < grid_.depth() ? grid_.page_of(next->child(0))
+                                                             : grid_.page_of(*next);
+                for (; root.depth > 0; root = grid_.page_of(root)) {
+                    add(root);
+                }
+                add(root);
+            }
+        }
+    }
+}
+
+void PagesSnapshot::finer_around(grid::Key node, std::vector<Entry>& found) const {
+    for (auto depth = static_cast<std::uint8_t>(node.depth + 1); depth < grid_.depth(); ++depth) {
+        const auto shift = static_cast<unsigned>(depth - node.depth);
+        const auto low = [&](std::uint32_t at) {
+            return (at << shift) == 0 ? 0 : (at << shift) - 1;
+        };
+        const auto high = [&](std::uint32_t at) { return (at + 1) << shift; };
+        const auto within = [&](grid::Key root) {
+            return root.y >= low(node.y) && root.y <= high(node.y) && root.z >= low(node.z) &&
+                   root.z <= high(node.z);
+        };
+        const grid::Key first{.depth = depth, .x = low(node.x), .y = low(node.y), .z = low(node.z)};
+        for (auto at = std::ranges::lower_bound(pages_, first, {}, &Entry::first);
+             at != pages_.end() && at->first.depth == depth && at->first.x <= high(node.x); ++at) {
+            if (within(at->first)) {
+                found.push_back(*at);
+            }
+        }
+    }
+}
+
 HeldPages::HeldPages(const grid::Grid& grid)
     : grid_{grid}, held_(static_cast<std::size_t>(grid.depth()) + 1) {}
 
