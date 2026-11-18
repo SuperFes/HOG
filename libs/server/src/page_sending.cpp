@@ -48,7 +48,7 @@ std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source)
             continue;
         }
         grid::for_open_leaves(*shape, page, [&](grid::Key leaf, const auto& open) {
-            view_.under(grid_, leaf, foot, open.value.is_solid(), at, pending);
+            view_.under(grid_, leaf, foot, open.value, at, pending);
         });
     }
     std::ranges::sort(found);

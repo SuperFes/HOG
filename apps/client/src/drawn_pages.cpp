@@ -32,7 +32,7 @@ std::vector<DrawnPage> drawn_pages(const HeldPages& held, DVec3 eye, const grid:
         if (page.levels == whole && foot < grid.depth()) {
             std::vector<grid::Key> feet;
             grid::for_open_leaves(*tree, root, [&](grid::Key leaf, const auto& open) {
-                view.under(grid, leaf, foot, open.value.is_solid(), eye, feet);
+                view.under(grid, leaf, foot, open.value, eye, feet);
             });
             for (const grid::Key under : feet) {
                 if (drawable(under) != nullptr) {

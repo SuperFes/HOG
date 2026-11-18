@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
+#include <hog/grid/kinds.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -27,10 +28,11 @@ struct View {
     // than allowed, but at least one.
     [[nodiscard]] std::uint8_t levels_at(const Grid& grid, Key root, double metres) const noexcept;
     // Into `pages`, the pages at `foot`, the foot of a page, under an open leaf of it at `leaf`
-    // worth seeing from `eye`: wherever nodes at the foot look coarse from there. A leaf above
-    // the foot is open only in case the ground lies nearer than its distance says, and one in the
-    // solid only for caves, so either is followed only where the finest nodes are wanted.
-    void under(const Grid& grid, Key leaf, std::uint8_t foot, bool solid, DVec3 eye,
+    // holding `surface`, worth seeing from `eye`: wherever nodes at the foot look coarse from
+    // there. A leaf above the foot the surface misses is open only in case the ground lies nearer
+    // than its distance says, and one in the solid only for caves, so either is followed only
+    // where the finest nodes are wanted; one the surface crosses is followed as any at the foot.
+    void under(const Grid& grid, Key leaf, std::uint8_t foot, const Surface& surface, DVec3 eye,
                std::vector<Key>& pages) const;
 };
 

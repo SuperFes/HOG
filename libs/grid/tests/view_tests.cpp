@@ -31,16 +31,23 @@ TEST_CASE("pages under an open leaf are seen where coarse, caves and doubt only 
     const View view;
     const Key leaf{.depth = 3, .x = 1, .y = 2, .z = 3};
     const std::uint8_t foot = 5;
+    const auto air = hog::grid::Surface::open();
+    const auto ground = hog::grid::Surface::plane(hog::DVec3{0.0, 0.0, 1.0}, 0.1);
     // From inside the leaf, every foot under it is near enough for its nodes to look coarse.
     const hog::DVec3 inside = grid.centre(leaf);
     std::vector<Key> pages;
-    view.under(grid, Key{.depth = foot, .x = 4, .y = 8, .z = 12}, foot, false, inside, pages);
+    view.under(grid, Key{.depth = foot, .x = 4, .y = 8, .z = 12}, foot, air, inside, pages);
     CHECK(pages.size() == 1);
     pages.clear();
     // Above the foot or in the solid, only within the finest nodes' reach: none from far off.
-    view.under(grid, leaf, foot, false, inside + hog::DVec3{400.0, 0.0, 0.0}, pages);
+    const hog::DVec3 off = inside + hog::DVec3{400.0, 0.0, 0.0};
+    view.under(grid, leaf, foot, air, off, pages);
     CHECK(pages.empty());
-    view.under(grid, leaf, foot, true, inside, pages);
+    // But a leaf the ground runs through is only as coarse as its plane, so followed from afar.
+    view.under(grid, leaf, foot, ground, off, pages);
+    CHECK_FALSE(pages.empty());
+    pages.clear();
+    view.under(grid, leaf, foot, hog::grid::Surface::solid(), inside, pages);
     for (const Key page : pages) {
         CHECK(page.depth == foot);
         CHECK(leaf.contains(page));

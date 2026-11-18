@@ -18,10 +18,11 @@ std::uint8_t View::levels_at(const Grid& grid, Key root, double metres) const no
     return whole;
 }
 
-void View::under(const Grid& grid, Key leaf, std::uint8_t foot, bool solid, DVec3 eye,
+void View::under(const Grid& grid, Key leaf, std::uint8_t foot, const Surface& surface, DVec3 eye,
                  std::vector<Key>& pages) const {
-    const double reach = solid || leaf.depth < foot ? grid.finest() / angle
-                                                    : std::numeric_limits<double>::infinity();
+    const double reach = surface.is_solid() || (leaf.depth < foot && !surface.crosses())
+                             ? grid.finest() / angle
+                             : std::numeric_limits<double>::infinity();
     std::vector<Key> pending{leaf};
     while (!pending.empty()) {
         const Key key = pending.back();
