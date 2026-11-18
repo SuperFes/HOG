@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <iostream>
@@ -20,16 +21,18 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-census [--planet FILE] [--seeds N,N,...] [--level N] [--lakes N]\n"
+    "usage: hog-census [--planet FILE] [--seeds N,N,...] [--level N] [--lakes N] [--woods FILE]\n"
     "Counts what the generator makes of the world over every cell of a level's grid (9 by\n"
     "default): land and sea, inland water still and running, and what tops the land; for each\n"
-    "seed given, the planet's own by default.\n";
+    "seed given, the planet's own by default. With --woods, the woods too, mapped into FILE, a\n"
+    "PNG, its name taking each seed where more than one is given.\n";
 
 struct Options {
     hog::globe::Planet planet;
     std::vector<std::uint64_t> seeds;
     int level = 9;
     std::size_t lakes = 10;
+    std::optional<std::filesystem::path> woods;
 };
 
 std::optional<double> number(std::string_view text) {
@@ -44,6 +47,10 @@ std::optional<double> number(std::string_view text) {
 }
 
 bool apply(Options& options, std::string_view name, std::string_view value) {
+    if (name == "--woods") {
+        options.woods = std::filesystem::path{value};
+        return true;
+    }
     if (name == "--planet") {
         const auto loaded = hog::globe::load_planet(value);
         if (!loaded) {
@@ -110,12 +117,28 @@ int run(std::span<const std::string_view> arguments) {
         const hog::globe::Generator generator{planet};
         const auto formed = std::chrono::steady_clock::now();
         const std::vector<hog::census::Spot> spots =
-            hog::census::survey(generator, options.level, each);
+            hog::census::survey(generator, options.level, each, options.woods.has_value());
         const auto surveyed = std::chrono::steady_clock::now();
         const std::optional<double> sea = generator.sea_level();
-        const hog::census::Census census =
-            hog::census::count(options.level, spots, planet.body.radius,
-                               sea ? std::optional{*sea - planet.body.radius} : std::nullopt);
+        const std::optional<double> over =
+            sea ? std::optional{*sea - planet.body.radius} : std::nullopt;
+        hog::census::Census census =
+            hog::census::count(options.level, spots, planet.body.radius, over);
+        census.woods = options.woods.has_value();
+        if (options.woods) {
+            std::filesystem::path path = *options.woods;
+            if (options.seeds.size() > 1) {
+                path.replace_filename(
+                    std::format("{}-{}{}", path.stem().string(), seed, path.extension().string()));
+            }
+            constexpr int map_width = 2048;
+            if (const auto written = hog::write_png(
+                    path, hog::census::woods_map(options.level, spots, map_width, over));
+                !written) {
+                std::cerr << std::format("hog-census: can't write {}\n", path.string());
+                return EXIT_FAILURE;
+            }
+        }
         const auto seconds = [](auto from, auto to) {
             return std::chrono::duration<double>(to - from).count();
         };

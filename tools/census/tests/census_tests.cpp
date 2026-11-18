@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -57,6 +58,50 @@ TEST_CASE("a census splits the world into land and sea, the land by what tops it
     CHECK(census.lowest == -30.0);
     CHECK(census.highest == 10.0);
     CHECK(census.lakes.empty());
+}
+
+TEST_CASE("a census counts the woods by kind and how high they stand, and maps them", "[census]") {
+    std::vector<Spot> spots = dry();
+    const Cell pines{.level = level, .face = 2, .i = 1, .j = 1};
+    const Cell mixed{.level = level, .face = 3, .i = 4, .j = 5};
+    at(spots, pines).ground = 900.0;
+    at(spots, pines).woods.cover = 0.5;
+    at(spots, pines).woods.shares.at(static_cast<std::size_t>(hog::flora::Kind::Needleleaf)) = 1.0;
+    at(spots, mixed).woods.cover = 1.0;
+    at(spots, mixed).woods.shares.at(static_cast<std::size_t>(hog::flora::Kind::Deciduous)) = 0.25;
+    at(spots, mixed).woods.shares.at(static_cast<std::size_t>(hog::flora::Kind::Wetland)) = 0.75;
+    Census census = count(level, spots, radius, 0.0);
+    census.woods = true;
+    CHECK_THAT(census.wooded, WithinRel((0.5 * km2(pines)) + km2(mixed), 1e-9));
+    CHECK_THAT(census.kinds.at(static_cast<std::size_t>(hog::flora::Kind::Needleleaf)),
+               WithinRel(0.5 * km2(pines), 1e-9));
+    CHECK_THAT(census.kinds.at(static_cast<std::size_t>(hog::flora::Kind::Wetland)),
+               WithinRel(0.75 * km2(mixed), 1e-9));
+    CHECK(census.treeline == 900.0);
+    CHECK(hog::census::report(census).find("woods:") != std::string::npos);
+
+    const hog::Image map = hog::census::woods_map(level, spots, 64, 0.0);
+    REQUIRE(map.width == 64);
+    REQUIRE(map.height == 32);
+    REQUIRE(map.pixels.size() == 64U * 32U * 3U);
+    // The pines' cell, seen from straight over its middle, against bare ground.
+    const hog::DVec3 middle = hog::globe::center(pines);
+    const double latitude = std::asin(middle.z);
+    const double longitude = std::atan2(middle.y, middle.x);
+    const auto x = static_cast<std::size_t>(((longitude / std::numbers::pi) + 1.0) / 2.0 * 64.0);
+    const auto y = static_cast<std::size_t>((0.5 - (latitude / std::numbers::pi)) * 32.0);
+    const auto pixel = [&](std::size_t px, std::size_t py) {
+        const std::size_t first = 3 * ((py * 64) + px);
+        return std::array{map.pixels[first], map.pixels[first + 1], map.pixels[first + 2]};
+    };
+    const Cell far{.level = level, .face = 5, .i = 3, .j = 3};
+    const hog::DVec3 bare = hog::globe::center(far);
+    const auto bx = static_cast<std::size_t>(
+        ((std::atan2(bare.y, bare.x) / std::numbers::pi) + 1.0) / 2.0 * 64.0);
+    const auto by = static_cast<std::size_t>((0.5 - (std::asin(bare.z) / std::numbers::pi)) * 32.0);
+    // Greener than the bare ground, where it's half under pines.
+    CHECK(pixel(x, y)[1] > pixel(x, y)[0]);
+    CHECK(pixel(bx, by)[0] > pixel(bx, by)[1]);
 }
 
 TEST_CASE("a census joins inland water over the cells' sides into lakes", "[census]") {

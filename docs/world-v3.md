@@ -447,7 +447,8 @@ step replaces something, the old and new are compared before the old goes.
       the water and faded in and out over its cycle (`carried_wave_surface`, flow maps), so none
       strays more than a cycle's run. Tests: drawn halfway through, one drawing carried half a
       cycle's run; a quarter through, both alike.
-8. Grass, plant cover and anything else placed on the ground read the new surface.
+8. Grass, plant cover and anything else placed on the ground read the new surface. Where trees
+   grow and which kinds: [woods.md](woods.md); placing single trees waits for the tree lab.
 9. Physics and the player's footing on the shape tree or collision meshes; the bot too. Tests:
    standing, walking a slope, falling into water.
 10. Rays: picking, the sun ray and sight lines through the held tree.

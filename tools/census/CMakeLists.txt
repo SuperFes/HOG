@@ -2,7 +2,7 @@ add_library(hog_census src/census.cpp)
 add_library(hog::census ALIAS hog_census)
 
 target_include_directories(hog_census PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_census PUBLIC hog::globe)
+target_link_libraries(hog_census PUBLIC hog::flora hog::globe)
 hog_target_defaults(hog_census)
 
 add_executable(hog_census_cli src/main.cpp)

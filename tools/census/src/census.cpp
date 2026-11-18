@@ -1,5 +1,6 @@
 #include <hog/census/census.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/habitat.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -19,6 +20,22 @@ constexpr std::array<std::string_view, globe::material_count> material_names{
     "sandstone", "shale",         "limestone",  "granite", "basalt", "mantle",
     "iron",      "anorthosite",   "regolith",   "firn",    "ice",    "clay",
     "gravel",    "volcanic sand", "shell sand", "shingle"};
+
+constexpr std::array<std::string_view, flora::kinds> kind_names{
+    "needleleaf", "deciduous", "evergreen", "dry", "palm", "wetland"};
+
+// Each kind's colour on the map, and the ground's, ice's and water's.
+using Colour = std::array<double, 3>;
+constexpr std::array<Colour, flora::kinds> kind_colours{
+    Colour{25.0, 75.0, 55.0},   Colour{95.0, 160.0, 45.0},  Colour{15.0, 105.0, 30.0},
+    Colour{160.0, 145.0, 70.0}, Colour{175.0, 205.0, 60.0}, Colour{40.0, 140.0, 125.0}};
+constexpr Colour bare_colour{200.0, 188.0, 165.0};
+constexpr Colour ice_colour{240.0, 245.0, 250.0};
+constexpr Colour sea_colour{35.0, 65.0, 115.0};
+constexpr Colour lake_colour{70.0, 115.0, 170.0};
+
+// Ground at least this share under crowns counts towards the treeline.
+constexpr double treeline_cover = 0.1;
 
 constexpr double degree = std::numbers::pi / 180.0;
 
@@ -98,6 +115,13 @@ Census count(int level, std::span<const Spot> spots, double radius, std::optiona
         } else if (!inland(spot, sea)) {
             census.sea += area;
         }
+        census.wooded += spot.woods.cover * area;
+        for (std::size_t kind = 0; kind < flora::kinds; ++kind) {
+            census.kinds.at(kind) += spot.woods.cover * spot.woods.shares.at(kind) * area;
+        }
+        if (spot.woods.cover >= treeline_cover) {
+            census.treeline = std::max(census.treeline, spot.ground - base);
+        }
     }
     std::vector<bool> taken(spots.size(), false);
     for (std::size_t first = 0; first < spots.size(); ++first) {
@@ -112,7 +136,8 @@ Census count(int level, std::span<const Spot> spots, double radius, std::optiona
     return census;
 }
 
-std::vector<Spot> survey(const globe::Generator& generator, int level, const globe::EachOf& each) {
+std::vector<Spot> survey(const globe::Generator& generator, int level, const globe::EachOf& each,
+                         bool woods) {
     const double radius = generator.planet().body.radius;
     const double lod = radius * (std::numbers::pi / 2.0) / static_cast<double>(1U << level);
     const auto side = static_cast<std::uint32_t>(1U << level);
@@ -144,6 +169,9 @@ std::vector<Spot> survey(const globe::Generator& generator, int level, const glo
                 // The voxel just under the ground, as the finest show it.
                 spot.top = column.sample(column.ground() - (generator.planet().voxel / 2.0), false)
                                .material;
+                if (woods) {
+                    spot.woods = flora::woods_of(globe::habitat(generator, globe::center(cell)));
+                }
             }
         }
     };
@@ -192,7 +220,58 @@ std::string report(const Census& census, std::size_t lakes) {
         out += std::format(" {} {:.1f}%", material_names.at(material), 100.0 * area / census.land);
     }
     out += '\n';
+    if (census.woods) {
+        out += std::format("woods: {:.1f}% of land under crowns, a tenth up to {:.0f} m;",
+                           100.0 * census.wooded / std::max(census.land, 1e-9), census.treeline);
+        for (std::size_t kind = 0; kind < flora::kinds; ++kind) {
+            out += std::format(" {} {:.1f}%", kind_names.at(kind),
+                               100.0 * census.kinds.at(kind) / std::max(census.wooded, 1e-9));
+        }
+        out += '\n';
+    }
     return out;
+}
+
+Image woods_map(int level, std::span<const Spot> spots, int width, std::optional<double> sea) {
+    const int height = width / 2;
+    Image map{.width = width,
+              .height = height,
+              .pixels = std::vector<std::uint8_t>(static_cast<std::size_t>(width) *
+                                                  static_cast<std::size_t>(height) * 3)};
+    for (int y = 0; y < height; ++y) {
+        const double latitude = (0.5 - ((y + 0.5) / height)) * std::numbers::pi;
+        for (int x = 0; x < width; ++x) {
+            const double longitude = ((((x + 0.5) / width) * 2.0) - 1.0) * std::numbers::pi;
+            const DVec3 direction{std::cos(latitude) * std::cos(longitude),
+                                  std::cos(latitude) * std::sin(longitude), std::sin(latitude)};
+            const Spot& spot = spots[static_cast<std::size_t>(
+                globe::index_of(globe::cell_under(direction, level)))];
+            Colour ground = bare_colour;
+            if (spot.top == globe::Material::Ice || spot.top == globe::Material::Snow ||
+                spot.top == globe::Material::Firn) {
+                ground = ice_colour;
+            }
+            if (spot.water.value_or(spot.ground) > spot.ground) {
+                ground = inland(spot, sea) ? lake_colour : sea_colour;
+            }
+            Colour woods{};
+            for (std::size_t kind = 0; kind < flora::kinds; ++kind) {
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    woods.at(channel) +=
+                        spot.woods.shares.at(kind) * kind_colours.at(kind).at(channel);
+                }
+            }
+            const std::size_t at =
+                3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+                     static_cast<std::size_t>(x));
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                const double shown = ground.at(channel) +
+                                     ((woods.at(channel) - ground.at(channel)) * spot.woods.cover);
+                map.pixels[at + channel] = static_cast<std::uint8_t>(std::clamp(shown, 0.0, 255.0));
+            }
+        }
+    }
+    return map;
 }
 
 } // namespace hog::census
