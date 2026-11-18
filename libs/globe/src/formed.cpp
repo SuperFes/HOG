@@ -69,6 +69,7 @@ struct OnCube {
 };
 
 constexpr double bankfull = 4.0;
+constexpr double seconds_a_year = 31'557'600.0;
 
 // How much the valley from the weighed point `at` counts, and how that changes per radian: as
 // far as it's weighed, or the point it runs into is if more, as it's read while its own isn't, so
@@ -90,7 +91,6 @@ std::pair<double, DVec3> weighed_valley(const formation::Smooth::Weights& weight
 // and `high` times its mean, meandering over no more than a quarter of `room` either way.
 Channel channel_of(double wearing, double passing, double fall, bool loose, double room, double low,
                    double high) noexcept {
-    constexpr double seconds_a_year = 31'557'600.0;
     constexpr double gentle = 0.01; // falls under which rivers wander freely
     const double mean = wearing / seconds_a_year;
     const double mean_depth = 0.27 * maths::pow(mean, 0.4);
@@ -1369,7 +1369,6 @@ std::vector<Formed::Turn> Formed::river_course(std::uint32_t stem, double lod) c
             }
         }
     }
-    constexpr double seconds_a_year = 31'557'600.0;
     std::vector<Turn> course;
     bool wet = false;
     for (const std::uint32_t point : std::views::reverse(stretches)) {
@@ -1663,7 +1662,8 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
                 .bed = dissected.top.value,
                 .settled = 1.0,
                 .bedforms = Noise{},
-                .sheet = ground.sheet};
+                .sheet = ground.sheet,
+                .above_floor = above_floor};
     // Ice fills the gullies itself, what it carried lying under it.
     if (dissected.ice <= 0.0) {
         settle(direction, weights, lod, cut);
@@ -1755,6 +1755,22 @@ void raise_crag(Formed::Here& here, Noise& top, double relief, double over, DVec
 
 } // namespace
 
+Formed::Climate Formed::climate_at(DVec3 direction, double height) const {
+    formation::Smooth::Weights weights;
+    smooth_.weigh(direction, weights, start_near(direction));
+    const formation::World& world = world_;
+    // The climate was worked out over the crust's heights, the liquid's level the lowest.
+    double base = 0.0;
+    for (std::size_t at = 0; at < weights.points.size(); ++at) {
+        base += weights.weights[at] * std::max(world.crust.base[weights.points[at]], 0.0);
+    }
+    return {.temperature = formation::Smooth::read(world.climate.temperature, weights).value +
+                           (world.body.lapse_rate * (base - std::max(height, 0.0))),
+            .rain = formation::Smooth::read(world.climate.rain, weights).value,
+            .flow = river_size_ * formation::Smooth::read(world.lakes.discharge, weights).value /
+                    seconds_a_year};
+}
+
 Formed::Here Formed::at(DVec3 direction, double lod, bool crags) const {
     formation::Smooth::Weights weights;
     smooth_.weigh(direction, weights, start_near(direction));
@@ -1813,6 +1829,7 @@ Formed::Here Formed::at(DVec3 direction, double lod, bool crags) const {
     // Gullies cut down through what lies draped over the ground and into the rock under it, the
     // top of which is what's rotted; under ice, which nothing settled under, through all of it.
     here.cut = top.cut;
+    here.above_floor = under.above_floor;
     double cut = std::max(0.0, top.cut);
     const std::array all{&layers.loess,     &layers.sand, &layers.alluvium,
                          &layers.lake_beds, &layers.till, &layers.lava};

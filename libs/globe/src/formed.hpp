@@ -66,6 +66,9 @@ public:
         double cut = 0.0;
         // Metres the rotted core of a block of rock stands out of the ground about it as a crag.
         double crag = 0.0;
+        // Metres it stands over the floor of the valley it lies in, or the lake it drains to: how
+        // far down the water under it lies.
+        double above_floor = 1e30;
         // Where a crag stands that was left out of the ground as asked: the block whose core it
         // is, metres it rotted in from its joints, metres from the centre the rock's top lies at
         // under it, and metres its core stands over that.
@@ -91,6 +94,17 @@ public:
     // Gullies and river channels narrower than twice `lod` are left out.
     // Without `crags`, none stands out of the ground, each noted as `standing` instead.
     [[nodiscard]] Here at(DVec3 direction, double lod = 0.0, bool crags = true) const;
+
+    // The yearly mean temperature at `direction` where the ground stands `height` metres over the
+    // sea, °C: the climate's at the points about, warmer or colder by the lapse rate from their
+    // heights to it; the rain falling there in a year, metres; and the water running down the
+    // valleys about at its mean, cubic metres a second.
+    struct Climate {
+        double temperature = 0.0;
+        double rain = 0.0;
+        double flow = 0.0;
+    };
+    [[nodiscard]] Climate climate_at(DVec3 direction, double height) const;
 
     [[nodiscard]] bool has_sea() const noexcept { return has_sea_; }
     // Where a lake that brims runs out over its rim, where a river leaves it: a unit direction,
@@ -204,6 +218,8 @@ private:
         // gradient per metre along the ground.
         Noise bedforms;
         double sheet = 0.0; // as carved
+        // Metres it stands over the floor of the valley it lies in, or the lake it drains to.
+        double above_floor = 1e30;
     };
     [[nodiscard]] Surface surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                   double lod) const;

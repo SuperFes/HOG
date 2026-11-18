@@ -10,6 +10,7 @@ add_library(hog_globe
     src/valleys.cpp
     src/generator.cpp
     src/grid_fill.cpp
+    src/habitat.cpp
     src/water_bodies.cpp
     src/grip.cpp
     src/layers.cpp
@@ -40,7 +41,7 @@ add_library(hog_globe
 add_library(hog::globe ALIAS hog_globe)
 
 target_include_directories(hog_globe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_globe PUBLIC hog::core hog::formation hog::grid hog::planet PRIVATE tomlplusplus)
+target_link_libraries(hog_globe PUBLIC hog::core hog::flora hog::formation hog::grid hog::planet PRIVATE tomlplusplus)
 hog_target_defaults(hog_globe)
 
 hog_add_tests(hog_globe
@@ -56,6 +57,7 @@ hog_add_tests(hog_globe
     tests/valleys_tests.cpp
     tests/generator_tests.cpp
     tests/grid_fill_tests.cpp
+    tests/habitat_tests.cpp
     tests/grip_tests.cpp
     tests/held_tiles_tests.cpp
     tests/land_tests.cpp
