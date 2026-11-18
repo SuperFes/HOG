@@ -16,6 +16,7 @@ add_library(hog_client
     src/forecast.cpp
     src/frame_times.cpp
     src/globe_view.cpp
+    src/ground_blocks.cpp
     src/ground_field.cpp
     src/held_pages.cpp
     src/grains.cpp
@@ -55,6 +56,7 @@ hog_add_tests(hog_client
     tests/frame_times_tests.cpp
     tests/glacier_lab_tests.cpp
     tests/globe_view_tests.cpp
+    tests/ground_blocks_tests.cpp
     tests/ground_field_tests.cpp
     tests/held_pages_tests.cpp
     tests/grains_tests.cpp
