@@ -26,6 +26,8 @@ add_library(hog_client
     src/scene.cpp
     src/page_meshes.cpp
     src/shape_mesh.cpp
+    src/transvoxel.cpp
+    src/transvoxel_tables.cpp
     src/sonar.cpp
     src/session.cpp
     src/tides.cpp)
@@ -62,6 +64,7 @@ hog_add_tests(hog_client
     tests/scene_tests.cpp
     tests/page_meshes_tests.cpp
     tests/shape_mesh_tests.cpp
+    tests/transvoxel_tests.cpp
     tests/sonar_tests.cpp
     tests/session_tests.cpp
     tests/tides_tests.cpp)
