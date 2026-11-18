@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/fade.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -64,18 +66,24 @@ public:
 
     // Meshes drawn besides, each kept apart by its key and uploaded once, as it's next drawn,
     // as chunks streamed in and out are: placing one under a key already held replaces it.
-    void place(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh);
-    void remove(std::uint64_t key);
+    // `faded`, what's replaced or removed fades out as what's placed fades in.
+    void place(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh,
+               bool faded = false);
+    void remove(std::uint64_t key, bool faded = false);
     [[nodiscard]] std::size_t placed() const noexcept { return placed_.size(); }
+    // Whether any mesh is still fading in or out.
+    [[nodiscard]] bool fading() const noexcept;
+    // Ends every fade, each mesh as it will be once done.
+    void finish_fades();
 
-    // Records drawing into the colour and depth images being rendered to, of `extent`. The
-    // frame's last submit must have finished.
+    // Records drawing into the colour and depth images being rendered to, of `extent`, fades as
+    // they are at `seconds`, on any steady clock. The frame's last submit must have finished.
     [[nodiscard]] Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
-                                std::uint32_t frame);
+                                std::uint32_t frame, double seconds);
     // The same in two halves, for drawing a frame's blocks more than once, as into a probe's
     // faces: readies the frame's copy and what's placed, once a frame, then draws them as often
     // as asked.
-    [[nodiscard]] Result<> prepare(std::uint32_t frame);
+    [[nodiscard]] Result<> prepare(std::uint32_t frame, double seconds);
     void draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
                        std::uint32_t frame) const;
 
@@ -102,6 +110,7 @@ private:
         WorldPosition origin = {};
         DVec3 middle{0.0};
         double radius = 0.0;
+        std::optional<Fade> fade; // none, drawn whole
     };
 
     [[nodiscard]] Result<> copy(Copy& copy) const;
@@ -110,9 +119,13 @@ private:
     [[nodiscard]] Result<> upload(Placed& placed) const;
     // Lets a mesh go once no frame in flight can still be drawing it.
     void retire(Placed placed);
+    // Fading out, if `faded`, else let go.
+    void let_go(Placed placed, bool faded);
     void draw_one(VkCommandBuffer commands, const Buffer& vertices, const Buffer& indices,
-                  std::uint32_t count, WorldPosition origin, const BlockView& view,
-                  double aspect) const;
+                  std::uint32_t count, WorldPosition origin, const BlockView& view, double aspect,
+                  std::uint32_t instance = 0) const;
+    void draw_placed(VkCommandBuffer commands, const Placed& placed, const BlockView& view,
+                     double aspect) const;
 
     const Device* device_ = nullptr;
     Pipeline pipeline_;
@@ -124,6 +137,8 @@ private:
     std::shared_ptr<const terrain::BlockMesh> mesh_;
     std::uint64_t shown_ = 0;
     std::map<std::uint64_t, Placed> placed_;
+    std::vector<Placed> fading_out_;
+    double seconds_ = 0.0;                                   // as the frame last readied is drawn
     std::vector<std::pair<std::uint64_t, Placed>> retiring_; // by the draw they were let go at
     std::uint64_t draws_ = 0;
 };

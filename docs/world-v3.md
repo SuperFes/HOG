@@ -403,6 +403,12 @@ step replaces something, the old and new are compared before the old goes.
      two, welds closed and facing out (Euler 2). Blocks over a held slope lie on it and meet
      with no gap.
 5. Morph or fade between depths. Tests: vertex positions at the start and end of a swap.
+   Done as a fade (`render::Fade`, `Blocks::place`/`remove` faded): a block replaced or taken
+   away dithers out over half a second as what replaces it dithers in, pixel for pixel the ones it
+   gives up, so the two cover the ground once with no blending. A morph was passed over: Transvoxel
+   blocks at two depths needn't share a shape to morph between, and a block re-meshed at the same
+   depth for a finer page needs the swap smoothed as much. Tests: fade steps, and a mesh fading in
+   taking exactly the pixels the one it replaces gives up. Stills end every fade first.
 6. Mesh cache and jobs: meshed once, kept until a version or depth changes, nearest first.
    Done (`client::BlockMeshes`):
    - On the jobs: choosing the blocks, meshing each nearest first, and working out what changed.

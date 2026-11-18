@@ -11,6 +11,7 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -193,11 +194,14 @@ Result<> Blocks::copy(Copy& copy) const {
     return {};
 }
 
-void Blocks::place(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh) {
-    remove(key);
+void Blocks::place(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh, bool faded) {
+    remove(key, faded);
     if (mesh && !mesh->indices.empty()) {
         Placed placed;
         placed.mesh = std::move(mesh);
+        if (faded) {
+            placed.fade = Fade{};
+        }
         placed_.emplace(key, std::move(placed));
     }
 }
@@ -232,10 +236,36 @@ Result<> Blocks::upload(Placed& placed) const {
     return {};
 }
 
-void Blocks::remove(std::uint64_t key) {
+void Blocks::remove(std::uint64_t key, bool faded) {
     if (const auto held = placed_.find(key); held != placed_.end()) {
-        retire(std::move(held->second));
+        let_go(std::move(held->second), faded);
         placed_.erase(held);
+    }
+}
+
+void Blocks::let_go(Placed placed, bool faded) {
+    // One never drawn has nothing to fade from.
+    if (faded && placed.count > 0) {
+        placed.fade = Fade{.in = false, .began = std::nullopt};
+        fading_out_.push_back(std::move(placed));
+    } else {
+        retire(std::move(placed));
+    }
+}
+
+bool Blocks::fading() const noexcept {
+    return !fading_out_.empty() || std::ranges::any_of(placed_, [](const auto& held) {
+        return held.second.fade.has_value();
+    });
+}
+
+void Blocks::finish_fades() {
+    for (Placed& placed : fading_out_) {
+        retire(std::move(placed));
+    }
+    fading_out_.clear();
+    for (auto& [key, placed] : placed_) {
+        placed.fade.reset();
     }
 }
 
@@ -245,7 +275,7 @@ void Blocks::retire(Placed placed) {
 
 void Blocks::draw_one(VkCommandBuffer commands, const Buffer& vertices, const Buffer& indices,
                       std::uint32_t count, WorldPosition origin, const BlockView& view,
-                      double aspect) const {
+                      double aspect, std::uint32_t instance) const {
     // The tiles' coordinates are the world's, wrapped where they repeat, so a mesh placed
     // anywhere wears them as its neighbours do.
     const Vec3 tiled{glm::mod(origin.metres(), DVec3{period})};
@@ -263,20 +293,51 @@ void Blocks::draw_one(VkCommandBuffer commands, const Buffer& vertices, const Bu
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),
                        &push);
-    vkCmdDrawIndexed(commands, count, 1, 0, 0, 0);
+    vkCmdDrawIndexed(commands, count, 1, 0, 0, instance);
+}
+
+void Blocks::draw_placed(VkCommandBuffer commands, const Placed& placed, const BlockView& view,
+                         double aspect) const {
+    if (seen(view, aspect, placed)) {
+        draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin, view,
+                 aspect, placed.fade ? placed.fade->instance(seconds_) : 0);
+    }
 }
 
 Result<> Blocks::draw(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
-                      std::uint32_t frame) {
-    if (Result<> prepared = prepare(frame); !prepared) {
+                      std::uint32_t frame, double seconds) {
+    if (Result<> prepared = prepare(frame, seconds); !prepared) {
         return prepared;
     }
     draw_prepared(commands, extent, view, frame);
     return {};
 }
 
-Result<> Blocks::prepare(std::uint32_t frame) {
+Result<> Blocks::prepare(std::uint32_t frame, double seconds) {
     ++draws_;
+    seconds_ = seconds;
+    // What's begun fading this frame begins together, so each pixel one gives up the other takes.
+    const auto begin = [seconds](Placed& placed) {
+        if (placed.fade) {
+            placed.fade->began = placed.fade->began.value_or(seconds);
+        }
+    };
+    std::vector<Placed> still_fading;
+    for (Placed& placed : fading_out_) {
+        if (!placed.fade || placed.fade->done(seconds)) {
+            retire(std::move(placed));
+        } else {
+            begin(placed);
+            still_fading.push_back(std::move(placed));
+        }
+    }
+    fading_out_ = std::move(still_fading);
+    for (auto& [key, placed] : placed_) {
+        if (placed.fade && placed.fade->done(seconds)) {
+            placed.fade.reset();
+        }
+        begin(placed);
+    }
     // Each frame in flight has been drawn again since: none can still be reading them.
     std::erase_if(retiring_,
                   [&](const auto& retired) { return draws_ - retired.first > copies_.size(); });
@@ -299,7 +360,8 @@ Result<> Blocks::prepare(std::uint32_t frame) {
 void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
                            std::uint32_t frame) const {
     const Copy& kept = copies_.at(frame);
-    if (extent.width == 0 || extent.height == 0 || (kept.count == 0 && placed_.empty())) {
+    if (extent.width == 0 || extent.height == 0 ||
+        (kept.count == 0 && placed_.empty() && fading_out_.empty())) {
         return;
     }
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
@@ -312,10 +374,10 @@ void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const Bl
         draw_one(commands, kept.vertices, kept.indices, kept.count, kept.origin, view, aspect);
     }
     for (const auto& [key, placed] : placed_) {
-        if (seen(view, aspect, placed)) {
-            draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin, view,
-                     aspect);
-        }
+        draw_placed(commands, placed, view, aspect);
+    }
+    for (const Placed& placed : fading_out_) {
+        draw_placed(commands, placed, view, aspect);
     }
 }
 

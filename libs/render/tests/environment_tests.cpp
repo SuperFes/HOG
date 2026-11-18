@@ -317,7 +317,7 @@ TEST_CASE("a probe's cube holds what stands round the eye over the sky",
         .exposure = 1.0};
     REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
-        CHECK(blocks->prepare(0));
+        CHECK(blocks->prepare(0, 0.0));
         const auto around = [&](VkCommandBuffer drawing, const hog::render::Camera& camera,
                                 VkExtent2D extent) -> hog::Result<> {
             blocks->draw_prepared(drawing, extent,
@@ -379,7 +379,7 @@ TEST_CASE("a probe draws one face a time after the first, keeping the others", "
     const auto record = [&] {
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
-            CHECK(blocks->prepare(0));
+            CHECK(blocks->prepare(0, 0.0));
             const auto around = [&](VkCommandBuffer drawing, const hog::render::Camera& camera,
                                     VkExtent2D extent) -> hog::Result<> {
                 blocks->draw_prepared(drawing, extent,

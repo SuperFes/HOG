@@ -73,10 +73,11 @@ void add_square(BlockMesh& mesh, double away, Tile tile) {
     add_square(mesh, away, tile, tile);
 }
 
+std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::Blocks& blocks,
+                                      const BlockView& view, double seconds = 0.0);
+
 // Draws the blocks over a black background, looking down -z from `eye` on a planet a thousand
 // kilometres across whose ground is `up` there, and reads it back.
-std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::Blocks& blocks,
-                                      const BlockView& view);
 
 std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Blocks& blocks,
                                  DVec3 sun, WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0},
@@ -89,9 +90,10 @@ std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Block
          .cutaway = cutaway});
 }
 
-// Draws the blocks as `view` sees them over a black background, and reads it back.
+// Draws the blocks as `view` sees them over a black background, fades as at `seconds`, and reads
+// it back.
 std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::Blocks& blocks,
-                                      const BlockView& view) {
+                                      const BlockView& view, double seconds) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -113,7 +115,7 @@ std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::
         hog::render::begin_rendering(commands, target->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
-        drawn = blocks.draw(commands, extent, view, 0).has_value();
+        drawn = blocks.draw(commands, extent, view, 0, seconds).has_value();
         vkCmdEndRendering(commands);
     }));
     REQUIRE(drawn);
@@ -421,4 +423,93 @@ TEST_CASE("water standing on level ground mirrors what the probe took round the 
     CHECK(mirrored[0] > mirrored[2]);
     CHECK(mirrored[0] > plain[0] + 40);
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a fade comes in steps, one fading in drawn in what one fading out gives up",
+          "[render]") {
+    using hog::render::Fade;
+    using hog::render::fade_seconds;
+    using hog::render::fade_steps;
+    const Fade unbegun{};
+    CHECK(unbegun.along(5.0) == 0.0);
+    CHECK(unbegun.instance(5.0) == 1);
+    const Fade in{.in = true, .began = 2.0};
+    const Fade out{.in = false, .began = 2.0};
+    CHECK(in.along(2.0) == 0.0);
+    CHECK(in.along(2.0 + (fade_seconds / 2.0)) == 0.5);
+    CHECK(!in.done(2.0 + (fade_seconds / 2.0)));
+    CHECK(in.done(2.0 + fade_seconds));
+    CHECK(in.instance(2.0) == 1);
+    CHECK(in.instance(2.0 + fade_seconds) == 1 + fade_steps);
+    CHECK(out.instance(2.0) == fade_steps + 2);
+    for (const double seconds : {2.0, 2.1, 2.25, 2.4, 3.0}) {
+        // At the same step, one fading in, one out.
+        CAPTURE(seconds);
+        CHECK(out.instance(seconds) - in.instance(seconds) == fade_steps + 1);
+    }
+}
+
+TEST_CASE("a mesh placed faded takes the pixels the one it replaces gives up", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    auto blocks = hog::render::Blocks::create(*device, VK_FORMAT_R8G8B8A8_UNORM,
+                                              VK_FORMAT_D32_SFLOAT, tiles());
+    REQUIRE(blocks);
+    const auto square_of = [](Tile tile) {
+        BlockMesh mesh;
+        add_square(mesh, 4.0, tile);
+        return std::make_shared<const BlockMesh>(std::move(mesh));
+    };
+    const BlockView view{
+        .camera = Camera{.eye = {}, .forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}},
+        .sun = {0.0, 0.0, 1.0},
+        .bend = {.up = {0.0, 0.0, 1.0}, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6}};
+    // Of the pixels drawn, how many red, how many blue, and how many neither.
+    struct Tally {
+        int red = 0;
+        int blue = 0;
+        int other = 0;
+    };
+    const auto tally = [&](double seconds) {
+        const std::vector<std::uint8_t> pixels = render_view(*device, *blocks, view, seconds);
+        Tally counted;
+        for (std::size_t y = 0; y < extent.height; ++y) {
+            for (std::size_t x = 0; x < extent.width; ++x) {
+                const Pixel pixel = at(pixels, x, y);
+                if (pixel[0] > 240 && pixel[2] < 10) {
+                    ++counted.red;
+                } else if (pixel[2] > 240 && pixel[0] < 10) {
+                    ++counted.blue;
+                } else if (pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0) {
+                    ++counted.other;
+                }
+            }
+        }
+        return counted;
+    };
+    blocks->place(1, square_of(Tile::Red));
+    const Tally whole = tally(0.0);
+    REQUIRE(whole.red > 100);
+    CHECK(whole.blue == 0);
+    blocks->place(1, square_of(Tile::Blue), true);
+    CHECK(blocks->fading());
+    const Tally begun = tally(10.0);
+    CHECK(begun.red == whole.red);
+    CHECK(begun.blue == 0);
+    const Tally halfway = tally(10.0 + (hog::render::fade_seconds / 2.0));
+    CHECK(halfway.red + halfway.blue == whole.red);
+    CHECK(halfway.other == 0);
+    CHECK(halfway.red > whole.red / 3);
+    CHECK(halfway.blue > whole.red / 3);
+    const Tally done = tally(10.0 + hog::render::fade_seconds);
+    CHECK(done.blue == whole.red);
+    CHECK(!blocks->fading());
+    // Taken away faded, it's drawn until it's faded out.
+    blocks->remove(1, true);
+    CHECK(tally(20.0).blue == whole.red);
+    CHECK(tally(20.0 + (hog::render::fade_seconds / 2.0)).blue < whole.red);
+    CHECK(tally(20.0 + hog::render::fade_seconds).blue == 0);
+    CHECK(!blocks->fading());
 }

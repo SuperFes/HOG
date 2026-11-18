@@ -78,10 +78,29 @@ struct Surface {
     float3 up;
     // From the eye.
     float3 from_eye;
+    // How it fades, as hog::render::Fade::instance has it: 0 drawn whole.
+    nointerpolation uint fade;
 };
 
+// Steps a fade is drawn in: render::fade_steps.
+static const uint fade_steps = 255;
+
+// Whether a pixel is drawn of a mesh fading as `fade` says. Those fading in take a pixel at the
+// step its noise rises past, those fading out give it up at that step.
+bool faded_out(uint fade, float2 pixel) {
+    if (fade == 0u) {
+        return false;
+    }
+    const uint step = (fade - 1u) % (fade_steps + 1u);
+    const bool in = fade - 1u <= fade_steps;
+    // Interleaved gradient noise: neighbouring pixels far apart, so a fade shows as a fine grain.
+    const float noise = frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+    const bool taken = noise * float(fade_steps) < float(step);
+    return in != taken;
+}
+
 [shader("vertex")]
-Surface vertex_main(Vertex vertex) {
+Surface vertex_main(Vertex vertex, uint instance: SV_VulkanInstanceID) {
     const float3 from_eye = vertex.position + push.origin.xyz;
     const float3 drawn =
         bent(from_eye, push.up_height, float2(push.sun_radius.w, push.faked_night.x));
@@ -98,6 +117,7 @@ Surface vertex_main(Vertex vertex) {
     surface.glow = level > 48u ? float(level - 48u) / 15.0 : 0.0;
     surface.tiled = vertex.position + float3(push.origin.w, push.faked_night.zw);
     surface.from_eye = from_eye;
+    surface.fade = instance;
     surface.up = from_eye + (push.up_height.xyz * (push.sun_radius.w + push.up_height.w));
     return surface;
 }
@@ -186,6 +206,9 @@ float3 tile_at(Tiling tiling, uint tile) {
 
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
+    if (faded_out(surface.fade, surface.position.xy)) {
+        discard;
+    }
     const float cutaway = floor(push.faked_night.y);
     const float night = push.faked_night.y - cutaway;
     const float away = length(surface.from_eye);

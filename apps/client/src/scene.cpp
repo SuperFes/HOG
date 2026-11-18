@@ -16,6 +16,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <numbers>
 #include <optional>
@@ -192,11 +193,11 @@ Scene::~Scene() = default;
 
 void Scene::show_ground(GroundChanges changes) {
     for (GroundChanges::Shown& shown : changes.shown) {
-        blocks_.place(shown.key, std::move(shown.ground));
+        blocks_.place(shown.key, std::move(shown.ground), true);
         ocean_.place_still(shown.key, std::move(shown.water));
     }
     for (const std::uint64_t key : changes.gone) {
-        blocks_.remove(key);
+        blocks_.remove(key, true);
         ocean_.remove_still(key);
     }
 }
@@ -366,9 +367,15 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     HOG_ZONE("scene");
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
-    settled_ = !ground_meshing_;
+    // Drawn on its own, the ground is shown as it'll be once it's faded.
+    if (shot.still) {
+        blocks_.finish_fades();
+    }
+    settled_ = !ground_meshing_ && !blocks_.fading();
     // The ground's meshes readied once for the frame, drawn by the probe and the ground pass.
-    if (Result<> prepared = blocks_.prepare(frame.slot); !prepared) {
+    if (Result<> prepared = blocks_.prepare(
+            frame.slot, std::chrono::duration<double>(shot.now.time_since_epoch()).count());
+        !prepared) {
         return prepared;
     }
 
