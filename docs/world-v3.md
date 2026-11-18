@@ -385,9 +385,18 @@ step replaces something, the old and new are compared before the old goes.
    around it, and shows its leaf's blend of two materials. A corner's side comes only from the
    page's own leaves: solid where it touches solid and nothing open, and the other way round;
    otherwise from the smallest planes over it. So a page's mesh depends on its tree and depth
-   alone. Edges on the page's sides make no polygons. They're left for 5.4, where stitching the
-   border leaves of neighbours fits this scheme better than skirts.
+   alone. Edges touching the page's sides make no polygons; they're left for the seams.
 4. Seams between depths. Tests: no gaps along every shared edge of mixed-depth neighbours.
+   Done (`client::mesh_seam`, `client::ShapesDrawn`): a page's leaves split round the pages drawn
+   under it, and its mesh leaves out every edge touching its sides or theirs. Its seam draws those
+   edges inside it, and those on its high sides, each edge on a side drawn by the place holding
+   the lowest of the four leaves round it, over the drawn leaves of both sides together. A corner
+   on a side reads the leaves either side; one inside reads the page's alone, as its mesh does.
+   Vertices are the meshes' own, from each page's border, so seams meet the meshes exactly. A
+   page's mesh never changes for its neighbours; its seam is meshed again when a page touching
+   it changes (`ShapesDrawn::touching`). Tests: a cave across eight pages at mixed depths, and
+   round finer pages drawn in a coarse one, closes with no gap and nothing drawn twice. Where
+   pages at three depths meet at a corner, a leaf may join two sheets at its vertex.
 5. Morph or fade between depths. Tests: vertex positions at the start and end of a swap.
 6. Mesh cache and jobs: meshed once, kept until a version or depth changes, nearest first.
 7. Water surfaces from bodies: level surfaces clipped to the water tree, river ribbons with flow,
