@@ -991,7 +991,7 @@ struct StreamedGround {
                    bool drawn_from_pages)
         : planet{std::move(held)}, world{this->planet, layers, volume},
           meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness}, pages{grid},
-          page_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
+          block_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
         world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -1007,7 +1007,7 @@ struct StreamedGround {
     client::TileMeshes meshes;
     grid::Grid grid;
     client::HeldPages pages;
-    client::BlockMeshes page_meshes;
+    client::BlockMeshes block_meshes;
     bool from_pages = false;
     bool pages_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pages_seen; // where from
@@ -1049,13 +1049,13 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
     if (!ground.from_pages) {
         return;
     }
-    if (ground.page_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
-                                         glm::length(eye - *ground.pages_seen) > pages_moved)) {
-        ground.page_meshes.want(ground.pages, eye);
+    if (ground.block_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
+                                          glm::length(eye - *ground.pages_seen) > pages_moved)) {
+        ground.block_meshes.want(ground.pages, eye);
         ground.pages_came = false;
         ground.pages_seen = eye;
     }
-    if (client::GroundChanges changes = ground.page_meshes.collect(); !changes.empty()) {
+    if (client::GroundChanges changes = ground.block_meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
 }
@@ -1085,7 +1085,7 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
     }
     take_pages(connection, ground, scene, eye);
     scene.set_ground_state(ground.meshes.covered(eye, streamed_ground),
-                           ground.meshes.in_flight() > 0 || ground.page_meshes.in_flight() > 0);
+                           ground.meshes.in_flight() > 0 || ground.block_meshes.in_flight() > 0);
 }
 
 // Starts or stops playing the character as asked, as take_part does; walking waits for the ground

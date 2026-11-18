@@ -372,41 +372,48 @@ step replaces something, the old and new are compared before the old goes.
    holding that kind, as deep as it's held, saying which page. `evict` lets go of the farthest
    pages from the eye until under a byte budget, never the top page, and gives their roots for
    telling the server once that message exists. Water bodies sent are held by id.
-2. Depth by distance per page. Tests: depth chosen for a camera path. Done
-   (`client::drawn_pages`, `grid::View`): the pixel rule is shared with the server, so a page is
-   drawn as deep as its nodes still span more than the pixels allowed from the eye, never deeper
-   than held. Where a page is drawn whole, the held pages under its open leaves that the view
-   wants are drawn in place of those leaves and listed under it; the rest of the page is drawn at
-   its own depth.
+2. Depth by distance per page. Tests: depth chosen for a camera path. Done, now per block
+   (`client::ground_blocks`, `grid::View`). The pixel rule is shared with the server: a block is
+   split while its cells span more than the pixels allowed from the eye. Its cells read the
+   finest pages held there. Blocks no longer follow pages (the per-page `drawn_pages` went with
+   the dual contouring).
 3. Smooth mesher over the shape tree at a depth, material weights per vertex. Tests: closed
    surfaces on flat, slope, overhang and cave regions; vertices on the surface within tolerance.
-   Done (`client::mesh_shape`): adaptive dual contouring over a page's leaves, drawn no wider
-   than four nodes of the drawn depth. Each vertex sits on its leaf's plane, nearest the crossings
-   around it, and shows its leaf's blend of two materials. A corner's side comes only from the
-   page's own leaves: solid where it touches solid and nothing open, and the other way round;
-   otherwise from the smallest planes over it. So a page's mesh depends on its tree and depth
-   alone. Edges touching the page's sides make no polygons; they're left for the seams.
+   Done (`client::mesh_block`): Lengyel's Transvoxel. The ground is drawn in blocks, each a node
+   meshed as 16 cells a side by marching cubes with his tables (MIT, vendored). It first tried
+   adaptive dual contouring per page with seam meshes between pages. Too many rules had to agree
+   exactly: which leaves are drawn, who owns an edge, a corner's side, where a vertex goes.
+   Neighbours could also be any number of depths apart. That left holes, km-wide fans and
+   triangles off to nowhere, so it was replaced.
+   - The field (`client::GroundField`) gives each lattice point one value: the mean distance from
+     the planes of the finest held leaves round it. So every block reading a point agrees.
+   - An edge is crossed where the plane of the leaf holding it crosses it, or else between the
+     finest points along it. So a coarse block and a finer one put a shared crossing at the same
+     point.
 4. Seams between depths. Tests: no gaps along every shared edge of mixed-depth neighbours.
-   Done (`client::mesh_seam`, `client::ShapesDrawn`): a page's leaves split round the pages drawn
-   under it, and its mesh leaves out every edge touching its sides or theirs. Its seam draws those
-   edges inside it, and those on its high sides, each edge on a side drawn by the place holding
-   the lowest of the four leaves round it, over the drawn leaves of both sides together. A corner
-   on a side reads the leaves either side; one inside reads the page's alone, as its mesh does.
-   Vertices are the meshes' own, from each page's border, so seams meet the meshes exactly. A
-   page's mesh never changes for its neighbours; its seam is meshed again when a page touching
-   it changes (`ShapesDrawn::touching`). Tests: a cave across eight pages at mixed depths, and
-   round finer pages drawn in a coarse one, closes with no gap and nothing drawn twice. Where
-   pages at three depths meet at a corner, a leaf may join two sheets at its vertex.
+   Done (`client::ground_blocks`, transition cells in `mesh_block`). Blocks split by the view rule
+   from the root down, but not where the ground is the same all through. Then they split until
+   blocks beside each other are at most a depth apart.
+   - A side next to finer blocks gets Transvoxel transition cells. They sample that side at the
+     finer spacing, so they meet the finer blocks exactly.
+   - The regular cells by that side move in by half a cell to make room. The shift fades to
+     nothing towards sides whose neighbour is no finer, so vertices there stay where that
+     neighbour has them.
+   - Tests: a ball over coarse blocks beside finer ones, finer on a low side, a high side or
+     two, welds closed and facing out (Euler 2). Blocks over a held slope lie on it and meet
+     with no gap.
 5. Morph or fade between depths. Tests: vertex positions at the start and end of a swap.
 6. Mesh cache and jobs: meshed once, kept until a version or depth changes, nearest first.
-   Done (`client::PageMeshes`): page meshes on the jobs nearest first, each kept until its shape
-   tree's version, its depth or the pages drawn under it change; seams once every page is meshed,
-   each kept until a page touching it is meshed anew. What's drawn swaps all at once when all
-   that's wanted is meshed, so nothing shows a hole meanwhile; the next drawing is worked out
-   only then. `hog-client --pages` draws the ground this way in place of the tiles, still with no
-   water or plants. Running it found the view rule stopping at coarse leaves the ground crosses
-   (merged planes, open beneath): they're now followed like leaves at the foot, by the server
-   too, so a kilometre leaf no longer sits beside 16 m detail.
+   Done (`client::BlockMeshes`):
+   - On the jobs: choosing the blocks, meshing each nearest first, and working out what changed.
+     The frame only hands a snapshot of the held pages over and takes the meshes back.
+   - A block is kept until its depth, its finer sides or a page it reads changes
+     (`PagesSnapshot::around`).
+   - What's drawn swaps all at once.
+   - `hog-client --pages` draws the ground this way in place of the tiles, still with no water or
+     plants.
+   - The view rule follows leaves the ground crosses down to the pages under them, as at the foot,
+     on the server too.
 7. Water surfaces from bodies: level surfaces clipped to the water tree, river ribbons with flow,
    the water shader moving along the flow with wind on top. Tests: tops at the body's level;
    flow along the course.

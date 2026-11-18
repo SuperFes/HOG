@@ -2,11 +2,15 @@
 
 #include <hog/client/block_meshes.hpp>
 #include <hog/client/held_pages.hpp>
+#include <hog/client/shape_mesh.hpp>
+#include <hog/globe/material.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/terrain/block_mesh.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -65,4 +69,37 @@ TEST_CASE("block meshes are kept until a page they read changes", "[client][bloc
         CHECK(std::ranges::includes(all, remeshed));
         CHECK(again.gone.empty());
     }
+}
+
+TEST_CASE("block keys stay clear of tiles' and each other's", "[client][block_meshes]") {
+    const Key page = hog::sloped::page_root;
+    CHECK(hog::client::block_key(page) != hog::client::block_key(page.child(0)));
+    CHECK(hog::client::block_key(Key{}) != hog::client::block_key(page));
+    CHECK((hog::client::block_key(Key{}) >> 62U) == 3U);
+}
+
+TEST_CASE("a shape mesh drawn blends its materials across triangles", "[client][block_meshes]") {
+    hog::client::ShapeMesh mesh;
+    mesh.origin = DVec3{0.0, 0.0, 1000.0};
+    const auto granite = static_cast<std::uint16_t>(hog::globe::Material::Granite);
+    const auto sand = static_cast<std::uint16_t>(hog::globe::Material::Sand);
+    mesh.vertices = {
+        {.position = {0.0F, 0.0F, 0.0F},
+         .normal = {0.0F, 0.0F, 1.0F},
+         .materials = {granite, sand},
+         .share = 0.75F},
+        {.position = {1.0F, 0.0F, 0.0F},
+         .normal = {0.0F, 0.0F, 1.0F},
+         .materials = {granite, sand},
+         .share = 0.25F},
+        {.position = {0.0F, 1.0F, 0.0F}, .normal = {}, .materials = {0, 0}, .share = 1.0F}};
+    mesh.indices = {0, 1, 2};
+    const hog::terrain::BlockMesh block = hog::client::block_of(mesh);
+    REQUIRE(block.indices.size() == 3);
+    const auto& corner = block.vertices[block.indices[0]];
+    CHECK(corner.tiles == std::array<std::uint8_t, 3>{
+                              static_cast<std::uint8_t>(granite), static_cast<std::uint8_t>(sand),
+                              static_cast<std::uint8_t>(hog::globe::Material::Soil)});
+    // A normal not known faces up from the planet's centre.
+    CHECK(block.vertices[block.indices[2]].normal.z > 0.999F);
 }

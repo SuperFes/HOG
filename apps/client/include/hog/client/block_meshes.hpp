@@ -22,6 +22,10 @@ namespace hog::client {
 // The key a block's mesh is drawn under: past every tile's key.
 [[nodiscard]] std::uint64_t block_key(grid::Key node) noexcept;
 
+// The ground as drawn from a shape mesh: each vertex showing the material most of it shows,
+// blended across triangles whose corners differ.
+[[nodiscard]] terrain::BlockMesh block_of(const ShapeMesh& mesh);
+
 // The held ground drawn in blocks as ground_blocks chooses them, meshed on the jobs and kept
 // until how a block's drawn or a page it reads changes, for the scene to draw. What's drawn
 // changes all at once, once all that's wanted is meshed, so the ground never shows a hole. All

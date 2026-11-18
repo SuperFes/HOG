@@ -1,8 +1,8 @@
 #include <hog/client/block_meshes.hpp>
 #include <hog/client/ground_blocks.hpp>
 #include <hog/client/ground_field.hpp>
-#include <hog/client/page_meshes.hpp>
 #include <hog/core/assert.hpp>
+#include <hog/globe/material.hpp>
 
 #include <algorithm>
 #include <iterator>
@@ -10,6 +10,9 @@
 
 namespace hog::client {
 namespace {
+
+// Past the tiles' keys, whose level takes the top bits but never this high, and the cutaway's.
+constexpr std::uint64_t block_keys = std::uint64_t{0b110} << 61U;
 
 const std::shared_ptr<const terrain::BlockMesh>& no_water() {
     static const auto none = std::make_shared<const terrain::BlockMesh>();
@@ -19,7 +22,31 @@ const std::shared_ptr<const terrain::BlockMesh>& no_water() {
 } // namespace
 
 std::uint64_t block_key(grid::Key node) noexcept {
-    return page_key(node, false);
+    HOG_ASSERT(node.depth < 20, "a block key in the bits kept for it");
+    return block_keys | grid::code(node);
+}
+
+terrain::BlockMesh block_of(const ShapeMesh& mesh) {
+    terrain::BlockMesh block{
+        .origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = mesh.indices};
+    block.vertices.reserve(mesh.vertices.size());
+    for (const ShapeVertex& vertex : mesh.vertices) {
+        const std::uint16_t shown =
+            vertex.share >= 0.5F ? vertex.materials[0] : vertex.materials[1];
+        // The generator's materials come first in the palette; what's unknown shows as soil.
+        const auto tile = shown == 0 || shown > 0xFF
+                              ? static_cast<std::uint8_t>(globe::Material::Soil)
+                              : static_cast<std::uint8_t>(shown);
+        const Vec3 normal = glm::dot(vertex.normal, vertex.normal) > 0.0F
+                                ? vertex.normal
+                                : Vec3{glm::normalize(mesh.origin + DVec3{vertex.position})};
+        block.vertices.push_back({.position = vertex.position,
+                                  .normal = normal,
+                                  .tiles = {tile, tile, tile},
+                                  .corner = terrain::packed_corner(0, 0.0)});
+    }
+    terrain::mix_corners(block);
+    return block;
 }
 
 bool BlockMeshes::Look::same(const Look& other) const noexcept {

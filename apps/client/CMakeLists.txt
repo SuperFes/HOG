@@ -8,7 +8,6 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 add_library(hog_client
     src/chat.cpp
     src/drawn.cpp
-    src/drawn_pages.cpp
     src/tile_meshes.cpp
     src/cutaway.cpp
     src/daylight.cpp
@@ -27,8 +26,6 @@ add_library(hog_client
     src/picture.cpp
     src/player.cpp
     src/scene.cpp
-    src/page_meshes.cpp
-    src/shape_mesh.cpp
     src/transvoxel.cpp
     src/transvoxel_tables.cpp
     src/sonar.cpp
@@ -46,7 +43,6 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/drawn_tests.cpp
-    tests/drawn_pages_tests.cpp
     tests/tile_meshes_tests.cpp
     tests/tile_look_tests.cpp
     tests/lod_look_tests.cpp
@@ -68,8 +64,6 @@ hog_add_tests(hog_client
     tests/picture_tests.cpp
     tests/player_tests.cpp
     tests/scene_tests.cpp
-    tests/page_meshes_tests.cpp
-    tests/shape_mesh_tests.cpp
     tests/transvoxel_tests.cpp
     tests/sonar_tests.cpp
     tests/session_tests.cpp

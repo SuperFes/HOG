@@ -83,6 +83,22 @@ TEST_CASE("held pages answer from the finest page over a node, as deep as it's h
     CHECK(deeper.value().found.value == 300 + (9 / 2));
 }
 
+TEST_CASE("a snapshot of held pages holds them as they were", "[client][held_pages]") {
+    const hog::grid::Grid grid = test_grid();
+    HeldPages held{grid};
+    REQUIRE(held.take(coded(Key{}, stripes(5, 100))).has_value());
+    const Key page{.depth = 5, .x = 3, .y = 4, .z = 5};
+    REQUIRE(held.take(coded(page, stripes(2, 200))).has_value());
+    const hog::client::PagesSnapshot snapshot{grid, held.entries()};
+    CHECK(snapshot.page(page) == held.page(page));
+    CHECK(snapshot.shared(Key{}) == held.shared(Key{}));
+    CHECK(snapshot.page(Key{.depth = 5, .x = 1, .y = 1, .z = 1}) == nullptr);
+    // A page taken in anew is another; the snapshot keeps the one it had.
+    REQUIRE(held.take(coded(page, stripes(2, 300))).has_value());
+    CHECK(snapshot.page(page) != held.page(page));
+    CHECK(snapshot.page(page) != nullptr);
+}
+
 TEST_CASE("a page sent with only the trees that changed keeps the rest", "[client][held_pages]") {
     HeldPages held{test_grid()};
     const auto water = [](std::uint32_t body) {
