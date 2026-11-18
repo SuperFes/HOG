@@ -12,6 +12,7 @@
 #include <hog/globe/vents.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/grid/kinds.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/net/server.hpp>
@@ -150,6 +151,8 @@ private:
     // Sends players the grid pages due to them, following them where they've moved or pages were
     // filled since.
     void tell_pages();
+    // Sends the player the water bodies by `ids`, as many messages as they take.
+    void tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids);
     // Tells each player the grain in flight near them, and once more when there's none.
     void tell_grains();
     // Sends each player a snapshot of those near them.

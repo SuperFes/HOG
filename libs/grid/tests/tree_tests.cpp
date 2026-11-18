@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -80,6 +81,18 @@ TEST_CASE("eight alike merge into one", "[grid]") {
     CHECK(halves.leaves() == 2);
     CHECK(halves.root().value == 5);
     CHECK(halves.at(levels, 2, 9, 9) == Tree<Water>::Found{.value = 5, .open = false, .depth = 1});
+}
+
+TEST_CASE("a tree lists its leaves' values", "[grid]") {
+    const auto bodies = Tree<Water>::build(levels, [](int x, int y, int) {
+        if (x < 8) {
+            return Water::Value{0};
+        }
+        return Water::Value{y < 8 ? 3U : 9U};
+    });
+    std::vector<Water::Value> values = bodies.leaf_values();
+    std::ranges::sort(values);
+    CHECK(values == std::vector<Water::Value>{0, 3, 9});
 }
 
 TEST_CASE("a tree reads back what it was built from", "[grid]") {

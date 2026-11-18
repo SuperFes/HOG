@@ -179,6 +179,9 @@ public:
     // Distinct nodes, and leaves among them, reachable from the root.
     [[nodiscard]] std::size_t nodes() const;
     [[nodiscard]] std::size_t leaves() const;
+    // The value of each distinct leaf reachable from the root; an open and a closed one alike
+    // give it twice.
+    [[nodiscard]] std::vector<Value> leaf_values() const;
 
     // Little-endian: format, levels, a varint node count, then each node once, after its
     // children: flags (1 split, 2 open), its value, and a split node's eight children as varint

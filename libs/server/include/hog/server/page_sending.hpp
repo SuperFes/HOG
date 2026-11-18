@@ -4,6 +4,7 @@
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/grid/view.hpp>
+#include <hog/grid/water_bodies.hpp>
 #include <hog/net/events.hpp>
 #include <hog/server/page_source.hpp>
 
@@ -12,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -50,10 +52,12 @@ public:
     void changed(std::span<const grid::Key> pages);
 
     // A page as sent: its root and its bytes as `grid::Page::encode` gives them, holding only the
-    // trees the player didn't hold as they are now.
+    // trees the player didn't hold as they are now; and the water bodies its water tree marks that
+    // the player hasn't been told of, to tell it first.
     struct Sent {
         grid::Key root;
         std::vector<std::byte> bytes;
+        std::vector<grid::Water::Value> bodies;
     };
     // The next pages due to the player that `source` holds deeper than sent, or newer, in order,
     // while they come to under `room` bytes, and one at least if any can go, `most` at most. Those
@@ -76,12 +80,16 @@ private:
         std::optional<grid::Key> over; // the finest page it was last followed over
         std::map<grid::Key, Holding> sent;
         std::vector<Want> due; // in order
+        std::set<grid::Water::Value> told;
     };
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
 
     // Whether any of `page` is newer to a player holding it as `holding`, leaving only that.
     [[nodiscard]] static bool worth_sending(grid::Page& page, const Holding& holding);
+    // The bodies `page`'s water marks that `told` hadn't, now in it.
+    [[nodiscard]] static std::vector<grid::Water::Value>
+    newly_told(std::set<grid::Water::Value>& told, const grid::Page& page);
     // Has `holding` hold what's sent of `page`, `levels` deep.
     static void hold(Holding& holding, const grid::Page& page, std::uint8_t levels);
 
@@ -89,5 +97,11 @@ private:
     grid::View view_;
     std::map<net::ConnectionId, Player> players_;
 };
+
+// The bodies of `table` by `ids`, in messages' bytes as `grid::WaterBodies::encode` gives them,
+// each `most` bytes at most; ids the table lacks, and a body too big alone, are left out.
+[[nodiscard]] std::vector<std::vector<std::byte>>
+bodies_coded(const grid::WaterBodies& table, std::span<const grid::Water::Value> ids,
+             std::size_t most);
 
 } // namespace hog::server

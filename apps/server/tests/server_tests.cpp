@@ -3,11 +3,13 @@
 #include <hog/chat/filter.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/grid_fill.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/grid/page.hpp>
+#include <hog/grid/water_bodies.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/login/token.hpp>
@@ -685,7 +687,7 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
     CHECK(server->time() - start < 1min);
 }
 
-TEST_CASE("a player is streamed grid pages, the top page first, when the server streams them",
+TEST_CASE("a player is streamed the top page first and the water bodies it marks before it",
           "[app][server]") {
     const World world;
     auto config = world.config();
@@ -696,6 +698,7 @@ TEST_CASE("a player is streamed grid pages, the top page first, when the server 
     REQUIRE(connected);
     hog::net::Client& client = *connected;
     std::optional<hog::grid::Page> first;
+    hog::grid::WaterBodies told;
     std::vector<hog::net::Event> events;
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 60s;
@@ -719,6 +722,12 @@ TEST_CASE("a player is streamed grid pages, the top page first, when the server 
                                         .at = hog::protocol::to_millimetres(hog::WorldPosition{at}),
                                         .stance = hog::protocol::Stance::Flying})));
                 }
+                if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&*decoded);
+                    bodies != nullptr && !first) {
+                    auto some = hog::grid::WaterBodies::decode(bodies->bytes);
+                    REQUIRE(some);
+                    told.bodies.merge(some->bodies);
+                }
                 if (const auto* pages = std::get_if<hog::protocol::Pages>(&*decoded);
                     pages != nullptr && !first) {
                     REQUIRE_FALSE(pages->pages.empty());
@@ -737,7 +746,13 @@ TEST_CASE("a player is streamed grid pages, the top page first, when the server 
     CHECK(first.value().root == hog::grid::Key{});
     CHECK(first.value().shape.has_value());
     CHECK(first.value().material.has_value());
-    CHECK(first.value().water.has_value());
+    REQUIRE(first.value().water.has_value());
+    for (const hog::grid::Water::Value body : first.value().water.value().tree.leaf_values()) {
+        CAPTURE(body);
+        CHECK((body == 0 || told.bodies.contains(body)));
+    }
+    CHECK(told.bodies.contains(hog::globe::sea_body) ==
+          server->generator().sea_level().has_value());
 }
 
 TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {

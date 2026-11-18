@@ -155,10 +155,56 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
         }
         bytes += coded.size();
         hold(held.sent[want.page], *page, levels);
-        sent.push_back({.root = want.page, .bytes = std::move(coded)});
+        sent.push_back(
+            {.root = want.page, .bytes = std::move(coded), .bodies = newly_told(held.told, *page)});
     }
     held.due = std::move(still);
     return sent;
+}
+
+std::vector<grid::Water::Value> PageSending::newly_told(std::set<grid::Water::Value>& told,
+                                                        const grid::Page& page) {
+    std::vector<grid::Water::Value> bodies;
+    if (page.water) {
+        for (const grid::Water::Value body : page.water->tree.leaf_values()) {
+            if (body != 0 && told.insert(body).second) {
+                bodies.push_back(body);
+            }
+        }
+    }
+    return bodies;
+}
+
+std::vector<std::vector<std::byte>> bodies_coded(const grid::WaterBodies& table,
+                                                 std::span<const grid::Water::Value> ids,
+                                                 std::size_t most) {
+    // The format byte and the count, a varint of ten bytes at most.
+    constexpr std::size_t heading = 11;
+    std::vector<std::vector<std::byte>> coded;
+    grid::WaterBodies some;
+    std::size_t bytes = heading;
+    for (const grid::Water::Value id : ids) {
+        const auto found = table.bodies.find(id);
+        if (found == table.bodies.end()) {
+            continue;
+        }
+        // Its own bytes, less the format byte and the one-byte count it's coded with alone.
+        const std::size_t own = grid::WaterBodies{.bodies = {*found}}.encode().size() - 2;
+        if (heading + own > most) {
+            continue;
+        }
+        if (bytes + own > most) {
+            coded.push_back(some.encode());
+            some.bodies.clear();
+            bytes = heading;
+        }
+        some.bodies.insert(*found);
+        bytes += own;
+    }
+    if (!some.bodies.empty()) {
+        coded.push_back(some.encode());
+    }
+    return coded;
 }
 
 std::size_t PageSending::due(net::ConnectionId player) const {

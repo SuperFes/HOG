@@ -158,7 +158,8 @@ TEST_CASE("page sending cost for a player arriving on the small world", "[.bench
                << following << " s; " << sending.due(player) << " still due");
 }
 
-TEST_CASE("a page whose water changes sends only its water tree", "[server][page_sending]") {
+TEST_CASE("a page whose water changes sends only its water tree and bodies not yet told",
+          "[server][page_sending]") {
     // 1 m nodes 11 deep: a top page of 5 levels, here all solid, so the only page wanted.
     const hog::grid::Grid grid{1000.0, 1.0};
     auto store = hog::baked::PageStore::scratch({.world = 42, .grid = grid, .generator = 1});
@@ -198,6 +199,7 @@ TEST_CASE("a page whose water changes sends only its water tree", "[server][page
     CHECK(whole->shape.has_value());
     CHECK(whole->material.has_value());
     CHECK(whole->water.has_value());
+    CHECK(first.front().bodies == std::vector<hog::grid::Water::Value>{1});
 
     // Nothing changed, nothing goes.
     sending.changed(std::vector<Key>{Key{}});
@@ -217,7 +219,50 @@ TEST_CASE("a page whose water changes sends only its water tree", "[server][page
     REQUIRE(page->water.has_value());
     CHECK(page->water.value().version == 2);
     CHECK(page->water.value().tree.same_as(water(2)));
+    CHECK(changed.front().bodies == std::vector<hog::grid::Water::Value>{2});
     CHECK(sending.due(player) == 0);
     sending.follow(player, at, *source);
     CHECK(sending.next(player, std::size_t{1} << 20U, *source).empty());
+
+    // A body told once isn't told again.
+    put(water(1));
+    REQUIRE(source->pump().has_value());
+    sending.changed(std::vector<Key>{Key{}});
+    const auto back = sending.next(player, std::size_t{1} << 20U, *source);
+    REQUIRE(back.size() == 1);
+    CHECK(back.front().bodies.empty());
+}
+
+TEST_CASE("bodies go in messages no bigger than allowed", "[server][page_sending]") {
+    hog::grid::WaterBodies table;
+    table.bodies.emplace(1U, hog::grid::Sea{.level = 1000.0});
+    table.bodies.emplace(2U, hog::grid::Lake{.level = 1010.0, .season = {}});
+    table.bodies.emplace(3U, hog::grid::Lake{.level = 1020.0, .season = {}});
+    hog::grid::River river;
+    for (int n = 0; n < 40; ++n) {
+        river.course.push_back({.place = hog::DVec3{1000.0, n * 10.0, 0.0}, .level = 1000.0});
+    }
+    table.bodies.emplace(4U, river);
+    const std::size_t lake =
+        hog::grid::WaterBodies{.bodies = {*table.bodies.find(2U)}}.encode().size();
+
+    // Two lakes and the sea fit one message as big as two lakes and a bit; the river fits none.
+    const std::vector<hog::grid::Water::Value> ids{2, 9, 3, 1, 4};
+    const auto coded = hog::server::bodies_coded(table, ids, (2 * lake) + 12);
+    REQUIRE(coded.size() == 2);
+    hog::grid::WaterBodies told;
+    for (const auto& bytes : coded) {
+        CHECK(bytes.size() <= (2 * lake) + 12);
+        const auto some = hog::grid::WaterBodies::decode(bytes);
+        REQUIRE(some.has_value());
+        told.bodies.insert(some->bodies.begin(), some->bodies.end());
+    }
+    CHECK(told.bodies.size() == 3);
+    CHECK_FALSE(told.bodies.contains(4U));
+    CHECK_FALSE(told.bodies.contains(9U));
+
+    // With room, all in one.
+    const auto one = hog::server::bodies_coded(table, ids, std::size_t{1} << 20U);
+    REQUIRE(one.size() == 1);
+    CHECK(*hog::grid::WaterBodies::decode(one.front()) == table);
 }

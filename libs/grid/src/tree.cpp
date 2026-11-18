@@ -110,6 +110,17 @@ std::size_t Tree<Kind>::leaves() const {
 }
 
 template <typename Kind>
+auto Tree<Kind>::leaf_values() const -> std::vector<Value> {
+    std::vector<Value> values;
+    for (const Id id : walk()) {
+        if (!nodes_[id].split()) {
+            values.push_back(nodes_[id].value);
+        }
+    }
+    return values;
+}
+
+template <typename Kind>
 std::vector<std::byte> Tree<Kind>::encode() const {
     const std::vector<Id> order = walk();
     std::vector<Id> index(nodes_.size(), none);
