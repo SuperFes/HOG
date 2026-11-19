@@ -22,7 +22,9 @@ namespace hog::server {
 // The grid pages each player is sent: the top page, and under each open leaf of a page sent whole
 // the pages there, wherever the page's finest nodes look coarser than they should from the
 // player. Each goes as deep as its nodes should be seen from there, deeper as the player nears.
-// Coarse pages go first, then finer ones, nearest first within a depth.
+// The page that looks biggest from the player goes first, so near detail comes before far, and a
+// page always before those under it. A page the source can't give yet is asked for once and waits
+// until it's written, rather than being read again each time.
 class PageSending {
 public:
     explicit PageSending(const grid::Grid& grid, const grid::View& view = grid::View{});
@@ -34,21 +36,23 @@ public:
     // when last followed.
     [[nodiscard]] bool moved(net::ConnectionId player, DVec3 at) const;
 
-    // A page and the levels of it wanted.
+    // A page, the levels of it wanted, and how big it looks: its size over its distance, the
+    // finest size added so the page holding the player has one too.
     struct Want {
         grid::Key page;
         std::uint8_t levels = 0;
-
-        friend constexpr bool operator==(const Want&, const Want&) noexcept = default;
+        double priority = 0.0;
     };
     // The pages standing for the world as seen from `at`, in the order they're sent, as far down
-    // as `source` holds them; those it lacks are asked of its filler on the way.
-    [[nodiscard]] std::vector<Want> wanted(DVec3 at, PageSource& source) const;
+    // as `source` holds them; those it lacks are asked of its filler on the way, in `round`.
+    [[nodiscard]] std::vector<Want> wanted(DVec3 at, PageSource& source,
+                                           std::uint64_t round = 0) const;
 
     // Has the player sent the pages wanted from `at` it hasn't been sent as deep yet, in order.
     void follow(net::ConnectionId player, DVec3 at, PageSource& source);
 
-    // Has the players holding any of `pages` sent what's changed of them, first.
+    // Has the players holding any of `pages` sent what's changed of them, first, and those
+    // waiting on any of them due again in their place.
     void changed(std::span<const grid::Key> pages);
 
     // A page as sent: its root and its bytes as `grid::Page::encode` gives them, holding only the
@@ -67,6 +71,8 @@ public:
          std::size_t most = std::numeric_limits<std::size_t>::max());
     // Pages still due to the player, held or not.
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
+    // Pages wanted that the source couldn't give, or not as deep, waiting until they're written.
+    [[nodiscard]] std::size_t waiting(net::ConnectionId player) const;
 
 private:
     // What a player holds of a page: how deep, and each tree's version.
@@ -81,7 +87,9 @@ private:
         std::optional<grid::Key> over; // the finest page it was last followed over
         std::map<grid::Key, Holding> sent;
         std::vector<Want> due; // in order
+        std::map<grid::Key, Want> waiting;
         std::set<grid::Water::Value> told;
+        std::uint64_t round = 0; // when last followed
     };
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
@@ -97,6 +105,7 @@ private:
     grid::Grid grid_;
     grid::View view_;
     std::map<net::ConnectionId, Player> players_;
+    std::uint64_t rounds_ = 0;
 };
 
 // The bodies of `table` by `ids`, in messages' bytes as `grid::WaterBodies::encode` gives them,

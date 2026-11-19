@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -18,7 +18,6 @@ namespace {
 struct Next {
     enum class Is : std::uint8_t { Answered, Filling, Fill } is = Is::Answered;
     grid::Key page;
-    std::uint8_t levels = 0; // to fill it to
 };
 
 } // namespace
@@ -56,17 +55,16 @@ struct Filler::Impl {
     grid::Grid grid;
 
     mutable std::mutex lock;
-    std::vector<grid::Key> asked; // guarded by lock
+    std::vector<std::pair<grid::Key, Rank>> asked; // guarded by lock
 
     // Fills under way, a few per thread, so the pool's queue never overflows onto the thread
-    // pumping; and those waiting their turn, first asked first, as deep as each is to go.
+    // pumping; and those waiting their turn, highest rank first.
     std::map<grid::Key, std::unique_ptr<jobs::Async<globe::Filled>>> filling;
-    std::deque<std::pair<grid::Key, std::uint8_t>> queued;
-    std::set<grid::Key> queued_pages;
-    // Nodes asked for waiting on a page being filled, by the page, gone over again once it's
-    // written; and all of them, so one asked again waits once.
-    std::map<grid::Key, std::vector<grid::Key>> blocked;
-    std::set<grid::Key> waiting;
+    std::set<std::pair<Rank, grid::Key>, std::greater<>> queued;
+    std::map<grid::Key, Rank> queued_pages;
+    // Nodes asked for waiting on a page being filled, by the page, with the highest rank each was
+    // asked at, gone over again once it's written.
+    std::map<grid::Key, std::map<grid::Key, Rank>> blocked;
 
     // Pages read from the store in one pump, by root.
     using Seen = std::map<grid::Key, std::optional<PageStore::Read>>;
@@ -80,7 +78,7 @@ struct Filler::Impl {
             const auto needs = static_cast<std::uint8_t>(
                 std::clamp<int>(node.depth - page.depth, 1, foot - page.depth));
             if (filling.contains(page) || queued_pages.contains(page)) {
-                return {.is = Next::Is::Filling, .page = page, .levels = needs};
+                return {.is = Next::Is::Filling, .page = page};
             }
             auto [at, fresh] = seen.try_emplace(page);
             if (fresh) {
@@ -89,10 +87,10 @@ struct Filler::Impl {
             const std::optional<PageStore::Read>& read = at->second;
             if (!read || !read->page.shape || !read->page.material || !read->page.water ||
                 read->page.shape->tree.levels() < needs) {
-                return {.is = Next::Is::Fill, .page = page, .levels = needs};
+                return {.is = Next::Is::Fill, .page = page};
             }
             if (node.depth <= foot) {
-                return {.is = Next::Is::Answered, .page = page, .levels = needs};
+                return {.is = Next::Is::Answered, .page = page};
             }
             const grid::Key over = node.ancestor(foot);
             const auto below = static_cast<std::uint8_t>(foot - page.depth);
@@ -100,25 +98,33 @@ struct Filler::Impl {
                 read->page.shape->tree.at(below, over.x - (page.x << below),
                                           over.y - (page.y << below), over.z - (page.z << below));
             if (!found.open) {
-                return {.is = Next::Is::Answered, .page = page, .levels = needs};
+                return {.is = Next::Is::Answered, .page = page};
             }
             page = over;
         }
     }
 
-    void start(grid::Key page, std::uint8_t levels) {
-        if (queued_pages.insert(page).second) {
-            queued.emplace_back(page, levels);
+    // Queues `page` at `rank`, or raises it there if queued lower.
+    void start(grid::Key page, Rank rank) {
+        const auto [at, fresh] = queued_pages.try_emplace(page, rank);
+        if (!fresh) {
+            if (at->second >= rank) {
+                return;
+            }
+            queued.erase({at->second, page});
+            at->second = rank;
         }
+        queued.emplace(rank, page);
     }
 
-    // Starts fills waiting their turn while there's room.
+    // Starts fills waiting their turn while there's room, each whole.
     void launch() {
         const std::size_t most = std::size_t{2} * jobs->thread_count();
         while (filling.size() < most && !queued.empty()) {
-            const auto [page, levels] = queued.front();
-            queued.pop_front();
+            const grid::Key page = queued.begin()->second;
+            queued.erase(queued.begin());
             queued_pages.erase(page);
+            const std::uint8_t levels = grid.levels_under(page.depth);
             filling.emplace(
                 page, std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, page, levels] {
                     return globe::fill(*generator, grid, page, levels);
@@ -147,12 +153,7 @@ struct Filler::Impl {
         if (Result<void> written = write_filled(*store, pages, filled); !written) {
             // Forgotten, so they're gone over afresh when next asked for.
             for (const grid::Key page : pages) {
-                if (const auto found = blocked.find(page); found != blocked.end()) {
-                    for (const grid::Key node : found->second) {
-                        waiting.erase(node);
-                    }
-                    blocked.erase(found);
-                }
+                blocked.erase(page);
             }
             return std::unexpected{written.error()};
         }
@@ -165,9 +166,9 @@ Filler::Filler(const globe::Generator& generator, PageStore& store, jobs::JobSys
 
 Filler::~Filler() = default;
 
-void Filler::want(grid::Key node) {
+void Filler::want(grid::Key node, Rank rank) {
     const std::scoped_lock guard{impl_->lock};
-    impl_->asked.push_back(node);
+    impl_->asked.emplace_back(node, rank);
 }
 
 Result<std::vector<grid::Key>> Filler::pump(bool wait) {
@@ -177,15 +178,10 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
         return written;
     }
     // Those asked for anew, and those waiting on the pages just written.
-    std::vector<grid::Key> nodes;
+    std::vector<std::pair<grid::Key, Rank>> nodes;
     {
         const std::scoped_lock guard{impl.lock};
-        for (const grid::Key node : impl.asked) {
-            if (impl.waiting.insert(node).second) {
-                nodes.push_back(node);
-            }
-        }
-        impl.asked.clear();
+        nodes.swap(impl.asked);
     }
     for (const grid::Key page : *written) {
         if (const auto found = impl.blocked.find(page); found != impl.blocked.end()) {
@@ -202,19 +198,28 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
         return std::unexpected{snapshot.error()};
     }
     Impl::Seen seen;
-    for (const grid::Key node : nodes) {
+    for (const auto& [node, rank] : nodes) {
         const Next next = impl.next(*snapshot, seen, node);
-        if (next.is == Next::Is::Fill) {
-            impl.start(next.page, next.levels);
-        }
         if (next.is == Next::Is::Answered) {
-            impl.waiting.erase(node);
-        } else {
-            impl.blocked[next.page].push_back(node);
+            continue;
         }
+        if (next.is == Next::Is::Fill || !impl.filling.contains(next.page)) {
+            impl.start(next.page, rank);
+        }
+        Rank& waits = impl.blocked[next.page][node];
+        waits = std::max(waits, rank);
     }
     impl.launch();
     return written;
+}
+
+std::vector<grid::Key> Filler::queued() const {
+    std::vector<grid::Key> pages;
+    pages.reserve(impl_->queued.size());
+    for (const auto& [rank, page] : impl_->queued) {
+        pages.push_back(page);
+    }
+    return pages;
 }
 
 bool Filler::idle() const {

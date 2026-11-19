@@ -2,8 +2,8 @@
 #include <hog/server/page_sending.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <span>
-#include <tuple>
 #include <utility>
 
 namespace hog::server {
@@ -29,21 +29,24 @@ bool PageSending::moved(net::ConnectionId player, DVec3 at) const {
     return found == players_.end() || found->second.over != over(at);
 }
 
-std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source) const {
-    std::vector<std::tuple<std::uint8_t, double, grid::Key, std::uint8_t>> found;
+std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source,
+                                                   std::uint64_t round) const {
+    std::vector<Want> found;
     std::vector<grid::Key> pending{grid::Key{}};
     while (!pending.empty()) {
         const grid::Key page = pending.back();
         pending.pop_back();
         const double away = grid_.distance(page, at);
         const std::uint8_t levels = view_.levels_at(grid_, page, away);
-        found.emplace_back(page.depth, away, page, levels);
+        const double priority = grid_.size(page.depth) / (away + grid_.finest());
+        found.push_back({.page = page, .levels = levels, .priority = priority});
         const std::uint8_t whole = grid_.levels_under(page.depth);
         const auto foot = static_cast<std::uint8_t>(page.depth + whole);
         if (levels < whole || foot >= grid_.depth()) {
             continue;
         }
-        const std::optional<grid::Tree<grid::Shape>> shape = source.shape(page, levels);
+        const std::optional<grid::Tree<grid::Shape>> shape =
+            source.shape(page, levels, {.round = round, .priority = priority});
         if (!shape || shape->levels() < whole) {
             continue;
         }
@@ -51,20 +54,19 @@ std::vector<PageSending::Want> PageSending::wanted(DVec3 at, PageSource& source)
             view_.under(grid_, leaf, foot, open.value, at, pending);
         });
     }
-    std::ranges::sort(found);
-    std::vector<Want> wants;
-    wants.reserve(found.size());
-    for (const auto& [depth, away, page, levels] : found) {
-        wants.push_back({.page = page, .levels = levels});
-    }
-    return wants;
+    std::ranges::sort(found, [](const Want& a, const Want& b) {
+        return a.priority != b.priority ? a.priority > b.priority : a.page < b.page;
+    });
+    return found;
 }
 
 void PageSending::follow(net::ConnectionId player, DVec3 at, PageSource& source) {
     Player& held = players_[player];
     held.over = over(at);
+    held.round = ++rounds_;
     held.due.clear();
-    for (const Want& want : wanted(at, source)) {
+    held.waiting.clear();
+    for (const Want& want : wanted(at, source, held.round)) {
         const auto sent = held.sent.find(want.page);
         if (sent == held.sent.end() || sent->second.levels < want.levels) {
             held.due.push_back(want);
@@ -75,6 +77,14 @@ void PageSending::follow(net::ConnectionId player, DVec3 at, PageSource& source)
 void PageSending::changed(std::span<const grid::Key> pages) {
     for (auto& [id, held] : players_) {
         for (const grid::Key page : pages) {
+            if (const auto waits = held.waiting.find(page); waits != held.waiting.end()) {
+                const Want want = waits->second;
+                held.waiting.erase(waits);
+                held.due.insert(std::ranges::upper_bound(held.due, want.priority,
+                                                         std::ranges::greater{}, &Want::priority),
+                                want);
+                continue;
+            }
             const auto sent = held.sent.find(page);
             if (sent == held.sent.end() || std::ranges::any_of(held.due, [&](const Want& want) {
                     return want.page == page;
@@ -134,16 +144,20 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
     std::size_t bytes = 0;
     std::vector<Want> still;
     for (const Want& want : held.due) {
-        const bool open = sent.size() < most && (sent.empty() || bytes < room);
-        std::optional<grid::Page> page = open ? source.page(want.page, want.levels) : std::nullopt;
-        if (!page || !page->shape) {
+        if (sent.size() >= most || (!sent.empty() && bytes >= room)) {
             still.push_back(want);
+            continue;
+        }
+        std::optional<grid::Page> page =
+            source.page(want.page, want.levels, {.round = held.round, .priority = want.priority});
+        if (!page || !page->shape) {
+            held.waiting[want.page] = want;
             continue;
         }
         const auto had = held.sent.find(want.page);
         const std::uint8_t levels = page->shape.value().tree.levels();
         if (levels < want.levels) {
-            still.push_back(want);
+            held.waiting[want.page] = want;
         }
         if (!worth_sending(*page, had == held.sent.end() ? Holding{} : had->second)) {
             continue;
@@ -151,9 +165,8 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
         std::vector<std::byte> coded = page.value().encode();
         if (!sent.empty() && bytes + coded.size() > room) {
             bytes = room;
-            if (levels >= want.levels) {
-                still.push_back(want);
-            }
+            held.waiting.erase(want.page);
+            still.push_back(want);
             continue;
         }
         bytes += coded.size();
@@ -213,6 +226,11 @@ std::vector<std::vector<std::byte>> bodies_coded(const grid::WaterBodies& table,
 std::size_t PageSending::due(net::ConnectionId player) const {
     const auto found = players_.find(player);
     return found == players_.end() ? 0 : found->second.due.size();
+}
+
+std::size_t PageSending::waiting(net::ConnectionId player) const {
+    const auto found = players_.find(player);
+    return found == players_.end() ? 0 : found->second.waiting.size();
 }
 
 } // namespace hog::server

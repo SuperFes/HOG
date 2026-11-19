@@ -15,14 +15,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <tuple>
+#include <iterator>
+#include <optional>
 #include <vector>
 
 using hog::grid::Key;
 using hog::server::PageSending;
 using hog::server::PageSource;
 
-TEST_CASE("pages are sent to a player standing still coarse first, then nearest first",
+TEST_CASE("pages are sent to a player standing still biggest looking first, the rest when filled",
           "[server][page_sending]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
@@ -56,15 +57,24 @@ TEST_CASE("pages are sent to a player standing still coarse first, then nearest 
     const std::vector<PageSending::Want> wanted = sending.wanted(at, *source);
     REQUIRE_FALSE(wanted.empty());
     CHECK(wanted.front().page == Key{});
-    CHECK(std::ranges::is_sorted(wanted, [&](const auto& a, const auto& b) {
-        return std::tuple{a.page.depth, grid.distance(a.page, at)} <
-               std::tuple{b.page.depth, grid.distance(b.page, at)};
-    }));
+    const auto place = [&](Key page) {
+        return std::ranges::find(wanted, page, &PageSending::Want::page) - wanted.begin();
+    };
+    // By how big each looks, so near detail before far, and every page after the one over it.
+    for (const auto& want : wanted) {
+        CAPTURE(want.page.depth);
+        CHECK(want.priority ==
+              grid.size(want.page.depth) / (grid.distance(want.page, at) + grid.finest()));
+        if (want.page.depth > 0) {
+            CHECK(place(grid.page_of(want.page)) < place(want.page));
+        }
+    }
+    CHECK(std::ranges::is_sorted(wanted, std::ranges::greater{}, &PageSending::Want::priority));
     // Those over the player go whole.
     for (const Key page : chain) {
-        CHECK(std::ranges::find(wanted, PageSending::Want{.page = page,
-                                                          .levels = grid.levels_under(
-                                                              page.depth)}) != wanted.end());
+        REQUIRE(place(page) < std::ssize(wanted));
+        CHECK(wanted[static_cast<std::size_t>(place(page))].levels ==
+              grid.levels_under(page.depth));
     }
     // Each finer page wanted lies near enough for the node it refines to span more than the
     // pixels allowed, and goes as deep as its nodes should be seen from there.
@@ -100,12 +110,32 @@ TEST_CASE("pages are sent to a player standing still coarse first, then nearest 
         }
     }
     CHECK(sent == chain);
-    CHECK(sending.due(player) == wanted.size() - chain.size());
+    // Those not held wait, asked for once, rather than being read again each time.
+    CHECK(sending.due(player) == 0);
+    CHECK(sending.waiting(player) == wanted.size() - chain.size());
 
     // Standing still, nothing is sent again.
     sending.follow(player, at, *source);
     CHECK(sending.due(player) == wanted.size() - chain.size());
     CHECK(sending.next(player, std::size_t{1} << 30U, *source).empty());
+    CHECK(sending.waiting(player) == wanted.size() - chain.size());
+
+    // One written is due again, and goes.
+    const auto beside = std::ranges::find_if(wanted, [&](const auto& want) {
+        return want.page.depth == chain.back().depth && want.page != chain.back();
+    });
+    REQUIRE(beside != wanted.end());
+    const std::vector<Key> written{beside->page};
+    const std::vector<std::optional<hog::globe::Filled>> filled{
+        hog::globe::fill(generator, grid, beside->page, grid.levels_under(beside->page.depth))};
+    REQUIRE(hog::baked::write_filled(*store, written, filled).has_value());
+    REQUIRE(source->pump().has_value());
+    sending.changed(written);
+    CHECK(sending.due(player) == 1);
+    CHECK(sending.waiting(player) == wanted.size() - chain.size() - 1);
+    const auto more = sending.next(player, std::size_t{1} << 30U, *source);
+    REQUIRE(more.size() == 1);
+    CHECK(more.front().root == beside->page);
 }
 
 TEST_CASE("page sending cost for a player arriving on the small world", "[.bench]") {

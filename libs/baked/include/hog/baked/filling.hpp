@@ -22,11 +22,21 @@ namespace hog::baked {
 [[nodiscard]] Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
                                         std::span<const std::optional<globe::Filled>> filled);
 
+// How soon a node is wanted: those of a later round first, then the higher priority.
+struct Rank {
+    std::uint64_t round = 0;
+    double priority = 0.0;
+
+    friend constexpr auto operator<=>(const Rank&, const Rank&) noexcept = default;
+};
+
 // Fills the pages the nodes asked for need, as the store doesn't hold them as this generator makes
 // them yet, on the job system's workers, and writes them from `pump`, which says which were
 // written. A node is answered by the pages over it down to the one holding its depth, or to one
 // whose leaf over it isn't open: pages under such a leaf would only repeat it. A page is filled
-// only as deep as the nodes asked for under it reach, and filled deeper once one reaches further.
+// whole, so it's filled once however deep it's later wanted; one held shallower than a node asked
+// for needs is filled again whole. Fills start in rank order, a page taking the highest rank of
+// the nodes waiting on it.
 class Filler {
 public:
     // Made on a thread of `jobs`' pool, as `pump` is called.
@@ -39,7 +49,7 @@ public:
     ~Filler();
 
     // From any thread.
-    void want(grid::Key node);
+    void want(grid::Key node, Rank rank = {});
 
     // Writes the fills that have finished, together, and starts those the nodes wanted need next,
     // giving the roots of the pages written. With `wait`, first waits for a fill under way where
@@ -48,6 +58,10 @@ public:
 
     // Whether nothing is wanted or being filled. From the thread calling `pump`.
     [[nodiscard]] bool idle() const;
+
+    // The pages waiting their turn to be filled, the first to start first. From the thread
+    // calling `pump`.
+    [[nodiscard]] std::vector<grid::Key> queued() const;
 
 private:
     struct Impl;
