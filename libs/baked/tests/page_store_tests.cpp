@@ -101,6 +101,9 @@ TEST_CASE("a page store reads back each tree it was given, at its version", "[ba
     REQUIRE(snapshot->refresh().has_value());
     CHECK(snapshot->page(fine).value().page.material.value().version == 3U);
     CHECK(snapshot->page(fine).value().page.shape.value().version == 1U);
+    // Read alone, the versions agree, none for trees not held.
+    CHECK(snapshot->versions(fine) == PageStore::Versions{.shape = 1, .material = 3});
+    CHECK(snapshot->versions(Key{.depth = 5, .x = 9, .y = 20, .z = 4}) == PageStore::Versions{});
 }
 
 TEST_CASE("the holder of any node is the deepest page over it holding that tree", "[baked]") {
@@ -147,6 +150,7 @@ TEST_CASE("trees another generator made are held stale, never read as current", 
         CHECK(read.value().stale ==
               hog::baked::Trees{.shape = false, .material = true, .water = true, .woods = false});
         CHECK_FALSE(snapshot->holder<hog::grid::Material>(fine).has_value());
+        CHECK(snapshot->versions(fine) == PageStore::Versions{});
     }
     // Made again alike, it keeps its version; unlike, it steps on.
     CHECK(put(store, fine, layers(6, 3)) == 1U);

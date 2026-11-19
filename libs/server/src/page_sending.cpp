@@ -153,15 +153,6 @@ void PageSending::hold(Holding& holding, const grid::Page& page, std::uint8_t le
     holding.woods = page.woods ? page.woods->version : holding.woods;
 }
 
-bool PageSending::worth_sending(grid::Page& page, const Holding& holding) {
-    // As deep as it's held, only what's changed goes; deeper, all of it does.
-    const std::uint8_t levels = page.shape.value().tree.levels();
-    if (levels > holding.levels) {
-        return true;
-    }
-    return levels == holding.levels && keep_newer(page, holding);
-}
-
 std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::size_t room,
                                                  PageSource& source, std::size_t most) {
     std::vector<Sent> sent;
@@ -177,21 +168,31 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
             still.push_back(want);
             continue;
         }
-        std::optional<grid::Page> page =
-            source.page(want.page, want.levels, {.round = held.round, .priority = want.priority});
-        if (!page || !page->shape) {
+        const std::shared_ptr<const Answer> answer =
+            source.answer(want.page, want.levels, {.round = held.round, .priority = want.priority});
+        if (!answer) {
             held.waiting[want.page] = want;
             continue;
         }
         const auto had = held.sent.find(want.page);
-        const std::uint8_t levels = page->shape.value().tree.levels();
+        const Holding holding = had == held.sent.end() ? Holding{} : had->second;
+        const std::uint8_t levels = answer->levels();
         if (levels < want.levels) {
             held.waiting[want.page] = want;
         }
-        if (!worth_sending(*page, had == held.sent.end() ? Holding{} : had->second)) {
+        // Deeper than held, the answer goes as it's kept; as deep, only what's newer of it.
+        std::vector<std::byte> coded;
+        if (levels > holding.levels) {
+            coded = answer->bytes;
+        } else if (levels == holding.levels) {
+            grid::Page newer = answer->page;
+            if (!keep_newer(newer, holding)) {
+                continue;
+            }
+            coded = newer.encode();
+        } else {
             continue;
         }
-        std::vector<std::byte> coded = page.value().encode();
         if (!sent.empty() && bytes + coded.size() > room) {
             bytes = room;
             held.waiting.erase(want.page);
@@ -199,22 +200,22 @@ std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::
             continue;
         }
         bytes += coded.size();
-        hold(held.sent[want.page], *page, levels);
-        sent.push_back(
-            {.root = want.page, .bytes = std::move(coded), .bodies = newly_told(held.told, *page)});
+        hold(held.sent[want.page], answer->page, levels);
+        sent.push_back({.root = want.page,
+                        .bytes = std::move(coded),
+                        .bodies = newly_told(held.told, answer->bodies)});
     }
     held.due = std::move(still);
     return sent;
 }
 
-std::vector<grid::Water::Value> PageSending::newly_told(std::set<grid::Water::Value>& told,
-                                                        const grid::Page& page) {
+std::vector<grid::Water::Value>
+PageSending::newly_told(std::set<grid::Water::Value>& told,
+                        std::span<const grid::Water::Value> marked) {
     std::vector<grid::Water::Value> bodies;
-    if (page.water) {
-        for (const grid::Water::Value body : page.water->tree.leaf_values()) {
-            if (body != 0 && told.insert(body).second) {
-                bodies.push_back(body);
-            }
+    for (const grid::Water::Value body : marked) {
+        if (body != 0 && told.insert(body).second) {
+            bodies.push_back(body);
         }
     }
     return bodies;

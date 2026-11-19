@@ -70,6 +70,8 @@ struct Filler::Impl {
     // Nodes asked for waiting on a page being filled, by the page, with the highest rank each was
     // asked at, gone over again once it's written.
     std::map<grid::Key, std::map<grid::Key, Rank>> blocked;
+    // Pages answering nodes asked for with nothing to fill, since last taken.
+    std::set<grid::Key> ready;
 
     // Fills are written on a thread of their own, so the thread pumping never waits on the disk
     // or on another writer: the batches handed over, in order, and those written, with how it
@@ -258,6 +260,7 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
     for (const auto& [node, rank] : nodes) {
         const Next next = impl.next(*snapshot, seen, node);
         if (next.is == Next::Is::Answered) {
+            impl.ready.insert(next.page);
             continue;
         }
         if (next.is == Next::Is::Fill || !impl.filling.contains(next.page)) {
@@ -268,6 +271,12 @@ Result<std::vector<grid::Key>> Filler::pump(bool wait) {
     }
     impl.launch();
     return written;
+}
+
+std::vector<grid::Key> Filler::take_ready() {
+    std::vector<grid::Key> pages{impl_->ready.begin(), impl_->ready.end()};
+    impl_->ready.clear();
+    return pages;
 }
 
 std::vector<grid::Key> Filler::queued() const {

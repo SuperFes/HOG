@@ -232,6 +232,27 @@ std::optional<PageStore::Read> PageStore::Snapshot::page(grid::Key root) const {
     return read;
 }
 
+PageStore::Versions PageStore::Snapshot::versions(grid::Key root) const {
+    const Shared& shared = *impl_->shared;
+    Versions versions;
+    const auto take = [&]<typename Kind>(std::uint32_t& version) {
+        const std::optional<Held> held =
+            held_at(impl_->txn, shared.trees, key_of(tag_of<Kind>(), root));
+        if (held && held->generator == shared.baking.generator) {
+            version = held->version;
+        }
+    };
+    try {
+        take.template operator()<grid::Shape>(versions.shape);
+        take.template operator()<grid::Material>(versions.material);
+        take.template operator()<grid::Water>(versions.water);
+        take.template operator()<grid::Woods>(versions.woods);
+    } catch (const lmdb::error&) {
+        return {};
+    }
+    return versions;
+}
+
 template <typename Kind>
 std::optional<grid::Held<Kind>> PageStore::Snapshot::tree(grid::Key root) const {
     const Shared& shared = *impl_->shared;

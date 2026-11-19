@@ -103,11 +103,9 @@ private:
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
 
-    // Whether any of `page` is newer to a player holding it as `holding`, leaving only that.
-    [[nodiscard]] static bool worth_sending(grid::Page& page, const Holding& holding);
-    // The bodies `page`'s water marks that `told` hadn't, now in it.
+    // Of the bodies `marked`, those `told` hadn't, now in it.
     [[nodiscard]] static std::vector<grid::Water::Value>
-    newly_told(std::set<grid::Water::Value>& told, const grid::Page& page);
+    newly_told(std::set<grid::Water::Value>& told, std::span<const grid::Water::Value> marked);
     // Has `holding` hold what's sent of `page`, `levels` deep.
     static void hold(Holding& holding, const grid::Page& page, std::uint8_t levels);
 

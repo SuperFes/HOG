@@ -49,6 +49,16 @@ public:
         bool read_only = false;
     };
 
+    // The versions of a page's trees as this generator makes them, 0 for one not held so.
+    struct Versions {
+        std::uint32_t shape = 0;
+        std::uint32_t material = 0;
+        std::uint32_t water = 0;
+        std::uint32_t woods = 0;
+
+        friend constexpr bool operator==(const Versions&, const Versions&) noexcept = default;
+    };
+
     // A page as held: the trees this generator made, at their versions and stamped with it, and
     // which are held only as another made them.
     struct Read {
@@ -68,6 +78,9 @@ public:
 
         // The page rooted at `root`; none where none of its trees is held.
         [[nodiscard]] std::optional<Read> page(grid::Key root) const;
+        // The versions of the page's trees, read without decoding them: cheap enough to check
+        // that anything kept of the page is still what's held.
+        [[nodiscard]] Versions versions(grid::Key root) const;
         // The page's tree of `Kind`, where held as this generator makes it.
         template <typename Kind>
         [[nodiscard]] std::optional<grid::Held<Kind>> tree(grid::Key root) const;

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 using hog::baked::Filler;
@@ -65,10 +66,13 @@ TEST_CASE("a node asked for is filled down to the page holding it, once", "[bake
         generator, grid, grid.page_of(finest), grid.levels_under(grid.page_of(finest).depth));
     CHECK(read.value().page.shape.value().tree.same_as(filled.shape));
 
-    // Held now, so asking again fills nothing.
+    // Held now, so asking again fills nothing, and says the page holding each is ready.
+    std::ignore = filler.take_ready();
     filler.want(finest);
     filler.want(finest.parent());
     CHECK(settle(filler).empty());
+    CHECK(filler.take_ready() == std::vector<Key>{grid.page_of(finest)});
+    CHECK(filler.take_ready().empty());
 }
 
 TEST_CASE("a node under a leaf that isn't open is answered by the page over it",

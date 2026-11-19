@@ -56,6 +56,11 @@ public:
     // none has finished. From one thread at a time.
     [[nodiscard]] Result<std::vector<grid::Key>> pump(bool wait = false);
 
+    // The roots of the pages found held as deep as the nodes asked for need since last taken, with
+    // nothing to fill: another writer may have filled them since they were last read. From the
+    // thread calling `pump`.
+    [[nodiscard]] std::vector<grid::Key> take_ready();
+
     // Whether nothing is wanted or being filled. From the thread calling `pump`.
     [[nodiscard]] bool idle() const;
 
