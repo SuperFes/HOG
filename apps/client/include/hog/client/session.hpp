@@ -78,6 +78,10 @@ public:
     // welcomed, or of a scale of nothing.
     void hurry(std::uint32_t scale);
 
+    // Asks the server for the grid pages in `ask`, in place of those asked for before; nothing
+    // before being welcomed.
+    void ask(const protocol::Ask& ask);
+
     // Game seconds a real one the server says its world runs at, 1 until it says otherwise.
     [[nodiscard]] std::uint32_t world_rate() const noexcept { return world_rate_; }
 

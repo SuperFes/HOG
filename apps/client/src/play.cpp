@@ -10,6 +10,7 @@
 #include <hog/client/held_pages.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
+#include <hog/client/page_asking.hpp>
 #include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
@@ -626,6 +627,16 @@ public:
         }
     }
 
+    // Asks the server for grid pages, in place of those asked for before, once in.
+    void ask(const protocol::Ask& ask) {
+        if (session_) {
+            session_->ask(ask);
+        }
+    }
+    [[nodiscard]] bool welcomed() const noexcept {
+        return session_ && session_->state() == client::Session::State::Welcomed;
+    }
+
     // The chat heard since last asked.
     [[nodiscard]] std::vector<client::ChatLine> take_chat() {
         return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
@@ -1010,6 +1021,12 @@ struct StreamedGround {
     client::HeldPages pages;
     client::BlockMeshes block_meshes;
     bool from_pages = false;
+    // The pages last asked for, from where and when, and whether any came since.
+    std::vector<client::PageWish> asked;
+    std::optional<DVec3> asked_from;
+    DVec3 asked_facing{};
+    MonotonicClock::time_point asked_at;
+    bool asked_came = false;
     bool pages_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pages_seen; // where from
     bool blocks_shown = false;       // any drawn from the pages yet
@@ -1034,15 +1051,51 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
 // Metres the eye moves before what's drawn of the pages is worked out again.
 constexpr double pages_moved = 4.0;
 
+// Pages asked for at once, and how often what's asked for is worked out again at most, as the
+// eye moves, turns more than this cosine allows, or pages come.
+constexpr std::size_t pages_asked = 2048;
+constexpr auto asking_interval = std::chrono::milliseconds{200};
+constexpr double asking_turn = 0.94;
+
+// Asks the server for the pages to see from `eye` looking along `facing` that aren't held as
+// deep as they should be, when the eye has moved, turned or pages have come since last asked.
+void ask_pages(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3 facing) {
+    const MonotonicClock::time_point now = MonotonicClock::now();
+    if (!connection.welcomed() || now - ground.asked_at < asking_interval) {
+        return;
+    }
+    if (ground.asked_from && !ground.asked_came &&
+        glm::length(eye - *ground.asked_from) <= pages_moved &&
+        glm::dot(facing, ground.asked_facing) >= asking_turn) {
+        return;
+    }
+    std::vector<client::PageWish> wishes =
+        client::pages_to_ask(ground.pages, eye, facing, grid::View{}, pages_asked);
+    ground.asked_at = now;
+    ground.asked_from = eye;
+    ground.asked_facing = facing;
+    ground.asked_came = false;
+    // Only the order and depths matter to the server's answers; how big each looks is for fills.
+    const bool same = std::ranges::equal(wishes, ground.asked, [](const auto& a, const auto& b) {
+        return a.page == b.page && a.levels == b.levels;
+    });
+    if (!same) {
+        connection.ask(client::ask_of(wishes));
+        ground.asked = std::move(wishes);
+    }
+}
+
 // Takes in the pages the server sent, and draws them as seen from `eye` once what was last
 // wanted of them is drawn.
-void take_pages(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye) {
+void take_pages(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
+                DVec3 facing) {
     HOG_ZONE("pages");
     for (const std::vector<std::byte>& bytes : connection.take_pages()) {
         if (auto taken = ground.pages.take(bytes); !taken) {
             log::warn(connection_log, "can't hold a page sent: {}", taken.error());
         } else {
             ground.pages_came = true;
+            ground.asked_came = true;
         }
     }
     for (const std::vector<std::byte>& bytes : connection.take_bodies()) {
@@ -1053,6 +1106,7 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
     if (!ground.from_pages) {
         return;
     }
+    ask_pages(connection, ground, eye, facing);
     if (ground.block_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
                                           glm::length(eye - *ground.pages_seen) > pages_moved)) {
         ground.block_meshes.want(ground.pages, eye);
@@ -1068,7 +1122,7 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
 // Takes in the tiles the server sent, held for the world and the player's footing and meshed to
 // draw, and the pages.
 void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene,
-                 std::optional<client::Player>& player, DVec3 eye) {
+                 std::optional<client::Player>& player, DVec3 eye, DVec3 facing) {
     HOG_ZONE("ground");
     for (const protocol::SentTile& sent : connection.take_tiles()) {
         auto tile = client::sent_tree(sent, ground.world.layers());
@@ -1087,7 +1141,7 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
     if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
-    take_pages(connection, ground, scene, eye);
+    take_pages(connection, ground, scene, eye, facing);
     // Drawn from the pages, which reach all round the planet, the sea is its own surface everywhere
     // once any is drawn; till then, the disc.
     double covered = ground.blocks_shown ? std::numbers::pi * ground.planet.body.radius : 0.0;
@@ -1143,7 +1197,7 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
         shaders.look(device, now);
         take_part_streamed(controls, player, flight, camera, ground);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        take_ground(connection, ground, scene, player, camera.eye.metres());
+        take_ground(connection, ground, scene, player, camera.eye.metres(), camera.forward);
         // Where the server remembers the player, unless they said where to start.
         if (const auto placed = connection.take_placed(); placed && !options.start) {
             const WorldPosition at = protocol::to_world(placed->at);

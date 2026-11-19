@@ -204,6 +204,13 @@ void Session::hurry(std::uint32_t scale) {
     send(protocol::Hurry{.scale = scale}, net::Delivery::Reliable);
 }
 
+void Session::ask(const protocol::Ask& ask) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    send(ask, net::Delivery::Reliable);
+}
+
 namespace {
 
 // A ball's radius as sent, in whole millimetres; none if it couldn't be.
