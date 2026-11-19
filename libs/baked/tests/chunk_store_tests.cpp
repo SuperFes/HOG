@@ -341,6 +341,33 @@ TEST_CASE("a chunk past its budget is held as its root's children's, down to the
     CHECK(put(store, 2, root, tree).empty());
 }
 
+TEST_CASE("chunks are given as stored and each decodes to its part of what was put",
+          "[baked][chunks]") {
+    ChunkStore store = scratch(baking(), 3, 512);
+    const Key root{.depth = 3, .x = 2, .y = 5, .z = 1};
+    const Tree<hog::grid::Material> tree = sheet(6, 1);
+    const std::vector<Chunk> made = put(store, 2, root, tree);
+    const auto snapshot = store.read();
+    REQUIRE(snapshot.has_value());
+    const std::vector<hog::baked::StoredChunk> stored =
+        snapshot->stored<hog::grid::Material>(2, root);
+    REQUIRE(stored.size() == made.size());
+    for (std::size_t n = 0; n < stored.size(); ++n) {
+        CHECK(stored[n].chunk == made[n]);
+        const auto decoded = Tree<hog::grid::Material>::decode(stored[n].tree);
+        REQUIRE(decoded.has_value());
+        const Key at = stored[n].chunk.root;
+        CHECK(decoded->same_as(cut_at(tree, root, at, 9)));
+    }
+    // The chunk over a node deep in one is that one alone.
+    const Key deep = under(made.front().root, 9, 3);
+    const std::vector<hog::baked::StoredChunk> over =
+        snapshot->stored<hog::grid::Material>(2, deep);
+    REQUIRE(over.size() == 1);
+    CHECK(over.front().chunk == made.front());
+    CHECK(snapshot->stored<hog::grid::Shape>(2, root).empty());
+}
+
 TEST_CASE("a tree put under a held chunk changes only what's under it", "[baked][chunks]") {
     ChunkStore store = scratch(baking(), 3, std::size_t{1} << 20U);
     const Key root{.depth = 3, .x = 2, .y = 5, .z = 1};

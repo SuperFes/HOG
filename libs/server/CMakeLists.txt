@@ -3,13 +3,12 @@ add_library(hog_server
     src/ice_climate.cpp
     src/grain_sharing.cpp
     src/ground_wetting.cpp
+    src/chunk_sending.cpp
     src/held_ground.cpp
     src/move_check.cpp
     src/pacer.cpp
     src/page_sending.cpp
     src/page_source.cpp
-    src/piece_sending.cpp
-    src/piece_source.cpp
     src/persistence.cpp
     src/players.cpp
     src/server_config.cpp
@@ -32,6 +31,7 @@ hog_add_tests(hog_server
     tests/ice_climate_tests.cpp
     tests/glacier_look_tests.cpp
     tests/catch_up_tests.cpp
+    tests/chunk_sending_tests.cpp
     tests/grain_sharing_tests.cpp
     tests/ground_wetting_tests.cpp
     tests/held_ground_tests.cpp
@@ -40,8 +40,6 @@ hog_add_tests(hog_server
     tests/pacer_tests.cpp
     tests/page_sending_tests.cpp
     tests/page_source_tests.cpp
-    tests/piece_sending_tests.cpp
-    tests/piece_source_tests.cpp
     tests/persistence_tests.cpp
     tests/players_tests.cpp
     tests/server_config_tests.cpp

@@ -1,8 +1,11 @@
+#include "held_chunks.hpp"
+
 #include <hog/client/held_pieces.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/kinds.hpp>
 #include <hog/grid/piece.hpp>
 #include <hog/grid/tree.hpp>
+#include <hog/protocol/messages.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -18,6 +21,7 @@ using hog::grid::Shape;
 using hog::grid::Surface;
 using hog::grid::Tree;
 using hog::grid::Water;
+using hog::testing::hold;
 
 namespace {
 
@@ -33,16 +37,16 @@ Tree<Material> stripes(std::uint8_t levels, std::uint16_t first) {
     });
 }
 
-std::vector<std::byte> coded(Key root, std::optional<Tree<Material>> material,
-                             std::optional<Tree<Water>> water = std::nullopt,
-                             std::optional<Tree<Shape>> shape = std::nullopt) {
+hog::grid::Piece coded(Key root, std::optional<Tree<Material>> material,
+                       std::optional<Tree<Water>> water = std::nullopt,
+                       std::optional<Tree<Shape>> shape = std::nullopt) {
     hog::grid::Piece piece;
     piece.root = root;
     piece.generator = 1;
     piece.shape = std::move(shape);
     piece.material = std::move(material);
     piece.water = std::move(water);
-    return piece.encode();
+    return piece;
 }
 
 // Open space above z's middle, solid below, `levels` deep, the nodes the middle touches open
@@ -73,9 +77,9 @@ TEST_CASE("held pieces answer at a node from the piece reaching deepest there",
           "[client][held_pieces]") {
     const hog::grid::Grid grid = test_grid();
     HeldPieces held{grid};
-    REQUIRE(held.take(coded(Key{}, stripes(5, 100))).has_value());
+    REQUIRE(hold(held, coded(Key{}, stripes(5, 100))).has_value());
     const Key piece{.depth = 4, .x = 3, .y = 4, .z = 5};
-    REQUIRE(held.take(coded(piece, stripes(3, 200))).has_value());
+    REQUIRE(hold(held, coded(piece, stripes(3, 200))).has_value());
     CHECK(held.pieces() == 2);
     CHECK(held.reach(piece) == 7);
     CHECK_FALSE(held.reach(Key{.depth = 4}).has_value());
@@ -100,16 +104,16 @@ TEST_CASE("held pieces answer at a node from the piece reaching deepest there",
 
     // A piece rooted deeper but reaching less deep than one over it gives way to it.
     const Key shallow{.depth = 2, .x = 0, .y = 1, .z = 1};
-    REQUIRE(held.take(coded(shallow, stripes(3, 300))).has_value());
+    REQUIRE(hold(held, coded(shallow, stripes(3, 300))).has_value());
     const Key under{.depth = 3, .x = 1, .y = 2, .z = 2};
-    REQUIRE(held.take(coded(under, Tree<Material>{1, 400, true})).has_value());
+    REQUIRE(hold(held, coded(under, Tree<Material>{1, 400, true})).has_value());
     const Key deep{.depth = 11, .x = under.x << 8U, .y = under.y << 8U, .z = under.z << 8U};
     CHECK(held.at<Material>(deep).value().root == shallow);
     CHECK(held.at<Material>(deep).value().found.depth == 4);
     CHECK(held.at<Material>(under).value().root == under);
 
     // Deeper, a piece is held in place of what was.
-    REQUIRE(held.take(coded(piece, stripes(7, 500))).has_value());
+    REQUIRE(hold(held, coded(piece, stripes(7, 500))).has_value());
     CHECK(held.pieces() == 4);
     const auto deeper = held.at<Material>(fine);
     REQUIRE(deeper.has_value());
@@ -122,7 +126,7 @@ TEST_CASE("held pieces cover a node where a piece reaches, a leaf closes or thos
     const hog::grid::Grid grid = test_grid();
     HeldPieces held{grid};
     CHECK_FALSE(held.covers(Key{}, 0));
-    REQUIRE(held.take(coded(Key{}, std::nullopt, std::nullopt, ground(4))).has_value());
+    REQUIRE(hold(held, coded(Key{}, std::nullopt, std::nullopt, ground(4))).has_value());
     CHECK(held.covers(Key{}, 4));
     CHECK_FALSE(held.covers(Key{}, 5));
     // Open sky and solid ground are closed leaves, held all the way down.
@@ -140,7 +144,7 @@ TEST_CASE("held pieces cover a node where a piece reaches, a leaf closes or thos
     for (std::size_t octant = 0; octant < 8; ++octant) {
         const Key child = node.child(octant);
         if (child.z == 7) {
-            REQUIRE(held.take(coded(child, std::nullopt, std::nullopt, ground(2))).has_value());
+            REQUIRE(hold(held, coded(child, std::nullopt, std::nullopt, ground(2))).has_value());
         }
     }
     CHECK(held.covers(node, 6));
@@ -151,7 +155,7 @@ TEST_CASE("a snapshot of held pieces holds them as they were, and finds those ro
           "[client][held_pieces]") {
     const hog::grid::Grid grid = test_grid();
     HeldPieces held{grid};
-    REQUIRE(held.take(coded(Key{}, stripes(5, 100))).has_value());
+    REQUIRE(hold(held, coded(Key{}, stripes(5, 100))).has_value());
     const Key node{.depth = 5, .x = 3, .y = 4, .z = 5};
     const Key over = node.ancestor(3);
     const Key inside = node.child(5).child(2);
@@ -159,7 +163,7 @@ TEST_CASE("a snapshot of held pieces holds them as they were, and finds those ro
     const Key beside_far{.depth = 7, .x = (4U * 4U) + 2, .y = 4U * 4U, .z = 5U * 4U};
     const Key away{.depth = 5, .x = 9, .y = 9, .z = 9};
     for (const Key root : {over, inside, touching, beside_far, away}) {
-        REQUIRE(held.take(coded(root, stripes(2, 200))).has_value());
+        REQUIRE(hold(held, coded(root, stripes(2, 200))).has_value());
     }
     const hog::client::PiecesSnapshot snapshot{grid, held.entries()};
     CHECK(snapshot.piece(node.ancestor(3)) == held.piece(over));
@@ -180,19 +184,19 @@ TEST_CASE("a snapshot of held pieces holds them as they were, and finds those ro
     CHECK_FALSE(has(away));
 
     // A piece taken in anew is another; the snapshot keeps the one it had.
-    REQUIRE(held.take(coded(inside, stripes(2, 300))).has_value());
+    REQUIRE(hold(held, coded(inside, stripes(2, 300))).has_value());
     CHECK(snapshot.piece(inside) != held.piece(inside));
     CHECK(snapshot.piece(inside) != nullptr);
 }
 
-TEST_CASE("a piece sent with only the trees that changed keeps the rest", "[client][held_pieces]") {
+TEST_CASE("a chunk of one kind leaves the other kinds held at its root", "[client][held_pieces]") {
     HeldPieces held{test_grid()};
     const auto water = [](std::uint32_t body) {
         return Tree<Water>::build(5, [&](int, int, int) { return body; });
     };
-    REQUIRE(held.take(coded(Key{}, stripes(5, 1), water(1))).has_value());
+    REQUIRE(hold(held, coded(Key{}, stripes(5, 1), water(1))).has_value());
     const std::size_t before = held.bytes();
-    REQUIRE(held.take(coded(Key{}, std::nullopt, water(2))).has_value());
+    REQUIRE(hold(held, coded(Key{}, std::nullopt, water(2))).has_value());
     const hog::grid::Piece* piece = held.piece(Key{});
     REQUIRE(piece != nullptr);
     REQUIRE(piece->material.has_value());
@@ -201,10 +205,45 @@ TEST_CASE("a piece sent with only the trees that changed keeps the rest", "[clie
     CHECK(held.bytes() == before);
 }
 
-TEST_CASE("held pieces refuse what isn't a piece of the grid", "[client][held_pieces]") {
+TEST_CASE("a chunk from a shallower band stays under a deeper one at its root till that's let go",
+          "[client][held_pieces]") {
     HeldPieces held{test_grid()};
-    CHECK_FALSE(held.take(std::vector<std::byte>{std::byte{1}, std::byte{2}}).has_value());
-    CHECK_FALSE(held.take(coded(Key{.depth = 12}, stripes(0, 1))).has_value());
-    CHECK_FALSE(held.take(coded(Key{.depth = 8}, stripes(4, 1))).has_value());
+    const Key node{.depth = 5, .x = 3, .y = 1, .z = 2};
+    REQUIRE(hold(held, coded(Key{}, stripes(5, 1)), 1).has_value());
+    REQUIRE(hold(held, coded(Key{}, stripes(3, 9)), 0).has_value());
+    CHECK(held.at<Material>(node).value().found.depth == 4);
+    CHECK(held.at<Material>(node).value().found.value == 2);
+    // Let go from a band it isn't held from, it stays.
+    const hog::protocol::SentChunk from_coarse{
+        .kind = 1, .band = 0, .depth = 0, .x = 0, .y = 0, .z = 0, .version = 0, .tree = {}};
+    REQUIRE(held.take(from_coarse).has_value());
+    CHECK(held.pieces() == 1);
+    hog::protocol::SentChunk from_fine = from_coarse;
+    from_fine.band = 1;
+    REQUIRE(held.take(from_fine).has_value());
+    CHECK(held.pieces() == 0);
+    CHECK(held.bytes() == 0);
+    CHECK_FALSE(held.at<Material>(node).has_value());
+    // The shallower one sent again is held.
+    REQUIRE(hold(held, coded(Key{}, stripes(3, 9)), 0).has_value());
+    CHECK(held.at<Material>(node).value().found.depth == 2);
+}
+
+TEST_CASE("held pieces refuse what isn't a chunk of the grid", "[client][held_pieces]") {
+    HeldPieces held{test_grid()};
+    const hog::protocol::SentChunk garbled{.kind = 1,
+                                           .band = 0,
+                                           .depth = 0,
+                                           .x = 0,
+                                           .y = 0,
+                                           .z = 0,
+                                           .version = 1,
+                                           .tree = {std::byte{1}, std::byte{2}}};
+    CHECK_FALSE(held.take(garbled).has_value());
+    hog::protocol::SentChunk no_kind = hog::testing::chunks_of(coded(Key{}, stripes(1, 1))).front();
+    no_kind.kind = 4;
+    CHECK_FALSE(held.take(no_kind).has_value());
+    CHECK_FALSE(hold(held, coded(Key{.depth = 12}, stripes(0, 1))).has_value());
+    CHECK_FALSE(hold(held, coded(Key{.depth = 8}, stripes(4, 1))).has_value());
     CHECK(held.pieces() == 0);
 }

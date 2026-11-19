@@ -2,9 +2,23 @@
 
 #include <algorithm>
 #include <type_traits>
+#include <utility>
 
 namespace hog::client {
 namespace {
+
+template <typename Kind>
+std::optional<grid::Tree<Kind>>& tree_of(grid::Piece& piece) {
+    if constexpr (std::is_same_v<Kind, grid::Shape>) {
+        return piece.shape;
+    } else if constexpr (std::is_same_v<Kind, grid::Material>) {
+        return piece.material;
+    } else if constexpr (std::is_same_v<Kind, grid::Water>) {
+        return piece.water;
+    } else {
+        return piece.woods;
+    }
+}
 
 template <typename Kind>
 const std::optional<grid::Tree<Kind>>& tree_of(const grid::Piece& piece) {
@@ -165,51 +179,87 @@ std::vector<PiecesSnapshot::Entry> PiecesSnapshot::around(grid::Key node) const 
 
 HeldPieces::HeldPieces(const grid::Grid& grid) : grid_{grid} {}
 
-Result<void> HeldPieces::take(std::span<const std::byte> bytes) {
-    auto piece = grid::Piece::decode(bytes);
-    if (!piece) {
-        return std::unexpected{piece.error()};
-    }
-    const grid::Key root = piece->root;
+Result<void> HeldPieces::take(const protocol::SentChunk& chunk) {
+    const grid::Key root{.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z};
     if (!root.is_valid() || root.depth > grid_.depth()) {
-        return make_error(ErrorCode::InvalidArgument, "a piece rooted off the grid");
+        return make_error(ErrorCode::InvalidArgument, "a chunk rooted off the grid");
     }
-    const int levels = levels_of(*piece);
-    if (root.depth + levels > grid_.depth()) {
-        return make_error(ErrorCode::InvalidArgument, "a piece deeper than the grid");
+    if (chunk.kind >= kinds) {
+        return make_error(ErrorCode::InvalidArgument, "a chunk of no kind");
     }
-    const auto found = held_.find(root);
-    if (found == held_.end()) {
-        held_.emplace(root,
-                      Held{.piece = std::make_shared<const grid::Piece>(std::move(*piece)),
-                           .bytes = bytes.size(),
-                           .reach = static_cast<std::uint8_t>(root.depth + std::max(levels, 0))});
-        depths_ |= depth_bit(root.depth);
-        bytes_ += bytes.size();
+    if (chunk.version == 0) {
+        let_go(chunk.kind, chunk.band, root);
         return {};
     }
-    Held& held = found->second;
-    // Held pieces are shared with what reads them, so a piece changed is a new one.
-    if (levels <= levels_of(*held.piece)) {
-        grid::Piece kept = *held.piece;
-        kept.generator = piece->generator;
-        const auto replace = [](auto& tree, auto& sent) {
-            if (sent) {
-                tree = std::move(sent);
-            }
-        };
-        replace(kept.shape, piece->shape);
-        replace(kept.material, piece->material);
-        replace(kept.water, piece->water);
-        replace(kept.woods, piece->woods);
-        *piece = std::move(kept);
+    switch (chunk.kind) {
+    case 0:
+        return take_tree<grid::Shape>(chunk, root);
+    case 1:
+        return take_tree<grid::Material>(chunk, root);
+    case 2:
+        return take_tree<grid::Water>(chunk, root);
+    default:
+        return take_tree<grid::Woods>(chunk, root);
     }
-    held.piece = std::make_shared<const grid::Piece>(std::move(*piece));
+}
+
+template <typename Kind>
+Result<void> HeldPieces::take_tree(const protocol::SentChunk& chunk, grid::Key root) {
+    auto tree = grid::Tree<Kind>::decode(chunk.tree);
+    if (!tree) {
+        return std::unexpected{tree.error()};
+    }
+    if (root.depth + tree->levels() > grid_.depth()) {
+        return make_error(ErrorCode::InvalidArgument, "a chunk deeper than the grid");
+    }
+    Held& held = held_[root];
+    const std::size_t kind = chunk.kind;
+    if (std::cmp_greater(held.bands.at(kind), chunk.band)) {
+        return {};
+    }
+    // Held pieces are shared with what reads them, so a piece changed is a new one.
+    grid::Piece piece = held.piece ? *held.piece : grid::Piece{};
+    piece.root = root;
+    tree_of<Kind>(piece) = std::move(*tree);
+    held.piece = std::make_shared<const grid::Piece>(std::move(piece));
+    held.bands.at(kind) = chunk.band;
+    bytes_ += chunk.tree.size() - held.bytes.at(kind);
+    held.bytes.at(kind) = chunk.tree.size();
     held.reach = static_cast<std::uint8_t>(root.depth + std::max(levels_of(*held.piece), 0));
-    bytes_ -= held.bytes;
-    held.bytes = held.piece->encode().size();
-    bytes_ += held.bytes;
+    depths_ |= depth_bit(root.depth);
     return {};
+}
+
+void HeldPieces::let_go(std::size_t kind, int band, grid::Key root) {
+    const auto found = held_.find(root);
+    if (found == held_.end() || found->second.bands.at(kind) != band) {
+        return;
+    }
+    Held& held = found->second;
+    grid::Piece piece = *held.piece;
+    switch (kind) {
+    case 0:
+        piece.shape.reset();
+        break;
+    case 1:
+        piece.material.reset();
+        break;
+    case 2:
+        piece.water.reset();
+        break;
+    default:
+        piece.woods.reset();
+        break;
+    }
+    bytes_ -= held.bytes.at(kind);
+    held.bytes.at(kind) = 0;
+    held.bands.at(kind) = -1;
+    if (levels_of(piece) < 0) {
+        held_.erase(found);
+        return;
+    }
+    held.piece = std::make_shared<const grid::Piece>(std::move(piece));
+    held.reach = static_cast<std::uint8_t>(root.depth + levels_of(*held.piece));
 }
 
 Result<void> HeldPieces::take_bodies(std::span<const std::byte> bytes) {

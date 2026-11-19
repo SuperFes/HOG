@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 42;
+inline constexpr std::uint32_t version = 43;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -357,17 +357,33 @@ struct Bodies {
     friend bool operator==(const Bodies&, const Bodies&) = default;
 };
 
-// Bytes a piece's coding may take, and the pieces a message may carry.
-inline constexpr std::size_t most_piece = std::size_t{1} << 20U;
-inline constexpr std::size_t most_pieces = 1024;
+// Bytes a chunk's tree may take, and the chunks a message may carry.
+inline constexpr std::size_t most_chunk = std::size_t{256} << 10U;
+inline constexpr std::size_t most_chunks = 1024;
 
-// Server to client: pieces of the ground, each as `grid::Piece::encode` codes it, in the order
-// asked; one carries only the kinds the client didn't hold as they are now, unless it goes deeper
-// than held. Sent bulk, so they never hold up moves.
-struct Pieces {
-    std::vector<std::vector<std::byte>> pieces; // at most most_pieces, each at most most_piece
+// One kind's chunk of the ground's trees as the server's store holds it: the kind (0 shape,
+// 1 material, 2 water, 3 woods), its band, its root, its version, and its tree from the root to
+// the band's foot as `grid::Tree::encode` codes it. Version 0 with no tree: no longer held, so
+// let go of.
+struct SentChunk {
+    std::uint8_t kind = 0;
+    std::uint8_t band = 0;
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+    std::uint64_t version = 0;
+    std::vector<std::byte> tree; // at most most_chunk
 
-    friend bool operator==(const Pieces&, const Pieces&) = default;
+    friend bool operator==(const SentChunk&, const SentChunk&) = default;
+};
+
+// Server to client: chunks of the ground as stored, for the nodes asked, in the order asked; one
+// goes again only when its version changes. Sent bulk, so they never hold up moves.
+struct Chunks {
+    std::vector<SentChunk> chunks; // at most most_chunks
+
+    friend bool operator==(const Chunks&, const Chunks&) = default;
 };
 
 // A node a client asks for: the node, the depth it wants it down to, and how big it looks from
@@ -427,7 +443,7 @@ struct Grains {
 
 using Message =
     std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said, Hurry,
-                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask, Pieces, AskPieces>;
+                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask, Chunks, AskPieces>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot

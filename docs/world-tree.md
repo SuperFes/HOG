@@ -76,10 +76,15 @@ them, so nothing is filled for someone gone.
 
 Each step is its own commit with tests, and the world stays playable after each.
 
-1. **Chunks as stored on the wire.** Protocol 43. The server answers asks with chunk bytes; the
-   client holds chunks and reads them as one tree. Asks replace the asker's last; leaving drops
-   them. Tests: what's sent is what's stored; a client holds what it'd hold from pieces; the
-   first answer goes the tick it's asked whatever is being filled.
+1. **Chunks as stored on the wire.** Done: protocol 43's `Chunks` carry each kind's chunk as the
+   store holds it, its band, root, version and tree's bytes, and version 0 for one let go of.
+   `server::ChunkSending` sends, for each node asked in order, every band's chunks over it or
+   under it down to the depth asked, read with `ChunkStore::Snapshot::stored` and never decoded;
+   each goes once a version, a node the store holds only part of goes as it is and waits on a
+   fill, and asks replace the asker's last. Every water body goes before the first chunk. The
+   client holds each chunk's tree at its root, a deeper band's over a shallower's. Tests: what's
+   sent is what's stored; the rest goes once filled; a chunk changed goes again and one gone is
+   let go of; messages keep to their limits; asks replace what's due.
 2. **Generation apart.** The wants table, `hog-bake --serve` filling it near first, the server
    picking up written chunks. Tests: a server with no generator sends what's stored at once and
    the rest as the generator writes it; asks no one holds are dropped.

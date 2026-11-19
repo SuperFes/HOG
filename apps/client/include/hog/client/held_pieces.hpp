@@ -8,7 +8,9 @@
 #include <hog/grid/tree.hpp>
 #include <hog/grid/water_bodies.hpp>
 #include <hog/grid/z_order.hpp>
+#include <hog/protocol/messages.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -58,16 +60,18 @@ private:
     std::uint64_t depths_ = 0; // a bit for each depth a piece is rooted at
 };
 
-// The pieces the server has sent, each as deep and as new as last sent, read as one tree: at a
-// node, the piece reaching deepest there answers. And the water bodies their water trees mark.
+// The chunks the server has sent, as new as last sent, held as pieces by their roots, a tree of
+// each kind, and read as one tree: at a node, the piece reaching deepest there answers. And the
+// water bodies their water trees mark.
 class HeldPieces {
 public:
     explicit HeldPieces(const grid::Grid& grid);
 
-    // Takes in a piece as `grid::Piece::encode` codes it: deeper than the one held at its root,
-    // it's held in place of it; as deep or shallower, the trees it carries replace those held.
-    // Fails on bytes that aren't a piece, or a piece rooted off the grid or deeper than it.
-    [[nodiscard]] Result<void> take(std::span<const std::byte> bytes);
+    // Takes in a chunk as the server's store holds it: its tree held at its root in place of the
+    // one of its kind held there from as deep a band or shallower; one from a deeper band stays.
+    // One no longer held is let go of where it's what's held there. Fails on a tree that doesn't
+    // decode, a chunk of no kind, or one rooted off the grid or reaching deeper than it.
+    [[nodiscard]] Result<void> take(const protocol::SentChunk& chunk);
     // Takes in bodies as `grid::WaterBodies::encode` codes them, in place of those of the same ids.
     [[nodiscard]] Result<void> take_bodies(std::span<const std::byte> bytes);
 
@@ -94,12 +98,18 @@ public:
     }
 
 private:
+    static constexpr std::size_t kinds = 4;
+    // A piece held and, for each kind, the band its tree came from (-1 none) and its bytes.
     struct Held {
         std::shared_ptr<const grid::Piece> piece;
-        std::size_t bytes = 0;
+        std::array<int, kinds> bands{-1, -1, -1, -1};
+        std::array<std::size_t, kinds> bytes{};
         std::uint8_t reach = 0;
     };
 
+    template <typename Kind>
+    [[nodiscard]] Result<void> take_tree(const protocol::SentChunk& chunk, grid::Key root);
+    void let_go(std::size_t kind, int band, grid::Key root);
     [[nodiscard]] const Held* find(grid::Key root) const;
     // Whether a piece over the node reaches `depth`, or a closed leaf holds all of it.
     [[nodiscard]] bool held_over(grid::Key node, std::uint8_t depth) const;

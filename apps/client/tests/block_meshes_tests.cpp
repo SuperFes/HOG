@@ -1,3 +1,4 @@
+#include "held_chunks.hpp"
 #include "sloped_ground.hpp"
 
 #include <hog/client/block_meshes.hpp>
@@ -36,8 +37,8 @@ TEST_CASE("block meshes are kept until a piece they read changes", "[client][blo
     const hog::grid::Grid grid{1000.0, 1.0};
     hog::jobs::JobSystem jobs{2};
     hog::client::HeldPieces held{grid};
-    REQUIRE(held.take(hog::sloped::sloped_root(grid)->encode()));
-    REQUIRE(held.take(hog::sloped::sloped_finely(grid)->encode()));
+    REQUIRE(hog::testing::hold(held, *hog::sloped::sloped_root(grid)));
+    REQUIRE(hog::testing::hold(held, *hog::sloped::sloped_finely(grid)));
     hog::client::BlockMeshes meshes{grid, jobs, 3};
     const DVec3 eye = hog::sloped::on_ground + (hog::sloped::normal() * 5.0);
     meshes.want(held, eye);
@@ -59,7 +60,7 @@ TEST_CASE("block meshes are kept until a piece they read changes", "[client][blo
         CHECK(meshes.collect().empty());
     }
     SECTION("a piece sent anew meshes the blocks reading it again, and only those") {
-        REQUIRE(held.take(hog::sloped::sloped_finely(grid)->encode()));
+        REQUIRE(hog::testing::hold(held, *hog::sloped::sloped_finely(grid)));
         meshes.want(held, eye);
         meshes.finish();
         const GroundChanges again = meshes.collect();

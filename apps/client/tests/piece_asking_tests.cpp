@@ -1,3 +1,4 @@
+#include "held_chunks.hpp"
 #include "sloped_ground.hpp"
 
 #include <hog/client/held_pieces.hpp>
@@ -26,7 +27,7 @@ constexpr std::size_t lots = 100'000;
 
 // The slope under `node` down to `depth`, as a server would answer: closed where it misses a
 // node, its finest nodes open where the grid goes finer.
-std::vector<std::byte> slope_piece(const hog::grid::Grid& grid, Key node, std::uint8_t depth) {
+hog::grid::Piece slope_piece(const hog::grid::Grid& grid, Key node, std::uint8_t depth) {
     using Shapes = hog::grid::Tree<hog::grid::Shape>;
     const auto levels = static_cast<std::uint8_t>(depth - node.depth);
     const auto decide = [&](std::uint8_t below, std::uint32_t x, std::uint32_t y,
@@ -53,12 +54,12 @@ std::vector<std::byte> slope_piece(const hog::grid::Grid& grid, Key node, std::u
     piece.root = node;
     piece.generator = 1;
     piece.shape = Shapes::grow(levels, decide);
-    return piece.encode();
+    return piece;
 }
 
 void answer(hog::client::HeldPieces& held, const std::vector<PieceWish>& wishes) {
     for (const PieceWish& wish : wishes) {
-        REQUIRE(held.take(slope_piece(held.grid(), wish.node, wish.depth)).has_value());
+        REQUIRE(hog::testing::hold(held, slope_piece(held.grid(), wish.node, wish.depth)));
     }
 }
 

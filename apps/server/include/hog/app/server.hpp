@@ -243,7 +243,7 @@ private:
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
     metrics::Counter& tiles_sent_;
-    metrics::Counter& pieces_sent_;
+    metrics::Counter& chunks_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

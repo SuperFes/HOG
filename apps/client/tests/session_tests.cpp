@@ -598,29 +598,37 @@ TEST_CASE("a session takes the tiles sent, and asks to dig and build once welcom
     }
 }
 
-TEST_CASE("a session takes the grid pieces and water bodies sent, oldest first",
+TEST_CASE("a session takes the ground chunks and water bodies sent oldest first",
           "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);
     welcome(session, stand);
-    stand.send(protocol::Pieces{.pieces = {{std::byte{1}, std::byte{2}}, {std::byte{3}}}});
+    const protocol::SentChunk shape{.kind = 0,
+                                    .band = 1,
+                                    .depth = 4,
+                                    .x = 3,
+                                    .y = 2,
+                                    .z = 1,
+                                    .version = 7,
+                                    .tree = {std::byte{1}, std::byte{2}}};
+    const protocol::SentChunk gone{
+        .kind = 2, .band = 0, .depth = 0, .x = 0, .y = 0, .z = 0, .version = 0, .tree = {}};
+    stand.send(protocol::Chunks{.chunks = {shape, gone}});
     stand.send(protocol::Bodies{.bytes = {std::byte{9}}});
-    stand.send(protocol::Pieces{.pieces = {{}}});
-    std::vector<std::vector<std::byte>> pieces;
+    stand.send(protocol::Chunks{.chunks = {shape}});
+    std::vector<protocol::SentChunk> chunks;
     std::vector<std::vector<std::byte>> bodies;
     look_until(session, stand, [&] {
-        for (std::vector<std::byte>& piece : session.take_pieces()) {
-            pieces.push_back(std::move(piece));
+        for (protocol::SentChunk& chunk : session.take_chunks()) {
+            chunks.push_back(std::move(chunk));
         }
         for (std::vector<std::byte>& sent : session.take_bodies()) {
             bodies.push_back(std::move(sent));
         }
-        return pieces.size() == 3 && bodies.size() == 1;
+        return chunks.size() == 3 && bodies.size() == 1;
     });
-    CHECK(pieces[0] == std::vector{std::byte{1}, std::byte{2}});
-    CHECK(pieces[1] == std::vector{std::byte{3}});
-    CHECK(pieces[2].empty());
+    CHECK(chunks == std::vector{shape, gone, shape});
     CHECK(bodies[0] == std::vector{std::byte{9}});
-    CHECK(session.take_pieces().empty());
+    CHECK(session.take_chunks().empty());
     CHECK(session.take_bodies().empty());
 }

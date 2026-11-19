@@ -11,10 +11,9 @@
 #include <hog/net/simulation.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
+#include <hog/server/chunk_sending.hpp>
 #include <hog/server/grain_sharing.hpp>
 #include <hog/server/ground_wetting.hpp>
-#include <hog/server/piece_sending.hpp>
-#include <hog/server/piece_source.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
 #include <glm/geometric.hpp>
@@ -69,6 +68,9 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 
 } // namespace
 
+// Chunks' bytes in one message, room left for their headings within what the connection lets go.
+constexpr std::size_t most_chunk_bytes = net::max_message_size - (std::size_t{64} << 10U);
+
 // Bodies' bytes in one message, as much as the protocol and the connection both let go.
 constexpr std::size_t most_bodies_sent =
     std::min(protocol::most_bodies, net::max_message_size - 64);
@@ -76,8 +78,8 @@ constexpr std::size_t most_bodies_sent =
 struct Server::PieceStreaming {
     PieceStreaming(baked::ChunkStore opened, const globe::Generator& generator,
                    jobs::JobSystem& jobs)
-        : store{std::move(opened)}, filler{generator, store, jobs},
-          sending{globe::grid_of(generator).depth()}, bodies{globe::water_bodies(generator)} {}
+        : store{std::move(opened)}, filler{generator, store, jobs}, sending{store.bands()},
+          bodies{globe::water_bodies(generator)} {}
 
     // Opens the store the config names, or a scratch one, to fill from `generator`.
     [[nodiscard]] static Result<std::unique_ptr<PieceStreaming>>
@@ -93,20 +95,20 @@ struct Server::PieceStreaming {
         }
         log::info(server_log, "streaming the grid from {}", opened->directory().string());
         auto pieces = std::make_unique<PieceStreaming>(std::move(*opened), generator, jobs);
-        auto reading = server::PieceSource::open(pieces->store, &pieces->filler);
+        auto reading = pieces->store.read();
         if (!reading) {
             return std::unexpected(reading.error());
         }
-        pieces->source.emplace(std::move(*reading));
+        pieces->snapshot.emplace(std::move(*reading));
         return pieces;
     }
 
     baked::ChunkStore store;
     baked::ChunkFiller filler;
-    std::optional<server::PieceSource> source;
-    server::PieceSending sending;
+    std::optional<baked::ChunkStore::Snapshot> snapshot;
+    server::ChunkSending sending;
     grid::WaterBodies bodies;
-    // Those who've asked for pieces, which draw them in place of tiles.
+    // Those who've asked for chunks, which draw them in place of tiles.
     std::set<net::ConnectionId> asking;
 };
 
@@ -150,7 +152,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
                                        "Lines of hate speech reported, sent on as small talk.")),
       tiles_sent_(
           registry_.counter("hog_tiles_sent_total", "Tiles of the voxel world sent to players.")),
-      pieces_sent_(registry_.counter("hog_pieces_sent_total", "Grid pieces sent to players.")),
+      chunks_sent_(registry_.counter("hog_chunks_sent_total", "Ground chunks sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -590,7 +592,7 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
     if (!pieces_ || !joined_.find(connection)) {
         return;
     }
-    std::vector<server::PieceSending::Want> wants;
+    std::vector<server::ChunkSending::Want> wants;
     wants.reserve(ask.pieces.size());
     for (const protocol::AskedPiece& piece : ask.pieces) {
         wants.push_back({.node = {.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z},
@@ -598,7 +600,15 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
                          .priority = static_cast<double>(piece.priority)});
     }
     pieces_->sending.ask(connection, wants);
-    pieces_->asking.insert(connection);
+    // Every body the water trees may mark, before any chunk that marks one.
+    if (pieces_->asking.insert(connection).second) {
+        std::vector<grid::Water::Value> ids;
+        ids.reserve(pieces_->bodies.bodies.size());
+        for (const auto& [id, body] : pieces_->bodies.bodies) {
+            ids.push_back(id);
+        }
+        tell_bodies(connection, ids);
+    }
 }
 
 void Server::build(net::ConnectionId connection, const protocol::Built& built) {
@@ -691,10 +701,17 @@ void Server::tell_pieces() {
         return;
     }
     PieceStreaming& pieces = *pieces_;
-    if (auto written = pieces.source.value().pump(); !written) {
-        log::warn(server_log, "couldn't fill grid pieces: {}", written.error());
+    if (auto written = pieces.filler.pump(); !written) {
+        log::warn(server_log, "couldn't fill grid chunks: {}", written.error());
     } else if (!written->empty()) {
         pieces.sending.changed(*written);
+    }
+    if (const auto answered = pieces.filler.take_answered(); !answered.empty()) {
+        pieces.sending.answered(answered);
+    }
+    if (auto refreshed = pieces.snapshot.value().refresh(); !refreshed) {
+        log::warn(server_log, "couldn't read the grid chunks: {}", refreshed.error());
+        return;
     }
     for (const net::ConnectionId connection : pieces.asking) {
         send_pieces(connection);
@@ -712,28 +729,28 @@ void Server::send_pieces(net::ConnectionId connection) {
     if (queued >= tile_queue || pieces.sending.due(connection) == 0) {
         return;
     }
-    protocol::Pieces next;
-    std::vector<grid::Water::Value> told;
-    for (server::PieceSending::Sent& sent : pieces.sending.next(
-             connection, tile_queue - queued, pieces.source.value(), protocol::most_pieces)) {
-        told.insert(told.end(), sent.bodies.begin(), sent.bodies.end());
-        if (sent.bytes.size() > protocol::most_piece) {
-            log::warn(server_log, "a grid piece of {} bytes too big to send", sent.bytes.size());
-            continue;
-        }
-        next.pieces.push_back(std::move(sent.bytes));
+    server::ChunkSending::Next next =
+        pieces.sending.next(connection, pieces.snapshot.value(),
+                            std::min(tile_queue - queued, most_chunk_bytes), protocol::most_chunks);
+    for (const server::ChunkSending::Short& missing : next.short_of) {
+        pieces.filler.want(missing.want.node, missing.want.depth, missing.rank);
     }
-    // The bodies a piece's water marks go before it.
-    tell_bodies(connection, told);
-    if (next.pieces.empty()) {
+    if (next.too_big > 0) {
+        log::warn(server_log, "{} grid chunks too big to send", next.too_big);
+    }
+    if (next.chunks.empty()) {
         return;
     }
-    if (auto sent = players.send(connection, net::Delivery::Bulk, protocol::encode(next)); !sent) {
-        log::debug(server_log, "couldn't send connection {} grid pieces: {}",
+    const std::size_t count = next.chunks.size();
+    if (auto sent =
+            players.send(connection, net::Delivery::Bulk,
+                         protocol::encode(protocol::Chunks{.chunks = std::move(next.chunks)}));
+        !sent) {
+        log::debug(server_log, "couldn't send connection {} grid chunks: {}",
                    std::to_underlying(connection), sent.error());
         return;
     }
-    pieces_sent_.add(next.pieces.size());
+    chunks_sent_.add(count);
 }
 
 void Server::tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids) {

@@ -8,7 +8,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/grid/piece.hpp>
+#include <hog/grid/tree.hpp>
 #include <hog/grid/water_bodies.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
@@ -687,7 +687,37 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
     CHECK(server->time() - start < 1min);
 }
 
-TEST_CASE("a player asking for the root is sent it with the water bodies it marks before it",
+namespace {
+
+// What a player asking for chunks hears: the root's chunk of each kind, by kind, the bodies told,
+// and how many of them before the first chunk came.
+struct HeardChunks {
+    std::map<std::uint8_t, hog::protocol::SentChunk> roots;
+    hog::grid::WaterBodies told;
+    std::optional<std::size_t> told_first;
+
+    void hear(const hog::protocol::Message& message) {
+        if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&message)) {
+            auto some = hog::grid::WaterBodies::decode(bodies->bytes);
+            REQUIRE(some);
+            told.bodies.merge(some->bodies);
+        }
+        if (const auto* chunks = std::get_if<hog::protocol::Chunks>(&message)) {
+            if (!told_first) {
+                told_first = told.bodies.size();
+            }
+            for (const hog::protocol::SentChunk& chunk : chunks->chunks) {
+                if (chunk.band == 0 && chunk.depth == 0 && chunk.version != 0) {
+                    roots.insert_or_assign(chunk.kind, chunk);
+                }
+            }
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("a player asking for the root is sent its chunks as stored with every water body first",
           "[app][server]") {
     const World world;
     const auto config = world.config();
@@ -696,8 +726,7 @@ TEST_CASE("a player asking for the root is sent it with the water bodies it mark
         hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
     REQUIRE(connected);
     hog::net::Client& client = *connected;
-    std::optional<hog::grid::Piece> first;
-    hog::grid::WaterBodies told;
+    HeardChunks heard;
     std::vector<hog::net::Event> events;
     std::atomic<bool> stop = false;
     // Filling the root takes a debug build under load most of a minute.
@@ -716,37 +745,28 @@ TEST_CASE("a player asking for the root is sent it with the water bodies it mark
                                         hog::protocol::encode(hog::protocol::AskPieces{
                                             .pieces = {{.to = 3, .priority = 1.0F}}})));
                 }
-                if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&*decoded);
-                    bodies != nullptr && !first) {
-                    auto some = hog::grid::WaterBodies::decode(bodies->bytes);
-                    REQUIRE(some);
-                    told.bodies.merge(some->bodies);
-                }
-                if (const auto* pieces = std::get_if<hog::protocol::Pieces>(&*decoded);
-                    pieces != nullptr && !first) {
-                    REQUIRE_FALSE(pieces->pieces.empty());
-                    auto piece = hog::grid::Piece::decode(pieces->pieces.front());
-                    REQUIRE(piece);
-                    first = std::move(*piece);
-                }
+                heard.hear(*decoded);
             }
         }
-        if (first || MonotonicClock::now() >= give_up) {
+        if (heard.roots.size() == 4 || MonotonicClock::now() >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
-    REQUIRE(first);
-    CHECK(first.value().root == hog::grid::Key{});
-    CHECK(first.value().shape.has_value());
-    CHECK(first.value().material.has_value());
-    REQUIRE(first.value().water.has_value());
-    CHECK(first.value().shape.value().levels() == 3);
-    for (const hog::grid::Water::Value body : first.value().water.value().leaf_values()) {
+    REQUIRE(heard.roots.size() == 4);
+    const auto shape = hog::grid::Tree<hog::grid::Shape>::decode(heard.roots.at(0).tree);
+    REQUIRE(shape);
+    CHECK(shape->levels() == 3);
+    const auto water = hog::grid::Tree<hog::grid::Water>::decode(heard.roots.at(2).tree);
+    REQUIRE(water);
+    // Every body went before any chunk.
+    const hog::grid::WaterBodies all = hog::globe::water_bodies(server->generator());
+    CHECK(heard.told_first == all.bodies.size());
+    for (const hog::grid::Water::Value body : water->leaf_values()) {
         CAPTURE(body);
-        CHECK((body == 0 || told.bodies.contains(body)));
+        CHECK((body == 0 || heard.told.bodies.contains(body)));
     }
-    CHECK(told.bodies.contains(hog::globe::sea_body) ==
+    CHECK(heard.told.bodies.contains(hog::globe::sea_body) ==
           server->generator().sea_level().has_value());
 }
 

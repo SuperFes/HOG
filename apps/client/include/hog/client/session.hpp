@@ -93,10 +93,9 @@ public:
         return std::exchange(tiles_, {});
     }
 
-    // Grid pieces the server sent since last asked, oldest first, each as `grid::Piece::encode`
-    // codes it.
-    [[nodiscard]] std::vector<std::vector<std::byte>> take_pieces() noexcept {
-        return std::exchange(pieces_, {});
+    // Ground chunks the server sent since last asked, oldest first.
+    [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() noexcept {
+        return std::exchange(chunks_, {});
     }
     // Water bodies the server sent since last asked, oldest first, each as
     // `grid::WaterBodies::encode` codes them.
@@ -163,7 +162,7 @@ private:
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentTile> tiles_;
-    std::vector<std::vector<std::byte>> pieces_;
+    std::vector<protocol::SentChunk> chunks_;
     std::vector<std::vector<std::byte>> bodies_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;

@@ -647,8 +647,8 @@ public:
         return session_ ? session_->take_tiles() : std::vector<protocol::SentTile>{};
     }
     // The grid pieces and water bodies the server sent since last asked, as coded.
-    [[nodiscard]] std::vector<std::vector<std::byte>> take_pieces() {
-        return session_ ? session_->take_pieces() : std::vector<std::vector<std::byte>>{};
+    [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() {
+        return session_ ? session_->take_chunks() : std::vector<protocol::SentChunk>{};
     }
     [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() {
         return session_ ? session_->take_bodies() : std::vector<std::vector<std::byte>>{};
@@ -1079,9 +1079,9 @@ void ask_pieces(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3
 void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
                  DVec3 facing) {
     HOG_ZONE("pieces");
-    for (const std::vector<std::byte>& bytes : connection.take_pieces()) {
-        if (auto taken = ground.pieces.take(bytes); !taken) {
-            log::warn(connection_log, "can't hold a piece sent: {}", taken.error());
+    for (const protocol::SentChunk& chunk : connection.take_chunks()) {
+        if (auto taken = ground.pieces.take(chunk); !taken) {
+            log::warn(connection_log, "can't hold a chunk sent: {}", taken.error());
         } else {
             ground.pieces_came = true;
             ground.asked_came = true;

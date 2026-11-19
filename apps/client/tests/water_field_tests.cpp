@@ -1,3 +1,4 @@
+#include "held_chunks.hpp"
 #include "welding.hpp"
 
 #include <hog/client/drawn.hpp>
@@ -208,8 +209,8 @@ TEST_CASE("the eye is in a lake where the pieces mark it, not in the sea",
           "[client][water_field]") {
     const Water lake_water{5};
     hog::client::HeldPieces held{lake_water.grid};
-    REQUIRE(held.take(lake_water.top()->encode()));
-    REQUIRE(held.take(lake_water.piece(piece_root, 5)->encode()));
+    REQUIRE(hog::testing::hold(held, *lake_water.top()));
+    REQUIRE(hog::testing::hold(held, *lake_water.piece(piece_root, 5)));
     hog::grid::WaterBodies bodies;
     bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
     bodies.bodies.emplace(5U,
@@ -229,7 +230,7 @@ TEST_CASE("the eye is in a lake where the pieces mark it, not in the sea",
 
     const Water sea_water{1};
     hog::client::HeldPieces sea{sea_water.grid};
-    REQUIRE(sea.take(sea_water.piece(piece_root, 1)->encode()));
+    REQUIRE(hog::testing::hold(sea, *sea_water.piece(piece_root, 1)));
     REQUIRE(sea.take_bodies(bodies.encode()));
     CHECK_FALSE(hog::client::still_water_in(sea, under).has_value());
 }

@@ -97,9 +97,9 @@ bool Session::took_ground(protocol::Message& message) {
     if (auto* tiles = std::get_if<protocol::Tiles>(&message)) {
         tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
                       std::make_move_iterator(tiles->tiles.end()));
-    } else if (auto* pieces = std::get_if<protocol::Pieces>(&message)) {
-        pieces_.insert(pieces_.end(), std::make_move_iterator(pieces->pieces.begin()),
-                       std::make_move_iterator(pieces->pieces.end()));
+    } else if (auto* chunks = std::get_if<protocol::Chunks>(&message)) {
+        chunks_.insert(chunks_.end(), std::make_move_iterator(chunks->chunks.begin()),
+                       std::make_move_iterator(chunks->chunks.end()));
     } else if (auto* bodies = std::get_if<protocol::Bodies>(&message)) {
         bodies_.push_back(std::move(bodies->bytes));
     } else {
