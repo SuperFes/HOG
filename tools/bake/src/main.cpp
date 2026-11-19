@@ -2,9 +2,12 @@
 #include <hog/baked/filling.hpp>
 #include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/grid/grid.hpp>
 #include <hog/jobs/job_system.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -25,10 +28,10 @@ namespace {
 constexpr std::string_view usage =
     "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both)\n"
     "                [--planet FILE] [--threads N] [--map-gb N]\n"
-    "Bakes the world's grid pages into the store at DIR ahead of play: over the whole planet\n"
-    "those whose finest nodes are --coarse metres across or wider, and every page within\n"
-    "--across metres (1000 by default) about --at down to the finest. Pages already held as\n"
-    "this generator makes them are kept, so a stopped bake carries on. The planet is\n"
+    "Bakes the world's grid into the store at DIR ahead of play: over the whole planet down\n"
+    "to the first level whose nodes are --coarse metres across or less, and within --across\n"
+    "metres (1000 by default) about --at down to the finest. Pages already held as deep as\n"
+    "that as this generator makes them are kept, so a stopped bake carries on. The planet is\n"
     "config/planet.toml where that's found, else the default.\n";
 
 struct Options {
@@ -150,14 +153,22 @@ int run(std::span<const std::string_view> arguments) {
             direction * generator.column(direction, hog::globe::voxel_lod(generator)).ground();
         reach.across = options.across;
     }
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    if (options.coarse) {
+        const std::uint8_t depth = hog::bake::depth_of(grid, *options.coarse);
+        std::cerr << std::format("everywhere down to level {} of {}, nodes {:.3g} m across\n",
+                                 depth, grid.depth(), grid.size(depth));
+    }
     hog::jobs::JobSystem jobs{options.threads};
     const auto started = std::chrono::steady_clock::now();
     const auto baked = hog::bake::bake(
         generator, *store, jobs, reach, std::size_t{4} * jobs.thread_count(),
-        [&](std::size_t done, std::size_t known) {
+        [&](std::size_t done, std::size_t waiting) {
             const double seconds =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-            std::cerr << std::format("{} of {} pages known, {:.0f} s\n", done, known, seconds);
+            std::cerr << std::format("{} pages done, {:.1f} a second, {} found waiting, {:.0f} s\n",
+                                     done, static_cast<double>(done) / std::max(seconds, 1e-3),
+                                     waiting, seconds);
         });
     if (!baked) {
         std::cerr << std::format("hog-bake: {}\n", baked.error());

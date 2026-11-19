@@ -4,7 +4,9 @@
 #include <hog/grid/leaves.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <utility>
@@ -12,18 +14,26 @@
 namespace hog::bake {
 namespace {
 
-// The pages of `pages` the store holds whole as this generator makes them, by their shape trees.
+// A page to bake, and how many levels under its root.
+struct Want {
+    grid::Key page;
+    std::uint8_t levels = 0;
+};
+
+// The pages of `wants` the store holds at least as deep as wanted as this generator makes them,
+// by their shape trees.
 Result<std::vector<std::optional<grid::Tree<grid::Shape>>>> held(const baked::PageStore& store,
-                                                                 std::span<const grid::Key> pages) {
+                                                                 std::span<const Want> wants) {
     Result<baked::PageStore::Snapshot> snapshot = store.read();
     if (!snapshot) {
         return std::unexpected{snapshot.error()};
     }
     std::vector<std::optional<grid::Tree<grid::Shape>>> shapes;
-    shapes.reserve(pages.size());
-    for (const grid::Key page : pages) {
-        std::optional<baked::PageStore::Read> read = snapshot->page(page);
-        if (read && read->page.shape && read->page.material && read->page.water) {
+    shapes.reserve(wants.size());
+    for (const Want& want : wants) {
+        std::optional<baked::PageStore::Read> read = snapshot->page(want.page);
+        if (read && read->page.shape && read->page.material && read->page.water &&
+            read->page.shape->tree.levels() >= want.levels) {
             shapes.emplace_back(std::move(read->page.shape->tree));
         } else {
             shapes.emplace_back();
@@ -32,31 +42,32 @@ Result<std::vector<std::optional<grid::Tree<grid::Shape>>>> held(const baked::Pa
     return shapes;
 }
 
-// Fills those of `pages` the store doesn't hold yet and writes them together, giving each page's
-// shape tree, held or filled.
+// Fills those of `wants` the store doesn't hold deep enough yet and writes them together, giving
+// each page's shape tree, held or filled.
 Result<std::vector<grid::Tree<grid::Shape>>>
 bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::PageStore& store,
-           jobs::JobSystem& jobs, std::span<const grid::Key> pages, Baked& baked) {
-    auto shapes = held(store, pages);
+           jobs::JobSystem& jobs, std::span<const Want> wants, Baked& baked) {
+    auto shapes = held(store, wants);
     if (!shapes) {
         return std::unexpected{shapes.error()};
     }
     std::vector<grid::Key> missing;
+    std::vector<std::uint8_t> levels;
     std::vector<std::size_t> slots;
-    for (std::size_t n = 0; n < pages.size(); ++n) {
+    for (std::size_t n = 0; n < wants.size(); ++n) {
         if (!(*shapes)[n]) {
-            missing.push_back(pages[n]);
+            missing.push_back(wants[n].page);
+            levels.push_back(wants[n].levels);
             slots.push_back(n);
         }
     }
     std::vector<std::optional<globe::Filled>> filled(missing.size());
-    jobs.parallel_for(
-        static_cast<std::uint32_t>(missing.size()), 1, [&](jobs::Range range, std::uint32_t) {
-            for (std::uint32_t n = range.begin; n < range.end; ++n) {
-                filled[n] =
-                    globe::fill(generator, grid, missing[n], grid.levels_under(missing[n].depth));
-            }
-        });
+    jobs.parallel_for(static_cast<std::uint32_t>(missing.size()), 1,
+                      [&](jobs::Range range, std::uint32_t) {
+                          for (std::uint32_t n = range.begin; n < range.end; ++n) {
+                              filled[n] = globe::fill(generator, grid, missing[n], levels[n]);
+                          }
+                      });
     if (Result<void> written = baked::write_filled(store, missing, filled); !written) {
         return std::unexpected{written.error()};
     }
@@ -69,9 +80,9 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
         (*shapes)[slots[m]] = std::move(page.shape);
     }
     baked.filled += missing.size();
-    baked.kept += pages.size() - missing.size();
+    baked.kept += wants.size() - missing.size();
     std::vector<grid::Tree<grid::Shape>> made;
-    made.reserve(pages.size());
+    made.reserve(wants.size());
     for (std::optional<grid::Tree<grid::Shape>>& shape : *shapes) {
         made.push_back(std::move(shape).value());
     }
@@ -80,6 +91,30 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
 
 } // namespace
 
+std::uint8_t depth_of(const grid::Grid& grid, double metres) noexcept {
+    // Leeway for a size typed short of the level it means, as a third of a metre is.
+    const double most = metres * (1.0 + 1e-6);
+    for (std::uint8_t depth = 0; depth < grid.depth(); ++depth) {
+        if (grid.size(depth) <= most) {
+            return depth;
+        }
+    }
+    return grid.depth();
+}
+
+std::uint8_t levels_for(const grid::Grid& grid, const Reach& reach, grid::Key page,
+                        bool surface) noexcept {
+    const std::uint8_t whole = grid.levels_under(page.depth);
+    if (reach.around && grid.distance(page, *reach.around) <= reach.across / 2.0) {
+        return whole;
+    }
+    const std::uint8_t deepest = depth_of(grid, reach.coarse);
+    if (!surface || deepest <= page.depth) {
+        return 0;
+    }
+    return std::min<std::uint8_t>(whole, static_cast<std::uint8_t>(deepest - page.depth));
+}
+
 std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach, grid::Key page,
                                    grid::Key leaf, bool surface) {
     // Rooted at the page's foot, which is the leaf itself only where the leaf is at that foot.
@@ -87,9 +122,7 @@ std::vector<grid::Key> pages_under(const grid::Grid& grid, const Reach& reach, g
     if (roots >= grid.depth()) {
         return {};
     }
-    const bool every =
-        surface &&
-        grid.size(static_cast<std::uint8_t>(roots + grid.levels_under(roots))) >= reach.coarse;
+    const bool every = surface && depth_of(grid, reach.coarse) > roots;
     const auto near = [&](grid::Key key) {
         return reach.around && grid.distance(key, *reach.around) <= reach.across / 2.0;
     };
@@ -119,33 +152,42 @@ Result<Baked> bake(const globe::Generator& generator, baked::PageStore& store,
     const grid::Grid grid = globe::grid_of(generator);
     batch = std::max<std::size_t>(batch, 1);
     Baked baked;
-    // A depth of pages at a time, top down, each leading to those under its open leaves.
-    std::vector<grid::Key> wave{grid::Key{}};
-    while (!wave.empty()) {
-        std::vector<grid::Key> next;
-        for (std::size_t from = 0; from < wave.size(); from += batch) {
-            const std::span<const grid::Key> pages =
-                std::span{wave}.subspan(from, std::min(batch, wave.size() - from));
-            auto shapes = bake_pages(generator, grid, store, jobs, pages, baked);
-            if (!shapes) {
-                return std::unexpected{shapes.error()};
-            }
-            for (std::size_t n = 0; n < pages.size(); ++n) {
-                grid::for_open_leaves((*shapes)[n], pages[n],
-                                      [&](grid::Key leaf, const auto& found) {
-                                          const bool surface = !found.value.is_solid();
-                                          const std::vector<grid::Key> under =
-                                              pages_under(grid, reach, pages[n], leaf, surface);
-                                          next.insert(next.end(), under.begin(), under.end());
-                                      });
-            }
-            if (progress) {
-                const std::size_t done = baked.filled + baked.kept;
-                progress(done, done + (wave.size() - from - pages.size()) + next.size());
-            }
+    // Depth first: a batch off the top, then the pages under it on top in Z order, so only the
+    // pages along the way down wait, and neighbours are filled and written together.
+    std::vector<Want> pending;
+    if (const std::uint8_t levels = levels_for(grid, reach, grid::Key{}, true); levels > 0) {
+        pending.push_back({.page = grid::Key{}, .levels = levels});
+    }
+    std::vector<Want> wants;
+    std::vector<Want> under;
+    while (!pending.empty()) {
+        const std::size_t take = std::min(batch, pending.size());
+        wants.assign(pending.end() - static_cast<std::ptrdiff_t>(take), pending.end());
+        pending.resize(pending.size() - take);
+        auto shapes = bake_pages(generator, grid, store, jobs, wants, baked);
+        if (!shapes) {
+            return std::unexpected{shapes.error()};
         }
-        std::ranges::sort(next);
-        wave = std::move(next);
+        under.clear();
+        for (std::size_t n = 0; n < wants.size(); ++n) {
+            if (wants[n].levels < grid.levels_under(wants[n].page.depth)) {
+                continue;
+            }
+            grid::for_open_leaves(
+                (*shapes)[n], wants[n].page, [&](grid::Key leaf, const auto& found) {
+                    const bool surface = !found.value.is_solid();
+                    for (const grid::Key page :
+                         pages_under(grid, reach, wants[n].page, leaf, surface)) {
+                        under.push_back(
+                            {.page = page, .levels = levels_for(grid, reach, page, surface)});
+                    }
+                });
+        }
+        std::ranges::sort(under, std::ranges::greater{}, &Want::page);
+        pending.insert(pending.end(), under.begin(), under.end());
+        if (progress) {
+            progress(baked.filled + baked.kept, pending.size());
+        }
     }
     return baked;
 }
