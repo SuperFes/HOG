@@ -93,7 +93,7 @@ something that already exists; "from" names that.
     *From:* landform likelihoods (lab), `hog-world-events` backlog, coasts.
 12. **Gameplay field queries and meta areas.** One server API answers "what's here":
     temperature, moisture, fertility, ore, danger, region, owner, rules. Meta areas carry what
-    is authored or derived. *From:* `hog-meta-areas` (queued).
+    is authored or derived. *From:* `hog-meta-areas` (queued). Plan: [queries](queries.md).
 13. **Bake the formation.** Save `Formed` to a file so generation runs once. Quality can then
     beat speed. *From:* SQLite tile archive; the formation cache is missing.
 
