@@ -72,9 +72,16 @@ size: any grid depth, any finest size, any detail asked for.
    over sea floor and land for band heights 2 to 4 and budgets from 256 bytes to 1 MB; open sky
    is one chunk a band and smooth ground takes fewer than rugged; versions step only on change;
    another generator's chunks read as not held.
-3. **Filling chunks.** On demand, ranked, written on the writer thread; the bake moves onto
-   chunks, depth first in bounded memory, to the detail asked for. Tests: what's filled matches
-   the generator; asking deeper grows what's held without refilling the bands above.
+3. **Filling chunks.** Done: a fill is a **region**, one band's nodes under a root set
+   `fill_levels` over the band's foot (no deeper than its roots), so one fill is never more than
+   that many levels however coarse its band, and its chunks can be wide. A band's regions under a
+   node are those the band above leaves open, so nothing is filled under ground the generator
+   closes. `baked::ChunkFiller` answers a node asked down to a depth, band by band from the one
+   holding the node, ranked, written on its writer thread; `hog-bake` fills regions depth first
+   into a chunk store, down through the band holding the level `--coarse` rounds to. Tests:
+   regions read back as the generator fills them; asking deeper fills only the bands under and
+   leaves the versions over it alone; a node in closed ground fills nothing under it; fills
+   start by rank; a bake keeps what it holds and deepens without filling again.
 4. **The server answers asks with pieces.** Kept pieces checked by their chunks' versions;
    changes sent to the clients holding them. Tests: answers match the store; a chunk written
    lets go of what was read from it; a client is sent a changed piece once.

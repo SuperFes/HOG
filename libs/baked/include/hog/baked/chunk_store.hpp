@@ -99,6 +99,9 @@ public:
         // The band's chunks over `node` or under it, in key order.
         template <typename Kind>
         [[nodiscard]] std::vector<Chunk> chunks(std::uint8_t band, grid::Key node) const;
+        // Whether the band's chunks hold all of `node`: one over it, or those under it together.
+        template <typename Kind>
+        [[nodiscard]] bool holds(std::uint8_t band, grid::Key node) const;
         // Moves on to the store as it is now. Long-held snapshots keep old pages from being
         // reused.
         [[nodiscard]] Result<void> refresh();
@@ -180,6 +183,7 @@ extern template std::uint64_t ChunkStore::Snapshot::version<grid::Shape>(std::ui
                                                                          grid::Key) const;
 extern template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Shape>(std::uint8_t,
                                                                              grid::Key) const;
+extern template bool ChunkStore::Snapshot::holds<grid::Shape>(std::uint8_t, grid::Key) const;
 extern template Result<std::vector<Chunk>>
 ChunkStore::Batch::put<grid::Shape>(std::uint8_t, grid::Key, const grid::Tree<grid::Shape>&);
 extern template std::optional<Piece<grid::Material>>
@@ -188,6 +192,7 @@ extern template std::uint64_t ChunkStore::Snapshot::version<grid::Material>(std:
                                                                             grid::Key) const;
 extern template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Material>(std::uint8_t,
                                                                                 grid::Key) const;
+extern template bool ChunkStore::Snapshot::holds<grid::Material>(std::uint8_t, grid::Key) const;
 extern template Result<std::vector<Chunk>>
 ChunkStore::Batch::put<grid::Material>(std::uint8_t, grid::Key, const grid::Tree<grid::Material>&);
 extern template std::optional<Piece<grid::Water>>
@@ -196,6 +201,7 @@ extern template std::uint64_t ChunkStore::Snapshot::version<grid::Water>(std::ui
                                                                          grid::Key) const;
 extern template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Water>(std::uint8_t,
                                                                              grid::Key) const;
+extern template bool ChunkStore::Snapshot::holds<grid::Water>(std::uint8_t, grid::Key) const;
 extern template Result<std::vector<Chunk>>
 ChunkStore::Batch::put<grid::Water>(std::uint8_t, grid::Key, const grid::Tree<grid::Water>&);
 extern template std::optional<Piece<grid::Woods>>
@@ -204,6 +210,7 @@ extern template std::uint64_t ChunkStore::Snapshot::version<grid::Woods>(std::ui
                                                                          grid::Key) const;
 extern template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Woods>(std::uint8_t,
                                                                              grid::Key) const;
+extern template bool ChunkStore::Snapshot::holds<grid::Woods>(std::uint8_t, grid::Key) const;
 extern template Result<std::vector<Chunk>>
 ChunkStore::Batch::put<grid::Woods>(std::uint8_t, grid::Key, const grid::Tree<grid::Woods>&);
 

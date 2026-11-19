@@ -18,6 +18,7 @@ target_include_directories(lmdbxx SYSTEM INTERFACE "${lmdbxx_include}")
 target_link_libraries(lmdbxx INTERFACE lmdb)
 
 add_library(hog_baked
+    src/chunk_filling.cpp
     src/chunk_store.cpp
     src/filling.cpp
     src/lmdb_shared.cpp
@@ -32,6 +33,7 @@ target_link_libraries(hog_baked PUBLIC hog::globe hog::grid hog::jobs PRIVATE lm
 hog_target_defaults(hog_baked)
 
 hog_add_tests(hog_baked
+    tests/chunk_filling_tests.cpp
     tests/chunk_store_tests.cpp
     tests/filling_tests.cpp
     tests/node_tests.cpp

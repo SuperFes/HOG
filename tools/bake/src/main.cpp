@@ -1,6 +1,6 @@
 #include <hog/bake/bake.hpp>
+#include <hog/baked/chunk_store.hpp>
 #include <hog/baked/filling.hpp>
-#include <hog/baked/page_store.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
@@ -29,9 +29,9 @@ constexpr std::string_view usage =
     "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both)\n"
     "                [--planet FILE] [--threads N] [--map-gb N]\n"
     "Bakes the world's grid into the store at DIR ahead of play: over the whole planet down\n"
-    "to the first level whose nodes are --coarse metres across or less, and within --across\n"
-    "metres (1000 by default) about --at down to the finest. Pages already held as deep as\n"
-    "that as this generator makes them are kept, so a stopped bake carries on. The planet is\n"
+    "to the band holding the first level whose nodes are --coarse metres across or less, and\n"
+    "within --across metres (1000 by default) about --at down to the finest. Regions already\n"
+    "held as this generator makes them are kept, so a stopped bake carries on. The planet is\n"
     "config/planet.toml where that's found, else the default.\n";
 
 struct Options {
@@ -136,9 +136,12 @@ int run(std::span<const std::string_view> arguments) {
     std::cerr << std::format(
         "formed in {:.1f} s\n",
         std::chrono::duration<double>(std::chrono::steady_clock::now() - formed).count());
-    auto store = hog::baked::PageStore::open(
-        *options.store, hog::baked::baking_of(generator),
-        {.map_bytes = options.map_gb << 30U, .readers = 1024, .read_only = false});
+    auto store = hog::baked::ChunkStore::open(*options.store, hog::baked::baking_of(generator),
+                                              {.map_bytes = options.map_gb << 30U,
+                                               .readers = 1024,
+                                               .read_only = false,
+                                               .band_height = 3,
+                                               .budget = std::size_t{32} << 10U});
     if (!store) {
         std::cerr << std::format("hog-bake: {}\n", store.error());
         return EXIT_FAILURE;
@@ -156,19 +159,23 @@ int run(std::span<const std::string_view> arguments) {
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
     if (options.coarse) {
         const std::uint8_t depth = hog::bake::depth_of(grid, *options.coarse);
-        std::cerr << std::format("everywhere down to level {} of {}, nodes {:.3g} m across\n",
-                                 depth, grid.depth(), grid.size(depth));
+        const hog::baked::Bands& bands = store->bands();
+        const std::uint8_t foot = bands.foot(bands.band_of(depth));
+        std::cerr << std::format(
+            "everywhere down to level {} of {}, nodes {:.3g} m across, through its band to {}\n",
+            depth, grid.depth(), grid.size(depth), foot);
     }
     hog::jobs::JobSystem jobs{options.threads};
     const auto started = std::chrono::steady_clock::now();
     const auto baked = hog::bake::bake(
-        generator, *store, jobs, reach, std::size_t{4} * jobs.thread_count(),
+        generator, *store, jobs, reach,
+        {.batch = std::size_t{4} * jobs.thread_count(), .fill_levels = 6},
         [&](std::size_t done, std::size_t waiting) {
             const double seconds =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-            std::cerr << std::format("{} pages done, {:.1f} a second, {} found waiting, {:.0f} s\n",
-                                     done, static_cast<double>(done) / std::max(seconds, 1e-3),
-                                     waiting, seconds);
+            std::cerr << std::format(
+                "{} regions done, {:.1f} a second, {} found waiting, {:.0f} s\n", done,
+                static_cast<double>(done) / std::max(seconds, 1e-3), waiting, seconds);
         });
     if (!baked) {
         std::cerr << std::format("hog-bake: {}\n", baked.error());
@@ -178,13 +185,13 @@ int run(std::span<const std::string_view> arguments) {
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     const auto megabytes = [](std::size_t bytes) { return static_cast<double>(bytes) / 1e6; };
     std::cout << std::format(
-        "{} pages filled in {:.1f} s, {} already held; trees: shape {:.1f} MB, material {:.1f} "
+        "{} regions filled in {:.1f} s, {} already held; trees: shape {:.1f} MB, material {:.1f} "
         "MB, water {:.1f} MB, woods {:.1f} MB\n",
         baked->filled, seconds, baked->kept, megabytes(baked->shape_bytes),
         megabytes(baked->material_bytes), megabytes(baked->water_bytes),
         megabytes(baked->woods_bytes));
     if (const auto stats = store->stats()) {
-        std::cout << std::format("store: {} trees, {:.1f} MB\n", stats->trees,
+        std::cout << std::format("store: {} chunks, {:.1f} MB\n", stats->chunks,
                                  megabytes(stats->bytes));
     }
     return EXIT_SUCCESS;

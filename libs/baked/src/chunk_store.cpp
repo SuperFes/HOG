@@ -26,7 +26,8 @@ using detail::Removed;
 using detail::tag_of;
 
 constexpr const char* chunks_name = "chunks";
-constexpr const char* about_name = "about";
+// Not the page store's, so neither is taken for the other.
+constexpr const char* about_name = "chunk store";
 constexpr std::string_view format_key = "format";
 constexpr std::string_view world_key = "world";
 constexpr std::string_view next_version_key = "next version";
@@ -457,6 +458,29 @@ std::vector<Chunk> ChunkStore::Snapshot::chunks(std::uint8_t band, grid::Key nod
     return found;
 }
 
+template <typename Kind>
+bool ChunkStore::Snapshot::holds(std::uint8_t band, grid::Key node) const {
+    if (!node.is_valid()) {
+        return false;
+    }
+    try {
+        if (impl_->current_over(tag_of<Kind>(), band, node)) {
+            return true;
+        }
+        // Chunks never overlap, so they hold all of it where their volumes add up to its.
+        const auto volume = [](grid::Key key) {
+            return std::uint64_t{1} << (3U * (grid::max_depth - key.depth));
+        };
+        std::uint64_t held = 0;
+        for (const Held& chunk : impl_->current_under(tag_of<Kind>(), band, node)) {
+            held += volume(chunk.root);
+        }
+        return held == volume(node);
+    } catch (const lmdb::error&) {
+        return false;
+    }
+}
+
 Result<void> ChunkStore::Snapshot::refresh() {
     return guarded([&] -> Result<void> {
         impl_->txn.reset();
@@ -674,12 +698,16 @@ template std::uint64_t ChunkStore::Snapshot::version<grid::Water>(std::uint8_t, 
 template std::uint64_t ChunkStore::Snapshot::version<grid::Woods>(std::uint8_t, grid::Key) const;
 template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Shape>(std::uint8_t,
                                                                       grid::Key) const;
+template bool ChunkStore::Snapshot::holds<grid::Shape>(std::uint8_t, grid::Key) const;
 template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Material>(std::uint8_t,
                                                                          grid::Key) const;
+template bool ChunkStore::Snapshot::holds<grid::Material>(std::uint8_t, grid::Key) const;
 template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Water>(std::uint8_t,
                                                                       grid::Key) const;
+template bool ChunkStore::Snapshot::holds<grid::Water>(std::uint8_t, grid::Key) const;
 template std::vector<Chunk> ChunkStore::Snapshot::chunks<grid::Woods>(std::uint8_t,
                                                                       grid::Key) const;
+template bool ChunkStore::Snapshot::holds<grid::Woods>(std::uint8_t, grid::Key) const;
 template Result<std::vector<Chunk>>
 ChunkStore::Batch::put<grid::Shape>(std::uint8_t, grid::Key, const grid::Tree<grid::Shape>&);
 template Result<std::vector<Chunk>>
