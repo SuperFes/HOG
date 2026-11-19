@@ -23,6 +23,10 @@ std::optional<grid::Page> PageSource::page(grid::Key root, std::uint8_t levels) 
     page.shape->tree = page.shape->tree.trimmed(levels);
     page.material->tree = page.material->tree.trimmed(levels);
     page.water->tree = page.water->tree.trimmed(levels);
+    // Pages filled before woods were carry none; they come with the next fill.
+    if (page.woods) {
+        page.woods->tree = page.woods->tree.trimmed(levels);
+    }
     return std::move(page);
 }
 

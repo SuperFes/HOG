@@ -29,6 +29,7 @@ struct Trees {
     bool shape = false;
     bool material = false;
     bool water = false;
+    bool woods = false;
 
     friend constexpr bool operator==(const Trees&, const Trees&) noexcept = default;
 };
@@ -151,15 +152,20 @@ extern template std::optional<grid::Held<grid::Material>>
     PageStore::Snapshot::tree<grid::Material>(grid::Key) const;
 extern template std::optional<grid::Held<grid::Water>>
     PageStore::Snapshot::tree<grid::Water>(grid::Key) const;
+extern template std::optional<grid::Held<grid::Woods>>
+    PageStore::Snapshot::tree<grid::Woods>(grid::Key) const;
 extern template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Shape>(grid::Key) const;
 extern template std::optional<grid::Key>
     PageStore::Snapshot::holder<grid::Material>(grid::Key) const;
 extern template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Water>(grid::Key) const;
+extern template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Woods>(grid::Key) const;
 extern template Result<std::uint32_t>
 PageStore::Batch::put<grid::Shape>(grid::Key, const grid::Tree<grid::Shape>&);
 extern template Result<std::uint32_t>
 PageStore::Batch::put<grid::Material>(grid::Key, const grid::Tree<grid::Material>&);
 extern template Result<std::uint32_t>
 PageStore::Batch::put<grid::Water>(grid::Key, const grid::Tree<grid::Water>&);
+extern template Result<std::uint32_t>
+PageStore::Batch::put<grid::Woods>(grid::Key, const grid::Tree<grid::Woods>&);
 
 } // namespace hog::baked

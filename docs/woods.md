@@ -40,7 +40,8 @@ What a tree there lives with, read from the formed world at the ground's own hei
   but a big river's makes a gallery forest through the desert.
 - **Ground:** how deep the soil is and what it's made of, bare rock, how steep, ice and snow
   lying the year round.
-- **Salt:** near the sea, spray and salt water at the shore.
+- **Salt:** near the sea, spray and salt water at the shore, once distances can be asked
+  ([queries](queries.md), step 2).
 
 ## The woods from it
 
@@ -74,6 +75,7 @@ What a tree there lives with, read from the formed world at the ground's own hei
    tenths of the land wooded, read at the map's own detail.
 4. The woods carried in the pages, so clients and the server read the same: a grid kind holding
    cover and the kinds' shares per node, filled by the generator, summed up coarse, versioned to
-   change with fire and felling.
+   change with fire and felling. Done (`grid::Woods`): on the ground through each node, held no
+   finer than 16 m, even woods merged coarse; stored, sent and held like the other trees.
 5. After the tree lab: single trees hash-pinned on the field at the finest nodes, each kind's
    species chosen within it, standing on the ground surface from the pages.

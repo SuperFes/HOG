@@ -34,7 +34,8 @@ Page baked() {
                                                                                            : open;
                                          })},
                 .material = Held<Material>{.version = 1, .tree = Tree<Material>{6, 3, false}},
-                .water = std::nullopt};
+                .water = std::nullopt,
+                .woods = std::nullopt};
 }
 
 // The finest node at (x, y, z) within the baked page.

@@ -121,7 +121,10 @@ extern template std::optional<HeldPages::Known<grid::Material>>
     HeldPages::at<grid::Material>(grid::Key) const;
 extern template std::optional<HeldPages::Known<grid::Water>>
     HeldPages::at<grid::Water>(grid::Key) const;
+extern template std::optional<HeldPages::Known<grid::Woods>>
+    HeldPages::at<grid::Woods>(grid::Key) const;
 extern template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
 extern template std::optional<KnownAt<grid::Water>> PagesSnapshot::at<grid::Water>(grid::Key) const;
+extern template std::optional<KnownAt<grid::Woods>> PagesSnapshot::at<grid::Woods>(grid::Key) const;
 
 } // namespace hog::client

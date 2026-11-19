@@ -3,6 +3,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
+#include <hog/globe/habitat.hpp>
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,10 @@ constexpr double half_diagonal = 0.866'025'403'784'438'6;
 constexpr double clear = 1.5 * half_diagonal;
 // Leaves whose middle lies within this many sides of the surface can have finer detail to come.
 constexpr double near = 2.0;
+// Metres across the finest nodes woods are held in: stands are hundreds of metres across, and a
+// tree is placed within a node by its own hash.
+constexpr double woods_finest = 16.0;
+static_assert(grid::Stand::kinds == flora::kinds, "the pages hold every kind of tree");
 
 // What the generator gives at a node's middle.
 struct Probe {
@@ -92,6 +97,28 @@ public:
             here.water > 0.0 && here.radius - half < here.water && here.radius + half > here.ground;
         return grid::Tree<grid::Water>::Leaf{.value = wet ? body_value(here.body) : 0,
                                              .open = open(depth, here)};
+    }
+
+    // The woods on the ground through a node, sampled at its middle with detail no finer than it,
+    // down to nodes woods_finest across.
+    std::optional<grid::Tree<grid::Woods>::Leaf> woods(std::uint8_t depth, std::uint32_t x,
+                                                       std::uint32_t y, std::uint32_t z) const {
+        const grid::Key key = absolute(depth, x, y, z);
+        const Probe& here = probes_.at(grid::code(key));
+        // Open by size alone, ground or none, so stands merge across the air beside them.
+        const bool finer = here.size / 2.0 >= woods_finest && key.depth < grid_->depth();
+        if (here.surface && !here.surface->crosses()) {
+            return grid::Tree<grid::Woods>::Leaf{.value = {}, .open = finer};
+        }
+        if (finer && depth < levels_) {
+            return std::nullopt;
+        }
+        if (generator_->shape().formed == nullptr) {
+            return grid::Tree<grid::Woods>::Leaf{.value = {.ground = true}, .open = finer};
+        }
+        const flora::Woods found = globe::woods(*generator_, grid_->centre(key), here.size);
+        return grid::Tree<grid::Woods>::Leaf{.value = grid::Stand::of(found.cover, found.shares),
+                                             .open = finer};
     }
 
     // The finest columns made with a crag left out of their ground.
@@ -358,6 +385,10 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
         levels, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
             return filler.water(depth, x, y, z);
         });
+    auto woods = grid::Tree<grid::Woods>::grow(
+        levels, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+            return filler.woods(depth, x, y, z);
+        });
     // What the shape leaves out, its middle in the node, within this far along the ground.
     const DVec3 middle = grid.centre(key);
     const double reach = glm::length(middle) > 0.0
@@ -391,6 +422,7 @@ Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
     return {.shape = std::move(shape),
             .material = std::move(material),
             .water = std::move(water),
+            .woods = std::move(woods),
             .placed = std::move(placed)};
 }
 

@@ -12,8 +12,10 @@ using hog::grid::Key;
 using hog::grid::Material;
 using hog::grid::Page;
 using hog::grid::Shape;
+using hog::grid::Stand;
 using hog::grid::Tree;
 using hog::grid::Water;
+using hog::grid::Woods;
 
 namespace {
 
@@ -28,7 +30,13 @@ Page full_page() {
                                                                    : hog::grid::Surface::solid();
                                          })},
                 .material = Held<Material>{.version = 1, .tree = Tree<Material>{6, 2, false}},
-                .water = Held<Water>{.version = 9, .tree = Tree<Water>{6, 1, true}}};
+                .water = Held<Water>{.version = 9, .tree = Tree<Water>{6, 1, true}},
+                .woods = Held<Woods>{.version = 2,
+                                     .tree = Tree<Woods>::build(6, [](int x, int /*y*/, int z) {
+                                         return z > 30 ? Stand{}
+                                                       : Stand::of(x / 64.0,
+                                                                   {1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+                                     })}};
 }
 
 } // namespace
@@ -48,6 +56,9 @@ TEST_CASE("pages come back from their bytes", "[grid]") {
     CHECK(back->shape.value().tree.same_as(page.shape.value().tree));
     CHECK(back->material.value().tree.same_as(page.material.value().tree));
     CHECK(back->water.value().tree.root().open);
+    REQUIRE(back->woods);
+    CHECK(back->woods.value().version == 2);
+    CHECK(back->woods.value().tree.same_as(page.woods.value().tree));
     CHECK(back->encode() == page.encode());
 }
 
@@ -55,6 +66,7 @@ TEST_CASE("a page may lack any of its trees", "[grid]") {
     Page page = full_page();
     page.material.reset();
     page.water.reset();
+    page.woods.reset();
     const auto back = Page::decode(page.encode());
     REQUIRE(back);
     CHECK(back->shape);
@@ -82,7 +94,7 @@ TEST_CASE("broken page bytes are refused", "[grid]") {
 
     // Which trees follow, after format, depth, x, y, z and generator.
     std::vector<std::byte> trees = bytes;
-    trees[18] = std::byte{8 | 7};
+    trees[18] = std::byte{16 | 15};
     CHECK_FALSE(Page::decode(trees));
 
     Page deep;

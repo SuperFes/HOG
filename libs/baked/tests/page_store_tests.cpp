@@ -145,7 +145,7 @@ TEST_CASE("trees another generator made are held stale, never read as current", 
         CHECK_FALSE(read.value().page.material.has_value());
         CHECK_FALSE(read.value().page.water.has_value());
         CHECK(read.value().stale ==
-              hog::baked::Trees{.shape = false, .material = true, .water = true});
+              hog::baked::Trees{.shape = false, .material = true, .water = true, .woods = false});
         CHECK_FALSE(snapshot->holder<hog::grid::Material>(fine).has_value());
     }
     // Made again alike, it keeps its version; unlike, it steps on.

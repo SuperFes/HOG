@@ -63,7 +63,8 @@ struct Water {
             .generator = 1,
             .shape = std::nullopt,
             .material = std::nullopt,
-            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)}});
+            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)},
+            .woods = std::nullopt});
     }
 
     [[nodiscard]] std::shared_ptr<const hog::grid::Page> page(Key root,
@@ -82,7 +83,8 @@ struct Water {
             .generator = 1,
             .shape = std::nullopt,
             .material = std::nullopt,
-            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)}});
+            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)},
+            .woods = std::nullopt});
     }
 };
 

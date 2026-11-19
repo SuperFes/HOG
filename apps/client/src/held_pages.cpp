@@ -14,8 +14,10 @@ const std::optional<grid::Held<Kind>>& tree_of(const grid::Page& page) {
         return page.shape;
     } else if constexpr (std::is_same_v<Kind, grid::Material>) {
         return page.material;
-    } else {
+    } else if constexpr (std::is_same_v<Kind, grid::Water>) {
         return page.water;
+    } else {
+        return page.woods;
     }
 }
 
@@ -27,7 +29,10 @@ int levels_of(const grid::Page& page) {
     if (page.material) {
         return page.material->tree.levels();
     }
-    return page.water ? page.water->tree.levels() : -1;
+    if (page.water) {
+        return page.water->tree.levels();
+    }
+    return page.woods ? page.woods->tree.levels() : -1;
 }
 
 // What's known at `node` among the pages `page_at` finds by their roots, as HeldPages::at has it.
@@ -88,6 +93,7 @@ std::optional<KnownAt<Kind>> PagesSnapshot::at(grid::Key node) const {
 
 template std::optional<KnownAt<grid::Shape>> PagesSnapshot::at<grid::Shape>(grid::Key) const;
 template std::optional<KnownAt<grid::Water>> PagesSnapshot::at<grid::Water>(grid::Key) const;
+template std::optional<KnownAt<grid::Woods>> PagesSnapshot::at<grid::Woods>(grid::Key) const;
 
 std::vector<PagesSnapshot::Entry> PagesSnapshot::around(grid::Key node) const {
     std::vector<Entry> found;
@@ -181,6 +187,7 @@ Result<void> HeldPages::take(std::span<const std::byte> bytes) {
         replace(kept.shape, page->shape);
         replace(kept.material, page->material);
         replace(kept.water, page->water);
+        replace(kept.woods, page->woods);
         *page = std::move(kept);
     }
     held.page = std::make_shared<const grid::Page>(std::move(*page));
@@ -245,6 +252,7 @@ template std::optional<HeldPages::Known<grid::Shape>> HeldPages::at<grid::Shape>
 template std::optional<HeldPages::Known<grid::Material>>
     HeldPages::at<grid::Material>(grid::Key) const;
 template std::optional<HeldPages::Known<grid::Water>> HeldPages::at<grid::Water>(grid::Key) const;
+template std::optional<HeldPages::Known<grid::Woods>> HeldPages::at<grid::Woods>(grid::Key) const;
 
 std::vector<grid::Key> HeldPages::evict(DVec3 eye, std::size_t budget) {
     std::vector<std::pair<double, grid::Key>> candidates;

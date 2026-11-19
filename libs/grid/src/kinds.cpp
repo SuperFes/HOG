@@ -275,4 +275,149 @@ Result<Shape::Value> Shape::read(ByteReader& in) {
     return Surface::from_raw(std::bit_cast<std::int32_t>(*distance), *u, *v, *material);
 }
 
+namespace {
+
+// Of the byte a stand is written with: ground, then which kinds have shares.
+constexpr std::uint8_t ground_bit = 0x80;
+
+} // namespace
+
+Stand Stand::of(double cover, const std::array<double, kinds>& shares) noexcept {
+    Stand stand{.ground = true,
+                .cover =
+                    static_cast<std::uint8_t>(std::lround(std::clamp(cover, 0.0, 1.0) * whole)),
+                .shares = {}};
+    double total = 0.0;
+    for (const double share : shares) {
+        total += std::max(share, 0.0);
+    }
+    if (total <= 0.0) {
+        return stand;
+    }
+    // Each its floor, then the parts left over to those that lost most to it, the first of those
+    // tied first.
+    std::array<double, kinds> lost{};
+    int given = 0;
+    for (std::size_t kind = 0; kind < kinds; ++kind) {
+        const double exact = std::max(shares.at(kind), 0.0) / total * whole;
+        const double floor = std::floor(exact);
+        stand.shares.at(kind) = static_cast<std::uint8_t>(floor);
+        lost.at(kind) = exact - floor;
+        given += static_cast<int>(floor);
+    }
+    for (; given < whole; ++given) {
+        const auto most = static_cast<std::size_t>(std::ranges::max_element(lost) - lost.begin());
+        ++stand.shares.at(most);
+        lost.at(most) = -1.0;
+    }
+    return stand;
+}
+
+Stand Woods::summary(const std::array<Value, 8>& children) noexcept {
+    int grounds = 0;
+    double cover = 0.0;
+    std::array<double, Stand::kinds> shares{};
+    std::array<double, Stand::kinds> even{};
+    for (const Value& child : children) {
+        if (!child.ground) {
+            continue;
+        }
+        ++grounds;
+        cover += child.cover;
+        for (std::size_t kind = 0; kind < Stand::kinds; ++kind) {
+            shares.at(kind) += static_cast<double>(child.cover) * child.shares.at(kind);
+            even.at(kind) += child.shares.at(kind);
+        }
+    }
+    if (grounds == 0) {
+        return {};
+    }
+    // Where none is under crowns, what kinds there'd be stand evenly for them.
+    return Stand::of(cover / (grounds * static_cast<double>(Stand::whole)),
+                     cover > 0.0 ? shares : even);
+}
+
+std::optional<Stand> Woods::merged(const std::array<Value, 8>& children, double /*side*/) noexcept {
+    const Value whole = summary(children);
+    for (const Value& child : children) {
+        if (!child.ground) {
+            continue;
+        }
+        if (std::abs(child.cover - whole.cover) > tolerance) {
+            return std::nullopt;
+        }
+        for (std::size_t kind = 0; kind < Stand::kinds; ++kind) {
+            if (std::abs(child.shares.at(kind) - whole.shares.at(kind)) > tolerance) {
+                return std::nullopt;
+            }
+        }
+    }
+    return whole;
+}
+
+std::uint64_t Woods::hash(const Value& value) noexcept {
+    std::uint64_t packed = (value.ground ? 1U : 0U) | (std::uint64_t{value.cover} << 8U);
+    for (std::size_t kind = 0; kind < Stand::kinds; ++kind) {
+        packed |= std::uint64_t{value.shares.at(kind)} << (16U + (8U * kind));
+    }
+    return packed * 0x9e37'79b9'7f4a'7c15ULL;
+}
+
+void Woods::write(ByteWriter& out, const Value& value) {
+    if (!value.ground) {
+        out.write(std::uint8_t{0});
+        return;
+    }
+    unsigned held = ground_bit;
+    for (std::size_t kind = 0; kind < Stand::kinds; ++kind) {
+        held |= value.shares.at(kind) != 0 ? 1U << kind : 0U;
+    }
+    out.write(static_cast<std::uint8_t>(held));
+    out.write(value.cover);
+    for (const std::uint8_t share : value.shares) {
+        if (share != 0) {
+            out.write(share);
+        }
+    }
+}
+
+Result<Stand> Woods::read(ByteReader& in) {
+    const auto held = in.read<std::uint8_t>();
+    if (!held) {
+        return make_error(ErrorCode::Parse, "a stand cut short");
+    }
+    Stand stand;
+    if (*held == 0) {
+        return stand;
+    }
+    if ((*held & ground_bit) == 0 || (*held & ~(ground_bit | ((1U << Stand::kinds) - 1U))) != 0) {
+        return make_error(ErrorCode::Parse, "a stand neither ground nor none");
+    }
+    stand.ground = true;
+    const auto cover = in.read<std::uint8_t>();
+    if (!cover) {
+        return make_error(ErrorCode::Parse, "a stand cut short");
+    }
+    stand.cover = *cover;
+    int total = 0;
+    for (std::size_t kind = 0; kind < Stand::kinds; ++kind) {
+        if ((*held & (1U << kind)) == 0) {
+            continue;
+        }
+        const auto read = in.read<std::uint8_t>();
+        if (!read) {
+            return make_error(ErrorCode::Parse, "a stand cut short");
+        }
+        if (*read == 0) {
+            return make_error(ErrorCode::Parse, "a stand's kind held with no share");
+        }
+        stand.shares.at(kind) = *read;
+        total += *read;
+    }
+    if (total != 0 && total != Stand::whole) {
+        return make_error(ErrorCode::Parse, "a stand's shares not summing to the whole");
+    }
+    return stand;
+}
+
 } // namespace hog::grid

@@ -168,9 +168,10 @@ int run(std::span<const std::string_view> arguments) {
     const auto megabytes = [](std::size_t bytes) { return static_cast<double>(bytes) / 1e6; };
     std::cout << std::format(
         "{} pages filled in {:.1f} s, {} already held; trees: shape {:.1f} MB, material {:.1f} "
-        "MB, water {:.1f} MB\n",
+        "MB, water {:.1f} MB, woods {:.1f} MB\n",
         baked->filled, seconds, baked->kept, megabytes(baked->shape_bytes),
-        megabytes(baked->material_bytes), megabytes(baked->water_bytes));
+        megabytes(baked->material_bytes), megabytes(baked->water_bytes),
+        megabytes(baked->woods_bytes));
     if (const auto stats = store->stats()) {
         std::cout << std::format("store: {} trees, {:.1f} MB\n", stats->trees,
                                  megabytes(stats->bytes));

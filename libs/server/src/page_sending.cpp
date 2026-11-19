@@ -89,16 +89,19 @@ void PageSending::changed(std::span<const grid::Key> pages) {
 namespace {
 
 // Drops the trees of `page` no newer than those held, giving whether any is left.
-bool keep_newer(grid::Page& page, std::uint32_t shape, std::uint32_t material,
-                std::uint32_t water) {
-    const auto keep = [](auto& tree, std::uint32_t held) {
-        if (tree && tree->version <= held) {
+template <typename Holding>
+bool keep_newer(grid::Page& page, const Holding& held) {
+    const auto keep = [](auto& tree, std::uint32_t version) {
+        if (tree && tree->version <= version) {
             tree.reset();
         }
         return tree.has_value();
     };
-    const bool any = keep(page.shape, shape);
-    return keep(page.material, material) || keep(page.water, water) || any;
+    const bool shape = keep(page.shape, held.shape);
+    const bool material = keep(page.material, held.material);
+    const bool water = keep(page.water, held.water);
+    const bool woods = keep(page.woods, held.woods);
+    return shape || material || water || woods;
 }
 
 } // namespace
@@ -108,6 +111,7 @@ void PageSending::hold(Holding& holding, const grid::Page& page, std::uint8_t le
     holding.shape = page.shape ? page.shape->version : holding.shape;
     holding.material = page.material ? page.material->version : holding.material;
     holding.water = page.water ? page.water->version : holding.water;
+    holding.woods = page.woods ? page.woods->version : holding.woods;
 }
 
 bool PageSending::worth_sending(grid::Page& page, const Holding& holding) {
@@ -116,8 +120,7 @@ bool PageSending::worth_sending(grid::Page& page, const Holding& holding) {
     if (levels > holding.levels) {
         return true;
     }
-    return levels == holding.levels &&
-           keep_newer(page, holding.shape, holding.material, holding.water);
+    return levels == holding.levels && keep_newer(page, holding);
 }
 
 std::vector<PageSending::Sent> PageSending::next(net::ConnectionId player, std::size_t room,

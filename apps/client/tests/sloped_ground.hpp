@@ -49,7 +49,8 @@ inline std::shared_ptr<const hog::grid::Page> sloped(const hog::grid::Grid& grid
         .generator = 1,
         .shape = hog::grid::Held<hog::grid::Shape>{.version = version, .tree = std::move(tree)},
         .material = std::nullopt,
-        .water = std::nullopt});
+        .water = std::nullopt,
+        .woods = std::nullopt});
 }
 
 // The slope through the page held finely, and coarsely all round it.

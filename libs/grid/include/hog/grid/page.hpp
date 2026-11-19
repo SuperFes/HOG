@@ -29,9 +29,11 @@ struct Page {
     std::optional<Held<Shape>> shape;
     std::optional<Held<Material>> material;
     std::optional<Held<Water>> water;
+    std::optional<Held<Woods>> woods;
 
     // Little-endian: format, the root's depth and x, y, z, the generator version, a byte saying
-    // which trees follow (1 shape, 2 material, 4 water), then each in that order: its version, a
+    // which trees follow (1 shape, 2 material, 4 water, 8 woods), then each in that order: its
+    // version, a
     // varint length and its bytes.
     [[nodiscard]] std::vector<std::byte> encode() const;
     // Fails, saying why, on bytes that aren't a page, or a tree deeper than a page.

@@ -237,5 +237,6 @@ private:
 extern template class Tree<Shape>;
 extern template class Tree<Material>;
 extern template class Tree<Water>;
+extern template class Tree<Woods>;
 
 } // namespace hog::grid

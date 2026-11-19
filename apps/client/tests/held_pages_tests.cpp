@@ -34,7 +34,8 @@ Tree<Material> stripes(std::uint8_t levels, std::uint16_t first) {
 std::vector<std::byte> coded(Key root, std::optional<Tree<Material>> material,
                              std::optional<Tree<Water>> water = std::nullopt,
                              std::uint32_t version = 1) {
-    hog::grid::Page page{.root = root, .generator = 1, .shape = {}, .material = {}, .water = {}};
+    hog::grid::Page page{
+        .root = root, .generator = 1, .shape = {}, .material = {}, .water = {}, .woods = {}};
     if (material) {
         page.material = hog::grid::Held<Material>{.version = version, .tree = *material};
     }

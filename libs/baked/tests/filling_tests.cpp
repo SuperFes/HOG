@@ -103,7 +103,7 @@ TEST_CASE("pages another generator version made are filled again", "[baked][fill
         auto snapshot = store->read();
         REQUIRE(snapshot.has_value());
         CHECK(snapshot->page(Key{}).value().stale ==
-              hog::baked::Trees{.shape = true, .material = true, .water = true});
+              hog::baked::Trees{.shape = true, .material = true, .water = true, .woods = true});
     }
     Filler filler{generator, *store, jobs};
     filler.want(corner);

@@ -48,6 +48,7 @@ struct Filled {
     grid::Tree<grid::Shape> shape;
     grid::Tree<grid::Material> material;
     grid::Tree<grid::Water> water;
+    grid::Tree<grid::Woods> woods;
     // What's placed apart from the ground's shape, its middle in the node.
     std::vector<Placed> placed;
 };
@@ -57,7 +58,8 @@ struct Filled {
 // cave shown in it at that detail, is a leaf all solid or all open, so only nodes near the
 // surface split, down to `levels`, where each holds the surface's plane. Material is the solid's
 // just inside the surface; water marks the open space over the ground under the sea, a lake or a
-// river, as high as it rises in the year, with the body it is. Leaves above
+// river, as high as it rises in the year, with the body it is; woods are those on the ground
+// through each node, no finer than nodes 16 m across, none where no ground is. Leaves above
 // the grid's finest depth are open where finer detail can still come: near the surface, and in
 // solid where caves may lie. Fallen rocks big enough for the finest detail filled to show, and
 // crags, are placed apart, left out of the shape, as are vents; smaller rocks lie spread as

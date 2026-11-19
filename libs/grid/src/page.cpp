@@ -12,6 +12,7 @@ namespace {
 constexpr std::uint8_t has_shape = 1;
 constexpr std::uint8_t has_material = 2;
 constexpr std::uint8_t has_water = 4;
+constexpr std::uint8_t has_woods = 8;
 
 template <typename Kind>
 void write(ByteWriter& out, const std::optional<Held<Kind>>& held) {
@@ -58,10 +59,11 @@ std::vector<std::byte> Page::encode() const {
     out.write(root.z);
     out.write(generator);
     out.write(static_cast<std::uint8_t>((shape ? has_shape : 0U) | (material ? has_material : 0U) |
-                                        (water ? has_water : 0U)));
+                                        (water ? has_water : 0U) | (woods ? has_woods : 0U)));
     write(out, shape);
     write(out, material);
     write(out, water);
+    write(out, woods);
     return std::move(out).take();
 }
 
@@ -84,7 +86,7 @@ Result<Page> Page::decode(std::span<const std::byte> bytes) {
     if (!root.is_valid()) {
         return make_error(ErrorCode::Parse, "a page rooted outside the grid");
     }
-    if ((*trees & ~(has_shape | has_material | has_water)) != 0) {
+    if ((*trees & ~(has_shape | has_material | has_water | has_woods)) != 0) {
         return make_error(ErrorCode::Parse, std::format("page trees {}", *trees));
     }
     auto shape = read<Shape>(in, (*trees & has_shape) != 0);
@@ -99,6 +101,10 @@ Result<Page> Page::decode(std::span<const std::byte> bytes) {
     if (!water) {
         return std::unexpected(std::move(water.error()));
     }
+    auto woods = read<Woods>(in, (*trees & has_woods) != 0);
+    if (!woods) {
+        return std::unexpected(std::move(woods.error()));
+    }
     if (auto done = in.finish(); !done) {
         return std::unexpected(std::move(done.error()));
     }
@@ -106,7 +112,8 @@ Result<Page> Page::decode(std::span<const std::byte> bytes) {
                 .generator = *generator,
                 .shape = std::move(*shape),
                 .material = std::move(*material),
-                .water = std::move(*water)};
+                .water = std::move(*water),
+                .woods = std::move(*woods)};
 }
 
 } // namespace hog::grid

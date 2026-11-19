@@ -68,9 +68,11 @@ constexpr std::uint8_t tag_of() noexcept {
         return 0;
     } else if constexpr (std::is_same_v<Kind, grid::Material>) {
         return 1;
-    } else {
-        static_assert(std::is_same_v<Kind, grid::Water>);
+    } else if constexpr (std::is_same_v<Kind, grid::Water>) {
         return 2;
+    } else {
+        static_assert(std::is_same_v<Kind, grid::Woods>);
+        return 3;
     }
 }
 
@@ -197,7 +199,8 @@ std::optional<PageStore::Read> PageStore::Snapshot::page(grid::Key root) const {
                        .generator = shared.baking.generator,
                        .shape = {},
                        .material = {},
-                       .water = {}},
+                       .water = {},
+                       .woods = {}},
               .stale = {}};
     bool any = false;
     const auto take = [&]<typename Kind>(std::optional<grid::Held<Kind>>& tree, bool& stale) {
@@ -219,6 +222,7 @@ std::optional<PageStore::Read> PageStore::Snapshot::page(grid::Key root) const {
         take(read.page.shape, read.stale.shape);
         take(read.page.material, read.stale.material);
         take(read.page.water, read.stale.water);
+        take(read.page.woods, read.stale.woods);
     } catch (const lmdb::error&) {
         return std::nullopt;
     }
@@ -253,6 +257,8 @@ template std::optional<grid::Held<grid::Material>>
     PageStore::Snapshot::tree<grid::Material>(grid::Key) const;
 template std::optional<grid::Held<grid::Water>>
     PageStore::Snapshot::tree<grid::Water>(grid::Key) const;
+template std::optional<grid::Held<grid::Woods>>
+    PageStore::Snapshot::tree<grid::Woods>(grid::Key) const;
 
 template <typename Kind>
 std::optional<grid::Key> PageStore::Snapshot::holder(grid::Key key) const {
@@ -282,6 +288,7 @@ std::optional<grid::Key> PageStore::Snapshot::holder(grid::Key key) const {
 template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Shape>(grid::Key) const;
 template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Material>(grid::Key) const;
 template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Water>(grid::Key) const;
+template std::optional<grid::Key> PageStore::Snapshot::holder<grid::Woods>(grid::Key) const;
 
 Result<void> PageStore::Snapshot::refresh() {
     return guarded([&] -> Result<void> {
@@ -327,6 +334,8 @@ template Result<std::uint32_t>
 PageStore::Batch::put<grid::Material>(grid::Key, const grid::Tree<grid::Material>&);
 template Result<std::uint32_t> PageStore::Batch::put<grid::Water>(grid::Key,
                                                                   const grid::Tree<grid::Water>&);
+template Result<std::uint32_t> PageStore::Batch::put<grid::Woods>(grid::Key,
+                                                                  const grid::Tree<grid::Woods>&);
 
 PageStore::PageStore(std::unique_ptr<Impl> impl) : impl_{std::move(impl)} {}
 PageStore::PageStore(PageStore&&) noexcept = default;

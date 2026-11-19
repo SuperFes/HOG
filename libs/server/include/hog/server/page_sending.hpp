@@ -75,6 +75,7 @@ private:
         std::uint32_t shape = 0;
         std::uint32_t material = 0;
         std::uint32_t water = 0;
+        std::uint32_t woods = 0;
     };
     struct Player {
         std::optional<grid::Key> over; // the finest page it was last followed over

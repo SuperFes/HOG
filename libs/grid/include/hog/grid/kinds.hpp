@@ -159,4 +159,47 @@ struct Material : Discrete<std::uint16_t> {};
 // The water body a node's basin belongs to, 0 for none.
 struct Water : Discrete<std::uint32_t> {};
 
+// The woods on the ground through a node: whether any ground passes through it, the share of that
+// ground under crowns, and each kind of tree's share of those crowns, in parts of `whole`, the
+// shares summing to it where any stand. A node no ground passes through holds none.
+struct Stand {
+    static constexpr std::size_t kinds = 6;
+    static constexpr int whole = 255;
+
+    bool ground = false;
+    std::uint8_t cover = 0;
+    std::array<std::uint8_t, kinds> shares{};
+
+    // Of ground with `cover` and `shares`, each 0 to 1, the shares rounded to sum to the whole
+    // where they sum to any.
+    [[nodiscard]] static Stand of(double cover, const std::array<double, kinds>& shares) noexcept;
+
+    [[nodiscard]] double cover_share() const noexcept { return cover / static_cast<double>(whole); }
+    [[nodiscard]] double share(std::size_t kind) const noexcept {
+        return shares.at(kind) / static_cast<double>(whole);
+    }
+
+    friend constexpr bool operator==(const Stand&, const Stand&) noexcept = default;
+};
+
+// Woods sum up as the ground under them does: a coarse node's cover is the mean of its eight's
+// that hold ground, and its shares theirs weighed by their cover. Eight merge where those holding
+// ground are all within `tolerance` parts of that, whatever those holding none are, so even woods
+// stay coarse.
+struct Woods {
+    using Value = Stand;
+    static constexpr int tolerance = 13;
+
+    [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
+    [[nodiscard]] static std::optional<Value> merged(const std::array<Value, 8>& children,
+                                                     double side) noexcept;
+    [[nodiscard]] static std::uint64_t hash(const Value& value) noexcept;
+    // A byte, 0 for none, else 0x80 for ground and a bit for each kind with a share, the first
+    // kind lowest; then the cover and those shares.
+    static void write(ByteWriter& out, const Value& value);
+    // Fails on a stand with shares summing to neither none nor the whole, or a value with no ground
+    // and woods.
+    [[nodiscard]] static Result<Value> read(ByteReader& in);
+};
+
 } // namespace hog::grid

@@ -1,3 +1,4 @@
+#include <hog/core/bytes.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/grid/tree.hpp>
 
@@ -5,8 +6,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 using Catch::Approx;
 using hog::DVec3;
@@ -222,4 +227,78 @@ TEST_CASE("a crease is kept as fine as it is", "[grid]") {
     const auto back = Tree<Shape>::decode(ridge.encode());
     REQUIRE(back);
     CHECK(back->same_as(ridge));
+}
+
+TEST_CASE("a stand holds its cover and shares in parts summing to the whole", "[grid]") {
+    using hog::grid::Stand;
+    const Stand third = Stand::of(0.5, {1.0, 1.0, 1.0, 0.0, 0.0, 0.0});
+    CHECK(third.ground);
+    CHECK(third.cover == 128);
+    CHECK(third.shares[0] + third.shares[1] + third.shares[2] == Stand::whole);
+    CHECK(third.shares[0] == 85);
+    CHECK(Stand::of(2.0, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}).cover == Stand::whole);
+    CHECK(Stand::of(0.0, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}).shares == std::array<std::uint8_t, 6>{});
+    // Never more than the whole however they round.
+    const Stand spread = Stand::of(1.0, {0.1, 0.2, 0.3, 0.15, 0.15, 0.1});
+    int total = 0;
+    for (const std::uint8_t share : spread.shares) {
+        total += share;
+    }
+    CHECK(total == Stand::whole);
+
+    hog::ByteWriter out;
+    hog::grid::Woods::write(out, spread);
+    hog::grid::Woods::write(out, Stand{});
+    const std::vector<std::byte> bytes = std::move(out).take();
+    CHECK(bytes.size() == 9);
+    hog::ByteReader in{bytes};
+    CHECK(hog::grid::Woods::read(in).value() == spread);
+    CHECK(hog::grid::Woods::read(in).value() == Stand{});
+    std::vector<std::byte> broken = bytes;
+    broken[2] = std::byte{0};
+    hog::ByteReader short_of{broken};
+    CHECK_FALSE(hog::grid::Woods::read(short_of));
+
+    // Only the kinds standing there are written.
+    hog::ByteWriter pines;
+    hog::grid::Woods::write(pines, Stand::of(0.7, {0.0, 0.0, 0.0, 0.0, 1.0, 0.0}));
+    const std::vector<std::byte> few = std::move(pines).take();
+    CHECK(few.size() == 3);
+    hog::ByteReader few_in{few};
+    CHECK(hog::grid::Woods::read(few_in).value() == Stand::of(0.7, {0.0, 0.0, 0.0, 0.0, 1.0, 0.0}));
+}
+
+TEST_CASE("woods sum up over the ground under them, and even woods stay coarse", "[grid]") {
+    using hog::grid::Stand;
+    using hog::grid::Woods;
+    const Stand pines = Stand::of(1.0, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    const Stand oaks = Stand::of(0.5, {0.0, 1.0, 0.0, 0.0, 0.0, 0.0});
+    // Air beside the ground counts for nothing.
+    const Stand half = Woods::summary({pines, oaks, pines, oaks, {}, {}, {}, {}});
+    CHECK(half.ground);
+    CHECK(half.cover == 192);
+    // Pines cover twice what oaks do.
+    CHECK(half.shares[0] == 170);
+    CHECK(half.shares[1] == 85);
+    CHECK(Woods::summary({}) == Stand{});
+    CHECK_FALSE(Woods::merged({pines, oaks, pines, oaks, {}, {}, {}, {}}, 1.0));
+    const Stand near = Stand::of(0.99, {0.98, 0.02, 0.0, 0.0, 0.0, 0.0});
+    CHECK(Woods::merged({pines, near, pines, near, {}, {}, {}, {}}, 1.0));
+    CHECK(Woods::merged({}, 1.0) == Stand{});
+
+    // A slope of cover across the nodes merges only where it's gentle.
+    const auto sloped = [](double over) {
+        return Tree<Woods>::build(levels, [&](int x, int /*y*/, int z) {
+            return z != 20 ? Stand{}
+                           : Stand::of(std::fmod(x / over, 1.0), {1.0, 1.0, 0.0, 0.0, 0.0, 0.0});
+        });
+    };
+    CHECK(sloped(4096.0).leaves() < sloped(64.0).leaves());
+    const Tree<Woods> gentle = sloped(4096.0);
+    for (int x = 0; x < 64; x += 7) {
+        const auto found = gentle.at(levels, static_cast<std::uint32_t>(x), 3, 20);
+        CHECK(found.value.ground);
+        CHECK(std::abs(found.value.cover - Stand::of(x / 4096.0, {}).cover) <=
+              3 * Woods::tolerance);
+    }
 }

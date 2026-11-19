@@ -38,6 +38,7 @@ struct Baked {
     std::size_t shape_bytes = 0;
     std::size_t material_bytes = 0;
     std::size_t water_bytes = 0;
+    std::size_t woods_bytes = 0;
 };
 
 // Called after each batch with the pages done and those known to do so far.

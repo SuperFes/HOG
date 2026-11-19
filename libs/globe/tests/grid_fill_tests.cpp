@@ -3,6 +3,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
+#include <hog/globe/habitat.hpp>
 #include <hog/testing/quick.hpp>
 #include <hog/testing/world.hpp>
 
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -215,6 +217,61 @@ TEST_CASE("open sky and deep rock are each one leaf", "[globe][grid]") {
     CHECK(rock.shape.root().value.is_solid());
     CHECK(rock.material.root().value != hog::globe::palette_of(hog::globe::Material::Air));
     CHECK(rock.water.root().value == 0);
+    CHECK(air.woods.nodes() == 1);
+    CHECK_FALSE(air.woods.root().value.ground);
+    CHECK_FALSE(rock.woods.root().value.ground);
+}
+
+TEST_CASE("woods lie on the ground, as the place grows them, no finer than stands need",
+          "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const double ground = hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    // Nodes from a few hundred metres across down to the finest woods are held in.
+    int checked = 0;
+    for (int at = 4; std::cmp_less(at, grid.depth()); ++at) {
+        const auto depth = static_cast<std::uint8_t>(at);
+        if (grid.size(depth) > 2'000.0) {
+            continue;
+        }
+        CAPTURE(at);
+        const auto under = static_cast<std::uint8_t>(std::min(3, grid.depth() - depth));
+        const Key key = grid.key_at(up * ground, depth).value();
+        const Filled filled = fill(world, grid, key, under);
+        CHECK(filled.woods.root().value.ground);
+        const std::uint32_t across = 1U << under;
+        for (std::uint32_t x = 0; x < across; ++x) {
+            for (std::uint32_t y = 0; y < across; ++y) {
+                for (std::uint32_t z = 0; z < across; ++z) {
+                    const auto shape = filled.shape.at(under, x, y, z);
+                    const auto woods = filled.woods.at(under, x, y, z);
+                    const Key node{.depth = static_cast<std::uint8_t>(key.depth + woods.depth),
+                                   .x = (key.x << woods.depth) + (x >> (under - woods.depth)),
+                                   .y = (key.y << woods.depth) + (y >> (under - woods.depth)),
+                                   .z = (key.z << woods.depth) + (z >> (under - woods.depth))};
+                    const double side = grid.size(node.depth);
+                    // Held no finer than 16 m, but where the node filled is finer itself.
+                    CHECK(side >= std::min(16.0, grid.size(key.depth)));
+                    // A coarser plane merged over it may cross where its own didn't.
+                    if (!woods.value.ground) {
+                        CHECK((!shape.value.crosses() || shape.depth < woods.depth));
+                        continue;
+                    }
+                    if (woods.depth == under || side < 32.0) {
+                        const hog::flora::Woods truth =
+                            hog::globe::woods(world, grid.centre(node), side);
+                        const hog::grid::Stand stand =
+                            hog::grid::Stand::of(truth.cover, truth.shares);
+                        CHECK(std::abs(woods.value.cover - stand.cover) <=
+                              3 * hog::grid::Woods::tolerance);
+                        ++checked;
+                    }
+                }
+            }
+        }
+    }
+    CHECK(checked > 20);
 }
 
 TEST_CASE("ground splits only near its surface and follows the generator", "[globe][grid]") {
@@ -662,5 +719,36 @@ TEST_CASE("vents and pools are placed apart where they open", "[globe][grid]") {
         CHECK(placed->kind ==
               (site.pool ? hog::globe::Placed::Kind::Pool : hog::globe::Placed::Kind::Vent));
         CHECK(placed->middle == opening);
+    }
+}
+
+TEST_CASE("woods' share of filling a page", "[.bench][globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const double ground = hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    for (const int up_from_finest : {1, 2, 1}) {
+        const auto root = static_cast<std::uint8_t>(grid.depth() - (6 * up_from_finest));
+        const Key key = grid.key_at(up * ground, root).value();
+        const auto started = std::chrono::steady_clock::now();
+        const Filled filled = fill(world, grid, key, 6);
+        const double whole =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        // As many woods samples again, on their own.
+        const std::size_t samples = filled.woods.leaves();
+        const auto sampling = std::chrono::steady_clock::now();
+        double sum = 0.0;
+        for (std::size_t n = 0; n < samples; ++n) {
+            sum +=
+                hog::globe::woods(world, up, grid.size(static_cast<std::uint8_t>(root + 6))).cover;
+        }
+        const double woods =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - sampling).count();
+        WARN("page " << grid.size(root) << " m: filled in " << whole * 1e3 << " ms, "
+                     << filled.woods.leaves() << " woods leaves of " << filled.woods.nodes()
+                     << " nodes, " << filled.woods.encode().size() << " bytes (shape "
+                     << filled.shape.encode().size() << "); a sample "
+                     << woods / static_cast<double>(samples) * 1e6 << " us, mean cover "
+                     << sum / static_cast<double>(samples));
     }
 }

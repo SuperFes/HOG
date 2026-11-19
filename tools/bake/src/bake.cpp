@@ -65,6 +65,7 @@ bake_pages(const globe::Generator& generator, const grid::Grid& grid, baked::Pag
         baked.shape_bytes += page.shape.encode().size();
         baked.material_bytes += page.material.encode().size();
         baked.water_bytes += page.water.encode().size();
+        baked.woods_bytes += page.woods.encode().size();
         (*shapes)[slots[m]] = std::move(page.shape);
     }
     baked.filled += missing.size();

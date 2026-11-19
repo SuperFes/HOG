@@ -217,5 +217,6 @@ auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded) -
 template class Tree<Shape>;
 template class Tree<Material>;
 template class Tree<Water>;
+template class Tree<Woods>;
 
 } // namespace hog::grid

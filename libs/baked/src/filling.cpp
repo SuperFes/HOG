@@ -36,7 +36,7 @@ Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
             const globe::Filled& page = filled[n].value();
             for (const Result<std::uint32_t>& put :
                  {batch.put(pages[n], page.shape), batch.put(pages[n], page.material),
-                  batch.put(pages[n], page.water)}) {
+                  batch.put(pages[n], page.water), batch.put(pages[n], page.woods)}) {
                 if (!put) {
                     return std::unexpected{put.error()};
                 }
