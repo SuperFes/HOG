@@ -33,3 +33,5 @@ time_control = true
 
 [ground]
 store = "../var/store"
+# Fill what players wait on here; false when hog-bake --serve does it instead.
+generate = true

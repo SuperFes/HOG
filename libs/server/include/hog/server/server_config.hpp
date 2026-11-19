@@ -58,6 +58,9 @@ struct WeatherConfig {
 // Without one, a store of its own, gone when the server stops.
 struct GroundConfig {
     std::optional<std::filesystem::path> store;
+    // Whether the server fills what players wait on itself, on threads of its own; without,
+    // another process does, as `hog-bake --serve`.
+    bool generate = true;
 };
 
 struct ServerConfig {
@@ -117,6 +120,7 @@ struct ServerConfig {
 //
 //     [ground]                   # optional
 //     store = "../var/store"     # the chunk store; without it, one gone when the server stops
+//     generate = true            # fill it here; false when hog-bake --serve does
 //
 //     [net]                      # optional
 //     port = 7675                # for players, on every address

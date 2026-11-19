@@ -85,9 +85,17 @@ Each step is its own commit with tests, and the world stays playable after each.
    client holds each chunk's tree at its root, a deeper band's over a shallower's. Tests: what's
    sent is what's stored; the rest goes once filled; a chunk changed goes again and one gone is
    let go of; messages keep to their limits; asks replace what's due.
-2. **Generation apart.** The wants table, `hog-bake --serve` filling it near first, the server
-   picking up written chunks. Tests: a server with no generator sends what's stored at once and
-   the rest as the generator writes it; asks no one holds are dropped.
+2. **Generation apart.** Done: the server writes what its players wait on to a wants table
+   (`baked::WantsTable`, an LMDB environment of its own beside the store, so writing it never
+   waits on a fill), and `baked::Generating` fills what it asks for, forgetting what drops out
+   of it (`ChunkFiller::forget`), in `hog-bake --serve` or on threads of the server's own
+   (`[ground] generate`, on by default). Every write to the store, and every want found to need
+   nothing more, goes in the store's log in the same transaction; the server reads the log each
+   tick for what changed, whoever wrote it, so a bake in another process wakes what waits on it
+   too. Both sides poll, as LMDB has no notify. The server's tick never fills or decodes. Tests:
+   the log holds every write in order and keeps its newest; the table holds what it's last
+   given; what the table asks for is filled and answered, and what leaves it never is; a server
+   that leaves filling to another process sends what's stored when asked.
 3. **Stage versions.** Versions per stage; chunks record theirs; stale chunks served and remade
    near first; forming's results stored by version. Tests: bumping a fine stage leaves coarse
    chunks alone and remakes fine ones; stale chunks are still sent; a restart doesn't form again.
@@ -150,5 +158,5 @@ development a stage can also be marked to remake everywhere it's read.
 
 - How deep the stored levels go: as deep as it takes to look right, with the look below that
   from the ground's materials as drawn rather than stored shape.
-- Waking across processes: LMDB has no notify, so something beside it (a socket, an event file)
-  says when wants or chunks are written. Any technology that does the job is fair.
+- Waking across processes: both sides poll now (the server each tick, the generator every 50 ms
+  while idle). A socket or event file could wake them instead if polling ever shows.

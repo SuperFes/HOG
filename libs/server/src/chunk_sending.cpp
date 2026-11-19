@@ -112,6 +112,36 @@ void ChunkSending::changed(std::span<const baked::Region> written) {
     }
 }
 
+void ChunkSending::changed_everything() {
+    for (auto& [id, player] : players_) {
+        for (grid::ZMap<Want>* held : {&player.waiting, &player.whole}) {
+            for (const auto& [node, want] : *held) {
+                due_again(player, want);
+            }
+            held->clear();
+        }
+    }
+}
+
+std::vector<baked::WantsTable::Want> ChunkSending::wanted() const {
+    std::map<std::pair<grid::Key, std::uint8_t>, baked::Rank, std::less<>> ranked;
+    for (const auto& [id, player] : players_) {
+        for (const auto& [node, want] : player.waiting) {
+            const baked::Rank rank{.round = player.round, .priority = want.priority};
+            auto [at, fresh] = ranked.try_emplace({node, want.depth}, rank);
+            if (!fresh) {
+                at->second = std::max(at->second, rank);
+            }
+        }
+    }
+    std::vector<baked::WantsTable::Want> wants;
+    wants.reserve(ranked.size());
+    for (const auto& [asked, rank] : ranked) {
+        wants.push_back({.node = asked.first, .depth = asked.second, .rank = rank});
+    }
+    return wants;
+}
+
 void ChunkSending::answered(std::span<const baked::ChunkFiller::Asked> asked) {
     for (auto& [id, player] : players_) {
         for (const baked::ChunkFiller::Asked& ask : asked) {
@@ -251,8 +281,6 @@ ChunkSending::Next ChunkSending::next(net::ConnectionId player,
             held.waiting.erase(want.node);
         } else {
             held.waiting.insert_or_assign(want.node, want);
-            next.short_of.push_back(
-                {.want = want, .rank = {.round = held.round, .priority = want.priority}});
         }
     }
     held.due.erase(held.due.begin(), held.due.begin() + static_cast<std::ptrdiff_t>(done));

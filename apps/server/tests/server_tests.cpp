@@ -695,6 +695,7 @@ struct HeardChunks {
     std::map<std::uint8_t, hog::protocol::SentChunk> roots;
     hog::grid::WaterBodies told;
     std::optional<std::size_t> told_first;
+    MonotonicClock::duration took{};
 
     void hear(const hog::protocol::Message& message) {
         if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&message)) {
@@ -715,22 +716,18 @@ struct HeardChunks {
     }
 };
 
-} // namespace
-
-TEST_CASE("a player asking for the root is sent its chunks as stored with every water body first",
-          "[app][server]") {
-    const World world;
-    const auto config = world.config();
-    const auto server = playing(config);
+// Connects to `server`, asks for the root down to the foot of its band, and hears what comes
+// until the root's chunk of every kind has, or `patience` runs out.
+HeardChunks asked_root(Server& server, std::chrono::seconds patience) {
     auto connected =
-        hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+        hog::net::Client::connect(std::format("127.0.0.1:{}", server.players()->port()));
     REQUIRE(connected);
     hog::net::Client& client = *connected;
     HeardChunks heard;
     std::vector<hog::net::Event> events;
     std::atomic<bool> stop = false;
-    // Filling the root takes a debug build under load most of a minute.
-    const auto give_up = MonotonicClock::now() + 180s;
+    const auto began = MonotonicClock::now();
+    const auto give_up = began + patience;
     Visited timer{[&] {
         client.poll(events);
         for (const hog::net::Event& event : events) {
@@ -752,7 +749,19 @@ TEST_CASE("a player asking for the root is sent its chunks as stored with every 
             stop = true;
         }
     }};
-    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(server.run(timer, [] { return start; }, stop));
+    heard.took = MonotonicClock::now() - began;
+    return heard;
+}
+
+} // namespace
+
+TEST_CASE("a player asking for the root is sent its chunks as stored with every water body first",
+          "[app][server]") {
+    const World world;
+    const auto server = playing(world.config());
+    // Filling the root takes a debug build under load most of a minute.
+    const HeardChunks heard = asked_root(*server, 180s);
     REQUIRE(heard.roots.size() == 4);
     const auto shape = hog::grid::Tree<hog::grid::Shape>::decode(heard.roots.at(0).tree);
     REQUIRE(shape);
@@ -768,6 +777,23 @@ TEST_CASE("a player asking for the root is sent its chunks as stored with every 
     }
     CHECK(heard.told.bodies.contains(hog::globe::sea_body) ==
           server->generator().sea_level().has_value());
+}
+
+TEST_CASE("a server that leaves filling to another process sends what's stored when asked",
+          "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.ground.store = world.config().world.parent_path() / "store";
+    {
+        const auto filling = playing(config);
+        REQUIRE(asked_root(*filling, 180s).roots.size() == 4);
+    }
+    config.ground.generate = false;
+    const auto server = playing(config);
+    const HeardChunks heard = asked_root(*server, 60s);
+    REQUIRE(heard.roots.size() == 4);
+    // Held already, it goes the tick it's asked: well within the time a fill takes.
+    CHECK(heard.took < 20s);
 }
 
 TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <set>
+#include <tuple>
 #include <vector>
 
 using hog::baked::Bands;
@@ -257,4 +258,56 @@ TEST_CASE("fills start by rank, a later round first, a region taking its highest
     const auto region = [&](std::size_t n) { return Region{.band = last, .root = roots[n]}; };
     CHECK(filler.queued() == std::vector<Region>{region(5), region(4), region(3), region(1)});
     CHECK(settle(filler).size() == 6);
+}
+
+TEST_CASE("asks forgotten leave their fills not yet started unstarted", "[baked][chunk-filling]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    ChunkStore store = scratch(generator);
+    // One worker, so two fills at a time.
+    hog::jobs::JobSystem jobs{1};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    const Bands& bands = store.bands();
+    const Regions regions{bands, 3};
+    const std::uint8_t last = bands.count() - 1;
+
+    std::vector<Key> roots;
+    const double size = grid.size(regions.depth(last));
+    for (int step = 0; roots.size() < 5; ++step) {
+        const Key root =
+            grid.key_at(on_ground(generator, step * 1.5 * size), regions.depth(last)).value();
+        if (std::ranges::find(roots, root) == roots.end()) {
+            roots.push_back(root);
+        }
+    }
+    for (const Key root : roots) {
+        filler.want(root, bands.roots(last));
+    }
+    settle(filler);
+    std::ignore = filler.take_answered();
+
+    for (std::size_t n = 0; n < roots.size(); ++n) {
+        filler.want(roots[n], grid.depth(), {.round = 1, .priority = static_cast<double>(n)});
+    }
+    // One forgotten before it's taken in at all.
+    std::vector<ChunkFiller::Asked> gone{{.node = roots[0], .depth = grid.depth()}};
+    filler.forget(gone);
+    REQUIRE(filler.pump().has_value());
+    const auto region = [&](std::size_t n) { return Region{.band = last, .root = roots[n]}; };
+    // The two ranked highest start; of those waiting, forgetting one leaves the other.
+    CHECK(filler.queued() == std::vector<Region>{region(2), region(1)});
+    gone = {{.node = roots[2], .depth = grid.depth()}, {.node = roots[4], .depth = grid.depth()}};
+    filler.forget(gone);
+    CHECK(filler.queued() == std::vector<Region>{region(1)});
+    // What was under way is still written, with what's left.
+    std::vector<Region> expected{region(1), region(3), region(4)};
+    std::ranges::sort(expected);
+    CHECK(settle(filler) == expected);
+    // Only what's still asked for is answered.
+    std::vector<ChunkFiller::Asked> answered = filler.take_answered();
+    std::ranges::sort(answered);
+    std::vector<ChunkFiller::Asked> asked{{.node = roots[1], .depth = grid.depth()},
+                                          {.node = roots[3], .depth = grid.depth()}};
+    std::ranges::sort(asked);
+    CHECK(answered == asked);
 }

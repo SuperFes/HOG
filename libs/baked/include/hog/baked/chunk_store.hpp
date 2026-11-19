@@ -56,6 +56,22 @@ struct StoredChunk {
     std::span<const std::byte> tree;
 };
 
+// Something written to a store, numbered in the order written from one count, so whoever reads
+// the log in order sees every write since, by any process: a chunk changed or no longer held, or
+// a node found to need nothing more filled under it down to a depth.
+struct Logged {
+    enum class What : std::uint8_t { Chunk, Answered };
+
+    std::uint64_t at = 0;
+    What what = What::Chunk;
+    std::uint8_t kind = 0;  // a chunk's: 0 shape, 1 material, 2 water, 3 woods
+    std::uint8_t band = 0;  // a chunk's
+    grid::Key node;         // a chunk's root, or the node answered
+    std::uint8_t depth = 0; // answered down to
+
+    friend constexpr bool operator==(const Logged&, const Logged&) noexcept = default;
+};
+
 // A node's subtree of one kind, read from the chunks it's held in.
 template <typename Kind>
 struct Piece {
@@ -83,6 +99,8 @@ public:
         std::uint8_t band_height = 3;
         // Bytes a chunk holds before it's split; one at its band's roots is never split.
         std::size_t budget = std::size_t{32} << 10U;
+        // Entries the log keeps, the oldest let go past it.
+        std::size_t logged = std::size_t{1} << 20U;
     };
 
     // One consistent view of the store, as it was when taken or last refreshed: reads take no
@@ -113,6 +131,11 @@ public:
         // Whether the band's chunks hold all of `node`: one over it, or those under it together.
         template <typename Kind>
         [[nodiscard]] bool holds(std::uint8_t band, grid::Key node) const;
+        // What was logged after `after`, oldest first, `most` at most.
+        [[nodiscard]] std::vector<Logged> logged_since(std::uint64_t after, std::size_t most) const;
+        // The first and last entries' numbers the log holds; 0 for none.
+        [[nodiscard]] std::uint64_t first_logged() const;
+        [[nodiscard]] std::uint64_t last_logged() const;
         // Moves on to the store as it is now. Long-held snapshots keep old pages from being
         // reused.
         [[nodiscard]] Result<void> refresh();
@@ -141,6 +164,8 @@ public:
         template <typename Kind>
         [[nodiscard]] Result<std::vector<Chunk>> put(std::uint8_t band, grid::Key root,
                                                      const grid::Tree<Kind>& tree);
+        // Logs `node` as needing nothing more filled under it down to `depth`.
+        [[nodiscard]] Result<void> answered(grid::Key node, std::uint8_t depth);
 
     private:
         friend class ChunkStore;

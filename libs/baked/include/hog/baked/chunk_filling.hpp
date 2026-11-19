@@ -135,6 +135,11 @@ public:
     // thread at a time.
     [[nodiscard]] Result<std::vector<Region>> pump(bool wait = false);
 
+    // Lets go of `asks`, as no one wants them any more: fills that only they wait on and haven't
+    // started yet aren't started. Fills under way finish and are written. From the thread
+    // calling `pump`.
+    void forget(std::span<const Asked> asks);
+
     // What's been asked for that the store holds all of, since last taken. From the thread
     // calling `pump`.
     [[nodiscard]] std::vector<Asked> take_answered();

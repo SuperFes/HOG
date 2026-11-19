@@ -21,11 +21,13 @@ add_library(hog_baked
     src/chunk_filling.cpp
     src/chunk_store.cpp
     src/filling.cpp
+    src/generating.cpp
     src/lmdb_shared.cpp
     src/node.cpp
     src/page.cpp
     src/page_store.cpp
-    src/store.cpp)
+    src/store.cpp
+    src/wants_table.cpp)
 add_library(hog::baked ALIAS hog_baked)
 
 target_include_directories(hog_baked PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -36,10 +38,12 @@ hog_add_tests(hog_baked
     tests/chunk_filling_tests.cpp
     tests/chunk_store_tests.cpp
     tests/filling_tests.cpp
+    tests/generating_tests.cpp
     tests/node_tests.cpp
     tests/page_store_tests.cpp
     tests/page_tests.cpp
-    tests/store_tests.cpp)
+    tests/store_tests.cpp
+    tests/wants_table_tests.cpp)
 
 if(TARGET hog_baked_tests)
     target_link_libraries(hog_baked_tests PRIVATE hog::test_world)

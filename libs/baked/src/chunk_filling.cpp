@@ -267,6 +267,36 @@ Result<std::vector<Region>> ChunkFiller::pump(bool wait) {
     return written;
 }
 
+void ChunkFiller::forget(std::span<const Asked> asks) {
+    Impl& impl = *impl_;
+    std::set<Asked> gone;
+    for (Asked ask : asks) {
+        ask.depth = std::clamp(ask.depth, ask.node.depth, impl.grid.depth());
+        gone.insert(ask);
+    }
+    {
+        const std::scoped_lock guard{impl.lock};
+        std::erase_if(impl.asked, [&](const auto& asked) { return gone.contains(asked.first); });
+    }
+    for (auto at = impl.blocked.begin(); at != impl.blocked.end();) {
+        std::erase_if(at->second,
+                      [&](const auto& waiting) { return gone.contains(waiting.first); });
+        if (!at->second.empty()) {
+            ++at;
+            continue;
+        }
+        if (const auto queued = impl.queued_regions.find(at->first);
+            queued != impl.queued_regions.end()) {
+            impl.queued.erase({queued->second, at->first});
+            impl.queued_regions.erase(queued);
+        }
+        at = impl.blocked.erase(at);
+    }
+    for (const Asked& ask : gone) {
+        impl.answered.erase(ask);
+    }
+}
+
 std::vector<ChunkFiller::Asked> ChunkFiller::take_answered() {
     std::vector<Asked> asks{impl_->answered.begin(), impl_->answered.end()};
     impl_->answered.clear();

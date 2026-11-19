@@ -154,6 +154,8 @@ private:
     void cut_tiles();
     // Sends players the grid pieces due to them, and again what's been filled or changed since.
     void tell_pieces();
+    // Takes in what the store logged since last heard: chunks written, nodes answered.
+    void hear_log();
     // Sends the player the grid pieces due to it, as its connection has room.
     void send_pieces(net::ConnectionId connection);
     // Sends the player the water bodies by `ids`, as many messages as they take.

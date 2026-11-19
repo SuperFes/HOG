@@ -86,7 +86,7 @@ TEST_CASE("a player is sent the chunks about what it asks for as stored and each
     sending.ask(player, wants);
     CHECK(sending.due(player) == 2);
     const ChunkSending::Next next = next_of(sending, store);
-    CHECK(next.short_of.empty());
+    CHECK(sending.wanted().empty());
     CHECK(next.too_big == 0);
     CHECK(sending.due(player) == 0);
 
@@ -125,8 +125,11 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     sending.ask(player, wants);
     const ChunkSending::Next part = next_of(sending, store);
     CHECK_FALSE(part.chunks.empty());
-    REQUIRE(part.short_of.size() == 1);
-    CHECK(part.short_of.front().want.node == node);
+    const std::vector<hog::baked::WantsTable::Want> wanted = sending.wanted();
+    REQUIRE(wanted.size() == 1);
+    CHECK(wanted.front().node == node);
+    CHECK(wanted.front().depth == 12);
+    CHECK(wanted.front().rank.priority == 0.5);
     CHECK(sending.waiting(player) == 1);
     // Asked again while it waits, it's not gone over again.
     sending.ask(player, wants);
@@ -145,7 +148,7 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     }
     CHECK(sending.due(player) == 1);
     const ChunkSending::Next rest = next_of(sending, store);
-    CHECK(rest.short_of.empty());
+    CHECK(sending.wanted().empty());
     std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> held;
     for (const ChunkSending::Next* each : {&part, &rest}) {
         for (const hog::protocol::SentChunk& chunk : each->chunks) {
@@ -240,19 +243,55 @@ TEST_CASE("asking again replaces what's due and what no one waits on any more is
     sending.join(player);
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = node, .depth = 12}});
     // Nothing stored: it waits on a fill.
-    CHECK(next_of(sending, store).short_of.size() == 1);
+    CHECK(next_of(sending, store).chunks.empty());
     CHECK(sending.waiting(player) == 1);
+    CHECK(sending.wanted().size() == 1);
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
     CHECK(sending.waiting(player) == 0);
+    CHECK(sending.wanted().empty());
     CHECK(sending.due(player) == 1);
 
     // The filler finding nothing more to fill under a node makes it whole.
-    CHECK(next_of(sending, store).short_of.size() == 1);
+    CHECK(next_of(sending, store).chunks.empty());
+    CHECK(sending.wanted().size() == 1);
     const std::vector<hog::baked::ChunkFiller::Asked> answered{{.node = other, .depth = 12}};
     sending.answered(answered);
     CHECK(sending.waiting(player) == 0);
+    CHECK(sending.wanted().empty());
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
     CHECK(sending.due(player) == 0);
     sending.leave(player);
     CHECK(sending.due(player) == 0);
+}
+
+TEST_CASE("what two players wait on is wanted once at the higher rank and everything goes again "
+          "when told to",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    const hog::net::ConnectionId other{2};
+    ChunkSending sending{store.bands()};
+    sending.join(player);
+    sending.join(other);
+    sending.ask(player,
+                std::vector<ChunkSending::Want>{{.node = node, .depth = 12, .priority = 0.25}});
+    sending.ask(other,
+                std::vector<ChunkSending::Want>{{.node = node, .depth = 12, .priority = 0.75}});
+    const auto snapshot = store.read();
+    REQUIRE(snapshot.has_value());
+    CHECK(sending.next(player, *snapshot, lots, lots).chunks.empty());
+    CHECK(sending.next(other, *snapshot, lots, lots).chunks.empty());
+    const std::vector<hog::baked::WantsTable::Want> wanted = sending.wanted();
+    REQUIRE(wanted.size() == 1);
+    CHECK(wanted.front().rank.priority == 0.75);
+    CHECK(wanted.front().rank.round == 2);
+
+    sending.changed_everything();
+    CHECK(sending.due(player) == 1);
+    CHECK(sending.due(other) == 1);
+    CHECK(sending.waiting(player) == 0);
+    sending.leave(other);
+    CHECK(sending.next(player, *snapshot, lots, lots).chunks.empty());
+    CHECK(sending.wanted().front().rank.priority == 0.25);
 }

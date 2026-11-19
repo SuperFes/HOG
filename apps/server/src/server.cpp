@@ -2,6 +2,8 @@
 #include <hog/baked/chunk_filling.hpp>
 #include <hog/baked/chunk_store.hpp>
 #include <hog/baked/filling.hpp>
+#include <hog/baked/generating.hpp>
+#include <hog/baked/wants_table.hpp>
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/text_file.hpp>
@@ -27,6 +29,7 @@
 #include <limits>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -68,6 +71,9 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 
 } // namespace
 
+// Entries of the store's log read in a tick at most; the rest wait for the next.
+constexpr std::size_t most_logged_read = std::size_t{1} << 16U;
+
 // Chunks' bytes in one message, room left for their headings within what the connection lets go.
 constexpr std::size_t most_chunk_bytes = net::max_message_size - (std::size_t{64} << 10U);
 
@@ -76,15 +82,16 @@ constexpr std::size_t most_bodies_sent =
     std::min(protocol::most_bodies, net::max_message_size - 64);
 
 struct Server::PieceStreaming {
-    PieceStreaming(baked::ChunkStore opened, const globe::Generator& generator,
-                   jobs::JobSystem& jobs)
-        : store{std::move(opened)}, filler{generator, store, jobs}, sending{store.bands()},
-          bodies{globe::water_bodies(generator)} {}
+    PieceStreaming(baked::ChunkStore opened, baked::WantsTable table,
+                   baked::ChunkStore::Snapshot read, const globe::Generator& generator)
+        : store{std::move(opened)}, wants{std::move(table)}, snapshot{std::move(read)},
+          sending{store.bands()}, bodies{globe::water_bodies(generator)},
+          logged{snapshot.last_logged()} {}
 
-    // Opens the store the config names, or a scratch one, to fill from `generator`.
+    // Opens the store the config names, or a scratch one, to fill from `generator` here or as
+    // another process does.
     [[nodiscard]] static Result<std::unique_ptr<PieceStreaming>>
-    open(const server::GroundConfig& config, const globe::Generator& generator,
-         jobs::JobSystem& jobs) {
+    open(const server::GroundConfig& config, const globe::Generator& generator) {
         const baked::Baking baking = baked::baking_of(generator);
         const baked::ChunkStore::Options options{
             .map_bytes = chunk_store_bytes, .readers = 1024, .read_only = false};
@@ -93,23 +100,53 @@ struct Server::PieceStreaming {
         if (!opened) {
             return std::unexpected(opened.error());
         }
-        log::info(server_log, "streaming the grid from {}", opened->directory().string());
-        auto pieces = std::make_unique<PieceStreaming>(std::move(*opened), generator, jobs);
-        auto reading = pieces->store.read();
-        if (!reading) {
-            return std::unexpected(reading.error());
+        auto table = baked::WantsTable::open(baked::WantsTable::beside(opened->directory()));
+        if (!table) {
+            return std::unexpected(table.error());
         }
-        pieces->snapshot.emplace(std::move(*reading));
+        // What an earlier run waited on isn't anyone's now.
+        if (auto cleared = table->replace({}); !cleared) {
+            return std::unexpected(cleared.error());
+        }
+        auto read = opened->read();
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        log::info(server_log, "streaming the grid from {}{}", opened->directory().string(),
+                  config.generate ? "" : ", filled as another process does");
+        auto pieces = std::make_unique<PieceStreaming>(std::move(*opened), std::move(*table),
+                                                       std::move(*read), generator);
+        if (config.generate) {
+            pieces->start_generating(generator);
+        }
         return pieces;
     }
 
+    // Fills what players wait on, on threads of its own, all but a couple of the machine's.
+    void start_generating(const globe::Generator& generator) {
+        generator_thread = std::jthread{[this, &generator](const std::stop_token& stop) {
+            // The pool takes the thread that makes it as one of its own.
+            const unsigned cores = std::max(std::thread::hardware_concurrency(), 3U);
+            jobs::JobSystem jobs{cores - 2};
+            baked::Generating generating{generator, store, wants, jobs};
+            generating.run(stop, [](const Error& error) {
+                log::warn(server_log, "couldn't fill grid chunks: {}", error);
+            });
+        }};
+    }
+
     baked::ChunkStore store;
-    baked::ChunkFiller filler;
-    std::optional<baked::ChunkStore::Snapshot> snapshot;
+    baked::WantsTable wants;
+    baked::ChunkStore::Snapshot snapshot;
     server::ChunkSending sending;
     grid::WaterBodies bodies;
     // Those who've asked for chunks, which draw them in place of tiles.
     std::set<net::ConnectionId> asking;
+    // The last of the store's log read, and the wants as last written.
+    std::uint64_t logged = 0;
+    std::vector<baked::WantsTable::Want> written_wants;
+    // Last, so it stops before what it fills goes.
+    std::jthread generator_thread;
 };
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
@@ -232,7 +269,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
             }
         }
     }
-    auto pieces = PieceStreaming::open(config.ground, server->generator_, server->jobs_);
+    auto pieces = PieceStreaming::open(config.ground, server->generator_);
     if (!pieces) {
         return context("chunk store", pieces.error());
     }
@@ -701,21 +738,52 @@ void Server::tell_pieces() {
         return;
     }
     PieceStreaming& pieces = *pieces_;
-    if (auto written = pieces.filler.pump(); !written) {
-        log::warn(server_log, "couldn't fill grid chunks: {}", written.error());
-    } else if (!written->empty()) {
-        pieces.sending.changed(*written);
-    }
-    if (const auto answered = pieces.filler.take_answered(); !answered.empty()) {
-        pieces.sending.answered(answered);
-    }
-    if (auto refreshed = pieces.snapshot.value().refresh(); !refreshed) {
+    if (auto refreshed = pieces.snapshot.refresh(); !refreshed) {
         log::warn(server_log, "couldn't read the grid chunks: {}", refreshed.error());
         return;
     }
+    hear_log();
     for (const net::ConnectionId connection : pieces.asking) {
         send_pieces(connection);
     }
+    // What's still waited on, for whoever fills.
+    if (std::vector<baked::WantsTable::Want> wanted = pieces.sending.wanted();
+        wanted != pieces.written_wants) {
+        if (auto written = pieces.wants.replace(wanted); !written) {
+            log::warn(server_log, "couldn't say what's wanted of the grid: {}", written.error());
+        } else {
+            pieces.written_wants = std::move(wanted);
+        }
+    }
+}
+
+void Server::hear_log() {
+    PieceStreaming& pieces = *pieces_;
+    // Fallen behind what the log keeps, what changed is unknown.
+    if (const std::uint64_t first = pieces.snapshot.first_logged(); first > pieces.logged + 1) {
+        pieces.sending.changed_everything();
+        pieces.logged = first - 1;
+    }
+    const std::vector<baked::Logged> logged =
+        pieces.snapshot.logged_since(pieces.logged, most_logged_read);
+    if (logged.empty()) {
+        return;
+    }
+    std::vector<baked::Region> written;
+    std::vector<baked::ChunkFiller::Asked> answered;
+    for (const baked::Logged& each : logged) {
+        if (each.what == baked::Logged::What::Chunk) {
+            written.push_back({.band = each.band, .root = each.node});
+        } else {
+            answered.push_back({.node = each.node, .depth = each.depth});
+        }
+    }
+    std::ranges::sort(written);
+    const auto [from, to] = std::ranges::unique(written);
+    written.erase(from, to);
+    pieces.sending.changed(written);
+    pieces.sending.answered(answered);
+    pieces.logged = logged.back().at;
 }
 
 void Server::send_pieces(net::ConnectionId connection) {
@@ -730,11 +798,8 @@ void Server::send_pieces(net::ConnectionId connection) {
         return;
     }
     server::ChunkSending::Next next =
-        pieces.sending.next(connection, pieces.snapshot.value(),
+        pieces.sending.next(connection, pieces.snapshot,
                             std::min(tile_queue - queued, most_chunk_bytes), protocol::most_chunks);
-    for (const server::ChunkSending::Short& missing : next.short_of) {
-        pieces.filler.want(missing.want.node, missing.want.depth, missing.rank);
-    }
     if (next.too_big > 0) {
         log::warn(server_log, "{} grid chunks too big to send", next.too_big);
     }

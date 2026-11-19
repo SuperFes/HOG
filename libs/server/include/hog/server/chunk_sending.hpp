@@ -3,6 +3,7 @@
 #include <hog/baked/chunk_filling.hpp>
 #include <hog/baked/chunk_store.hpp>
 #include <hog/baked/filling.hpp>
+#include <hog/baked/wants_table.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/grid/kinds.hpp>
 #include <hog/grid/water_bodies.hpp>
@@ -45,17 +46,17 @@ public:
     // Has the nodes sent or waiting over what's written gone over again, in order of how big
     // they look.
     void changed(std::span<const baked::Region> written);
+    // Has everything sent or waiting gone over again, as where what changed is unknown.
+    void changed_everything();
     // Takes the nodes the filler found nothing more to fill under as whole.
     void answered(std::span<const baked::ChunkFiller::Asked> asked);
 
-    // A node the store held only part of, to be filled at its rank.
-    struct Short {
-        Want want;
-        baked::Rank rank;
-    };
+    // What every player waits on the store to hold more of, each node and depth once, at the
+    // highest rank any asks it: what's to be filled.
+    [[nodiscard]] std::vector<baked::WantsTable::Want> wanted() const;
+
     struct Next {
         std::vector<protocol::SentChunk> chunks;
-        std::vector<Short> short_of;
         // Chunks held but too big to send.
         std::size_t too_big = 0;
     };

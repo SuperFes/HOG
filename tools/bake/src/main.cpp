@@ -1,6 +1,8 @@
 #include <hog/bake/bake.hpp>
 #include <hog/baked/chunk_store.hpp>
 #include <hog/baked/filling.hpp>
+#include <hog/baked/generating.hpp>
+#include <hog/baked/wants_table.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/planet.hpp>
@@ -8,8 +10,10 @@
 #include <hog/jobs/job_system.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -21,18 +25,21 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both)\n"
+    "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both | "
+    "--serve)\n"
     "                [--planet FILE] [--threads N] [--map-gb N]\n"
     "Bakes the world's grid into the store at DIR ahead of play: over the whole planet down\n"
     "to the band holding the first level whose nodes are --coarse metres across or less, and\n"
     "within --across metres (1000 by default) about --at down to the finest. Regions already\n"
-    "held as this generator makes them are kept, so a stopped bake carries on. The planet is\n"
-    "config/planet.toml where that's found, else the default.\n";
+    "held as this generator makes them are kept, so a stopped bake carries on. With --serve,\n"
+    "fills what a server's players wait on instead, as its wants table beside the store asks,\n"
+    "until stopped. The planet is config/planet.toml where that's found, else the default.\n";
 
 struct Options {
     hog::globe::Planet planet;
@@ -42,7 +49,47 @@ struct Options {
     std::optional<double> coarse;
     std::optional<std::pair<double, double>> at; // degrees
     double across = 1000.0;
+    bool serve = false;
 };
+
+// Set from a signal handler, which may only touch lock-free atomics, so it has to be global.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> stopping{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
+extern "C" void stop_serving(int /*signal*/) {
+    stopping.store(true, std::memory_order_relaxed);
+}
+
+// Fills what the wants table beside the store asks for until stopped.
+int serve(const hog::globe::Generator& generator, hog::baked::ChunkStore& store,
+          std::uint32_t threads) {
+    auto wants = hog::baked::WantsTable::open(hog::baked::WantsTable::beside(store.directory()));
+    if (!wants) {
+        std::cerr << std::format("hog-bake: {}\n", wants.error());
+        return EXIT_FAILURE;
+    }
+    hog::jobs::JobSystem jobs{threads};
+    hog::baked::Generating generating{generator, store, *wants, jobs};
+    for (const int signal : {SIGINT, SIGTERM}) {
+        if (std::signal(signal, stop_serving) == SIG_ERR) {
+            std::cerr << std::format("hog-bake: can't handle signal {}\n", signal);
+        }
+    }
+    std::cerr << std::format("serving the wants for {}\n", store.directory().string());
+    bool busy = false;
+    while (!stopping) {
+        const auto stepped = generating.step(busy);
+        if (!stepped) {
+            std::cerr << std::format("hog-bake: {}\n", stepped.error());
+        }
+        busy = stepped.value_or(false);
+        if (!busy) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        }
+    }
+    return EXIT_SUCCESS;
+}
 
 std::optional<double> number(std::string_view text) {
     const std::string part{text};
@@ -115,19 +162,28 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-bake: {}\n\n{}", why, usage);
         return EXIT_FAILURE;
     };
-    for (std::size_t k = 0; k < arguments.size(); k += 2) {
+    for (std::size_t k = 0; k < arguments.size();) {
+        if (arguments[k] == "--serve") {
+            options.serve = true;
+            ++k;
+            continue;
+        }
         if (k + 1 >= arguments.size()) {
             return refuse(std::format("{} needs a value", arguments[k]));
         }
         if (!apply(options, arguments[k], arguments[k + 1])) {
             return refuse(std::format("can't take {} {}", arguments[k], arguments[k + 1]));
         }
+        k += 2;
     }
     if (!options.store) {
         return refuse("--store is required");
     }
-    if (!options.coarse && !options.at) {
-        return refuse("give --coarse, --at, or both, to say what to bake");
+    if (!options.coarse && !options.at && !options.serve) {
+        return refuse("give --coarse, --at, or both, to say what to bake, or --serve");
+    }
+    if (options.serve && (options.coarse || options.at)) {
+        return refuse("--serve bakes nothing ahead");
     }
     const auto formed = std::chrono::steady_clock::now();
     const hog::globe::Generator generator{options.planet, [](std::string_view stage) {
@@ -145,6 +201,9 @@ int run(std::span<const std::string_view> arguments) {
     if (!store) {
         std::cerr << std::format("hog-bake: {}\n", store.error());
         return EXIT_FAILURE;
+    }
+    if (options.serve) {
+        return serve(generator, *store, options.threads);
     }
     hog::bake::Reach reach;
     if (options.coarse) {

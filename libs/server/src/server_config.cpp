@@ -296,7 +296,7 @@ private:
 
 [[nodiscard]] Result<void> parse_ground(const Table& ground, const std::filesystem::path& base,
                                         GroundConfig& config) {
-    if (auto known = ground.only({"store"}); !known) {
+    if (auto known = ground.only({"store", "generate"}); !known) {
         return known;
     }
     const auto store = ground.string("store");
@@ -306,6 +306,11 @@ private:
     if (*store) {
         config.store = (base / **store).lexically_normal();
     }
+    const auto generate = ground.boolean("generate");
+    if (!generate) {
+        return std::unexpected(generate.error());
+    }
+    config.generate = generate->value_or(config.generate);
     return {};
 }
 

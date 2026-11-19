@@ -368,6 +368,71 @@ TEST_CASE("chunks are given as stored and each decodes to its part of what was p
     CHECK(snapshot->stored<hog::grid::Shape>(2, root).empty());
 }
 
+TEST_CASE("every chunk written or let go of and every node answered is logged in order",
+          "[baked][chunks]") {
+    ChunkStore store = scratch(baking(), 3, 512);
+    const Key root{.depth = 3, .x = 2, .y = 5, .z = 1};
+    auto snapshot = store.read();
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->last_logged() == 0);
+    const std::vector<Chunk> made = put(store, 2, root, sheet(6, 1));
+    const Key node = under(root, 7, 4);
+    REQUIRE(store
+                .write([&](ChunkStore::Batch& batch) -> Result<void> {
+                    return batch.answered(node, 9);
+                })
+                .has_value());
+    // Held as one chunk over them all, those under go.
+    const std::vector<Chunk> wider =
+        put(store, 2, root.ancestor(2), Tree<hog::grid::Material>{7, 3, false});
+
+    REQUIRE(snapshot.value().refresh().has_value());
+    const std::vector<hog::baked::Logged> logged = snapshot->logged_since(0, 1000);
+    REQUIRE(logged.size() == made.size() + 1 + wider.size());
+    for (std::size_t n = 0; n < logged.size(); ++n) {
+        CHECK(logged[n].at == n + 1);
+    }
+    for (std::size_t n = 0; n < made.size(); ++n) {
+        CHECK(logged[n].what == hog::baked::Logged::What::Chunk);
+        CHECK(logged[n].kind == 1);
+        CHECK(logged[n].band == 2);
+        CHECK(logged[n].node == made[n].root);
+        CHECK(logged[n].at == made[n].version);
+    }
+    CHECK(logged[made.size()].what == hog::baked::Logged::What::Answered);
+    CHECK(logged[made.size()].node == node);
+    CHECK(logged[made.size()].depth == 9);
+    for (std::size_t n = 0; n < wider.size(); ++n) {
+        CHECK(logged[made.size() + 1 + n].node == wider[n].root);
+    }
+    CHECK(snapshot->first_logged() == 1);
+    CHECK(snapshot->last_logged() == logged.size());
+    CHECK(snapshot->logged_since(made.size(), 1).front().what ==
+          hog::baked::Logged::What::Answered);
+}
+
+TEST_CASE("the log keeps only its newest entries", "[baked][chunks]") {
+    auto opened = ChunkStore::scratch(baking(), {.map_bytes = std::uint64_t{256} << 20U,
+                                                 .readers = 64,
+                                                 .read_only = false,
+                                                 .band_height = 3,
+                                                 .budget = 512,
+                                                 .logged = 10});
+    REQUIRE(opened.has_value());
+    for (std::uint8_t n = 0; n < 25; ++n) {
+        REQUIRE(opened
+                    ->write([&](ChunkStore::Batch& batch) -> Result<void> {
+                        return batch.answered(Key{.depth = 1, .x = n % 2U}, n);
+                    })
+                    .has_value());
+    }
+    const auto snapshot = opened->read();
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->first_logged() == 16);
+    CHECK(snapshot->last_logged() == 25);
+    CHECK(snapshot->logged_since(0, 100).size() == 10);
+}
+
 TEST_CASE("a tree put under a held chunk changes only what's under it", "[baked][chunks]") {
     ChunkStore store = scratch(baking(), 3, std::size_t{1} << 20U);
     const Key root{.depth = 3, .x = 2, .y = 5, .z = 1};

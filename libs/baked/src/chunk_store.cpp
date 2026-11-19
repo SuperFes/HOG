@@ -29,6 +29,7 @@ using grid::aligned;
 using grid::aligned_end;
 
 constexpr const char* chunks_name = "chunks";
+constexpr const char* log_name = "log";
 // Not the page store's, so neither is taken for the other.
 constexpr const char* about_name = "chunk store";
 constexpr std::string_view format_key = "format";
@@ -39,6 +40,8 @@ struct Shared {
     lmdb::env env{nullptr};
     lmdb::dbi chunks;
     lmdb::dbi about;
+    // Absent in a store opened read only from before the log was kept.
+    std::optional<lmdb::dbi> log;
     ChunkStore::Options options;
     Baking baking;
     Bands bands;
@@ -164,6 +167,59 @@ std::vector<Held> under(const lmdb::txn& txn, const lmdb::dbi& chunks, std::uint
     return found;
 }
 
+using LogKey = std::array<std::byte, 8>;
+
+LogKey log_key(std::uint64_t at) noexcept {
+    LogKey key{};
+    for (std::size_t k = 0; k < key.size(); ++k) {
+        key.at(k) = static_cast<std::byte>(at >> (8U * (7U - k)));
+    }
+    return key;
+}
+
+std::uint64_t log_at(std::string_view key) noexcept {
+    std::uint64_t at = 0;
+    for (const std::byte part : as_bytes(key)) {
+        at = (at << 8U) | std::to_integer<std::uint64_t>(part);
+    }
+    return at;
+}
+
+std::vector<std::byte> log_value(const Logged& logged) {
+    ByteWriter out;
+    out.write(static_cast<std::uint8_t>(logged.what));
+    out.write(logged.kind);
+    out.write(logged.band);
+    out.write(logged.node.depth);
+    out.write(logged.node.x);
+    out.write(logged.node.y);
+    out.write(logged.node.z);
+    out.write(logged.depth);
+    return std::move(out).take();
+}
+
+std::optional<Logged> logged_from(std::string_view key, std::string_view value) {
+    ByteReader in{as_bytes(value)};
+    const auto what = in.read<std::uint8_t>();
+    const auto kind = in.read<std::uint8_t>();
+    const auto band = in.read<std::uint8_t>();
+    const auto depth = in.read<std::uint8_t>();
+    const auto x = in.read<std::uint32_t>();
+    const auto y = in.read<std::uint32_t>();
+    const auto z = in.read<std::uint32_t>();
+    const auto to = in.read<std::uint8_t>();
+    if (key.size() != sizeof(LogKey) || !what || *what > 1 || !kind || !band || !depth || !x ||
+        !y || !z || !to) {
+        return std::nullopt;
+    }
+    return Logged{.at = log_at(key),
+                  .what = static_cast<Logged::What>(*what),
+                  .kind = *kind,
+                  .band = *band,
+                  .node = {.depth = *depth, .x = *x, .y = *y, .z = *z},
+                  .depth = *to};
+}
+
 // Where `node` lies under `root`: its depth below it and place among that depth's.
 struct Below {
     std::uint8_t depth = 0;
@@ -193,6 +249,33 @@ std::vector<std::byte> format_bytes() {
     ByteWriter out;
     out.write(ChunkStore::format);
     return std::move(out).take();
+}
+
+// Opens the store's tables, made where it's new: whether it was.
+Result<bool> open_tables(const lmdb::txn& txn, Shared& shared) {
+    const bool read_only = shared.options.read_only;
+    // Named databases are keys of the unnamed one: anything else there is another store's.
+    const lmdb::dbi names = lmdb::dbi::open(txn, nullptr);
+    std::string_view held;
+    const bool fresh = !get(txn, names, about_name, held);
+    if (fresh) {
+        MDB_stat stat{};
+        lmdb::dbi_stat(txn, names, &stat);
+        if (stat.ms_entries != 0) {
+            return make_error(ErrorCode::Unsupported, "not a chunk store");
+        }
+        if (read_only) {
+            return make_error(ErrorCode::NotFound, "no chunk store");
+        }
+    }
+    const unsigned create = fresh ? MDB_CREATE : 0U;
+    shared.about = lmdb::dbi::open(txn, about_name, create);
+    shared.chunks = lmdb::dbi::open(txn, chunks_name, create);
+    // Stores from before the log get one, unless only read.
+    if (get(txn, names, log_name, held) || !read_only) {
+        shared.log = lmdb::dbi::open(txn, log_name, read_only ? 0U : MDB_CREATE);
+    }
+    return fresh;
 }
 
 Result<void> mark(const lmdb::txn& txn, Shared& shared, bool fresh) {
@@ -351,6 +434,33 @@ struct ChunkStore::Batch::Impl {
         out.write(next + 1);
         shared->about.put(txn, next_version_key, as_view(out.bytes()));
         return next;
+    }
+
+    // Logs `logged` at the number `at`, where the store keeps a log.
+    void log(std::uint64_t at, Logged logged) const {
+        if (!shared->log) {
+            return;
+        }
+        logged.at = at;
+        shared->log->put(txn, as_view(log_key(at)), as_view(log_value(logged)));
+    }
+
+    // Lets go of the oldest entries past what the log keeps.
+    void trim() const {
+        if (!shared->log) {
+            return;
+        }
+        MDB_stat stat{};
+        lmdb::dbi_stat(txn, *shared->log, &stat);
+        std::size_t over =
+            stat.ms_entries > shared->options.logged ? stat.ms_entries - shared->options.logged : 0;
+        lmdb::cursor cursor = lmdb::cursor::open(txn.handle(), shared->log->handle());
+        std::string_view key;
+        std::string_view value;
+        while (over > 0 && cursor.get(key, value, MDB_FIRST)) {
+            lmdb::cursor_del(cursor.handle(), 0);
+            --over;
+        }
     }
 };
 
@@ -520,10 +630,19 @@ Result<std::vector<Chunk>> ChunkStore::Batch::put(std::uint8_t band, grid::Key r
     return guarded([&] -> Result<std::vector<Chunk>> {
         std::vector<Chunk> touched;
         const lmdb::txn& txn = impl_->txn;
+        const auto logged = [&](grid::Key at) {
+            return Logged{.at = 0,
+                          .what = Logged::What::Chunk,
+                          .kind = tag,
+                          .band = band,
+                          .node = at,
+                          .depth = 0};
+        };
         const auto erase = [&](grid::Key at) {
             const ChunkKey key = key_of(tag, band, at);
             shared.chunks.del(txn, as_view(key));
             touched.push_back({.band = band, .root = at, .version = 0});
+            impl_->log(impl_->next_version(), logged(at));
         };
         // What's to be held, rooted where.
         grid::Key whole = root;
@@ -565,12 +684,82 @@ Result<std::vector<Chunk>> ChunkStore::Batch::put(std::uint8_t band, grid::Key r
             out.write_bytes(bytes);
             shared.chunks.put(txn, as_view(key_of(tag, band, at)), as_view(out.bytes()));
             touched.push_back({.band = band, .root = at, .version = version});
+            impl_->log(version, logged(at));
         }
         for (const auto& [at, version] : before) {
             erase(at);
         }
         return touched;
     });
+}
+
+Result<void> ChunkStore::Batch::answered(grid::Key node, std::uint8_t depth) {
+    if (!node.is_valid()) {
+        return make_error(ErrorCode::InvalidArgument, "a node off the grid answered");
+    }
+    return guarded([&] -> Result<void> {
+        impl_->log(impl_->next_version(), {.at = 0,
+                                           .what = Logged::What::Answered,
+                                           .kind = 0,
+                                           .band = 0,
+                                           .node = node,
+                                           .depth = depth});
+        return {};
+    });
+}
+
+std::vector<Logged> ChunkStore::Snapshot::logged_since(std::uint64_t after,
+                                                       std::size_t most) const {
+    std::vector<Logged> found;
+    const std::optional<lmdb::dbi>& log = impl_->shared->log;
+    if (!log || most == 0) {
+        return found;
+    }
+    try {
+        lmdb::cursor cursor = lmdb::cursor::open(impl_->txn.handle(), log->handle());
+        const LogKey first = log_key(after + 1);
+        std::string_view key = as_view(first);
+        std::string_view value;
+        for (bool more = cursor.get(key, value, MDB_SET_RANGE); more && found.size() < most;
+             more = cursor.get(key, value, MDB_NEXT)) {
+            if (std::optional<Logged> logged = logged_from(key, value)) {
+                found.push_back(*logged);
+            }
+        }
+    } catch (const lmdb::error&) {
+        return {};
+    }
+    return found;
+}
+
+std::uint64_t ChunkStore::Snapshot::first_logged() const {
+    const std::optional<lmdb::dbi>& log = impl_->shared->log;
+    if (!log) {
+        return 0;
+    }
+    try {
+        lmdb::cursor cursor = lmdb::cursor::open(impl_->txn.handle(), log->handle());
+        std::string_view key;
+        std::string_view value;
+        return cursor.get(key, value, MDB_FIRST) ? log_at(key) : 0;
+    } catch (const lmdb::error&) {
+        return 0;
+    }
+}
+
+std::uint64_t ChunkStore::Snapshot::last_logged() const {
+    const std::optional<lmdb::dbi>& log = impl_->shared->log;
+    if (!log) {
+        return 0;
+    }
+    try {
+        lmdb::cursor cursor = lmdb::cursor::open(impl_->txn.handle(), log->handle());
+        std::string_view key;
+        std::string_view value;
+        return cursor.get(key, value, MDB_LAST) ? log_at(key) : 0;
+    } catch (const lmdb::error&) {
+        return 0;
+    }
 }
 
 ChunkStore::ChunkStore(std::unique_ptr<Impl> impl) : impl_{std::move(impl)} {}
@@ -597,6 +786,7 @@ Result<ChunkStore> ChunkStore::open(const std::filesystem::path& directory, cons
                  .shared = {.env = lmdb::env{nullptr},
                             .chunks = {},
                             .about = {},
+                            .log = {},
                             .options = options,
                             .baking = baking,
                             .bands = Bands{options.band_height, baking.grid.depth()}}});
@@ -604,7 +794,7 @@ Result<ChunkStore> ChunkStore::open(const std::filesystem::path& directory, cons
         shared.env = lmdb::env::create();
         shared.env.set_mapsize(options.map_bytes);
         shared.env.set_max_readers(options.readers);
-        shared.env.set_max_dbs(2);
+        shared.env.set_max_dbs(3);
         // Snapshots aren't tied to the thread that took them; reads are scattered, so the OS
         // reading ahead only wastes the page cache.
         unsigned flags = MDB_NOTLS | MDB_NORDAHEAD;
@@ -613,24 +803,11 @@ Result<ChunkStore> ChunkStore::open(const std::filesystem::path& directory, cons
         }
         shared.env.open(directory.string().c_str(), flags, 0644);
         lmdb::txn txn = lmdb::txn::begin(shared.env, nullptr, options.read_only ? MDB_RDONLY : 0U);
-        // Named databases are keys of the unnamed one: anything else there is another store's.
-        const lmdb::dbi names = lmdb::dbi::open(txn, nullptr);
-        std::string_view held;
-        const bool fresh = !get(txn, names, about_name, held);
-        if (fresh) {
-            MDB_stat stat{};
-            lmdb::dbi_stat(txn, names, &stat);
-            if (stat.ms_entries != 0) {
-                return make_error(ErrorCode::Unsupported, "not a chunk store");
-            }
-            if (options.read_only) {
-                return make_error(ErrorCode::NotFound, "no chunk store");
-            }
+        const Result<bool> fresh = open_tables(txn, shared);
+        if (!fresh) {
+            return std::unexpected{fresh.error()};
         }
-        const unsigned create = fresh ? MDB_CREATE : 0U;
-        shared.about = lmdb::dbi::open(txn, about_name, create);
-        shared.chunks = lmdb::dbi::open(txn, chunks_name, create);
-        if (Result<void> marked = mark(txn, shared, fresh); !marked) {
+        if (Result<void> marked = mark(txn, shared, *fresh); !marked) {
             return std::unexpected{marked.error()};
         }
         txn.commit();
@@ -684,6 +861,7 @@ Result<void> ChunkStore::write(const std::function<Result<void>(Batch&)>& body) 
             impl.txn.abort();
             return done;
         }
+        impl.trim();
         impl.txn.commit();
         return {};
     });
