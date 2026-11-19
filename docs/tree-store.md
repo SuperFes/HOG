@@ -1,5 +1,7 @@
 # The tree, stored and sent without tiles
 
+> Folded into [the world tree](world-tree.md) (2026-11-19), whose steps supersede these.
+
 The world's ground is one octree per kind (shape, material, water, woods) over the grid: every
 node holds a correct summary of what's under it at its own size, identical nodes are shared, and
 the generator fills any node to any depth. That stays. What goes is cutting it into fixed pages

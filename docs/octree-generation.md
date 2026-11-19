@@ -1,5 +1,7 @@
 # The shape tree
 
+> Folded into [the world tree](world-tree.md) (2026-11-19), whose steps supersede these.
+
 Proposed 2026-11-12. The world is one spatial tree that can be cut into anywhere and split as far
 as detail is wanted. Every node, at any depth, says how it looks and what it means to the game. No
 tiles, stacks, columns or tile workers: those go.
