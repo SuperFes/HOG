@@ -58,13 +58,12 @@ and a change to the generator remakes only what it touches.
 ## Edits over what's generated
 
 Generated nodes are a cache: anything made can be thrown away and made again from the levels over
-it, as Outerra refines its terrain as it's viewed. Edits are the one thing that can't be: digging,
-building up, the ground flattened under a house. Each edit is kept as a shape (a ball dug, a box
-filled, a slab levelled) in its own table, listed on the nodes it touches, and applied over the
-generated nodes whenever they're made, with the summaries over them redone up the path. Remaking a
-stage after a version change remakes the ground under an edit and puts the edit back on it. Houses
-and other buildings are objects standing on the ground, not ground; only what they do to it (the
-levelled slab, a cellar dug) is an edit.
+it, as Outerra refines its terrain as it's viewed. The world is remade until it's right; edits
+matter once it's settled, and needn't outlive a remake before then. Each edit is kept as a shape
+(a ball dug, a box filled, a slab levelled) in its own table, listed on the nodes it touches, and
+applied over the generated nodes as they're made, with the summaries over them redone up the
+path. Houses and other buildings are objects standing on the ground, not ground; only what they
+do to it (the levelled slab, a cellar dug) is an edit.
 
 ## Sending what's stored
 
@@ -97,7 +96,7 @@ Each step is its own commit with tests, and the world stays playable after each.
 6. **Seeded layers.** Unique-scale leaves and the layers under them. Tests: a read from any depth
    agrees with one from the root; seams match across neighbours; layers steer by stored numbers.
 7. **Woods, rocks and materials from stored numbers.** No `Formed::at` behind them.
-8. **Edits as shapes** over generated nodes, kept through remakes.
+8. **Edits as shapes** over generated nodes; a remake may drop them.
 9. **Remove** `Formed::at` as a play path, `Generator::columns`, tiles, pages and their stores;
    the bot and walking stand on the tree.
 
