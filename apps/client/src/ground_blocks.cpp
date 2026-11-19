@@ -117,8 +117,8 @@ void balance(Leaves& leaves) {
 
 // What's held over a node, where it's the same all through: the leaf over it holds no plane, or
 // one that misses it.
-std::optional<grid::Surface> uniform(const PagesSnapshot& pages, grid::Key node) {
-    const auto known = pages.at<grid::Shape>(node);
+std::optional<grid::Surface> uniform(const PiecesSnapshot& pieces, grid::Key node) {
+    const auto known = pieces.at<grid::Shape>(node);
     if (!known) {
         return grid::Surface::open();
     }
@@ -129,7 +129,7 @@ std::optional<grid::Surface> uniform(const PagesSnapshot& pages, grid::Key node)
     if (known->found.depth >= node.depth) {
         return std::nullopt;
     }
-    const grid::Grid& grid = pages.grid();
+    const grid::Grid& grid = pieces.grid();
     const grid::Key leaf = node.ancestor(known->found.depth);
     const DVec3 normal = value.normal();
     const double away = (value.distance() * grid.size(leaf.depth)) +
@@ -144,8 +144,8 @@ std::optional<grid::Surface> uniform(const PagesSnapshot& pages, grid::Key node)
 
 // Whether the ground may cross a block: where it or a node beside it isn't one thing all
 // through, or they aren't all the same thing.
-bool may_cross(const PagesSnapshot& pages, grid::Key node) {
-    const auto whole = uniform(pages, node);
+bool may_cross(const PiecesSnapshot& pieces, grid::Key node) {
+    const auto whole = uniform(pieces, node);
     if (!whole) {
         return true;
     }
@@ -153,7 +153,7 @@ bool may_cross(const PagesSnapshot& pages, grid::Key node) {
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
                 const auto next = node.beside(dx, dy, dz);
-                const auto near = next ? uniform(pages, *next) : whole;
+                const auto near = next ? uniform(pieces, *next) : whole;
                 if (!near || *near != *whole) {
                     return true;
                 }
@@ -185,19 +185,19 @@ std::vector<Block> balanced_blocks(const grid::Grid& grid, std::uint8_t cells,
     return blocks;
 }
 
-std::vector<Block> ground_blocks(const PagesSnapshot& pages, DVec3 eye, std::uint8_t cells,
+std::vector<Block> ground_blocks(const PiecesSnapshot& pieces, DVec3 eye, std::uint8_t cells,
                                  const grid::View& view) {
-    const grid::Grid& grid = pages.grid();
+    const grid::Grid& grid = pieces.grid();
     std::vector<Block> blocks = balanced_blocks(grid, cells, [&](grid::Key node) {
-        if (const auto known = pages.at<grid::Shape>(node); known && !known->found.open &&
-                                                            known->found.depth <= node.depth &&
-                                                            uniform(pages, node)) {
+        if (const auto known = pieces.at<grid::Shape>(node); known && !known->found.open &&
+                                                             known->found.depth <= node.depth &&
+                                                             uniform(pieces, node)) {
             return false;
         }
         return view.coarse(grid, static_cast<std::uint8_t>(node.depth + cells),
                            grid.distance(node, eye));
     });
-    std::erase_if(blocks, [&](const Block& block) { return !may_cross(pages, block.node); });
+    std::erase_if(blocks, [&](const Block& block) { return !may_cross(pieces, block.node); });
     return blocks;
 }
 

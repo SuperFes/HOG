@@ -78,9 +78,9 @@ public:
     // welcomed, or of a scale of nothing.
     void hurry(std::uint32_t scale);
 
-    // Asks the server for the grid pages in `ask`, in place of those asked for before; nothing
+    // Asks the server for the grid pieces in `ask`, in place of those asked for before; nothing
     // before being welcomed.
-    void ask(const protocol::Ask& ask);
+    void ask(const protocol::AskPieces& ask);
 
     // Game seconds a real one the server says its world runs at, 1 until it says otherwise.
     [[nodiscard]] std::uint32_t world_rate() const noexcept { return world_rate_; }
@@ -93,10 +93,10 @@ public:
         return std::exchange(tiles_, {});
     }
 
-    // Grid pages the server sent since last asked, oldest first, each as `grid::Page::encode`
+    // Grid pieces the server sent since last asked, oldest first, each as `grid::Piece::encode`
     // codes it.
-    [[nodiscard]] std::vector<std::vector<std::byte>> take_pages() noexcept {
-        return std::exchange(pages_, {});
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_pieces() noexcept {
+        return std::exchange(pieces_, {});
     }
     // Water bodies the server sent since last asked, oldest first, each as
     // `grid::WaterBodies::encode` codes them.
@@ -163,7 +163,7 @@ private:
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentTile> tiles_;
-    std::vector<std::vector<std::byte>> pages_;
+    std::vector<std::vector<std::byte>> pieces_;
     std::vector<std::vector<std::byte>> bodies_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;

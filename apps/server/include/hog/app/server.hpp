@@ -145,18 +145,17 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
-    // Has the player sent the grid pages it asks for, and only those, from now on.
-    void ask_pages(net::ConnectionId connection, const protocol::Ask& ask);
+    // Has the player sent the grid pieces it asks for, and only those, from now on.
+    void ask_pieces(net::ConnectionId connection, const protocol::AskPieces& ask);
     // Sends each player the tiles due to them, as their connection has room, and cuts the land
     // afresh for one that's moved on, in the background, the land left to it meanwhile.
     void tell_tiles();
     // Takes the land cut last for a player, and cuts it afresh for the next that's moved on.
     void cut_tiles();
-    // Sends players the grid pages due to them, following them where they've moved or pages were
-    // filled since.
-    void tell_pages();
-    // Sends the player the grid pages due to it, as its connection has room.
-    void send_pages(net::ConnectionId connection);
+    // Sends players the grid pieces due to them, and again what's been filled or changed since.
+    void tell_pieces();
+    // Sends the player the grid pieces due to it, as its connection has room.
+    void send_pieces(net::ConnectionId connection);
     // Sends the player the water bodies by `ids`, as many messages as they take.
     void tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids);
     // Tells each player the grain in flight near them, and once more when there's none.
@@ -205,9 +204,9 @@ private:
     server::TileSending tiles_;
     // The land being cut for a player, after the land and the jobs it uses.
     std::unique_ptr<jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>> cutting_;
-    // The grid pages streamed, where the config asks for them; after the jobs that fill them.
-    struct PageStreaming;
-    std::unique_ptr<PageStreaming> pages_;
+    // The grid pieces streamed, where the config asks for them; after the jobs that fill them.
+    struct PieceStreaming;
+    std::unique_ptr<PieceStreaming> pieces_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
@@ -244,7 +243,7 @@ private:
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
     metrics::Counter& tiles_sent_;
-    metrics::Counter& pages_sent_;
+    metrics::Counter& pieces_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

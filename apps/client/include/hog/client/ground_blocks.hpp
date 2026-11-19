@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/transvoxel.hpp>
 #include <hog/core/math.hpp>
 #include <hog/grid/grid.hpp>
@@ -23,7 +23,7 @@ namespace hog::client {
 // The blocks the held ground is drawn in, seen from `eye`: split where their cells look coarse
 // from there as `view` has it, but not where the ground's the same all through; and of those,
 // the ones the ground may cross.
-[[nodiscard]] std::vector<Block> ground_blocks(const PagesSnapshot& pages, DVec3 eye,
+[[nodiscard]] std::vector<Block> ground_blocks(const PiecesSnapshot& pieces, DVec3 eye,
                                                std::uint8_t cells,
                                                const grid::View& view = grid::View{});
 

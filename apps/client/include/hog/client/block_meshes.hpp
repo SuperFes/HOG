@@ -1,12 +1,11 @@
 #pragma once
 
 #include <hog/client/ground_changes.hpp>
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/transvoxel.hpp>
 #include <hog/core/math.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
-#include <hog/grid/page.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/terrain/block_mesh.hpp>
 
@@ -27,8 +26,8 @@ namespace hog::client {
 [[nodiscard]] terrain::BlockMesh block_of(const ShapeMesh& mesh);
 
 // The held ground drawn in blocks as ground_blocks chooses them, with the water standing in each,
-// meshed on the jobs and kept until how a block's drawn or a page it reads changes, for the scene
-// to draw. The water bodies a page marks come before it, so they're held by then. What's drawn
+// meshed on the jobs and kept until how a block's drawn or a piece it reads changes, for the scene
+// to draw. The water bodies a piece marks come before it, so they're held by then. What's drawn
 // changes all at once, once all that's wanted is meshed, so the ground never shows a hole. All
 // but taking in what the jobs give is done on them, so a frame never waits on it.
 class BlockMeshes {
@@ -45,7 +44,7 @@ public:
     [[nodiscard]] bool settled() const noexcept { return stage_ == Stage::Settled; }
     // Wants the held ground drawn as seen from `eye`, meshing what's changed, nearest first.
     // Precondition: settled().
-    void want(const HeldPages& held, DVec3 eye);
+    void want(const HeldPieces& held, DVec3 eye);
     // Meshes on; what's to be drawn since last asked, and what's gone.
     [[nodiscard]] GroundChanges collect();
     // Meshes all that's wanted, waiting for it.
@@ -62,7 +61,7 @@ private:
     // How a block is drawn: all its mesh depends on.
     struct Look {
         Block block;
-        std::vector<PagesSnapshot::Entry> reads;
+        std::vector<PiecesSnapshot::Entry> reads;
 
         [[nodiscard]] bool same(const Look& other) const noexcept;
     };
@@ -78,7 +77,7 @@ private:
     struct Plan {
         Drawings wanted;
         std::vector<grid::Key> queued; // nearest first
-        std::shared_ptr<const PagesSnapshot> pages;
+        std::shared_ptr<const PiecesSnapshot> pieces;
         std::shared_ptr<const grid::WaterBodies> bodies;
     };
     struct Shown {
@@ -105,7 +104,7 @@ private:
     // Read by the job planning, and only changed once it's done.
     Drawings drawn_;
     Drawings wanted_;
-    std::shared_ptr<const PagesSnapshot> pages_; // what's wanted is meshed from
+    std::shared_ptr<const PiecesSnapshot> pieces_; // what's wanted is meshed from
     std::shared_ptr<const grid::WaterBodies> bodies_;
     std::deque<grid::Key> queued_; // nearest first
     std::vector<Work> working_;

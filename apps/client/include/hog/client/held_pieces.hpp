@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -52,8 +53,9 @@ private:
     void under_touching(grid::Key node, grid::Key place, std::vector<Entry>& found) const;
 
     grid::Grid grid_;
-    std::vector<Entry> pieces_; // in Z order
-    std::uint64_t depths_ = 0;  // a bit for each depth a piece is rooted at
+    std::vector<Entry> pieces_;                            // in Z order
+    std::unordered_map<std::uint64_t, std::size_t> index_; // by the root's code
+    std::uint64_t depths_ = 0; // a bit for each depth a piece is rooted at
 };
 
 // The pieces the server has sent, each as deep and as new as last sent, read as one tree: at a

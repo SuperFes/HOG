@@ -176,7 +176,7 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     CHECK(server->players() != nullptr);
 }
 
-TEST_CASE("a bot is sent grid pages, the top page first, where the server streams them", "[bot]") {
+TEST_CASE("a bot asks for grid pieces and is sent them where the server streams them", "[bot]") {
     const hog::testing::TemporaryDirectory directory;
     const auto server = serving(directory.path(), true);
     const hog::DVec3 middle =
@@ -193,12 +193,12 @@ TEST_CASE("a bot is sent grid pages, the top page first, where the server stream
         const double seconds = std::min(std::chrono::duration<double>(now - last).count(), 0.1);
         last = now;
         bot->update(now, seconds);
-        if (bot->streamed().pages >= 2 || now >= give_up) {
+        if (bot->streamed().pieces >= 2 || now >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
-    CHECK(bot->streamed().pages >= 2);
+    CHECK(bot->streamed().pieces >= 2);
     CHECK(bot->streamed().refused == 0);
     CHECK(bot->streamed().bytes > 0);
     CHECK(bot->holds(hog::grid::Key{}).has_value());

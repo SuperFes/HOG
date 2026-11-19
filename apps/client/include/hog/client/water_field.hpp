@@ -1,6 +1,6 @@
 #pragma once
 
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/shape_mesh.hpp>
 #include <hog/client/transvoxel.hpp>
 #include <hog/core/math.hpp>
@@ -19,7 +19,7 @@
 
 namespace hog::client {
 
-// Open water as held pages mark it and the bodies they mark have it, read at points of the grid's
+// Open water as held pieces mark it and the bodies they mark have it, read at points of the grid's
 // finest lattice for blocks to mesh. A point is in the water of the body the finest leaves round it
 // mark, the lowest id of those held where they mark more than one, and its value is the metres it
 // stands over that water's surface at its lowest in the year; one marked with none, or none held,
@@ -27,8 +27,8 @@ namespace hog::client {
 // water, which water_of leaves out. Read by one thread.
 class WaterField {
 public:
-    // The pages and bodies must outlive it.
-    WaterField(const PagesSnapshot& pages, const grid::WaterBodies& bodies);
+    // The pieces and bodies must outlive it.
+    WaterField(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies);
 
     [[nodiscard]] double value(I64Vec3 point);
     [[nodiscard]] Crossed crossing(I64Vec3 low, I64Vec3 high);
@@ -61,7 +61,7 @@ private:
     [[nodiscard]] const Leaf& leaf(I64Vec3 point);
     [[nodiscard]] const std::optional<Wet>& wet(I64Vec3 point);
 
-    const PagesSnapshot* pages_;
+    const PiecesSnapshot* pieces_;
     const grid::WaterBodies* bodies_;
     grid::Grid grid_;
     DVec3 origin_;
@@ -74,12 +74,12 @@ private:
     std::size_t next_recent_ = 0;
 };
 
-// Whether any water may be marked in the node, as the finest page over it says.
-[[nodiscard]] bool may_hold_water(const PagesSnapshot& pages, grid::Key node);
+// Whether any water may be marked in the node, as the pieces held over it say.
+[[nodiscard]] bool may_hold_water(const PiecesSnapshot& pieces, grid::Key node);
 
-// The lake's or river's water `eye` lies in, or would at its highest in the year, as the held pages
-// mark it there and its body has it; none in the sea, which is drawn as its own, or in none.
-[[nodiscard]] std::optional<globe::StandingWater> still_water_in(const HeldPages& held, DVec3 eye);
+// The lake's or river's water `eye` lies in, or would at its highest in the year, as the held
+// pieces mark it there and its body has it; none in the sea, which is drawn as its own, or in none.
+[[nodiscard]] std::optional<globe::StandingWater> still_water_in(const HeldPieces& held, DVec3 eye);
 
 // A block's water surface, meshed from `field`, as still water draws it: each vertex rising as its
 // water does through the year, its normal the current there, the sea's marked as its own, and

@@ -89,7 +89,7 @@ BlockMeshes::~BlockMeshes() {
     showing_.reset();
 }
 
-void BlockMeshes::want(const HeldPages& held, DVec3 eye) {
+void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
     HOG_ASSERT(settled(), "a drawing wanted while the last is still meshing");
     wanted_.clear();
     planning_ = std::make_unique<jobs::Async<Plan>>(
@@ -97,12 +97,12 @@ void BlockMeshes::want(const HeldPages& held, DVec3 eye) {
                  bodies = held.shared_bodies(), eye, was = &drawn_] mutable {
             Plan plan{.wanted = {},
                       .queued = {},
-                      .pages = std::make_shared<const PagesSnapshot>(grid, std::move(entries)),
+                      .pieces = std::make_shared<const PiecesSnapshot>(grid, std::move(entries)),
                       .bodies = std::move(bodies)};
             std::vector<std::pair<double, grid::Key>> to_mesh;
-            for (const Block& block : ground_blocks(*plan.pages, eye, cells)) {
+            for (const Block& block : ground_blocks(*plan.pieces, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
-                drawing.look = {.block = block, .reads = plan.pages->around(block.node)};
+                drawing.look = {.block = block, .reads = plan.pieces->around(block.node)};
                 if (const auto found = was->find(block.node);
                     found != was->end() && found->second.look.same(drawing.look)) {
                     drawing.mesh = found->second.mesh;
@@ -127,14 +127,14 @@ void BlockMeshes::start() {
         working_.push_back(
             {.node = node,
              .job = std::make_unique<jobs::Async<Meshed>>(
-                 *jobs_, [grid = grid_, pages = pages_, bodies = bodies_,
+                 *jobs_, [grid = grid_, pieces = pieces_, bodies = bodies_,
                           block = wanted_.at(node).look.block] {
-                     GroundField ground{*pages};
+                     GroundField ground{*pieces};
                      Meshed meshed{.ground = std::make_shared<const terrain::BlockMesh>(
                                        block_of(mesh_block(grid, block, ground.field()))),
                                    .water = std::make_shared<const terrain::BlockMesh>()};
-                     if (may_hold_water(*pages, block.node)) {
-                         WaterField water{*pages, *bodies};
+                     if (may_hold_water(*pieces, block.node)) {
+                         WaterField water{*pieces, *bodies};
                          meshed.water = std::make_shared<const terrain::BlockMesh>(
                              water_of(mesh_block(grid, block, water.field()), water));
                      }
@@ -163,7 +163,7 @@ void BlockMeshes::advance(bool wait) {
         Plan plan = planning_->take();
         planning_.reset();
         wanted_ = std::move(plan.wanted);
-        pages_ = std::move(plan.pages);
+        pieces_ = std::move(plan.pieces);
         bodies_ = std::move(plan.bodies);
         queued_.insert(queued_.end(), plan.queued.begin(), plan.queued.end());
         stage_ = Stage::Meshing;
@@ -180,7 +180,7 @@ void BlockMeshes::advance(bool wait) {
         stage_ = Stage::Settled;
     }
     if (stage_ == Stage::Meshing && queued_.empty() && working_.empty()) {
-        pages_.reset();
+        pieces_.reset();
         bodies_.reset();
         showing_ = show();
         stage_ = Stage::Showing;

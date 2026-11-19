@@ -7,10 +7,10 @@
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
 #include <hog/client/globe_view.hpp>
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
-#include <hog/client/page_asking.hpp>
+#include <hog/client/piece_asking.hpp>
 #include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
@@ -627,8 +627,8 @@ public:
         }
     }
 
-    // Asks the server for grid pages, in place of those asked for before, once in.
-    void ask(const protocol::Ask& ask) {
+    // Asks the server for grid pieces, in place of those asked for before, once in.
+    void ask(const protocol::AskPieces& ask) {
         if (session_) {
             session_->ask(ask);
         }
@@ -646,9 +646,9 @@ public:
     [[nodiscard]] std::vector<protocol::SentTile> take_tiles() {
         return session_ ? session_->take_tiles() : std::vector<protocol::SentTile>{};
     }
-    // The grid pages and water bodies the server sent since last asked, as coded.
-    [[nodiscard]] std::vector<std::vector<std::byte>> take_pages() {
-        return session_ ? session_->take_pages() : std::vector<std::vector<std::byte>>{};
+    // The grid pieces and water bodies the server sent since last asked, as coded.
+    [[nodiscard]] std::vector<std::vector<std::byte>> take_pieces() {
+        return session_ ? session_->take_pieces() : std::vector<std::vector<std::byte>>{};
     }
     [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() {
         return session_ ? session_->take_bodies() : std::vector<std::vector<std::byte>>{};
@@ -992,18 +992,18 @@ Result<void> show_frame(client::Scene& scene, const client::Shot& shot,
 // Metres from the eye the server sends the ground.
 constexpr double streamed_ground = 8'000.0;
 
-// Levels of cells in a block the ground's drawn in from the pages: 16 a side.
+// Levels of cells in a block the ground's drawn in from the grid: 16 a side.
 constexpr std::uint8_t block_cells = 4;
 
 // The ground the server sends, held as it comes: tiles, over the planet and its layers, read by
-// the world and meshed to draw, the same trees shared; and grid pages, drawn in the tiles' place
+// the world and meshed to draw, the same trees shared; and grid pieces, drawn in the tiles' place
 // where asked.
 struct StreamedGround {
     StreamedGround(globe::Planet held, const globe::Layers& layers, jobs::JobSystem& jobs,
                    bool drawn_from_pages)
         : planet{std::move(held)}, world{this->planet, layers, volume},
-          meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness}, pages{grid},
-          block_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
+          meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness},
+          pieces{grid}, block_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
         world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -1018,18 +1018,18 @@ struct StreamedGround {
     globe::World world;
     client::TileMeshes meshes;
     grid::Grid grid;
-    client::HeldPages pages;
+    client::HeldPieces pieces;
     client::BlockMeshes block_meshes;
     bool from_pages = false;
-    // The pages last asked for, from where and when, and whether any came since.
-    std::vector<client::PageWish> asked;
+    // The pieces last asked for, from where and when, and whether any came since.
+    std::vector<client::PieceWish> asked;
     std::optional<DVec3> asked_from;
     DVec3 asked_facing{};
     MonotonicClock::time_point asked_at;
     bool asked_came = false;
-    bool pages_came = false;         // since what's drawn of them was last worked out
-    std::optional<DVec3> pages_seen; // where from
-    bool blocks_shown = false;       // any drawn from the pages yet
+    bool pieces_came = false;         // since what's drawn of them was last worked out
+    std::optional<DVec3> pieces_seen; // where from
+    bool blocks_shown = false;        // any drawn from the pieces yet
 };
 
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
@@ -1038,7 +1038,7 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
     const std::optional<double> sea =
         globe::derive(ground.planet).liquid ? std::optional{radius} : std::nullopt;
     const std::optional<globe::StandingWater> water =
-        ground.from_pages ? client::still_water_in(ground.pages, eye.metres())
+        ground.from_pages ? client::still_water_in(ground.pieces, eye.metres())
                           : client::still_water_at(ground.world, eye.metres(), sea,
                                                    ground.world.layers().thickness);
     if (!water) {
@@ -1048,36 +1048,36 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
         .level = water->top - radius, .rise = water->rise, .peak = water->peak};
 }
 
-// Metres the eye moves before what's drawn of the pages is worked out again.
-constexpr double pages_moved = 4.0;
+// Metres the eye moves before what's drawn of the pieces is worked out again.
+constexpr double pieces_moved = 4.0;
 
-// Pages asked for at once, and how often what's asked for is worked out again at most, as the
-// eye moves, turns more than this cosine allows, or pages come.
-constexpr std::size_t pages_asked = 2048;
+// Pieces asked for at once, and how often what's asked for is worked out again at most, as the
+// eye moves, turns more than this cosine allows, or pieces come.
+constexpr std::size_t pieces_asked = protocol::most_asked;
 constexpr auto asking_interval = std::chrono::milliseconds{200};
 constexpr double asking_turn = 0.94;
 
-// Asks the server for the pages to see from `eye` looking along `facing` that aren't held as
-// deep as they should be, when the eye has moved, turned or pages have come since last asked.
-void ask_pages(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3 facing) {
+// Asks the server for the pieces to see from `eye` looking along `facing` that aren't held as
+// deep as they should be, when the eye has moved, turned or pieces have come since last asked.
+void ask_pieces(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3 facing) {
     const MonotonicClock::time_point now = MonotonicClock::now();
     if (!connection.welcomed() || now - ground.asked_at < asking_interval) {
         return;
     }
     if (ground.asked_from && !ground.asked_came &&
-        glm::length(eye - *ground.asked_from) <= pages_moved &&
+        glm::length(eye - *ground.asked_from) <= pieces_moved &&
         glm::dot(facing, ground.asked_facing) >= asking_turn) {
         return;
     }
-    std::vector<client::PageWish> wishes =
-        client::pages_to_ask(ground.pages, eye, facing, grid::View{}, pages_asked);
+    std::vector<client::PieceWish> wishes =
+        client::pieces_to_ask(ground.pieces, eye, facing, grid::View{}, pieces_asked);
     ground.asked_at = now;
     ground.asked_from = eye;
     ground.asked_facing = facing;
     ground.asked_came = false;
     // Only the order and depths matter to the server's answers; how big each looks is for fills.
     const bool same = std::ranges::equal(wishes, ground.asked, [](const auto& a, const auto& b) {
-        return a.page == b.page && a.levels == b.levels;
+        return a.node == b.node && a.depth == b.depth;
     });
     if (!same) {
         connection.ask(client::ask_of(wishes));
@@ -1085,33 +1085,33 @@ void ask_pages(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3 
     }
 }
 
-// Takes in the pages the server sent, and draws them as seen from `eye` once what was last
+// Takes in the pieces the server sent, and draws them as seen from `eye` once what was last
 // wanted of them is drawn.
-void take_pages(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
-                DVec3 facing) {
-    HOG_ZONE("pages");
-    for (const std::vector<std::byte>& bytes : connection.take_pages()) {
-        if (auto taken = ground.pages.take(bytes); !taken) {
-            log::warn(connection_log, "can't hold a page sent: {}", taken.error());
+void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
+                 DVec3 facing) {
+    HOG_ZONE("pieces");
+    for (const std::vector<std::byte>& bytes : connection.take_pieces()) {
+        if (auto taken = ground.pieces.take(bytes); !taken) {
+            log::warn(connection_log, "can't hold a piece sent: {}", taken.error());
         } else {
-            ground.pages_came = true;
+            ground.pieces_came = true;
             ground.asked_came = true;
         }
     }
     for (const std::vector<std::byte>& bytes : connection.take_bodies()) {
-        if (auto taken = ground.pages.take_bodies(bytes); !taken) {
+        if (auto taken = ground.pieces.take_bodies(bytes); !taken) {
             log::warn(connection_log, "can't hold water bodies sent: {}", taken.error());
         }
     }
     if (!ground.from_pages) {
         return;
     }
-    ask_pages(connection, ground, eye, facing);
-    if (ground.block_meshes.settled() && (ground.pages_came || !ground.pages_seen ||
-                                          glm::length(eye - *ground.pages_seen) > pages_moved)) {
-        ground.block_meshes.want(ground.pages, eye);
-        ground.pages_came = false;
-        ground.pages_seen = eye;
+    ask_pieces(connection, ground, eye, facing);
+    if (ground.block_meshes.settled() && (ground.pieces_came || !ground.pieces_seen ||
+                                          glm::length(eye - *ground.pieces_seen) > pieces_moved)) {
+        ground.block_meshes.want(ground.pieces, eye);
+        ground.pieces_came = false;
+        ground.pieces_seen = eye;
     }
     if (client::GroundChanges changes = ground.block_meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
@@ -1120,7 +1120,7 @@ void take_pages(Connection& connection, StreamedGround& ground, client::Scene& s
 }
 
 // Takes in the tiles the server sent, held for the world and the player's footing and meshed to
-// draw, and the pages.
+// draw, and the pieces.
 void take_ground(Connection& connection, StreamedGround& ground, client::Scene& scene,
                  std::optional<client::Player>& player, DVec3 eye, DVec3 facing) {
     HOG_ZONE("ground");
@@ -1141,9 +1141,9 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
     if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
     }
-    take_pages(connection, ground, scene, eye, facing);
-    // Drawn from the pages, which reach all round the planet, the sea is its own surface everywhere
-    // once any is drawn; till then, the disc.
+    take_pieces(connection, ground, scene, eye, facing);
+    // Drawn from the pieces, which reach all round the planet, the sea is its own surface
+    // everywhere once any is drawn; till then, the disc.
     double covered = ground.blocks_shown ? std::numbers::pi * ground.planet.body.radius : 0.0;
     if (!ground.from_pages) {
         covered = ground.meshes.covered(eye, streamed_ground);

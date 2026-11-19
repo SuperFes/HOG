@@ -1,14 +1,14 @@
 #include "welding.hpp"
 
 #include <hog/client/drawn.hpp>
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/transvoxel.hpp>
 #include <hog/client/water_field.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/kinds.hpp>
-#include <hog/grid/page.hpp>
+#include <hog/grid/piece.hpp>
 #include <hog/grid/tree.hpp>
 #include <hog/grid/water_bodies.hpp>
 
@@ -29,68 +29,67 @@ using hog::grid::Key;
 
 namespace {
 
-// 1 m nodes 11 deep: a page of 64 m whose low corner lies 64 m below the planet's centre on x,
+// 1 m nodes 11 deep: a piece of 64 m whose low corner lies 64 m below the planet's centre on x,
 // its finest nodes marked with `body` wherever their middles lie under `level` and short of `shore`
-// metres along y; the top page round it holds no water, the page's place in it left open for it.
-constexpr Key page_root{.depth = 5, .x = 15, .y = 16, .z = 16};
+// metres along y; the root's piece round it holds no water, the finer piece's place in it left open
+// for it.
+constexpr Key piece_root{.depth = 5, .x = 15, .y = 16, .z = 16};
+constexpr std::uint8_t top_levels = 5;
+constexpr std::uint8_t piece_levels = 6;
 constexpr double level = 50.0;
 constexpr double shore = 40.0;
 
+std::shared_ptr<const hog::grid::Piece> water_piece(Key root,
+                                                    hog::grid::Tree<hog::grid::Water> tree) {
+    auto piece = std::make_shared<hog::grid::Piece>();
+    piece->root = root;
+    piece->generator = 1;
+    piece->water = std::move(tree);
+    return piece;
+}
+
 struct Water {
     hog::grid::Grid grid{1000.0, 1.0};
-    hog::client::PagesSnapshot pages;
+    hog::client::PiecesSnapshot pieces;
 
     explicit Water(hog::grid::Water::Value body)
-        : pages{grid, {{Key{}, top()}, {page_root, page(page_root, body)}}} {}
+        : pieces{grid, {{Key{}, top()}, {piece_root, piece(piece_root, body)}}} {}
 
-    [[nodiscard]] std::shared_ptr<const hog::grid::Page> top() const {
-        const std::uint8_t levels = grid.levels_under(0);
+    [[nodiscard]] static std::shared_ptr<const hog::grid::Piece> top() {
         using Leaf = hog::grid::Tree<hog::grid::Water>::Leaf;
-        auto tree = hog::grid::Tree<hog::grid::Water>::grow(
-            levels,
-            [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
-                std::uint32_t z) -> std::optional<Leaf> {
-                const auto shift = static_cast<unsigned>(levels - depth);
-                const bool over = page_root.x >> shift == x && page_root.y >> shift == y &&
-                                  page_root.z >> shift == z;
-                if (over && depth < levels) {
-                    return std::nullopt;
-                }
-                return Leaf{.value = 0, .open = over};
-            });
-        return std::make_shared<const hog::grid::Page>(hog::grid::Page{
-            .root = Key{},
-            .generator = 1,
-            .shape = std::nullopt,
-            .material = std::nullopt,
-            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)},
-            .woods = std::nullopt});
+        return water_piece(Key{}, hog::grid::Tree<hog::grid::Water>::grow(
+                                      top_levels,
+                                      [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                                          std::uint32_t z) -> std::optional<Leaf> {
+                                          const auto shift =
+                                              static_cast<unsigned>(top_levels - depth);
+                                          const bool over = piece_root.x >> shift == x &&
+                                                            piece_root.y >> shift == y &&
+                                                            piece_root.z >> shift == z;
+                                          if (over && depth < top_levels) {
+                                              return std::nullopt;
+                                          }
+                                          return Leaf{.value = 0, .open = over};
+                                      }));
     }
 
-    [[nodiscard]] std::shared_ptr<const hog::grid::Page> page(Key root,
-                                                              hog::grid::Water::Value body) const {
+    [[nodiscard]] std::shared_ptr<const hog::grid::Piece>
+    piece(Key root, hog::grid::Water::Value body) const {
         const DVec3 low = grid.low(root);
-        const std::uint8_t levels = grid.levels_under(root.depth);
-        const double side = grid.size(static_cast<std::uint8_t>(root.depth + levels));
-        auto tree = hog::grid::Tree<hog::grid::Water>::build(levels, [&](int x, int y, int z) {
-            const DVec3 middle = low + (DVec3{x + 0.5, y + 0.5, z + 0.5} * side);
-            return glm::length(middle) < level + 2.0 && middle.y < shore
-                       ? body
-                       : hog::grid::Water::Value{0};
-        });
-        return std::make_shared<const hog::grid::Page>(hog::grid::Page{
-            .root = root,
-            .generator = 1,
-            .shape = std::nullopt,
-            .material = std::nullopt,
-            .water = hog::grid::Held<hog::grid::Water>{.version = 1, .tree = std::move(tree)},
-            .woods = std::nullopt});
+        const double side = grid.size(static_cast<std::uint8_t>(root.depth + piece_levels));
+        return water_piece(
+            root, hog::grid::Tree<hog::grid::Water>::build(piece_levels, [&](int x, int y, int z) {
+                const DVec3 middle = low + (DVec3{x + 0.5, y + 0.5, z + 0.5} * side);
+                return glm::length(middle) < level + 2.0 && middle.y < shore
+                           ? body
+                           : hog::grid::Water::Value{0};
+            }));
     }
 };
 
 hog::terrain::BlockMesh meshed(const Water& water, const hog::grid::WaterBodies& bodies,
                                hog::client::Block block) {
-    WaterField field{water.pages, bodies};
+    WaterField field{water.pieces, bodies};
     const hog::client::ShapeMesh shape = mesh_block(water.grid, block, field.field());
     return hog::client::water_of(shape, field);
 }
@@ -107,7 +106,7 @@ TEST_CASE("the sea's surface stands at its level over what's marked as it",
     hog::grid::WaterBodies bodies;
     bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
 
-    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = page_root, .cells = 5});
+    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = piece_root, .cells = 5});
     REQUIRE_FALSE(mesh.indices.empty());
     int edge = 0;
     for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
@@ -138,7 +137,7 @@ TEST_CASE("a lake's surface rises as its season has it, and an unknown body is d
     bodies.bodies.emplace(5U,
                           hog::grid::Lake{.level = level, .season = {.rise = 2.0, .peak = 0.25}});
 
-    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = page_root, .cells = 4});
+    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = piece_root, .cells = 4});
     REQUIRE_FALSE(mesh.indices.empty());
     for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
         CHECK(std::abs(glm::length(placed(mesh, vertex)) - level) < 1e-4);
@@ -147,14 +146,14 @@ TEST_CASE("a lake's surface rises as its season has it, and an unknown body is d
         CHECK(vertex.tiles[2] == hog::globe::peak_of(0.25));
     }
 
-    CHECK(meshed(water, {}, {.node = page_root, .cells = 4}).indices.empty());
+    CHECK(meshed(water, {}, {.node = piece_root, .cells = 4}).indices.empty());
 }
 
 TEST_CASE("a river's surface falls along its course, its current running down it",
           "[client][water_field]") {
     const Water water{0x8000'0002U};
     hog::grid::WaterBodies bodies;
-    // Down the page along z, a metre lower at its foot.
+    // Down the piece along z, a metre lower at its foot.
     bodies.bodies.emplace(
         0x8000'0002U,
         hog::grid::River{
@@ -162,7 +161,7 @@ TEST_CASE("a river's surface falls along its course, its current running down it
                        {.place = DVec3{-30.0, 20.0, 64.0}, .level = level - 0.5, .flow = 8.0}},
             .peak = 0.0});
 
-    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = page_root, .cells = 5});
+    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = piece_root, .cells = 5});
     REQUIRE_FALSE(mesh.indices.empty());
     for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
         const DVec3 at = placed(mesh, vertex);
@@ -184,10 +183,10 @@ TEST_CASE("blocks of water meet finer ones on the sea's surface", "[client][wate
     const Water water{1};
     hog::grid::WaterBodies bodies;
     bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
-    WaterField field{water.pages, bodies};
-    const std::array<Key, 1> split{page_root.child(5)};
+    WaterField field{water.pieces, bodies};
+    const std::array<Key, 1> split{piece_root.child(5)};
     std::size_t triangles = 0;
-    for (const hog::client::Block& block : hog::welding::blocks_of(page_root, split, 3)) {
+    for (const hog::client::Block& block : hog::welding::blocks_of(piece_root, split, 3)) {
         const hog::terrain::BlockMesh mesh =
             hog::client::water_of(mesh_block(water.grid, block, field.field()), field);
         triangles += mesh.indices.size() / 3;
@@ -201,15 +200,16 @@ TEST_CASE("blocks of water meet finer ones on the sea's surface", "[client][wate
 
 TEST_CASE("only a node marked somewhere may hold water", "[client][water_field]") {
     const Water water{1};
-    CHECK(hog::client::may_hold_water(water.pages, page_root));
-    CHECK_FALSE(hog::client::may_hold_water(water.pages, Key{.depth = 5, .x = 0, .y = 0, .z = 0}));
+    CHECK(hog::client::may_hold_water(water.pieces, piece_root));
+    CHECK_FALSE(hog::client::may_hold_water(water.pieces, Key{.depth = 5, .x = 0, .y = 0, .z = 0}));
 }
 
-TEST_CASE("the eye is in a lake where the pages mark it, not in the sea", "[client][water_field]") {
+TEST_CASE("the eye is in a lake where the pieces mark it, not in the sea",
+          "[client][water_field]") {
     const Water lake_water{5};
-    hog::client::HeldPages held{lake_water.grid};
+    hog::client::HeldPieces held{lake_water.grid};
     REQUIRE(held.take(lake_water.top()->encode()));
-    REQUIRE(held.take(lake_water.page(page_root, 5)->encode()));
+    REQUIRE(held.take(lake_water.piece(piece_root, 5)->encode()));
     hog::grid::WaterBodies bodies;
     bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
     bodies.bodies.emplace(5U,
@@ -223,13 +223,13 @@ TEST_CASE("the eye is in a lake where the pages mark it, not in the sea", "[clie
     CHECK(standing.top == level);
     CHECK(standing.rise == 1.0);
     CHECK(standing.peak == 0.5);
-    // Dry past the shore, and far from the page.
+    // Dry past the shore, and far from the finer piece.
     CHECK_FALSE(hog::client::still_water_in(held, DVec3{-20.0, 45.0, 10.0}).has_value());
     CHECK_FALSE(hog::client::still_water_in(held, DVec3{500.0, 500.0, 500.0}).has_value());
 
     const Water sea_water{1};
-    hog::client::HeldPages sea{sea_water.grid};
-    REQUIRE(sea.take(sea_water.page(page_root, 1)->encode()));
+    hog::client::HeldPieces sea{sea_water.grid};
+    REQUIRE(sea.take(sea_water.piece(piece_root, 1)->encode()));
     REQUIRE(sea.take_bodies(bodies.encode()));
     CHECK_FALSE(hog::client::still_water_in(sea, under).has_value());
 }

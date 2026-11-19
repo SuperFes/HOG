@@ -115,10 +115,4 @@ private:
     std::uint64_t rounds_ = 0;
 };
 
-// The bodies of `table` by `ids`, in messages' bytes as `grid::WaterBodies::encode` gives them,
-// each `most` bytes at most; ids the table lacks, and a body too big alone, are left out.
-[[nodiscard]] std::vector<std::vector<std::byte>>
-bodies_coded(const grid::WaterBodies& table, std::span<const grid::Water::Value> ids,
-             std::size_t most);
-
 } // namespace hog::server

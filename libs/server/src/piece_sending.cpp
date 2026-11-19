@@ -170,4 +170,36 @@ std::size_t PieceSending::waiting(net::ConnectionId player) const {
     return found == players_.end() ? 0 : found->second.waiting.size();
 }
 
+std::vector<std::vector<std::byte>> bodies_coded(const grid::WaterBodies& table,
+                                                 std::span<const grid::Water::Value> ids,
+                                                 std::size_t most) {
+    // The format byte and the count, a varint of ten bytes at most.
+    constexpr std::size_t heading = 11;
+    std::vector<std::vector<std::byte>> coded;
+    grid::WaterBodies some;
+    std::size_t bytes = heading;
+    for (const grid::Water::Value id : ids) {
+        const auto found = table.bodies.find(id);
+        if (found == table.bodies.end()) {
+            continue;
+        }
+        // Its own bytes, less the format byte and the one-byte count it's coded with alone.
+        const std::size_t own = grid::WaterBodies{.bodies = {*found}}.encode().size() - 2;
+        if (heading + own > most) {
+            continue;
+        }
+        if (bytes + own > most) {
+            coded.push_back(some.encode());
+            some.bodies.clear();
+            bytes = heading;
+        }
+        some.bodies.insert(*found);
+        bytes += own;
+    }
+    if (!some.bodies.empty()) {
+        coded.push_back(some.encode());
+    }
+    return coded;
+}
+
 } // namespace hog::server

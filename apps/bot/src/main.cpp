@@ -137,8 +137,8 @@ int run(std::span<const std::string_view> arguments) {
         if (options->run_for && now - began >= *options->run_for) {
             for (std::size_t which = 0; which < bots.size(); ++which) {
                 const bot::Bot::Streamed& streamed = bots[which].streamed();
-                log::info(bot_log, "{}-{} was sent {} grid pages, {:.1f} MB, {} not pages",
-                          options->name, which + 1, streamed.pages,
+                log::info(bot_log, "{}-{} was sent {} grid pieces, {:.1f} MB, {} not pieces",
+                          options->name, which + 1, streamed.pieces,
                           static_cast<double>(streamed.bytes) / 1e6, streamed.refused);
             }
             return EXIT_SUCCESS;

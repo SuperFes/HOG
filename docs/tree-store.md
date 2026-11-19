@@ -92,14 +92,21 @@ size: any grid depth, any finest size, any detail asked for.
    a piece short of its depth waits until something is written under it. Tests: answers match the
    store and the generator; a chunk written lets go of what was read from it; a client is sent a
    changed piece once, with only the kinds changed; a short piece goes again once filled.
-5. **The client asks by region and holds one tree.** Regions sized by distance, the depth the
-   view wants, what's ahead first; meshing reads the merged tree. Tests: asks cover what the
-   view needs with no overlap; detail arrives coarse first; turning re-ranks.
+5. **The client asks by region and holds one tree.** Done: `client::HeldPieces` keeps each piece
+   as it came and reads them as one tree, the piece reaching deepest at a node answering there;
+   meshing reads nodes through it. `client::pieces_to_ask` goes down from the root through what's
+   held: a node wanted no more than `region_levels` under it is one region, asked to the depth its
+   distance wants; one wanted deeper is gone down through, child by child, and asked
+   `region_levels` deep where nothing's held under it yet, so coarse comes first and finer is
+   asked only where ground lies. Behind the eye ranks lower. The server serves pieces from the
+   chunk store, filling on demand; the bot asks as a client does. Protocol 42. Tests: asks never
+   overlap and each lies under what's held; asking and answering until nothing's left holds the
+   ground near and far as deep as the view wants; turning re-ranks.
 6. **Pages retire:** the page store, page filling, page sending and held pages, and the page
    cut in the grid.
 
-Steps 1 to 3 don't touch what runs now. Steps 4 and 5 switch the server and the client over
-together, and the store is rebuilt by baking.
+Steps 1 to 3 don't touch what runs now. Step 5 switched the server and the client over
+together; a store is a chunk store, baked or filled as asked.
 
 ## Open
 
@@ -110,3 +117,8 @@ together, and the store is rebuilt by baking.
 - Whether chunks well under budget are ever joined back into one under their parent, or a bake
   just fills at a sensible root to begin with.
 - Whether identical pieces travel once, by hash, for clients far apart seeing the same sea.
+- The client keeps every piece it's sent, and the server remembers each as held; letting go of
+  far pieces needs the client to say so, so the server sends them again when asked.
+- A piece over 512 KiB can't go in one message though a piece may be 1 MB; regions of five
+  levels stay far under it so far.
+- A bake in another process doesn't wake pieces waiting on fills; they go when next touched.

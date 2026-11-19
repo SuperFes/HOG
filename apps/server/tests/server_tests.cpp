@@ -8,7 +8,7 @@
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/grid/page.hpp>
+#include <hog/grid/piece.hpp>
 #include <hog/grid/water_bodies.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
@@ -687,7 +687,7 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
     CHECK(server->time() - start < 1min);
 }
 
-TEST_CASE("a player is streamed the top page first and the water bodies it marks before it",
+TEST_CASE("a player asking for the root is sent it with the water bodies it marks before it",
           "[app][server]") {
     const World world;
     auto config = world.config();
@@ -697,11 +697,12 @@ TEST_CASE("a player is streamed the top page first and the water bodies it marks
         hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
     REQUIRE(connected);
     hog::net::Client& client = *connected;
-    std::optional<hog::grid::Page> first;
+    std::optional<hog::grid::Piece> first;
     hog::grid::WaterBodies told;
     std::vector<hog::net::Event> events;
     std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 60s;
+    // Filling the root takes a debug build under load most of a minute.
+    const auto give_up = MonotonicClock::now() + 180s;
     Visited timer{[&] {
         client.poll(events);
         for (const hog::net::Event& event : events) {
@@ -711,16 +712,10 @@ TEST_CASE("a player is streamed the top page first and the water bodies it marks
             } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
                 auto decoded = hog::protocol::decode(message->bytes());
                 REQUIRE(decoded);
-                // Pages follow where the player is, so it says.
                 if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
-                    const hog::DVec3 at = hog::planet::start_direction *
-                                          (server->generator().planet().body.radius + 3'000.0);
-                    REQUIRE(
-                        client.send(hog::net::Delivery::Reliable,
-                                    hog::protocol::encode(hog::protocol::Moved{
-                                        .sequence = 1,
-                                        .at = hog::protocol::to_millimetres(hog::WorldPosition{at}),
-                                        .stance = hog::protocol::Stance::Flying})));
+                    REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                        hog::protocol::encode(hog::protocol::AskPieces{
+                                            .pieces = {{.to = 3, .priority = 1.0F}}})));
                 }
                 if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&*decoded);
                     bodies != nullptr && !first) {
@@ -728,12 +723,12 @@ TEST_CASE("a player is streamed the top page first and the water bodies it marks
                     REQUIRE(some);
                     told.bodies.merge(some->bodies);
                 }
-                if (const auto* pages = std::get_if<hog::protocol::Pages>(&*decoded);
-                    pages != nullptr && !first) {
-                    REQUIRE_FALSE(pages->pages.empty());
-                    auto page = hog::grid::Page::decode(pages->pages.front());
-                    REQUIRE(page);
-                    first = std::move(*page);
+                if (const auto* pieces = std::get_if<hog::protocol::Pieces>(&*decoded);
+                    pieces != nullptr && !first) {
+                    REQUIRE_FALSE(pieces->pieces.empty());
+                    auto piece = hog::grid::Piece::decode(pieces->pieces.front());
+                    REQUIRE(piece);
+                    first = std::move(*piece);
                 }
             }
         }
@@ -747,7 +742,8 @@ TEST_CASE("a player is streamed the top page first and the water bodies it marks
     CHECK(first.value().shape.has_value());
     CHECK(first.value().material.has_value());
     REQUIRE(first.value().water.has_value());
-    for (const hog::grid::Water::Value body : first.value().water.value().tree.leaf_values()) {
+    CHECK(first.value().shape.value().levels() == 3);
+    for (const hog::grid::Water::Value body : first.value().water.value().leaf_values()) {
         CAPTURE(body);
         CHECK((body == 0 || told.bodies.contains(body)));
     }

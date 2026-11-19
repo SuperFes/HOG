@@ -2,6 +2,7 @@
 
 #include <hog/grid/key.hpp>
 #include <hog/grid/kinds.hpp>
+#include <hog/grid/water_bodies.hpp>
 #include <hog/grid/z_order.hpp>
 #include <hog/net/events.hpp>
 #include <hog/server/piece_source.hpp>
@@ -86,5 +87,11 @@ private:
     std::map<net::ConnectionId, Player> players_;
     std::uint64_t rounds_ = 0;
 };
+
+// The bodies of `table` by `ids`, in messages' bytes as `grid::WaterBodies::encode` gives them,
+// each `most` bytes at most; ids the table lacks, and a body too big alone, are left out.
+[[nodiscard]] std::vector<std::vector<std::byte>>
+bodies_coded(const grid::WaterBodies& table, std::span<const grid::Water::Value> ids,
+             std::size_t most);
 
 } // namespace hog::server

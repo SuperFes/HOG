@@ -35,8 +35,8 @@ double meets_sphere(DVec3 a, DVec3 b, double radius) noexcept {
 
 } // namespace
 
-WaterField::WaterField(const PagesSnapshot& pages, const grid::WaterBodies& bodies)
-    : pages_{&pages}, bodies_{&bodies}, grid_{pages.grid()}, origin_{grid_.low(grid::Key{})},
+WaterField::WaterField(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies)
+    : pieces_{&pieces}, bodies_{&bodies}, grid_{pieces.grid()}, origin_{grid_.low(grid::Key{})},
       across_{std::int64_t{1} << grid_.depth()} {}
 
 DVec3 WaterField::at(I64Vec3 point) const noexcept {
@@ -57,7 +57,7 @@ const WaterField::Leaf& WaterField::leaf(I64Vec3 point) {
     const auto [found, made] = leaves_.try_emplace(grid::code(node));
     if (made) {
         Leaf& made_leaf = found->second;
-        const auto known = pages_->at<grid::Water>(node);
+        const auto known = pieces_->at<grid::Water>(node);
         const grid::Key over = known ? node.ancestor(known->found.depth) : grid::Key{};
         made_leaf.body = known ? known->found.value : 0;
         const auto shift = static_cast<unsigned>(grid_.depth() - over.depth);
@@ -172,13 +172,13 @@ BlockField WaterField::field() {
             .crossing = [this](I64Vec3 low, I64Vec3 high) { return crossing(low, high); }};
 }
 
-bool may_hold_water(const PagesSnapshot& pages, grid::Key node) {
+bool may_hold_water(const PiecesSnapshot& pieces, grid::Key node) {
     // A node's value is the most common body under it but none, so none means none at all.
-    const auto known = pages.at<grid::Water>(node);
+    const auto known = pieces.at<grid::Water>(node);
     return known && known->found.value != 0;
 }
 
-std::optional<globe::StandingWater> still_water_in(const HeldPages& held, DVec3 eye) {
+std::optional<globe::StandingWater> still_water_in(const HeldPieces& held, DVec3 eye) {
     const std::optional<grid::Key> node = held.grid().key_at(eye, held.grid().depth());
     const auto known = node ? held.at<grid::Water>(*node) : std::nullopt;
     if (!known || known->found.value == 0) {

@@ -1,7 +1,7 @@
 #include "sloped_ground.hpp"
 
 #include <hog/client/block_meshes.hpp>
-#include <hog/client/held_pages.hpp>
+#include <hog/client/held_pieces.hpp>
 #include <hog/client/shape_mesh.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/jobs/job_system.hpp>
@@ -32,12 +32,12 @@ std::vector<std::uint64_t> shown_keys(const GroundChanges& changes) {
 
 } // namespace
 
-TEST_CASE("block meshes are kept until a page they read changes", "[client][block_meshes]") {
+TEST_CASE("block meshes are kept until a piece they read changes", "[client][block_meshes]") {
     const hog::grid::Grid grid{1000.0, 1.0};
     hog::jobs::JobSystem jobs{2};
-    hog::client::HeldPages held{grid};
-    REQUIRE(held.take(hog::sloped::sloped(grid, Key{})->encode()));
-    REQUIRE(held.take(hog::sloped::sloped(grid, hog::sloped::page_root)->encode()));
+    hog::client::HeldPieces held{grid};
+    REQUIRE(held.take(hog::sloped::sloped_root(grid)->encode()));
+    REQUIRE(held.take(hog::sloped::sloped_finely(grid)->encode()));
     hog::client::BlockMeshes meshes{grid, jobs, 3};
     const DVec3 eye = hog::sloped::on_ground + (hog::sloped::normal() * 5.0);
     meshes.want(held, eye);
@@ -58,8 +58,8 @@ TEST_CASE("block meshes are kept until a page they read changes", "[client][bloc
         meshes.finish();
         CHECK(meshes.collect().empty());
     }
-    SECTION("a page sent anew meshes the blocks reading it again, and only those") {
-        REQUIRE(held.take(hog::sloped::sloped(grid, hog::sloped::page_root, 2)->encode()));
+    SECTION("a piece sent anew meshes the blocks reading it again, and only those") {
+        REQUIRE(held.take(hog::sloped::sloped_finely(grid)->encode()));
         meshes.want(held, eye);
         meshes.finish();
         const GroundChanges again = meshes.collect();
@@ -72,9 +72,9 @@ TEST_CASE("block meshes are kept until a page they read changes", "[client][bloc
 }
 
 TEST_CASE("block keys stay clear of tiles' and each other's", "[client][block_meshes]") {
-    const Key page = hog::sloped::page_root;
-    CHECK(hog::client::block_key(page) != hog::client::block_key(page.child(0)));
-    CHECK(hog::client::block_key(Key{}) != hog::client::block_key(page));
+    const Key node = hog::sloped::piece_root;
+    CHECK(hog::client::block_key(node) != hog::client::block_key(node.child(0)));
+    CHECK(hog::client::block_key(Key{}) != hog::client::block_key(node));
     CHECK((hog::client::block_key(Key{}) >> 62U) == 3U);
 }
 

@@ -97,9 +97,9 @@ bool Session::took_ground(protocol::Message& message) {
     if (auto* tiles = std::get_if<protocol::Tiles>(&message)) {
         tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
                       std::make_move_iterator(tiles->tiles.end()));
-    } else if (auto* pages = std::get_if<protocol::Pages>(&message)) {
-        pages_.insert(pages_.end(), std::make_move_iterator(pages->pages.begin()),
-                      std::make_move_iterator(pages->pages.end()));
+    } else if (auto* pieces = std::get_if<protocol::Pieces>(&message)) {
+        pieces_.insert(pieces_.end(), std::make_move_iterator(pieces->pieces.begin()),
+                       std::make_move_iterator(pieces->pieces.end()));
     } else if (auto* bodies = std::get_if<protocol::Bodies>(&message)) {
         bodies_.push_back(std::move(bodies->bytes));
     } else {
@@ -204,7 +204,7 @@ void Session::hurry(std::uint32_t scale) {
     send(protocol::Hurry{.scale = scale}, net::Delivery::Reliable);
 }
 
-void Session::ask(const protocol::Ask& ask) {
+void Session::ask(const protocol::AskPieces& ask) {
     if (state_ != State::Welcomed) {
         return;
     }

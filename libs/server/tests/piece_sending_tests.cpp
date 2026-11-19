@@ -6,6 +6,7 @@
 #include <hog/globe/grid_fill.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/piece.hpp>
+#include <hog/grid/water_bodies.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/server/piece_sending.hpp>
 #include <hog/server/piece_source.hpp>
@@ -165,4 +166,38 @@ TEST_CASE("a piece short of what's asked goes as held, and again once filled und
     CHECK(piece.material);
     CHECK(sending.waiting(player) == 0);
     CHECK(sending.due(player) == 0);
+}
+
+TEST_CASE("bodies go in messages no bigger than allowed", "[server][piece_sending]") {
+    hog::grid::WaterBodies table;
+    table.bodies.emplace(1U, hog::grid::Sea{.level = 1000.0});
+    table.bodies.emplace(2U, hog::grid::Lake{.level = 1010.0, .season = {}});
+    table.bodies.emplace(3U, hog::grid::Lake{.level = 1020.0, .season = {}});
+    hog::grid::River river;
+    for (int n = 0; n < 40; ++n) {
+        river.course.push_back({.place = hog::DVec3{1000.0, n * 10.0, 0.0}, .level = 1000.0});
+    }
+    table.bodies.emplace(4U, river);
+    const std::size_t lake =
+        hog::grid::WaterBodies{.bodies = {*table.bodies.find(2U)}}.encode().size();
+
+    // Two lakes and the sea fit one message as big as two lakes and a bit; the river fits none.
+    const std::vector<hog::grid::Water::Value> ids{2, 9, 3, 1, 4};
+    const auto coded = hog::server::bodies_coded(table, ids, (2 * lake) + 12);
+    REQUIRE(coded.size() == 2);
+    hog::grid::WaterBodies told;
+    for (const auto& bytes : coded) {
+        CHECK(bytes.size() <= (2 * lake) + 12);
+        const auto some = hog::grid::WaterBodies::decode(bytes);
+        REQUIRE(some.has_value());
+        told.bodies.insert(some->bodies.begin(), some->bodies.end());
+    }
+    CHECK(told.bodies.size() == 3);
+    CHECK_FALSE(told.bodies.contains(4U));
+    CHECK_FALSE(told.bodies.contains(9U));
+
+    // With room, all in one.
+    const auto one = hog::server::bodies_coded(table, ids, std::size_t{1} << 20U);
+    REQUIRE(one.size() == 1);
+    CHECK(*hog::grid::WaterBodies::decode(one.front()) == table);
 }

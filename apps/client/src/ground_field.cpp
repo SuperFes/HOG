@@ -20,8 +20,8 @@ glm::length_t axis_of(I64Vec3 low, I64Vec3 high) noexcept {
 
 } // namespace
 
-GroundField::GroundField(const PagesSnapshot& pages)
-    : pages_{&pages}, grid_{pages.grid()}, origin_{grid_.low(grid::Key{})},
+GroundField::GroundField(const PiecesSnapshot& pieces)
+    : pieces_{&pieces}, grid_{pieces.grid()}, origin_{grid_.low(grid::Key{})},
       across_{std::int64_t{1} << grid_.depth()} {}
 
 DVec3 GroundField::at(I64Vec3 point) const noexcept {
@@ -46,7 +46,7 @@ const GroundField::Leaf& GroundField::leaf(I64Vec3 point) {
     const auto [found, made] = leaves_.try_emplace(grid::code(node));
     if (made) {
         Leaf& made_leaf = found->second;
-        const auto known = pages_->at<grid::Shape>(node);
+        const auto known = pieces_->at<grid::Shape>(node);
         made_leaf.node = known ? node.ancestor(known->found.depth) : grid::Key{};
         made_leaf.value = known ? known->found.value : grid::Surface::open();
         const auto shift = static_cast<unsigned>(grid_.depth() - made_leaf.node.depth);

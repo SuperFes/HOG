@@ -96,14 +96,16 @@ std::uint64_t depth_bit(std::uint8_t depth) {
 PiecesSnapshot::PiecesSnapshot(const grid::Grid& grid, std::vector<Entry> pieces)
     : grid_{grid}, pieces_{std::move(pieces)} {
     std::ranges::sort(pieces_, grid::ZOrder{}, &Entry::first);
-    for (const Entry& entry : pieces_) {
-        depths_ |= depth_bit(entry.first.depth);
+    index_.reserve(pieces_.size());
+    for (std::size_t at = 0; at < pieces_.size(); ++at) {
+        depths_ |= depth_bit(pieces_[at].first.depth);
+        index_.emplace(grid::code(pieces_[at].first), at);
     }
 }
 
 const PiecesSnapshot::Entry* PiecesSnapshot::find(grid::Key root) const {
-    const auto found = std::ranges::lower_bound(pieces_, root, grid::ZOrder{}, &Entry::first);
-    return found == pieces_.end() || found->first != root ? nullptr : &*found;
+    const auto found = index_.find(grid::code(root));
+    return found == index_.end() ? nullptr : &pieces_[found->second];
 }
 
 const grid::Piece* PiecesSnapshot::piece(grid::Key root) const {

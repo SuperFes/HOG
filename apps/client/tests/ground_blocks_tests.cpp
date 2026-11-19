@@ -113,7 +113,7 @@ TEST_CASE("blocks cover the root, each beside blocks a level apart at most",
 TEST_CASE("the ground is drawn in the blocks it may cross", "[client][ground_blocks]") {
     const hog::sloped::Sloped sloped;
     const DVec3 eye = hog::sloped::on_ground + (hog::sloped::normal() * 5.0);
-    const std::vector<Block> blocks = hog::client::ground_blocks(sloped.pages, eye, 3);
+    const std::vector<Block> blocks = hog::client::ground_blocks(sloped.pieces, eye, 3);
     REQUIRE(!blocks.empty());
     for (const Block& block : blocks) {
         CAPTURE(block.node.depth, block.node.x, block.node.y, block.node.z);
@@ -132,19 +132,19 @@ TEST_CASE("the ground is drawn in the blocks it may cross", "[client][ground_blo
     }));
 }
 
-TEST_CASE("a node reads the pages over it, in it and beside it", "[client][ground_blocks]") {
+TEST_CASE("a node reads the pieces over it, in it and beside it", "[client][ground_blocks]") {
     const hog::sloped::Sloped sloped;
     const auto roots = [&](Key node) {
         std::vector<Key> found;
-        for (const auto& [root, page] : sloped.pages.around(node)) {
+        for (const auto& [root, piece] : sloped.pieces.around(node)) {
             found.push_back(root);
         }
         return found;
     };
-    const Key page = hog::sloped::page_root;
-    CHECK(roots(page.child(3)) == std::vector<Key>{Key{}, page});
-    CHECK(roots(page.parent()) == std::vector<Key>{Key{}, page});
+    const Key node = hog::sloped::piece_root;
+    CHECK(roots(node.child(3)) == std::vector<Key>{Key{}, node});
+    CHECK(roots(node.parent()) == std::vector<Key>{Key{}, node});
     // Touching it from beside, to the finest node.
-    CHECK(roots(page.beside(1, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}, page});
-    CHECK(roots(page.beside(2, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}});
+    CHECK(roots(node.beside(1, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}, node});
+    CHECK(roots(node.beside(2, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}});
 }
