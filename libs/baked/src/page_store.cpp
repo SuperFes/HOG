@@ -1,3 +1,5 @@
+#include "lmdb_shared.hpp"
+
 #include <hog/baked/page_store.hpp>
 #include <hog/core/bytes.hpp>
 
@@ -7,15 +9,20 @@
 #include <array>
 #include <bit>
 #include <format>
-#include <random>
 #include <span>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace hog::baked {
 namespace {
+
+using detail::as_bytes;
+using detail::as_view;
+using detail::get;
+using detail::guarded;
+using detail::Removed;
+using detail::tag_of;
 
 constexpr const char* trees_name = "trees";
 constexpr const char* about_name = "about";
@@ -29,52 +36,6 @@ struct Shared {
     PageStore::Options options;
     Baking baking;
 };
-
-std::string_view as_view(std::span<const std::byte> bytes) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
-}
-
-std::span<const std::byte> as_bytes(std::string_view view) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return {reinterpret_cast<const std::byte*>(view.data()), view.size()};
-}
-
-// The value under `key`, read in place; LMDB's own reads are const in all but name.
-bool get(const lmdb::txn& txn, const lmdb::dbi& dbi, std::string_view key,
-         std::string_view& value) {
-    MDB_val key_val{key.size(), const_cast<char*>(key.data())}; // NOLINT: LMDB takes it mutable
-    MDB_val value_val{};
-    if (!lmdb::dbi_get(txn.handle(), dbi.handle(), &key_val, &value_val)) {
-        return false;
-    }
-    value = {static_cast<const char*>(value_val.mv_data), value_val.mv_size};
-    return true;
-}
-
-// Runs `body`, turning what LMDB throws into an error.
-template <typename Body>
-auto guarded(const Body& body) -> decltype(body()) {
-    try {
-        return body();
-    } catch (const lmdb::error& error) {
-        return make_error(ErrorCode::Io, error.what());
-    }
-}
-
-template <typename Kind>
-constexpr std::uint8_t tag_of() noexcept {
-    if constexpr (std::is_same_v<Kind, grid::Shape>) {
-        return 0;
-    } else if constexpr (std::is_same_v<Kind, grid::Material>) {
-        return 1;
-    } else if constexpr (std::is_same_v<Kind, grid::Water>) {
-        return 2;
-    } else {
-        static_assert(std::is_same_v<Kind, grid::Woods>);
-        return 3;
-    }
-}
 
 // A tree's key: which kind, then its page's root as its depth and Morton code, big-endian, so a
 // kind's pages of one depth lie in Z order.
@@ -151,23 +112,6 @@ Result<void> mark(const lmdb::txn& txn, Shared& shared, bool fresh) {
     }
     return {};
 }
-
-// A directory removed when this is dropped.
-struct Removed {
-    std::filesystem::path directory;
-
-    Removed() = default;
-    Removed(Removed&& other) noexcept : directory{std::exchange(other.directory, {})} {}
-    Removed& operator=(Removed&&) = delete;
-    Removed(const Removed&) = delete;
-    Removed& operator=(const Removed&) = delete;
-    ~Removed() {
-        if (!directory.empty()) {
-            std::error_code failed;
-            std::filesystem::remove_all(directory, failed);
-        }
-    }
-};
 
 } // namespace
 
@@ -419,33 +363,20 @@ Result<PageStore> PageStore::open(const std::filesystem::path& directory, const 
 }
 
 Result<PageStore> PageStore::scratch(const Baking& baking, const Options& options) {
-    std::error_code failed;
-    const std::filesystem::path temporary = std::filesystem::temp_directory_path(failed);
-    if (failed) {
-        return make_error(ErrorCode::Io, failed.message());
+    Result<std::filesystem::path> directory = detail::new_scratch_directory();
+    if (!directory) {
+        return std::unexpected{directory.error()};
     }
-    std::random_device entropy;
-    for (int attempt = 0; attempt < 16; ++attempt) {
-        const std::uint64_t name = (std::uint64_t{entropy()} << 32U) | entropy();
-        const std::filesystem::path directory =
-            temporary / std::format("hog-scratch-{:016x}", name);
-        if (!std::filesystem::create_directory(directory, failed)) {
-            if (failed) {
-                return make_error(ErrorCode::Io, failed.message());
-            }
-            continue;
-        }
-        Options writable = options;
-        writable.read_only = false;
-        Result<PageStore> store = open(directory, baking, writable);
-        if (!store) {
-            std::filesystem::remove_all(directory, failed);
-            return store;
-        }
-        store->impl_->scratch.directory = directory;
+    Options writable = options;
+    writable.read_only = false;
+    Result<PageStore> store = open(*directory, baking, writable);
+    if (!store) {
+        std::error_code failed;
+        std::filesystem::remove_all(*directory, failed);
         return store;
     }
-    return make_error(ErrorCode::Io, "no new scratch directory");
+    store->impl_->scratch.directory = *directory;
+    return store;
 }
 
 const std::filesystem::path& PageStore::directory() const noexcept {

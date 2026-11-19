@@ -25,9 +25,10 @@ size: any grid depth, any finest size, any detail asked for.
 - **Asks are sized by the view, not the store.** A client asks for regions whose size grows
   with distance, each to the depth its distance wants, so an ask carries a few thousand nodes
   wherever it is, near or far. A distant kilometre is one ask, not thousands.
-- **Storage is grouped by content, not depth.** Depths are taken in **bands** of a few levels.
-  A **chunk** holds the nodes of one band under one node, its root, which lies at or above the
-  band's top. A chunk is split into its root's eight children only where it would go past a byte
+- **Storage is grouped by content, not depth.** Depths are taken in **bands** of a few levels
+  from the root. A **chunk** holds the nodes of one band under one node, its root, which lies no
+  deeper than the band above's foot, so everything the band holds there lies under it. A chunk
+  is split into its root's eight children only where it would go past a byte
   budget. Shared nodes make uniform ground tiny: open sea, flat plains and solid rock stay one
   small chunk over kilometres even at the finest band, and rugged ground splits finer. A chunk
   is one record, keyed by kind, band and root in Z order, so the chunk holding any node is one
@@ -61,10 +62,16 @@ size: any grid depth, any finest size, any detail asked for.
    fill reads the same at every node whatever its depth or starting node; pieces filled apart
    graft into what's filled whole; graft then cut gives the piece back; a graft changes only
    what's under it and keeps the values over it.
-2. **Chunk store.** Bands, chunks keyed by kind, band and root, split by budget, found by one
-   seek, versioned; reading any piece from them. Tests: a piece read from chunks matches the
-   tree the generator fills directly, over flat and rugged ground, for several band heights and
-   budgets; flat ground takes few chunks; versions step only on change.
+2. **Chunk store.** Done: `baked::ChunkStore` beside the page store. Chunks are keyed by kind,
+   band and the root's Morton bits moved up to the deepest depth, so the chunk over any node is
+   the last key at or before it, one seek. A chunk carries the tree from its root to its band's
+   foot; a piece is cut from the finest band's chunk over the node, or put together from the
+   coarser bands with the finer chunks under the node grafted in. Versions come from one counter
+   for the whole store, so a key let go and held again never repeats a version. A tree put under
+   a held chunk is grafted into it. Tests: pieces read from chunks match the generator's trees
+   over sea floor and land for band heights 2 to 4 and budgets from 256 bytes to 1 MB; open sky
+   is one chunk a band and smooth ground takes fewer than rugged; versions step only on change;
+   another generator's chunks read as not held.
 3. **Filling chunks.** On demand, ranked, written on the writer thread; the bake moves onto
    chunks, depth first in bounded memory, to the detail asked for. Tests: what's filled matches
    the generator; asking deeper grows what's held without refilling the bands above.
@@ -83,7 +90,9 @@ together, and the store is rebuilt by baking.
 ## Open
 
 - The band height and the chunk budget, from counts on the working world: probably three levels
-  and some tens of kilobytes.
+  and some tens of kilobytes. On the test world a 64-node-wide shape fill is about 70 kB over
+  sea floor and 117 kB over land: every surface node holds its own plane, so even smooth ground
+  isn't shared, only empty and solid space is.
 - Whether chunks well under budget are ever joined back into one under their parent, or a bake
   just fills at a sensible root to begin with.
 - Whether identical pieces travel once, by hash, for clients far apart seeing the same sea.
