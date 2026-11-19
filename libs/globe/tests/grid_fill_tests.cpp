@@ -389,6 +389,112 @@ TEST_CASE("a node filled coarse agrees with the fine ones under it", "[globe][gr
     }
 }
 
+TEST_CASE("a node reads the same however deep it's filled, and from whichever node over it",
+          "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const DVec3 ground =
+        up * hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    const Key node = grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - levels)).value();
+    const Filled deep = fill(world, grid, node, levels);
+    // Every node of `tree` down `reach` from its root that `whole` also has, `within` deep under
+    // its root at `offset` among that depth's, alike in both. Where either has a leaf over a
+    // node, the leaf stands for it, so isn't compared there.
+    std::size_t compared = 0;
+    const auto same = [&](const char* kind, const auto& tree, const auto& whole, std::uint8_t reach,
+                          std::uint8_t within, std::array<std::uint32_t, 3> offset) {
+        CAPTURE(kind);
+        for (std::uint8_t depth = 0; depth <= reach; ++depth) {
+            const std::uint32_t side = 1U << depth;
+            const auto at = static_cast<std::uint8_t>(within + depth);
+            for (std::uint32_t z = 0; z < side; ++z) {
+                for (std::uint32_t y = 0; y < side; ++y) {
+                    for (std::uint32_t x = 0; x < side; ++x) {
+                        const auto here = tree.at(depth, x, y, z);
+                        const auto there =
+                            whole.at(at, (offset[0] << depth) + x, (offset[1] << depth) + y,
+                                     (offset[2] << depth) + z);
+                        if (here.depth != depth || there.depth != at) {
+                            continue;
+                        }
+                        CAPTURE(depth, x, y, z);
+                        CHECK(here.value == there.value);
+                        ++compared;
+                    }
+                }
+            }
+        }
+    };
+    REQUIRE(deep.shape.nodes() > 1);
+    for (const std::uint8_t shallow : {std::uint8_t{1}, std::uint8_t{3}}) {
+        CAPTURE(shallow);
+        const Filled less = fill(world, grid, node, shallow);
+        same("shape", less.shape, deep.shape, shallow, 0, {0, 0, 0});
+        same("material", less.material, deep.material, shallow, 0, {0, 0, 0});
+        same("water", less.water, deep.water, shallow, 0, {0, 0, 0});
+        same("woods", less.woods, deep.woods, shallow, 0, {0, 0, 0});
+    }
+    // Filled from the node over it, the same under it.
+    const Filled over = fill(world, grid, node.parent(), levels);
+    const std::array<std::uint32_t, 3> offset{node.x & 1U, node.y & 1U, node.z & 1U};
+    const auto reach = static_cast<std::uint8_t>(levels - 1);
+    same("shape", deep.shape, over.shape, reach, 1, offset);
+    same("material", deep.material, over.material, reach, 1, offset);
+    same("water", deep.water, over.water, reach, 1, offset);
+    same("woods", deep.woods, over.woods, reach, 1, offset);
+    CHECK(compared > 100);
+}
+
+TEST_CASE("pieces filled apart graft into what's filled whole", "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const DVec3 ground =
+        up * hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    const Key node = grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - levels)).value();
+    const Filled whole = fill(world, grid, node, levels);
+    // Coarse first, then each child's piece to the same depth grafted in.
+    Filled pieced = fill(world, grid, node, 1);
+    for (std::uint32_t octant = 0; octant < 8; ++octant) {
+        const Key child = node.child(octant);
+        const Filled piece = fill(world, grid, child, levels - 1);
+        const std::uint32_t x = octant & 1U;
+        const std::uint32_t y = (octant >> 1U) & 1U;
+        const std::uint32_t z = octant >> 2U;
+        pieced.shape.graft(1, x, y, z, piece.shape);
+        pieced.material.graft(1, x, y, z, piece.material);
+        pieced.water.graft(1, x, y, z, piece.water);
+        pieced.woods.graft(1, x, y, z, piece.woods);
+    }
+    // Every node both hold, alike; a leaf in either stands for what's under it.
+    std::size_t compared = 0;
+    const auto same = [&](const char* kind, const auto& one, const auto& other) {
+        CAPTURE(kind);
+        CHECK(one.levels() == other.levels());
+        for (std::uint8_t depth = 0; depth <= levels; ++depth) {
+            const std::uint32_t side = 1U << depth;
+            for (std::uint32_t n = 0; n < side * side * side; ++n) {
+                const std::uint32_t x = n % side;
+                const std::uint32_t y = (n / side) % side;
+                const std::uint32_t z = n / (side * side);
+                const auto here = one.at(depth, x, y, z);
+                const auto there = other.at(depth, x, y, z);
+                if (here.depth == depth && there.depth == depth) {
+                    CAPTURE(depth, x, y, z);
+                    CHECK(here.value == there.value);
+                    ++compared;
+                }
+            }
+        }
+    };
+    same("shape", pieced.shape, whole.shape);
+    same("material", pieced.material, whole.material);
+    same("water", pieced.water, whole.water);
+    same("woods", pieced.woods, whole.woods);
+    CHECK(compared > 100);
+}
+
 TEST_CASE("every lake is its own body at its level", "[globe][grid]") {
     const auto& world = hog::testing::small_world();
     const hog::grid::Grid grid = grid_of(world);

@@ -11,13 +11,15 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 namespace hog::grid {
 
 // One kind of data over a node's subtree, `levels` deep. Every node holds a value: a leaf's
-// stands for all under it, a split node's is its kind's summary of its eight. An open leaf has
+// stands for all under it; a split node's is what it is at its own size, as whoever built the
+// tree gave it, or its kind's summary of its eight where they gave none. An open leaf has
 // finer detail under it, held elsewhere or still to come; a closed one is the same all through.
 // Alike nodes are held once, so building the same content gives the same tree. Eight leaves merge
 // into one wherever their kind says one value stands for them all.
@@ -94,8 +96,20 @@ public:
         bool open = false;
     };
 
+    // A node as a builder going down decides it with its own value: a leaf, open or not, or one
+    // that splits, its children decided in turn. A node's own value stands whatever is under it,
+    // so a tree reads the same at any node however deep it was grown; eight children alike enough
+    // to merge make it a leaf of its own value.
+    struct Decided {
+        Value value{}; // NOLINT(readability-redundant-member-init): zeroes integral kinds
+        bool open = false;
+        bool split = false;
+    };
+
     // From the root down, asking `decide(depth, x, y, z)` of each node reached, x, y, z among
-    // that depth's: a leaf ends it there, none splits it. Every node `levels` deep must be a leaf.
+    // that depth's. Deciding a Leaf ends it there and none splits it, its value its children's
+    // summary; deciding a Decided gives every node its own value. Every node `levels` deep must
+    // be a leaf.
     template <typename Decide>
     [[nodiscard]] static Tree grow(std::uint8_t levels, const Decide& decide) {
         struct Frame {
@@ -105,6 +119,7 @@ public:
             std::uint32_t z = 0;
             std::size_t next = 0;
             std::array<Id, 8> children{};
+            std::optional<Value> own;
         };
         Tree tree;
         tree.levels_ = levels;
@@ -113,12 +128,25 @@ public:
         // Pushes a node that splits; a leaf is made at once, as `done`.
         const auto reach = [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
                                std::uint32_t z) {
-            if (const std::optional<Leaf> leaf = decide(depth, x, y, z)) {
-                done = tree.leaf_of(leaf->value, leaf->open);
-                return false;
+            if constexpr (std::is_same_v<
+                              std::invoke_result_t<const Decide&, std::uint8_t, std::uint32_t,
+                                                   std::uint32_t, std::uint32_t>,
+                              Decided>) {
+                const Decided decided = decide(depth, x, y, z);
+                if (!decided.split) {
+                    done = tree.leaf_of(decided.value, decided.open);
+                    return false;
+                }
+                HOG_ASSERT(depth < levels, "nodes at the foot must be leaves");
+                stack.push_back({.depth = depth, .x = x, .y = y, .z = z, .own = decided.value});
+            } else {
+                if (const std::optional<Leaf> leaf = decide(depth, x, y, z)) {
+                    done = tree.leaf_of(leaf->value, leaf->open);
+                    return false;
+                }
+                HOG_ASSERT(depth < levels, "nodes at the foot must be leaves");
+                stack.push_back({.depth = depth, .x = x, .y = y, .z = z, .own = std::nullopt});
             }
-            HOG_ASSERT(depth < levels, "nodes at the foot must be leaves");
-            stack.push_back({.depth = depth, .x = x, .y = y, .z = z});
             return true;
         };
         if (!reach(0, 0, 0, 0)) {
@@ -128,7 +156,7 @@ public:
         while (!stack.empty()) {
             const Frame top = stack.back();
             if (top.next == 8) {
-                done = tree.joined(top.children, std::ldexp(1.0, levels - top.depth - 1));
+                done = tree.joined(top.children, std::ldexp(1.0, levels - top.depth - 1), top.own);
                 stack.pop_back();
                 if (stack.empty()) {
                     break;
@@ -156,18 +184,19 @@ public:
         if (levels >= levels_) {
             return *this;
         }
-        return grow(levels,
-                    [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y,
-                        std::uint32_t z) -> std::optional<Leaf> {
-                        const Found found = at(depth, x, y, z);
-                        if (at(depth + 1, 2 * x, 2 * y, 2 * z).depth == depth) {
-                            return Leaf{.value = found.value, .open = found.open};
-                        }
-                        if (depth == levels) {
-                            return Leaf{.value = found.value, .open = true};
-                        }
-                        return std::nullopt;
-                    });
+        // Every node keeps the value it has, split or not.
+        return grow(
+            levels,
+            [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) -> Decided {
+                const Found found = at(depth, x, y, z);
+                if (at(depth + 1, 2 * x, 2 * y, 2 * z).depth == depth) {
+                    return {.value = found.value, .open = found.open, .split = false};
+                }
+                if (depth == levels) {
+                    return {.value = found.value, .open = true, .split = false};
+                }
+                return {.value = found.value, .open = false, .split = true};
+            });
     }
 
     // The node `depth` below the root at (x, y, z) among that depth's, or the leaf over it.
@@ -175,6 +204,26 @@ public:
     [[nodiscard]] Found at(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
                            std::uint32_t z) const noexcept;
     [[nodiscard]] Found root() const noexcept { return at(0, 0, 0, 0); }
+
+    // The piece under the node `depth` below the root at (x, y, z) among that depth's, `levels`
+    // deep under it, each node as it's held here: one split deeper becomes an open leaf of its
+    // value. Under a leaf, the leaf stands for it, alone.
+    // Precondition: depth <= levels() and x, y, z < 2^depth.
+    [[nodiscard]] Tree cut(std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z,
+                           std::uint8_t levels) const;
+
+    // Puts `piece` in at the node `depth` below the root at (x, y, z), in place of what was there,
+    // going as deep as the piece does. The nodes over it keep their values; a leaf over it splits,
+    // its other children leaves alike to it. Only the piece and the way down to it are added, so
+    // grafting costs no more than they do; what it lets go of stays held until compacted.
+    // Precondition: x, y, z < 2^depth, and the piece isn't this tree.
+    void graft(std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z,
+               const Tree& piece);
+
+    // Lets go of the nodes no longer reachable from the root.
+    void compact();
+    // Nodes held, reachable or not.
+    [[nodiscard]] std::size_t held_nodes() const noexcept { return nodes_.size(); }
 
     // Distinct nodes, and leaves among them, reachable from the root.
     [[nodiscard]] std::size_t nodes() const;
@@ -187,8 +236,7 @@ public:
     // children: flags (1 split, 2 open), its value, and a split node's eight children as varint
     // indices. The root comes last.
     [[nodiscard]] std::vector<std::byte> encode() const;
-    // Fails, saying why, on bytes that aren't a tree, go deeper than they say, or hold a split
-    // node whose value isn't its children's summary.
+    // Fails, saying why, on bytes that aren't a tree or go deeper than they say.
     [[nodiscard]] static Result<Tree> decode(std::span<const std::byte> bytes);
 
     [[nodiscard]] bool same_as(const Tree& other) const { return encode() == other.encode(); }
@@ -217,7 +265,10 @@ private:
     }
     // Eight leaves alike in being open or closed become one where their kind merges them; else a
     // split node. Of children `side` finest nodes across.
-    [[nodiscard]] Id joined(const std::array<Id, 8>& children, double side);
+    // Of children `side` finest nodes across; the parent's own value where it has one, else
+    // their summary.
+    [[nodiscard]] Id joined(const std::array<Id, 8>& children, double side,
+                            const std::optional<Value>& own = std::nullopt);
     // A decoded node's id here and how far it reaches down.
     struct Decoded {
         Id id = 0;

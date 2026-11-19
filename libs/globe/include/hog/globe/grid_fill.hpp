@@ -54,7 +54,9 @@ struct Filled {
 };
 
 // The trees over the node at `key`, `levels` deep under it, from the generator. Each node is
-// sampled at its middle with detail no finer than itself; one the surface clearly misses, with no
+// sampled at its middle with detail no finer than itself, and keeps what it's sampled as whether
+// it splits or not, so a node reads the same however deep it's filled and from whichever node
+// over it; one the surface clearly misses, with no
 // cave shown in it at that detail, is a leaf all solid or all open, so only nodes near the
 // surface split, down to `levels`, where each holds the surface's plane. Material is the solid's
 // just inside the surface; water marks the open space over the ground under the sea, a lake or a

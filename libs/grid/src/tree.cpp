@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <utility>
 
 namespace hog::grid {
@@ -38,7 +39,8 @@ auto Tree<Kind>::held(const Node& node) -> Id {
 }
 
 template <typename Kind>
-auto Tree<Kind>::joined(const std::array<Id, 8>& children, double side) -> Id {
+auto Tree<Kind>::joined(const std::array<Id, 8>& children, double side,
+                        const std::optional<Value>& own) -> Id {
     std::array<Value, 8> values{};
     for (std::size_t k = 0; k < 8; ++k) {
         values.at(k) = nodes_[children.at(k)].value;
@@ -49,10 +51,11 @@ auto Tree<Kind>::joined(const std::array<Id, 8>& children, double side) -> Id {
             return node.split() || node.open != first.open;
         })) {
         if (const std::optional<Value> one = Kind::merged(values, side)) {
-            return leaf_of(*one, first.open);
+            return leaf_of(own.value_or(*one), first.open);
         }
     }
-    return held({.value = Kind::summary(values), .open = false, .children = children});
+    return held(
+        {.value = own.value_or(Kind::summary(values)), .open = false, .children = children});
 }
 
 template <typename Kind>
@@ -71,6 +74,142 @@ auto Tree<Kind>::at(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
     }
     const Node& node = nodes_[id];
     return {.value = node.value, .open = node.open, .depth = depth};
+}
+
+namespace {
+
+// Which of a node's eight children holds (x, y, z) among the depth `shift` levels below them.
+std::size_t octant_of(std::uint32_t x, std::uint32_t y, std::uint32_t z, unsigned shift) noexcept {
+    return ((x >> shift) & 1U) | (((y >> shift) & 1U) << 1U) | (((z >> shift) & 1U) << 2U);
+}
+
+} // namespace
+
+template <typename Kind>
+Tree<Kind> Tree<Kind>::cut(std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z,
+                           std::uint8_t levels) const {
+    Id id = root_;
+    for (std::uint8_t down = 0; down < depth; ++down) {
+        const Node& node = nodes_[id];
+        if (!node.split()) {
+            return Tree{levels, node.value, node.open};
+        }
+        id = node.children.at(octant_of(x, y, z, static_cast<unsigned>(depth - down - 1)));
+    }
+    Tree piece;
+    piece.levels_ = levels;
+    // Shared nodes are copied once for each depth they're met at.
+    std::unordered_map<std::uint64_t, Id> copied;
+    const auto key = [](Id from, std::uint8_t below) {
+        return (std::uint64_t{from} << 8U) | below;
+    };
+    // A node `below` levels under the piece's root as it's copied, where that needs no children
+    // copied first.
+    const auto copied_now = [&](Id from, std::uint8_t below) -> std::optional<Id> {
+        const Node& node = nodes_[from];
+        if (!node.split()) {
+            return piece.leaf_of(node.value, node.open);
+        }
+        if (below == levels) {
+            return piece.leaf_of(node.value, true);
+        }
+        if (const auto found = copied.find(key(from, below)); found != copied.end()) {
+            return found->second;
+        }
+        return std::nullopt;
+    };
+    struct Frame {
+        Id from = 0;
+        std::uint8_t below = 0;
+        std::size_t next = 0;
+        std::array<Id, 8> children{};
+    };
+    if (const std::optional<Id> now = copied_now(id, 0)) {
+        piece.root_ = *now;
+        return piece;
+    }
+    std::vector<Frame> stack{{.from = id, .below = 0, .next = 0, .children = {}}};
+    while (!stack.empty()) {
+        Frame& top = stack.back();
+        if (top.next == 8) {
+            const Id made = piece.held(
+                {.value = nodes_[top.from].value, .open = false, .children = top.children});
+            copied.emplace(key(top.from, top.below), made);
+            stack.pop_back();
+            if (stack.empty()) {
+                piece.root_ = made;
+                break;
+            }
+            Frame& parent = stack.back();
+            parent.children.at(parent.next++) = made;
+            continue;
+        }
+        const Id child = nodes_[top.from].children.at(top.next);
+        const auto below = static_cast<std::uint8_t>(top.below + 1);
+        if (const std::optional<Id> now = copied_now(child, below)) {
+            top.children.at(top.next++) = *now;
+        } else {
+            stack.push_back({.from = child, .below = below, .next = 0, .children = {}});
+        }
+    }
+    return piece;
+}
+
+template <typename Kind>
+void Tree<Kind>::graft(std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z,
+                       const Tree& piece) {
+    // The piece's nodes held here, children first.
+    std::vector<Id> mapped(piece.nodes_.size(), none);
+    for (const Id from : piece.walk()) {
+        Node node = piece.nodes_[from];
+        if (node.split()) {
+            for (Id& child : node.children) {
+                child = mapped[child];
+            }
+        }
+        mapped[from] = held(node);
+    }
+    // The way down from the root; a leaf on it stands for each of its children below.
+    std::vector<Id> way(depth);
+    Id at = root_;
+    for (std::uint8_t down = 0; down < depth; ++down) {
+        way[down] = at;
+        if (const Node& node = nodes_[at]; node.split()) {
+            at = node.children.at(octant_of(x, y, z, static_cast<unsigned>(depth - down - 1)));
+        }
+    }
+    Id id = mapped[piece.root_];
+    for (std::uint8_t down = depth; down-- > 0;) {
+        const Node over = nodes_[way[down]];
+        std::array<Id, 8> children{};
+        if (over.split()) {
+            children = over.children;
+        } else {
+            children.fill(way[down]);
+        }
+        children.at(octant_of(x, y, z, static_cast<unsigned>(depth - down - 1))) = id;
+        id = held({.value = over.value, .open = false, .children = children});
+    }
+    root_ = id;
+    levels_ = std::max(levels_, static_cast<std::uint8_t>(depth + piece.levels_));
+}
+
+template <typename Kind>
+void Tree<Kind>::compact() {
+    Tree kept;
+    kept.levels_ = levels_;
+    std::vector<Id> mapped(nodes_.size(), none);
+    for (const Id from : walk()) {
+        Node node = nodes_[from];
+        if (node.split()) {
+            for (Id& child : node.children) {
+                child = mapped[child];
+            }
+        }
+        mapped[from] = kept.held(node);
+    }
+    kept.root_ = mapped[root_];
+    *this = std::move(kept);
 }
 
 template <typename Kind>
@@ -193,7 +332,6 @@ auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded) -
     Node node{.value = *value, .open = (*flags & open_flag) != 0};
     std::uint8_t reach = 0;
     if (split) {
-        std::array<Value, 8> values{};
         for (std::size_t k = 0; k < 8; ++k) {
             const auto child = in.read_varint();
             if (!child || *child >= decoded.size()) {
@@ -201,14 +339,10 @@ auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded) -
             }
             const Decoded& below = decoded[*child];
             node.children.at(k) = below.id;
-            values.at(k) = nodes_[below.id].value;
             reach = std::max(reach, static_cast<std::uint8_t>(below.reach + 1));
         }
         if (reach > levels_) {
             return make_error(ErrorCode::Parse, "a tree deeper than its levels");
-        }
-        if (node.value != Kind::summary(values)) {
-            return make_error(ErrorCode::Parse, "a split node's value isn't its summary");
         }
     }
     return Decoded{.id = held(node), .reach = reach};

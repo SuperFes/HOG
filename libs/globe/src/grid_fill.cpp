@@ -33,13 +33,15 @@ static_assert(grid::Stand::kinds == flora::kinds, "the pages hold every kind of 
 struct Probe {
     double distance = 0.0; // metres, negative inside the solid
     Material material = Material::Air;
-    double size = 0.0;                    // metres across the node
-    double radius = 0.0;                  // of its middle, from the centre
-    double ground = 0.0;                  // under it, metres from the centre
-    double water = 0.0;                   // over it at its highest in the year, likewise; 0 none
-    WaterBody body;                       // which that water is
-    std::optional<grid::Surface> surface; // where the node is a leaf
-    bool caves = false;                   // a cave may lie in it at finer detail
+    double size = 0.0;   // metres across the node
+    double radius = 0.0; // of its middle, from the centre
+    double ground = 0.0; // under it, metres from the centre
+    double water = 0.0;  // over it at its highest in the year, likewise; 0 none
+    WaterBody body;      // which that water is
+    // Its plane where the surface may cross it, else solid or open; none past what's filled.
+    std::optional<grid::Surface> surface;
+    bool splits = false; // the surface may cross it and finer nodes are filled under it
+    bool caves = false;  // a cave may lie in it at finer detail
 };
 
 // Which way is up at a point. At the centre every way is down alike, so any will do.
@@ -66,59 +68,51 @@ public:
         survey();
     }
 
-    std::optional<grid::Tree<grid::Shape>::Leaf> shape(std::uint8_t depth, std::uint32_t x,
-                                                       std::uint32_t y, std::uint32_t z) const {
+    // Each node of each tree has its own value as it's sampled at its own size, split or not, so
+    // a node reads the same however deep it's filled.
+    grid::Tree<grid::Shape>::Decided shape(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                                           std::uint32_t z) const {
         const Probe& here = probes_.at(grid::code(absolute(depth, x, y, z)));
-        if (!here.surface) {
-            return std::nullopt;
-        }
-        return grid::Tree<grid::Shape>::Leaf{.value = *here.surface, .open = open(depth, here)};
+        return {.value = here.surface.value(), .open = open(depth, here), .split = here.splits};
     }
-    std::optional<grid::Tree<grid::Material>::Leaf>
-    material(std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) const {
+    grid::Tree<grid::Material>::Decided material(std::uint8_t depth, std::uint32_t x,
+                                                 std::uint32_t y, std::uint32_t z) const {
         const Probe& here = probes_.at(grid::code(absolute(depth, x, y, z)));
-        if (!here.surface) {
-            return std::nullopt;
-        }
-        return grid::Tree<grid::Material>::Leaf{.value = palette_of(here.material),
-                                                .open = open(depth, here)};
+        return {
+            .value = palette_of(here.material), .open = open(depth, here), .split = here.splits};
     }
-    std::optional<grid::Tree<grid::Water>::Leaf> water(std::uint8_t depth, std::uint32_t x,
-                                                       std::uint32_t y, std::uint32_t z) const {
+    grid::Tree<grid::Water>::Decided water(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                                           std::uint32_t z) const {
         const Probe& here = probes_.at(grid::code(absolute(depth, x, y, z)));
-        if (!here.surface) {
-            return std::nullopt;
-        }
         // The sea's basin: reaching under its level and over the ground, so not a cave under it,
         // nor rock the surface clearly misses. Where in it water stands is the level's to say, so
         // it needn't split along the sea's top.
         const double half = half_diagonal * here.size;
         const bool wet =
             here.water > 0.0 && here.radius - half < here.water && here.radius + half > here.ground;
-        return grid::Tree<grid::Water>::Leaf{.value = wet ? body_value(here.body) : 0,
-                                             .open = open(depth, here)};
+        return {.value = wet ? body_value(here.body) : 0,
+                .open = open(depth, here),
+                .split = here.splits};
     }
 
     // The woods on the ground through a node, sampled at its middle with detail no finer than it,
     // down to nodes woods_finest across.
-    std::optional<grid::Tree<grid::Woods>::Leaf> woods(std::uint8_t depth, std::uint32_t x,
-                                                       std::uint32_t y, std::uint32_t z) const {
+    grid::Tree<grid::Woods>::Decided woods(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
+                                           std::uint32_t z) const {
         const grid::Key key = absolute(depth, x, y, z);
         const Probe& here = probes_.at(grid::code(key));
         // Open by size alone, ground or none, so stands merge across the air beside them.
         const bool finer = here.size / 2.0 >= woods_finest && key.depth < grid_->depth();
-        if (here.surface && !here.surface->crosses()) {
-            return grid::Tree<grid::Woods>::Leaf{.value = {}, .open = finer};
+        if (!here.splits && !here.surface.value().crosses()) {
+            return {.value = {}, .open = finer, .split = false};
         }
-        if (finer && depth < levels_) {
-            return std::nullopt;
-        }
+        const bool split = finer && depth < levels_ && here.splits;
         if (generator_->shape().formed == nullptr) {
-            return grid::Tree<grid::Woods>::Leaf{.value = {.ground = true}, .open = finer};
+            return {.value = {.ground = true}, .open = finer, .split = split};
         }
-        const flora::Woods found = globe::woods(*generator_, grid_->centre(key), here.size);
-        return grid::Tree<grid::Woods>::Leaf{.value = grid::Stand::of(found.cover, found.shares),
-                                             .open = finer};
+        // The top node's middle is the planet's centre, which has no up of its own.
+        const flora::Woods found = globe::woods(*generator_, up_at(grid_->centre(key)), here.size);
+        return {.value = grid::Stand::of(found.cover, found.shares), .open = finer, .split = split};
     }
 
     // The finest columns made with a crag left out of their ground.
@@ -159,8 +153,8 @@ private:
                (std::abs(here.distance) < near * here.size || here.caves);
     }
 
-    // Each depth's nodes down from the filled one, probed together: only those the surface may
-    // cross go on down, and at the foot each it does gets its plane.
+    // Each depth's nodes down from the filled one, probed together: those the surface may cross
+    // get their planes, and go on down above the foot.
     void survey() {
         std::vector<grid::Key> nodes{key_};
         for (std::uint8_t depth = 0; depth <= levels_ && !nodes.empty(); ++depth) {
@@ -176,37 +170,43 @@ private:
             }
             const std::vector<double> distances = distances_at(middles, level, lod);
             std::vector<grid::Key> next;
-            std::vector<std::size_t> feet;
+            std::vector<std::size_t> crossing;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
-                const double radius = glm::length(middles[n]);
-                const Generator::Column& column = column_at(middles[n], level);
-                Probe probe{.distance = distances[n],
-                            .material = distances[n] > clear * size
-                                            ? Material::Air
-                                            : solid_at(middles[n], radius, level, size),
-                            .size = size,
-                            .radius = radius,
-                            .ground = column.ground(),
-                            .water = highest_water(column),
-                            .body = column.water_body(),
-                            .surface = std::nullopt};
+                Probe probe = probe_at(middles[n], distances[n], size, level);
                 if (missed(probe, middles[n], level)) {
                     probe.surface =
                         probe.distance < 0.0 ? grid::Surface::solid() : grid::Surface::open();
-                } else if (depth == levels_) {
-                    feet.push_back(n);
                 } else {
-                    for (std::size_t octant = 0; octant < 8; ++octant) {
-                        next.push_back(nodes[n].child(octant));
+                    crossing.push_back(n);
+                    if (depth < levels_) {
+                        probe.splits = true;
+                        for (std::size_t octant = 0; octant < 8; ++octant) {
+                            next.push_back(nodes[n].child(octant));
+                        }
                     }
                 }
                 probes_.emplace(grid::code(nodes[n]), probe);
             }
-            if (!feet.empty()) {
-                planes(nodes, middles, feet, size, level, lod);
+            if (!crossing.empty()) {
+                planes(nodes, middles, crossing, size, level, lod);
             }
             nodes = std::move(next);
         }
+    }
+
+    // What the generator gives at a node's middle `distance` out of the solid, but its surface.
+    [[nodiscard]] Probe probe_at(DVec3 middle, double distance, double size, int level) const {
+        const double radius = glm::length(middle);
+        const Generator::Column& column = column_at(middle, level);
+        return {.distance = distance,
+                .material =
+                    distance > clear * size ? Material::Air : solid_at(middle, radius, level, size),
+                .size = size,
+                .radius = radius,
+                .ground = column.ground(),
+                .water = highest_water(column),
+                .body = column.water_body(),
+                .surface = std::nullopt};
     }
 
     // Whether no surface crosses the node: the ground's far from it, and in the solid, no cave
@@ -228,23 +228,24 @@ private:
         return true;
     }
 
-    // The feet's planes: each one's normal the way the distance rises across it.
+    // The planes of the nodes the surface may cross: each one's normal the way the distance rises
+    // across it.
     void planes(const std::vector<grid::Key>& nodes, const std::vector<DVec3>& middles,
-                const std::vector<std::size_t>& feet, double size, int level, double lod) {
+                const std::vector<std::size_t>& crossing, double size, int level, double lod) {
         constexpr std::array<DVec3, 3> axes{DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0},
                                             DVec3{0.0, 0.0, 1.0}};
         const double step = size / 2.0;
         std::vector<DVec3> points;
-        points.reserve(feet.size() * 6);
-        for (const std::size_t n : feet) {
+        points.reserve(crossing.size() * 6);
+        for (const std::size_t n : crossing) {
             for (const DVec3 axis : axes) {
                 points.push_back(middles[n] + (axis * step));
                 points.push_back(middles[n] - (axis * step));
             }
         }
         const std::vector<double> distances = distances_at(points, level, lod);
-        for (std::size_t f = 0; f < feet.size(); ++f) {
-            const std::size_t n = feet[f];
+        for (std::size_t f = 0; f < crossing.size(); ++f) {
+            const std::size_t n = crossing[f];
             const std::size_t first = 6 * f;
             const DVec3 rise{distances[first] - distances[first + 1],
                              distances[first + 2] - distances[first + 3],

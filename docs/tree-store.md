@@ -12,6 +12,12 @@ size: any grid depth, any finest size, any detail asked for.
 
 ## Decided
 
+- **A node holds its own value.** Each node keeps what the generator gives at its own size,
+  whether it splits or not, rather than the summary of whatever happens to be filled under it.
+  So a node reads the same however deep the tree around it is filled and from whichever node
+  over it the fill began, any cut of the tree agrees with any other, and a coarse node never
+  changes as detail is added under it: filling finer never rewrites coarser chunks. Edits are
+  the one thing that change a node, and they recompute what's over them.
 - **Ask for a node to a depth.** Any node, any depth down to the finest. The answer is a
   **piece**: that node's subtree for each kind, cut at that depth. Leaves keep saying whether
   more detail lies under them. Pieces are what goes over the wire and what a client merges into
@@ -48,10 +54,13 @@ size: any grid depth, any finest size, any detail asked for.
 
 ## Steps
 
-1. **Pieces.** A piece is a node and its trees cut at a depth, coded like a page is now but
-   rooted at any node; grafting a piece into a held tree and cutting one out of it. Tests:
-   graft then cut gives the piece back; grafting a deeper piece over a shallower one replaces
-   only its subtree; summaries above stay consistent.
+1. **Pieces.** Done: nodes keep their own values (`Tree::Decided`, kept through `trimmed`), and
+   `Tree::cut`, `Tree::graft` and `Tree::compact` cut a piece from any node to any depth and
+   graft one in at any node, touching only the piece and the way down to it. The coded form is
+   `grid::Page`, whose root may be any node; it takes the name piece when pages retire. Tests: a
+   fill reads the same at every node whatever its depth or starting node; pieces filled apart
+   graft into what's filled whole; graft then cut gives the piece back; a graft changes only
+   what's under it and keeps the values over it.
 2. **Chunk store.** Bands, chunks keyed by kind, band and root, split by budget, found by one
    seek, versioned; reading any piece from them. Tests: a piece read from chunks matches the
    tree the generator fills directly, over flat and rugged ground, for several band heights and

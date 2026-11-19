@@ -109,11 +109,126 @@ TEST_CASE("a tree reads back what it was built from", "[grid]") {
     CHECK(tree.leaves() < std::size_t{across} * across * across);
 }
 
-TEST_CASE("a split node's value is its children's summary", "[grid]") {
+TEST_CASE("a tree built from its foot gives split nodes their children's summary", "[grid]") {
     check_summaries(patchy_tree());
     check_summaries(Tree<Water>::build(levels, [](int x, int y, int z) {
         return static_cast<Water::Value>(hog::hash_values(2, x, y / 4, z) % 5);
     }));
+}
+
+TEST_CASE("nodes given their own values read the same however deep the tree is grown", "[grid]") {
+    // A value of each node's own, split down to the foot along x's middle.
+    const auto own = [](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+        return static_cast<Material::Value>(1 + (hog::hash_values(depth, x / 2, y, z) % 5));
+    };
+    const auto grown = [&](std::uint8_t deep) {
+        return Tree<Material>::grow(
+            deep, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+                const std::uint32_t middle = std::uint32_t{1} << depth >> 1U;
+                const bool edge = x + 1 == middle || x == middle;
+                return Tree<Material>::Decided{.value = own(depth, x, y, z),
+                                               .open = depth == deep,
+                                               .split = depth < deep && (depth == 0 || edge)};
+            });
+    };
+    const Tree<Material> deep = grown(levels);
+    CHECK(deep.root().value == own(0, 0, 0, 0));
+    for (std::uint8_t shallow = 1; shallow < levels; ++shallow) {
+        CAPTURE(shallow);
+        const Tree<Material> cut = deep.trimmed(shallow);
+        const Tree<Material> less = grown(shallow);
+        for (std::uint8_t depth = 0; depth <= shallow; ++depth) {
+            const std::uint32_t side = std::uint32_t{1} << depth;
+            for (std::uint32_t z = 0; z < side; ++z) {
+                for (std::uint32_t y = 0; y < side; ++y) {
+                    for (std::uint32_t x = 0; x < side; ++x) {
+                        // Open or not may differ: grown deeper, a leaf can know it's closed.
+                        const auto found = cut.at(depth, x, y, z);
+                        CHECK(found.value == less.at(depth, x, y, z).value);
+                        CHECK(found.depth == less.at(depth, x, y, z).depth);
+                        CHECK(found.value == deep.at(depth, x, y, z).value);
+                    }
+                }
+            }
+        }
+    }
+    // Back from its bytes, every value stands.
+    const auto back = Tree<Material>::decode(deep.encode());
+    REQUIRE(back);
+    CHECK(back->same_as(deep));
+}
+
+TEST_CASE("a piece cut from a tree grafts back into it, and a graft changes only what's under it",
+          "[grid]") {
+    const Tree<Material> tree = patchy_tree();
+    // A node two levels down, its piece to the foot.
+    const std::uint8_t depth = 2;
+    const std::uint32_t nx = 1;
+    const std::uint32_t ny = 2;
+    const std::uint32_t nz = 3;
+    const auto under = [&](std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+        return (x >> (levels - depth)) == nx && (y >> (levels - depth)) == ny &&
+               (z >> (levels - depth)) == nz;
+    };
+    const Tree<Material> piece = tree.cut(depth, nx, ny, nz, levels - depth);
+    CHECK(piece.levels() == levels - depth);
+    const std::uint32_t side = 1U << (levels - depth);
+    for (std::uint32_t z = 0; z < side; ++z) {
+        for (std::uint32_t y = 0; y < side; ++y) {
+            for (std::uint32_t x = 0; x < side; ++x) {
+                CHECK(piece.at(levels - depth, x, y, z).value ==
+                      tree.at(levels, (nx * side) + x, (ny * side) + y, (nz * side) + z).value);
+            }
+        }
+    }
+    Tree<Material> back = tree;
+    back.graft(depth, nx, ny, nz, piece);
+    CHECK(back.same_as(tree));
+    // Cut shallower, what splits deeper is an open leaf of its value.
+    const Tree<Material> shallow = tree.cut(depth, nx, ny, nz, 1);
+    CHECK(shallow.levels() == 1);
+    CHECK(shallow.root().value == tree.at(depth, nx, ny, nz).value);
+
+    // Another piece in its place: under it, the piece; elsewhere, as it was; over it, as it was.
+    Tree<Material> grafted = tree;
+    grafted.graft(depth, nx, ny, nz, Tree<Material>{levels - depth, 9, false});
+    for (std::uint32_t z = 0; z < across; ++z) {
+        for (std::uint32_t y = 0; y < across; ++y) {
+            for (std::uint32_t x = 0; x < across; ++x) {
+                CHECK(grafted.at(levels, x, y, z).value ==
+                      (under(x, y, z) ? 9 : tree.at(levels, x, y, z).value));
+            }
+        }
+    }
+    CHECK(grafted.root().value == tree.root().value);
+    CHECK(grafted.at(1, 0, 1, 1).value == tree.at(1, 0, 1, 1).value);
+
+    // Deeper than the tree went, under a leaf: the tree goes as deep as the piece, the leaf's
+    // other children alike to it.
+    const Tree<Material> merged = Tree<Material>::build(
+        levels, [](int x, int, int) { return static_cast<Material::Value>(x < 8 ? 1 : 2); });
+    REQUIRE(merged.at(levels, 0, 0, 0).depth < levels);
+    const Tree<Material> finer = Tree<Material>::build(
+        2, [](int x, int y, int z) { return static_cast<Material::Value>(3 + ((x + y + z) % 2)); });
+    Tree<Material> deeper = merged;
+    deeper.graft(levels, 0, 0, 0, finer);
+    CHECK(deeper.levels() == levels + 2);
+    CHECK(deeper.at(levels + 2, 1, 0, 0).value == 4);
+    CHECK(deeper.at(levels + 2, 1, 1, 0).value == 3);
+    CHECK(deeper.at(levels, 1, 0, 0) ==
+          Tree<Material>::Found{.value = 1, .open = false, .depth = levels});
+    CHECK(deeper.at(levels, 9, 0, 0).value == 2);
+    // Cut under a leaf, the leaf alone.
+    const Tree<Material> lone = merged.cut(levels, 3, 3, 3, 2);
+    CHECK(lone.nodes() == 1);
+    CHECK(lone.root() == Tree<Material>::Found{.value = 1, .open = false, .depth = 0});
+
+    // Compacted, what's let go goes and the rest stands.
+    CHECK(grafted.held_nodes() > grafted.nodes());
+    const std::vector<std::byte> before = grafted.encode();
+    grafted.compact();
+    CHECK(grafted.held_nodes() == grafted.nodes());
+    CHECK(grafted.encode() == before);
 }
 
 TEST_CASE("the same content gives the same bytes", "[grid]") {
@@ -169,9 +284,12 @@ TEST_CASE("broken tree bytes are refused", "[grid]") {
     const std::vector<std::byte> split = halves.encode();
     const std::size_t root = split.size() - 8 - 2 - 1;
     REQUIRE(split[root] == std::byte{1});
-    std::vector<std::byte> wrong_summary = split;
-    wrong_summary[root + 1] = std::byte{2};
-    CHECK_FALSE(Tree<Material>::decode(wrong_summary));
+    // A split node of its own value, not its children's summary, comes back as it is.
+    std::vector<std::byte> own = split;
+    own[root + 1] = std::byte{7};
+    const auto own_back = Tree<Material>::decode(own);
+    REQUIRE(own_back);
+    CHECK(own_back->root().value == 7);
     std::vector<std::byte> open_split = split;
     open_split[root] = std::byte{3};
     CHECK_FALSE(Tree<Material>::decode(open_split));
