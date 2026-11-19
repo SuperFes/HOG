@@ -145,12 +145,18 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
+    // Has the player sent the grid pages it asks for, and only those, from now on.
+    void ask_pages(net::ConnectionId connection, const protocol::Ask& ask);
     // Sends each player the tiles due to them, as their connection has room, and cuts the land
     // afresh for one that's moved on, in the background, the land left to it meanwhile.
     void tell_tiles();
+    // Takes the land cut last for a player, and cuts it afresh for the next that's moved on.
+    void cut_tiles();
     // Sends players the grid pages due to them, following them where they've moved or pages were
     // filled since.
     void tell_pages();
+    // Sends the player the grid pages due to it, as its connection has room.
+    void send_pages(net::ConnectionId connection);
     // Sends the player the water bodies by `ids`, as many messages as they take.
     void tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids);
     // Tells each player the grain in flight near them, and once more when there's none.

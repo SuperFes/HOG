@@ -74,6 +74,35 @@ void PageSending::follow(net::ConnectionId player, DVec3 at, PageSource& source)
     }
 }
 
+void PageSending::ask(net::ConnectionId player, std::span<const Want> wants) {
+    Player& held = players_[player];
+    held.asking = true;
+    held.round = ++rounds_;
+    held.due.clear();
+    held.waiting.clear();
+    for (Want want : wants) {
+        const grid::Key page = want.page;
+        if (page.depth >= grid_.depth()) {
+            continue;
+        }
+        const std::uint32_t across = std::uint32_t{1} << page.depth;
+        if (page.x >= across || page.y >= across || page.z >= across ||
+            grid_.page_of(page.child(0)) != page) {
+            continue;
+        }
+        want.levels = std::min(want.levels, grid_.levels_under(page.depth));
+        const auto sent = held.sent.find(page);
+        if (want.levels > 0 && (sent == held.sent.end() || sent->second.levels < want.levels)) {
+            held.due.push_back(want);
+        }
+    }
+}
+
+bool PageSending::asking(net::ConnectionId player) const {
+    const auto found = players_.find(player);
+    return found != players_.end() && found->second.asking;
+}
+
 void PageSending::changed(std::span<const grid::Key> pages) {
     for (auto& [id, held] : players_) {
         for (const grid::Key page : pages) {

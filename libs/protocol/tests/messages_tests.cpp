@@ -82,58 +82,62 @@ Weather weather(std::uint8_t level) {
 }
 
 std::vector<Message> examples() {
-    return {Hello{},
-            Hello{.version = version, .token = bytes({1, 2, 3, 250})},
-            Welcome{},
-            Welcome{.world = 0x0123456789abcdefULL, .planet = {}, .ground = {}},
-            Welcome{.world = 1, .planet = bytes({4, 5}), .ground = bytes({6, 7, 8})},
-            Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
-            Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
-            Moved{.sequence = 0xFFFF'FFFF, .corrections = 3, .at = far_out},
-            Moved{.sequence = 2,
-                  .corrections = 0,
-                  .at = far_out,
-                  .stance = Stance::Flying,
-                  .facing = {.heading = 0xFFFF, .pitch = -16'384}},
-            Placed{.at = far_out, .stance = Stance::Walking, .facing = {.heading = 1, .pitch = 7}},
-            Placed{.at = far_out, .stance = Stance::Flying, .facing = {}},
-            Corrected{.count = 1, .at = far_out},
-            Ack{.tick = 0xFFFF'FFF0},
-            whole(),
-            delta(),
-            Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
-            weather(0),
-            weather(1),
-            Said{.from = "", .text = "hello?"},
-            Said{.from = std::string(most_name, 'n'), .text = std::string(most_said, 's')},
-            Hurry{.scale = 1},
-            Hurry{.scale = 16'384},
-            Clock{.scale = 1},
-            Clock{.scale = 86'400},
-            Dug{.centre = far_out, .radius = 1},
-            Dug{.centre = far_out, .radius = most_edit},
-            Built{.centre = far_out, .radius = 2'500, .material = 9},
-            Tiles{},
-            Tiles{.tiles = {{.level = 9,
-                             .face = 5,
-                             .i = 0xFFFF'FFF0,
-                             .j = 3,
-                             .k = 0x8000'0001,
-                             .bytes = bytes({1, 2, 3})},
-                            {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
-            Pages{},
-            Pages{.pages = {bytes({1, 2, 3}), {}, bytes({250})}},
-            Bodies{},
-            Bodies{.bytes = bytes({1, 0, 7})},
-            Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
-            Grains{},
-            Grains{.tick = 7,
-                   .flying = {{.id = NetId{1},
-                               .at = far_out,
-                               .velocity = {-32'768, 0, 32'767},
-                               .material = 4,
-                               .amount = 70'000},
-                              {.id = NetId{9}, .at = Millimetres{0, -5, 6}, .velocity = {}}}}};
+    return {
+        Hello{},
+        Hello{.version = version, .token = bytes({1, 2, 3, 250})},
+        Welcome{},
+        Welcome{.world = 0x0123456789abcdefULL, .planet = {}, .ground = {}},
+        Welcome{.world = 1, .planet = bytes({4, 5}), .ground = bytes({6, 7, 8})},
+        Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
+        Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
+        Moved{.sequence = 0xFFFF'FFFF, .corrections = 3, .at = far_out},
+        Moved{.sequence = 2,
+              .corrections = 0,
+              .at = far_out,
+              .stance = Stance::Flying,
+              .facing = {.heading = 0xFFFF, .pitch = -16'384}},
+        Placed{.at = far_out, .stance = Stance::Walking, .facing = {.heading = 1, .pitch = 7}},
+        Placed{.at = far_out, .stance = Stance::Flying, .facing = {}},
+        Corrected{.count = 1, .at = far_out},
+        Ack{.tick = 0xFFFF'FFF0},
+        whole(),
+        delta(),
+        Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
+        weather(0),
+        weather(1),
+        Said{.from = "", .text = "hello?"},
+        Said{.from = std::string(most_name, 'n'), .text = std::string(most_said, 's')},
+        Hurry{.scale = 1},
+        Hurry{.scale = 16'384},
+        Clock{.scale = 1},
+        Clock{.scale = 86'400},
+        Dug{.centre = far_out, .radius = 1},
+        Dug{.centre = far_out, .radius = most_edit},
+        Built{.centre = far_out, .radius = 2'500, .material = 9},
+        Tiles{},
+        Tiles{.tiles = {{.level = 9,
+                         .face = 5,
+                         .i = 0xFFFF'FFF0,
+                         .j = 3,
+                         .k = 0x8000'0001,
+                         .bytes = bytes({1, 2, 3})},
+                        {.level = 0, .face = 0, .i = 1, .j = 2, .k = 4, .bytes = {}}}},
+        Pages{},
+        Pages{.pages = {bytes({1, 2, 3}), {}, bytes({250})}},
+        Bodies{},
+        Bodies{.bytes = bytes({1, 0, 7})},
+        Ask{},
+        Ask{.pages = {{.depth = 12, .x = 4000, .y = 3, .z = 4095, .levels = 6, .priority = 0.75F},
+                      {.depth = 0, .levels = 2, .priority = 3.0e-4F}}},
+        Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
+        Grains{},
+        Grains{.tick = 7,
+               .flying = {{.id = NetId{1},
+                           .at = far_out,
+                           .velocity = {-32'768, 0, 32'767},
+                           .material = 4,
+                           .amount = 70'000},
+                          {.id = NetId{9}, .at = Millimetres{0, -5, 6}, .velocity = {}}}}};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -480,6 +484,17 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
     auto short_bodies = encode(Bodies{.bytes = bytes({1, 2})});
     short_bodies.pop_back();
     CHECK(decode(short_bodies).error().code == ErrorCode::Parse);
+    // Asks: a count over the most, a page ranked by no finite size, and one cut short.
+    CHECK(decode(bytes({21, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto unranked = encode(Ask{
+        .pages = {{.depth = 1, .levels = 1, .priority = std::numeric_limits<float>::infinity()}}});
+    CHECK(decode(unranked).error().code == ErrorCode::OutOfRange);
+    auto short_ask = encode(Ask{.pages = {{.depth = 1, .levels = 1}}});
+    short_ask.pop_back();
+    CHECK(decode(short_ask).error().code == ErrorCode::Parse);
     // Grains: a count over the most, ids not going up, and one cut short.
     CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
           ErrorCode::OutOfRange);

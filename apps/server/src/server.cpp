@@ -504,6 +504,8 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         dig(connection, *dug);
     } else if (const auto* built = std::get_if<protocol::Built>(&*message)) {
         build(connection, *built);
+    } else if (const auto* ask = std::get_if<protocol::Ask>(&*message)) {
+        ask_pages(connection, *ask);
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -592,6 +594,20 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     }
 }
 
+void Server::ask_pages(net::ConnectionId connection, const protocol::Ask& ask) {
+    if (!pages_ || !joined_.find(connection)) {
+        return;
+    }
+    std::vector<server::PageSending::Want> wants;
+    wants.reserve(ask.pages.size());
+    for (const protocol::AskedPage& page : ask.pages) {
+        wants.push_back({.page = {.depth = page.depth, .x = page.x, .y = page.y, .z = page.z},
+                         .levels = page.levels,
+                         .priority = static_cast<double>(page.priority)});
+    }
+    pages_->sending.ask(connection, wants);
+}
+
 void Server::build(net::ConnectionId connection, const protocol::Built& built) {
     if (!joined_.find(connection)) {
         return;
@@ -613,10 +629,7 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
     }
 }
 
-void Server::tell_tiles() {
-    if (!players_) {
-        return;
-    }
+void Server::cut_tiles() {
     const globe::EachOf each = [this](std::size_t count,
                                       const std::function<void(std::size_t)>& body) {
         jobs_.parallel_for(static_cast<std::uint32_t>(count), 1,
@@ -638,6 +651,10 @@ void Server::tell_tiles() {
     if (!cutting_) {
         for (const auto& [connection, look] : joined_.looks()) {
             const DVec3 at = look.at.metres();
+            // One asking for grid pages draws those, not tiles.
+            if (pages_ && pages_->sending.asking(connection)) {
+                continue;
+            }
             if (tiles_.moved(connection, at, generator_.layers())) {
                 cutting_ = std::make_unique<
                     jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>>(
@@ -648,8 +665,16 @@ void Server::tell_tiles() {
             }
         }
     }
+}
+
+void Server::tell_tiles() {
+    if (!players_) {
+        return;
+    }
+    auto& players = *players_;
+    cut_tiles();
     for (const auto& [connection, look] : joined_.looks()) {
-        const std::optional<net::Stats> stats = players_->stats(connection);
+        const std::optional<net::Stats> stats = players.stats(connection);
         const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
         if (queued >= tile_queue || tiles_.due(connection) == 0) {
             continue;
@@ -658,7 +683,7 @@ void Server::tell_tiles() {
         if (next.tiles.empty()) {
             continue;
         }
-        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(next));
+        if (auto sent = players.send(connection, net::Delivery::Bulk, protocol::encode(next));
             !sent) {
             log::debug(server_log, "couldn't send connection {} tiles: {}",
                        std::to_underlying(connection), sent.error());
@@ -673,7 +698,6 @@ void Server::tell_pages() {
         return;
     }
     PageStreaming& pages = *pages_;
-    auto& players = *players_;
     server::PageSource& source = pages.source.value();
     if (auto written = source.pump(); !written) {
         log::warn(server_log, "couldn't fill grid pages: {}", written.error());
@@ -687,39 +711,49 @@ void Server::tell_pages() {
     for (const auto& [connection, look] : joined_.looks()) {
         const DVec3 at = look.at.metres();
         PageStreaming::Follow& follow = pages.followed[connection];
-        if (pages.sending.moved(connection, at) || (follow.filled && now - follow.at >= refollow)) {
+        if (!pages.sending.asking(connection) && (pages.sending.moved(connection, at) ||
+                                                  (follow.filled && now - follow.at >= refollow))) {
             pages.sending.follow(connection, at, source);
             follow = {.at = now, .filled = false};
         }
-        const std::optional<net::Stats> stats = players.stats(connection);
-        const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
-        if (queued >= tile_queue || pages.sending.due(connection) == 0) {
-            continue;
-        }
-        protocol::Pages next;
-        std::vector<grid::Water::Value> told;
-        for (server::PageSending::Sent& sent :
-             pages.sending.next(connection, tile_queue - queued, source, protocol::most_pages)) {
-            told.insert(told.end(), sent.bodies.begin(), sent.bodies.end());
-            if (sent.bytes.size() > protocol::most_page) {
-                log::warn(server_log, "a grid page of {} bytes too big to send", sent.bytes.size());
-                continue;
-            }
-            next.pages.push_back(std::move(sent.bytes));
-        }
-        // The bodies a page's water marks go before it.
-        tell_bodies(connection, told);
-        if (next.pages.empty()) {
-            continue;
-        }
-        if (auto sent = players.send(connection, net::Delivery::Bulk, protocol::encode(next));
-            !sent) {
-            log::debug(server_log, "couldn't send connection {} grid pages: {}",
-                       std::to_underlying(connection), sent.error());
-            continue;
-        }
-        pages_sent_.add(next.pages.size());
+        send_pages(connection);
     }
+}
+
+void Server::send_pages(net::ConnectionId connection) {
+    if (!pages_ || !players_) {
+        return;
+    }
+    PageStreaming& pages = *pages_;
+    auto& players = *players_;
+    server::PageSource& source = pages.source.value();
+    const std::optional<net::Stats> stats = players.stats(connection);
+    const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
+    if (queued >= tile_queue || pages.sending.due(connection) == 0) {
+        return;
+    }
+    protocol::Pages next;
+    std::vector<grid::Water::Value> told;
+    for (server::PageSending::Sent& sent :
+         pages.sending.next(connection, tile_queue - queued, source, protocol::most_pages)) {
+        told.insert(told.end(), sent.bodies.begin(), sent.bodies.end());
+        if (sent.bytes.size() > protocol::most_page) {
+            log::warn(server_log, "a grid page of {} bytes too big to send", sent.bytes.size());
+            continue;
+        }
+        next.pages.push_back(std::move(sent.bytes));
+    }
+    // The bodies a page's water marks go before it.
+    tell_bodies(connection, told);
+    if (next.pages.empty()) {
+        return;
+    }
+    if (auto sent = players.send(connection, net::Delivery::Bulk, protocol::encode(next)); !sent) {
+        log::debug(server_log, "couldn't send connection {} grid pages: {}",
+                   std::to_underlying(connection), sent.error());
+        return;
+    }
+    pages_sent_.add(next.pages.size());
 }
 
 void Server::tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids) {

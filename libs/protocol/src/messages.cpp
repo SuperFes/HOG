@@ -39,6 +39,7 @@ enum class Kind : std::uint16_t {
     Tiles = 18,
     Pages = 19,
     Bodies = 20,
+    Ask = 21,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -632,6 +633,37 @@ struct Ball {
     return finished(in, std::move(pages));
 }
 
+[[nodiscard]] Result<Message> read_ask(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "pages asked for");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_asked) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} pages asked for; {} allowed", *count, most_asked));
+    }
+    Ask ask;
+    ask.pages.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto depth = read<std::uint8_t>(in, "a page asked for");
+        const auto x = read<std::uint32_t>(in, "a page asked for");
+        const auto y = read<std::uint32_t>(in, "a page asked for");
+        const auto z = read<std::uint32_t>(in, "a page asked for");
+        const auto levels = read<std::uint8_t>(in, "a page asked for");
+        const auto priority = read<std::uint32_t>(in, "a page asked for");
+        if (!depth || !x || !y || !z || !levels || !priority) {
+            return make_error(ErrorCode::Parse, "a page asked for cut short");
+        }
+        const auto size = std::bit_cast<float>(*priority);
+        if (!std::isfinite(size)) {
+            return make_error(ErrorCode::OutOfRange, "a page asked for ranked by no finite size");
+        }
+        ask.pages.push_back(
+            {.depth = *depth, .x = *x, .y = *y, .z = *z, .levels = *levels, .priority = size});
+    }
+    return finished(in, std::move(ask));
+}
+
 [[nodiscard]] Result<Message> read_bodies(ByteReader& in) {
     const auto length = read<std::uint32_t>(in, "bodies");
     if (!length) {
@@ -835,6 +867,20 @@ void write_pages(ByteWriter& out, const Pages& pages) {
     }
 }
 
+void write_ask(ByteWriter& out, const Ask& ask) {
+    HOG_ASSERT(ask.pages.size() <= most_asked, "too many pages to ask for at once");
+    out.write(static_cast<std::uint16_t>(Kind::Ask));
+    out.write(static_cast<std::uint16_t>(ask.pages.size()));
+    for (const AskedPage& page : ask.pages) {
+        out.write(page.depth);
+        out.write(page.x);
+        out.write(page.y);
+        out.write(page.z);
+        out.write(page.levels);
+        out.write(std::bit_cast<std::uint32_t>(page.priority));
+    }
+}
+
 void write_bodies(ByteWriter& out, const Bodies& bodies) {
     HOG_ASSERT(bodies.bytes.size() <= most_bodies, "too many bodies to send at once");
     out.write(static_cast<std::uint16_t>(Kind::Bodies));
@@ -974,6 +1020,8 @@ std::vector<std::byte> encode(const Message& message) {
                 write_pages(out, body);
             } else if constexpr (std::is_same_v<Body, Bodies>) {
                 write_bodies(out, body);
+            } else if constexpr (std::is_same_v<Body, Ask>) {
+                write_ask(out, body);
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 write_grains(out, body);
             } else if constexpr (std::is_same_v<Body, Ack>) {
@@ -1063,6 +1111,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_pages(in);
     case Kind::Bodies:
         return read_bodies(in);
+    case Kind::Ask:
+        return read_ask(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {

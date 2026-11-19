@@ -323,6 +323,32 @@ struct Pages {
     friend bool operator==(const Pages&, const Pages&) = default;
 };
 
+// Pages a client may ask for at once.
+inline constexpr std::size_t most_asked = 4096;
+
+// A grid page a client asks for: its root, how many levels under it, and how big it looks from
+// the client, a node's size over its distance, which the server ranks filling it by.
+struct AskedPage {
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+    std::uint8_t levels = 0;
+    float priority = 0.0F;
+
+    friend bool operator==(const AskedPage&, const AskedPage&) = default;
+};
+
+// Client to server: the grid pages it wants now, most wanted first, in place of any it asked for
+// before. Each is sent as deep as the server holds it, up to as deep as asked, and deeper once
+// it's filled; a page sent isn't sent again unless it changes or is asked for deeper. A client
+// that asks is sent only what it asks for. Sent reliably, as it replaces what came before.
+struct Ask {
+    std::vector<AskedPage> pages; // at most most_asked
+
+    friend bool operator==(const Ask&, const Ask&) = default;
+};
+
 // Server to client: water bodies the pages' water trees mark, as `grid::WaterBodies::encode`
 // codes them, held in place of those of the same ids.
 struct Bodies {
@@ -363,14 +389,15 @@ struct Grains {
 // As a cell's weather reads back once sent.
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell);
 
-using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies>;
+using Message =
+    std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said, Hurry,
+                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
-// characters, a stance it doesn't know, an edit of no width or too wide, or tiles, pages or
-// bodies too many or too big.
+// characters, a stance it doesn't know, an edit of no width or too wide, tiles, pages or bodies
+// too many or too big, or pages asked for too many or ranked by no finite size.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

@@ -263,6 +263,85 @@ TEST_CASE("a page whose water changes sends only its water tree and bodies not y
     CHECK(back.front().bodies.empty());
 }
 
+TEST_CASE("a player asking is sent what it asks for in its order, and nothing else",
+          "[server][page_sending]") {
+    // 1 m nodes 11 deep: a top page of 5 levels over pages of 6.
+    const hog::grid::Grid grid{1000.0, 1.0};
+    auto store = hog::baked::PageStore::scratch({.world = 42, .grid = grid, .generator = 1});
+    REQUIRE(store.has_value());
+    const auto put = [&](Key root, std::uint8_t levels) {
+        REQUIRE(store
+                    ->write([&](hog::baked::PageStore::Batch& batch) -> hog::Result<void> {
+                        for (const auto& held :
+                             {batch.put(root, hog::grid::Tree<hog::grid::Shape>::build(
+                                                  levels,
+                                                  [](int, int, int) {
+                                                      return hog::grid::Surface::solid();
+                                                  })),
+                              batch.put(root, hog::grid::Tree<hog::grid::Material>::build(
+                                                  levels,
+                                                  [](int, int, int) { return std::uint16_t{3}; })),
+                              batch.put(root, hog::grid::Tree<hog::grid::Water>::build(
+                                                  levels, [](int, int, int) { return 0U; }))}) {
+                            if (!held) {
+                                return std::unexpected{held.error()};
+                            }
+                        }
+                        return {};
+                    })
+                    .has_value());
+    };
+    const Key child{.depth = 5, .x = 1, .y = 2, .z = 3};
+    const Key missing{.depth = 5, .x = 4, .y = 4, .z = 4};
+    put(Key{}, 5);
+    put(child, 6);
+    auto source = PageSource::open(*store);
+    REQUIRE(source.has_value());
+
+    PageSending sending{grid};
+    const hog::net::ConnectionId player{3};
+    sending.join(player);
+    CHECK_FALSE(sending.asking(player));
+    // Past the page's foot, not a page's root, and outside the grid: cut, and left out.
+    const std::vector<PageSending::Want> asked{
+        {.page = child, .levels = 9, .priority = 2.0},
+        {.page = Key{}, .levels = 5, .priority = 1.0},
+        {.page = missing, .levels = 3, .priority = 0.5},
+        {.page = Key{.depth = 3}, .levels = 2, .priority = 9.0},
+        {.page = Key{.depth = 5, .x = 99}, .levels = 1, .priority = 1.0},
+        {.page = Key{.depth = 40}, .levels = 1, .priority = 1.0}};
+    sending.ask(player, asked);
+    CHECK(sending.asking(player));
+    CHECK(sending.due(player) == 3);
+    const auto first = sending.next(player, std::size_t{1} << 30U, *source);
+    REQUIRE(first.size() == 2);
+    CHECK(first[0].root == child);
+    CHECK(first[1].root == Key{});
+    const auto deep = hog::grid::Page::decode(first[0].bytes);
+    REQUIRE(deep.has_value());
+    CHECK(deep->shape.value().tree.levels() == 6);
+    CHECK(sending.waiting(player) == 1);
+
+    // Asked again, in place of before: what's been sent as deep isn't due again.
+    const std::vector<PageSending::Want> again{{.page = child, .levels = 6, .priority = 1.0},
+                                               {.page = missing, .levels = 3, .priority = 1.0}};
+    sending.ask(player, again);
+    CHECK(sending.due(player) == 1);
+    CHECK(sending.next(player, std::size_t{1} << 30U, *source).empty());
+    CHECK(sending.waiting(player) == 1);
+
+    // Once it's written, it goes.
+    put(missing, 6);
+    REQUIRE(source->pump().has_value());
+    sending.changed(std::vector<Key>{missing});
+    const auto last = sending.next(player, std::size_t{1} << 30U, *source);
+    REQUIRE(last.size() == 1);
+    CHECK(last.front().root == missing);
+    const auto cut = hog::grid::Page::decode(last.front().bytes);
+    REQUIRE(cut.has_value());
+    CHECK(cut->shape.value().tree.levels() == 3);
+}
+
 TEST_CASE("bodies go in messages no bigger than allowed", "[server][page_sending]") {
     hog::grid::WaterBodies table;
     table.bodies.emplace(1U, hog::grid::Sea{.level = 1000.0});

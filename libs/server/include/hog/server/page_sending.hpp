@@ -51,6 +51,14 @@ public:
     // Has the player sent the pages wanted from `at` it hasn't been sent as deep yet, in order.
     void follow(net::ConnectionId player, DVec3 at, PageSource& source);
 
+    // Has the player sent the pages it asks for, in its order, as deep as asked where it hasn't
+    // been sent them as deep, in place of whatever it was due before; from now on it's sent only
+    // what it asks for, never followed. Pages that aren't pages' roots in the grid are left out,
+    // and levels past a page's foot are cut to it.
+    void ask(net::ConnectionId player, std::span<const Want> wants);
+    // Whether the player asks for what it's sent.
+    [[nodiscard]] bool asking(net::ConnectionId player) const;
+
     // Has the players holding any of `pages` sent what's changed of them, first, and those
     // waiting on any of them due again in their place.
     void changed(std::span<const grid::Key> pages);
@@ -89,7 +97,8 @@ private:
         std::vector<Want> due; // in order
         std::map<grid::Key, Want> waiting;
         std::set<grid::Water::Value> told;
-        std::uint64_t round = 0; // when last followed
+        std::uint64_t round = 0; // when last followed or asked
+        bool asking = false;
     };
 
     [[nodiscard]] grid::Key over(DVec3 at) const;
