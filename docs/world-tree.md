@@ -103,6 +103,36 @@ Each step is its own commit with tests, and the world stays playable after each.
 Steps 1 to 3 change nothing about how the planet looks, and make every later step quick to see:
 change a stage, and only what it touches is remade around where you're looking.
 
+## Valleys, as others carry them
+
+How step 4 carries valleys from forming's points into finer levels, after Proland, Outerra and
+Génevaux, Cordonnier and Peytavie's papers (none tried here yet):
+
+- **Courses stored once, wander baked in.** Forming writes each valley stretch as a course line
+  with its wander already in it, and a profile along it: bed level, width, depth and wall shape,
+  falling only downstream and smoothed by width (Proland's curve profiles, Peytavie's courses).
+  No noise is walked along a course at read time.
+- **Lists clipped down the tree.** A node's list is its parent's clipped to it by `wall_bounds`
+  plus a margin, its course lines simplified at half the parent's tolerance (Proland's graphs).
+- **The ground under the valleys comes down unmodified.** A node's ground is the interpolating
+  upsample of its parent's ground before valleys, plus a stored correction where there is one,
+  plus noise scaled by stored slope, curvature and roughness (Proland's elevation, Outerra's
+  noise). The valleys are laid over it again at each level from the list, by Génevaux's replace
+  blend, whose weight is zero past a valley's reach, so bounds cull it. So a valley is never
+  smeared down through the upsampling. A read is a distance to a course and a profile lookup:
+  about a microsecond in Génevaux's measurements, against 200 to 550 here now.
+- **Narrower than the node, a valley is its mean and spread** (step 5).
+- **Edits are shapes laid on in the same stage** as a node is made, as Outerra lays craters, and
+  versions decide what's remade, as Proland's graph versions do.
+
+Sources: [Proland terrain](https://proland.inria.fr/doc/proland-4.0/terrain/html/index.html),
+[Proland graphs](https://proland.inria.fr/doc/proland-4.0/graph/html/index.html),
+[Outerra's terrain](https://outerra.blogspot.com/2009/02/procedural-terrain-algorithm.html),
+[Outerra's roads](https://outerra.blogspot.com/2009/06/roads.html),
+[Génevaux et al. 2013](https://www.cs.purdue.edu/homes/bbenes/papers/Genevaux13ToG.pdf),
+[Cordonnier et al. 2016](https://www.cs.purdue.edu/homes/bbenes/papers/Cordonier16CGF.pdf),
+[Peytavie et al. 2019](https://www.cs.purdue.edu/homes/bbenes/papers/Peytavie19CGF.pdf).
+
 ## Versions that hold
 
 A version bumped by hand is only as good as remembering to bump it, so a stage's version is its
@@ -113,9 +143,6 @@ development a stage can also be marked to remake everywhere it's read.
 
 ## Open
 
-- How forming's stages write features and corrections instead of fields read by `Formed::at`;
-  valleys first, as they're most of the cost now. Look at how others refine coarse terrain on
-  demand (Proland's producers, Outerra) before settling.
 - How deep the stored levels go: as deep as it takes to look right, with the look below that
   from the ground's materials as drawn rather than stored shape.
 - Waking across processes: LMDB has no notify, so something beside it (a socket, an event file)
