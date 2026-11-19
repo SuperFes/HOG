@@ -20,7 +20,9 @@ add_library(hog_client
     src/ground_field.cpp
     src/water_field.cpp
     src/held_pages.cpp
+    src/held_pieces.cpp
     src/page_asking.cpp
+    src/piece_asking.cpp
     src/grains.cpp
     src/likeness.cpp
     src/options.cpp
@@ -60,7 +62,9 @@ hog_add_tests(hog_client
     tests/ground_field_tests.cpp
     tests/water_field_tests.cpp
     tests/held_pages_tests.cpp
+    tests/held_pieces_tests.cpp
     tests/page_asking_tests.cpp
+    tests/piece_asking_tests.cpp
     tests/grains_tests.cpp
     tests/likeness_tests.cpp
     tests/options_tests.cpp
