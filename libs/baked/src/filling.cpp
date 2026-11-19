@@ -3,12 +3,16 @@
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stop_token>
+#include <thread>
 #include <utility>
 
 namespace hog::baked {
@@ -47,7 +51,8 @@ Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
 
 struct Filler::Impl {
     Impl(const globe::Generator& from, PageStore& into, jobs::JobSystem& on)
-        : generator(&from), store(&into), jobs(&on), grid(globe::grid_of(from)) {}
+        : generator(&from), store(&into), jobs(&on), grid(globe::grid_of(from)),
+          writer([this](const std::stop_token& stop) { write_on(stop); }) {}
 
     const globe::Generator* generator;
     PageStore* store;
@@ -65,6 +70,34 @@ struct Filler::Impl {
     // Nodes asked for waiting on a page being filled, by the page, with the highest rank each was
     // asked at, gone over again once it's written.
     std::map<grid::Key, std::map<grid::Key, Rank>> blocked;
+
+    // Fills are written on a thread of their own, so the thread pumping never waits on the disk
+    // or on another writer: the batches handed over, in order, and those written, with how it
+    // went. `writes_out` counts those handed over and not yet taken back, on the thread pumping.
+    struct Batch {
+        std::vector<grid::Key> pages;
+        std::vector<std::optional<globe::Filled>> filled;
+    };
+    std::mutex writes_lock;
+    std::condition_variable_any writes_changed;
+    std::deque<Batch> to_write;                                         // guarded by writes_lock
+    std::vector<std::pair<std::vector<grid::Key>, Result<void>>> wrote; // guarded by writes_lock
+    std::size_t writes_out = 0;
+    // Last, so it stops before what it writes from goes.
+    std::jthread writer;
+
+    void write_on(const std::stop_token& stop) {
+        std::unique_lock guard{writes_lock};
+        while (writes_changed.wait(guard, stop, [&] { return !to_write.empty(); })) {
+            Batch batch = std::move(to_write.front());
+            to_write.pop_front();
+            guard.unlock();
+            Result<void> done = write_filled(*store, batch.pages, batch.filled);
+            guard.lock();
+            wrote.emplace_back(std::move(batch.pages), std::move(done));
+            writes_changed.notify_all();
+        }
+    }
 
     // Pages read from the store in one pump, by root.
     using Seen = std::map<grid::Key, std::optional<PageStore::Read>>;
@@ -132,30 +165,54 @@ struct Filler::Impl {
         }
     }
 
-    // Takes the fills finished, or with `wait` the first under way where none has.
+    // Hands the fills finished to the writer, and gives the pages it has written since. With
+    // `wait`, where nothing is being written, first waits for a fill under way where none has
+    // finished; then waits for a write.
     Result<std::vector<grid::Key>> write_finished(bool wait) {
-        std::vector<grid::Key> pages;
-        std::vector<std::optional<globe::Filled>> filled;
+        Batch batch;
         const bool any =
             std::ranges::any_of(filling, [](const auto& at) { return at.second->done(); });
         for (auto at = filling.begin(); at != filling.end();) {
-            if (at->second->done() || (wait && !any && at == filling.begin())) {
-                pages.push_back(at->first);
-                filled.emplace_back(at->second->take());
+            if (at->second->done() || (wait && !any && writes_out == 0 && at == filling.begin())) {
+                batch.pages.push_back(at->first);
+                batch.filled.emplace_back(at->second->take());
                 at = filling.erase(at);
             } else {
                 ++at;
             }
         }
-        if (pages.empty()) {
-            return pages;
+        std::vector<std::pair<std::vector<grid::Key>, Result<void>>> done;
+        {
+            std::unique_lock guard{writes_lock};
+            if (!batch.pages.empty()) {
+                to_write.push_back(std::move(batch));
+                ++writes_out;
+                writes_changed.notify_all();
+            }
+            if (wait && writes_out > 0) {
+                writes_changed.wait(guard, [&] { return !wrote.empty(); });
+            }
+            done.swap(wrote);
         }
-        if (Result<void> written = write_filled(*store, pages, filled); !written) {
-            // Forgotten, so they're gone over afresh when next asked for.
+        writes_out -= done.size();
+        std::vector<grid::Key> pages;
+        std::optional<Error> failed;
+        for (auto& [written, result] : done) {
+            if (!result) {
+                // Forgotten, so they're gone over afresh when next asked for.
+                for (const grid::Key page : written) {
+                    blocked.erase(page);
+                }
+                failed = result.error();
+                continue;
+            }
+            pages.insert(pages.end(), written.begin(), written.end());
+        }
+        if (failed) {
             for (const grid::Key page : pages) {
                 blocked.erase(page);
             }
-            return std::unexpected{written.error()};
+            return std::unexpected{*failed};
         }
         return pages;
     }
@@ -224,7 +281,8 @@ std::vector<grid::Key> Filler::queued() const {
 
 bool Filler::idle() const {
     const std::scoped_lock guard{impl_->lock};
-    return impl_->asked.empty() && impl_->filling.empty() && impl_->queued.empty();
+    return impl_->asked.empty() && impl_->filling.empty() && impl_->queued.empty() &&
+           impl_->writes_out == 0;
 }
 
 } // namespace hog::baked

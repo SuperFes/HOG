@@ -31,12 +31,12 @@ struct Rank {
 };
 
 // Fills the pages the nodes asked for need, as the store doesn't hold them as this generator makes
-// them yet, on the job system's workers, and writes them from `pump`, which says which were
-// written. A node is answered by the pages over it down to the one holding its depth, or to one
-// whose leaf over it isn't open: pages under such a leaf would only repeat it. A page is filled
-// whole, so it's filled once however deep it's later wanted; one held shallower than a node asked
-// for needs is filled again whole. Fills start in rank order, a page taking the highest rank of
-// the nodes waiting on it.
+// them yet, on the job system's workers, and writes them on a thread of its own, so `pump` never
+// waits on the disk; `pump` says which were written. A node is answered by the pages over it down
+// to the one holding its depth, or to one whose leaf over it isn't open: pages under such a leaf
+// would only repeat it. A page is filled whole, so it's filled once however deep it's later wanted;
+// one held shallower than a node asked for needs is filled again whole. Fills start in rank order,
+// a page taking the highest rank of the nodes waiting on it.
 class Filler {
 public:
     // Made on a thread of `jobs`' pool, as `pump` is called.
@@ -45,7 +45,7 @@ public:
     Filler& operator=(const Filler&) = delete;
     Filler(Filler&&) = delete;
     Filler& operator=(Filler&&) = delete;
-    // Waits for fills under way, writing none of them.
+    // Waits for fills under way and any write under way, writing no more.
     ~Filler();
 
     // From any thread.
