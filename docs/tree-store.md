@@ -98,8 +98,10 @@ size: any grid depth, any finest size, any detail asked for.
    held: a node wanted no more than `region_levels` under it is one region, asked to the depth its
    distance wants; one wanted deeper is gone down through, child by child, and asked
    `region_levels` deep where nothing's held under it yet, so coarse comes first and finer is
-   asked only where ground lies. Behind the eye ranks lower. The server serves pieces from the
-   chunk store, filling on demand; the bot asks as a client does. Protocol 42. Tests: asks never
+   asked only where ground lies. Behind the eye ranks lower. The server always serves pieces from
+   the chunk store `[ground] store` names, or a scratch one, filling on demand, and the client
+   always draws from them; tiles still go to whoever doesn't ask, so the bot walks on them, and
+   the client flies until walking reads the pieces. Protocol 42. Tests: asks never
    overlap and each lies under what's held; asking and answering until nothing's left holds the
    ground near and far as deep as the view wants; turning re-ranks.
 6. **Pages retire:** the page store, page filling, page sending and held pages, and the page
@@ -122,3 +124,5 @@ together; a store is a chunk store, baked or filled as asked.
 - A piece over 512 KiB can't go in one message though a piece may be 1 MB; regions of five
   levels stay far under it so far.
 - A bake in another process doesn't wake pieces waiting on fills; they go when next touched.
+- Walking reads the old tiles, which a client asking for pieces isn't sent: the player should
+  stand and collide on the held pieces.

@@ -989,21 +989,16 @@ Result<void> show_frame(client::Scene& scene, const client::Shot& shot,
     return {};
 }
 
-// Metres from the eye the server sends the ground.
-constexpr double streamed_ground = 8'000.0;
-
 // Levels of cells in a block the ground's drawn in from the grid: 16 a side.
 constexpr std::uint8_t block_cells = 4;
 
-// The ground the server sends, held as it comes: tiles, over the planet and its layers, read by
-// the world and meshed to draw, the same trees shared; and grid pieces, drawn in the tiles' place
-// where asked.
+// The ground the server sends, held as it comes: grid pieces, drawn; and any tiles, over the planet
+// and its layers, read by the world for footing.
 struct StreamedGround {
-    StreamedGround(globe::Planet held, const globe::Layers& layers, jobs::JobSystem& jobs,
-                   bool drawn_from_pages)
+    StreamedGround(globe::Planet held, const globe::Layers& layers, jobs::JobSystem& jobs)
         : planet{std::move(held)}, world{this->planet, layers, volume},
-          meshes{this->planet, layers, jobs}, grid{layers.ceiling(), layers.thickness},
-          pieces{grid}, block_meshes{grid, jobs, block_cells}, from_pages{drawn_from_pages} {
+          grid{layers.ceiling(), layers.thickness}, pieces{grid},
+          block_meshes{grid, jobs, block_cells} {
         world.read_tiles(&tiles);
     }
     StreamedGround(const StreamedGround&) = delete;
@@ -1016,11 +1011,9 @@ struct StreamedGround {
     globe::Volume volume; // none: the ground is the tiles sent
     globe::HeldTiles tiles;
     globe::World world;
-    client::TileMeshes meshes;
     grid::Grid grid;
     client::HeldPieces pieces;
     client::BlockMeshes block_meshes;
-    bool from_pages = false;
     // The pieces last asked for, from where and when, and whether any came since.
     std::vector<client::PieceWish> asked;
     std::optional<DVec3> asked_from;
@@ -1035,12 +1028,8 @@ struct StreamedGround {
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
 std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, WorldPosition eye) {
     const double radius = ground.planet.body.radius;
-    const std::optional<double> sea =
-        globe::derive(ground.planet).liquid ? std::optional{radius} : std::nullopt;
     const std::optional<globe::StandingWater> water =
-        ground.from_pages ? client::still_water_in(ground.pieces, eye.metres())
-                          : client::still_water_at(ground.world, eye.metres(), sea,
-                                                   ground.world.layers().thickness);
+        client::still_water_in(ground.pieces, eye.metres());
     if (!water) {
         return std::nullopt;
     }
@@ -1103,9 +1092,6 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
             log::warn(connection_log, "can't hold water bodies sent: {}", taken.error());
         }
     }
-    if (!ground.from_pages) {
-        return;
-    }
     ask_pieces(connection, ground, eye, facing);
     if (ground.block_meshes.settled() && (ground.pieces_came || !ground.pieces_seen ||
                                           glm::length(eye - *ground.pieces_seen) > pieces_moved)) {
@@ -1131,25 +1117,15 @@ void take_ground(Connection& connection, StreamedGround& ground, client::Scene& 
             continue;
         }
         ground.tiles.put(tile->key, tile->tree);
-        if (!ground.from_pages) {
-            ground.meshes.take(*tile);
-        }
         if (player) {
             player->changed(tile->key);
         }
     }
-    if (client::GroundChanges changes = ground.meshes.collect(); !changes.empty()) {
-        scene.show_ground(std::move(changes));
-    }
     take_pieces(connection, ground, scene, eye, facing);
     // Drawn from the pieces, which reach all round the planet, the sea is its own surface
     // everywhere once any is drawn; till then, the disc.
-    double covered = ground.blocks_shown ? std::numbers::pi * ground.planet.body.radius : 0.0;
-    if (!ground.from_pages) {
-        covered = ground.meshes.covered(eye, streamed_ground);
-    }
-    scene.set_ground_state(covered,
-                           ground.meshes.in_flight() > 0 || ground.block_meshes.in_flight() > 0);
+    const double covered = ground.blocks_shown ? std::numbers::pi * ground.planet.body.radius : 0.0;
+    scene.set_ground_state(covered, ground.block_meshes.in_flight() > 0);
 }
 
 // Starts or stops playing the character as asked, as take_part does; walking waits for the ground
@@ -1363,7 +1339,7 @@ int show_streamed_world(const client::Options& options, render::Device& device,
         std::cerr << std::format("{}: the server's voxel layers: {}\n", program, origin.error());
         return EXIT_FAILURE;
     }
-    StreamedGround ground{*planet, origin->layers, jobs, options.pages};
+    StreamedGround ground{*planet, origin->layers, jobs};
     startup("ready");
     const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
                                             device, presenter, window);

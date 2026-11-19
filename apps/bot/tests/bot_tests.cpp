@@ -42,16 +42,13 @@ namespace {
 constexpr GameTime start{
     std::chrono::sys_days{std::chrono::year{2026} / 10 / 11}.time_since_epoch()};
 
-// A server on a free players' port, for the small test planet in `directory`, streaming grid
-// pages where asked.
-std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory,
-                                          bool pages = false) {
+// A server on a free players' port, for the small test planet in `directory`.
+std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory) {
     std::ofstream{directory / "planet.toml"} << hog::testing::small_planet_file();
     hog::server::ServerConfig config;
     config.world = directory / "var" / "world.db";
     config.planet = directory / "planet.toml";
     config.metrics_interval = 0s;
-    config.pages.scratch = pages;
     for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
         config.net.port = hog::testing::random_port();
         auto server = hog::app::Server::open(config, start);
@@ -174,32 +171,4 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     CHECK(glm::length(feet) > lowest - voxel);
     CHECK(glm::length(feet) < highest + voxel);
     CHECK(server->players() != nullptr);
-}
-
-TEST_CASE("a bot asks for grid pieces and is sent them where the server streams them", "[bot]") {
-    const hog::testing::TemporaryDirectory directory;
-    const auto server = serving(directory.path(), true);
-    const hog::DVec3 middle =
-        hog::globe::land_near(server->generator(), hog::planet::start_direction)
-            .value_or(hog::planet::start_direction);
-    auto bot = hog::bot::Bot::start(
-        server->generator(), std::format("127.0.0.1:{}", server->players()->port()), {}, middle, 3);
-    REQUIRE(bot);
-    std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 120s;
-    MonotonicClock::time_point last = MonotonicClock::now();
-    Visited timer{[&] {
-        const MonotonicClock::time_point now = MonotonicClock::now();
-        const double seconds = std::min(std::chrono::duration<double>(now - last).count(), 0.1);
-        last = now;
-        bot->update(now, seconds);
-        if (bot->streamed().pieces >= 2 || now >= give_up) {
-            stop = true;
-        }
-    }};
-    REQUIRE(server->run(timer, [] { return start; }, stop));
-    CHECK(bot->streamed().pieces >= 2);
-    CHECK(bot->streamed().refused == 0);
-    CHECK(bot->streamed().bytes > 0);
-    CHECK(bot->holds(hog::grid::Key{}).has_value());
 }

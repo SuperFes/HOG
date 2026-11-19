@@ -1,19 +1,15 @@
 #pragma once
 
 #include <hog/bot/wander.hpp>
-#include <hog/client/held_pieces.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/session.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/globe/generator.hpp>
-#include <hog/globe/grid_fill.hpp>
 #include <hog/globe/held_tiles.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/grid/grid.hpp>
-#include <hog/grid/key.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -47,23 +43,10 @@ public:
     // The ground as it's been sent.
     [[nodiscard]] const globe::World& world() const noexcept { return held_->world; }
 
-    // The grid pieces the server has streamed it, as it asks for them like a client.
-    struct Streamed {
-        std::size_t pieces = 0; // taken in
-        std::size_t bytes = 0;
-        std::size_t refused = 0; // that weren't pieces of the grid
-    };
-    [[nodiscard]] const Streamed& streamed() const noexcept { return streamed_; }
-    // Whether it's been sent the piece rooted at `root`, and how deep in the grid it reaches.
-    [[nodiscard]] std::optional<std::uint8_t> holds(grid::Key root) const {
-        return held_->pieces.reach(root);
-    }
-
 private:
     // On the heap, where the player's ground can keep hold of it.
     struct Held {
-        explicit Held(const globe::Generator& generator)
-            : world{generator, volume}, grid{globe::grid_of(generator)}, pieces{grid} {
+        explicit Held(const globe::Generator& generator) : world{generator, volume} {
             world.read_tiles(&tiles);
         }
         Held(const Held&) = delete;
@@ -75,17 +58,12 @@ private:
         globe::Volume volume; // none: the ground is the tiles sent
         globe::HeldTiles tiles;
         globe::World world;
-        grid::Grid grid;
-        client::HeldPieces pieces;
     };
 
     Bot(std::unique_ptr<Held> held, client::Session session, DVec3 direction, std::uint64_t seed,
         const WanderSettings& settings) noexcept;
     // Takes in the tiles sent, standing the player on the ground once its finest is there.
     void take_ground();
-    // Takes in the grid pieces sent, and asks for more as a client would once they come or it's
-    // moved on.
-    void take_pieces();
 
     std::unique_ptr<Held> held_;
     std::optional<client::Player> player_;
@@ -95,8 +73,6 @@ private:
     std::mt19937_64 random_;
     double planet_radius_;
     WanderSettings settings_;
-    Streamed streamed_;
-    std::optional<DVec3> asked_from_; // where it last asked for pieces
 };
 
 } // namespace hog::bot

@@ -204,7 +204,7 @@ private:
     server::TileSending tiles_;
     // The land being cut for a player, after the land and the jobs it uses.
     std::unique_ptr<jobs::Async<std::pair<net::ConnectionId, server::TileSending::Cut>>> cutting_;
-    // The grid pieces streamed, where the config asks for them; after the jobs that fill them.
+    // The grid pieces streamed; after the jobs that fill them.
     struct PieceStreaming;
     std::unique_ptr<PieceStreaming> pieces_;
     std::optional<net::Server> players_;

@@ -690,8 +690,7 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
 TEST_CASE("a player asking for the root is sent it with the water bodies it marks before it",
           "[app][server]") {
     const World world;
-    auto config = world.config();
-    config.pages.scratch = true;
+    const auto config = world.config();
     const auto server = playing(config);
     auto connected =
         hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));

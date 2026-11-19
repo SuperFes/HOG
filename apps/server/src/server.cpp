@@ -79,14 +79,10 @@ struct Server::PieceStreaming {
         : store{std::move(opened)}, filler{generator, store, jobs},
           sending{globe::grid_of(generator).depth()}, bodies{globe::water_bodies(generator)} {}
 
-    // Opens the store the config names, or a scratch one, to fill from `generator`; none where
-    // the config streams no ground.
+    // Opens the store the config names, or a scratch one, to fill from `generator`.
     [[nodiscard]] static Result<std::unique_ptr<PieceStreaming>>
-    open(const server::PagesConfig& config, const globe::Generator& generator,
+    open(const server::GroundConfig& config, const globe::Generator& generator,
          jobs::JobSystem& jobs) {
-        if (!config.on()) {
-            return nullptr;
-        }
         const baked::Baking baking = baked::baking_of(generator);
         const baked::ChunkStore::Options options{
             .map_bytes = chunk_store_bytes, .readers = 1024, .read_only = false};
@@ -234,7 +230,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
             }
         }
     }
-    auto pieces = PieceStreaming::open(config.pages, server->generator_, server->jobs_);
+    auto pieces = PieceStreaming::open(config.ground, server->generator_, server->jobs_);
     if (!pieces) {
         return context("chunk store", pieces.error());
     }

@@ -1,9 +1,7 @@
 #include <hog/bot/bot.hpp>
-#include <hog/client/piece_asking.hpp>
 #include <hog/client/tile_meshes.hpp>
 #include <hog/core/log.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/grid/view.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -14,9 +12,6 @@ namespace hog::bot {
 namespace {
 
 const log::Category bot_log{"bot"};
-
-// Metres it moves before it asks for pieces again with none come since.
-constexpr double asking_moved = 4.0;
 
 } // namespace
 
@@ -72,28 +67,6 @@ void Bot::take_ground() {
     player_ = std::move(*player);
 }
 
-void Bot::take_pieces() {
-    bool came = false;
-    for (const std::vector<std::byte>& bytes : session_.take_pieces()) {
-        streamed_.bytes += bytes.size();
-        if (auto taken = held_->pieces.take(bytes); !taken) {
-            ++streamed_.refused;
-            log::warn(bot_log, "can't hold a piece sent: {}", taken.error());
-            continue;
-        }
-        ++streamed_.pieces;
-        came = true;
-    }
-    const DVec3 eye = feet().metres();
-    if (session_.state() != client::Session::State::Welcomed ||
-        (asked_from_ && !came && glm::length(eye - *asked_from_) <= asking_moved)) {
-        return;
-    }
-    session_.ask(client::ask_of(client::pieces_to_ask(held_->pieces, eye, std::nullopt,
-                                                      grid::View{}, protocol::most_asked)));
-    asked_from_ = eye;
-}
-
 void Bot::update(MonotonicClock::time_point now, double seconds) {
     // Until it stands it hangs where it's to, flying, which the server takes as it is.
     session_.look(client::Whereabouts{.at = feet(),
@@ -101,7 +74,6 @@ void Bot::update(MonotonicClock::time_point now, double seconds) {
                                                         : protocol::Stance::Flying},
                   now);
     take_ground();
-    take_pieces();
     if (!player_) {
         return;
     }

@@ -172,7 +172,6 @@ constexpr std::array flags{
     Flag{.name = "--help", .set = [](Options& options) { options.help = true; }},
     Flag{.name = "--through", .set = [](Options& options) { options.through = true; }},
     Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
-    Flag{.name = "--pages", .set = [](Options& options) { options.pages = true; }},
     Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
     Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
     Flag{.name = "--bend", .set = [](Options& options) { options.bend = true; }},
@@ -254,8 +253,6 @@ options:
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
   --through              start flying through the ground (G toggles it)
-  --pages                draw the ground from the grid pages the server sends, not
-                         its tiles; no water or plants on it yet
   --chat-filter          cussing in chat as comic-book grawlix; on by default
   --no-chat-filter       cussing as it was said; hate speech reads as small
                          talk about the weather either way
