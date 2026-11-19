@@ -39,8 +39,9 @@ Leaning:
 - Smooth surfaces meshed from the shape tree's planes (dual contouring, `qef.hpp`).
   A plain grid's axes only line up with "up" in six places, so blocks would stair-step almost
   everywhere.
-- Trees cut into pages of 64³ finest nodes (subtrees) for disk and the wire, keyed by depth and grid
-  position. Pages are where a tree is cut, not edges in the world.
+- Trees stored in chunks grouped by content and asked for and sent as pieces, a node to a depth,
+  with no fixed cut anywhere ([the tree store](tree-store.md)). This replaces pages of 64³
+  finest nodes, whose fixed cut became the unit of storing, filling and sending.
 - Edits as a log over the baked trees, with snapshots and rollback (below).
 
 Open:
@@ -55,9 +56,8 @@ The planet sits in one root node centred on its middle: the smallest that halves
 finest size and holds the planet and its sky. For the working world (28.8 km radius and 3 km of
 sky, a third of a metre) that's about 87 km across and 18 halvings deep. Nothing is cut ahead: a
 node splits only where what's under it differs, so open sea, sky and deep rock each stay one large
-node, and detail goes only where it's needed. Pages group the nodes that exist for disk and the
-wire, under one node and down six levels at most; where the tree stops early there's no page
-under it. Each node sums up what's under it (shape as the plane through its
+node, and detail goes only where it's needed. How the nodes that exist are grouped for disk and
+the wire is in [the tree store](tree-store.md). Each node sums up what's under it (shape as the plane through its
 eight, material and water by most), so a node is its own coarse view, and a change under it updates
 only the nodes above it. Neighbours are x ± 1: no face edges, no radial layers, no
 tapered boxes. "Up" and gravity are the direction from the centre, worked out from position,
