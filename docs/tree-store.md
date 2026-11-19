@@ -82,9 +82,16 @@ size: any grid depth, any finest size, any detail asked for.
    regions read back as the generator fills them; asking deeper fills only the bands under and
    leaves the versions over it alone; a node in closed ground fills nothing under it; fills
    start by rank; a bake keeps what it holds and deepens without filling again.
-4. **The server answers asks with pieces.** Kept pieces checked by their chunks' versions;
-   changes sent to the clients holding them. Tests: answers match the store; a chunk written
-   lets go of what was read from it; a client is sent a changed piece once.
+4. **The server answers asks with pieces.** Done, beside the page path: `grid::Piece` is the
+   coded form, any depth under any node, and `AskPieces`/`Pieces` carry asks and answers.
+   `server::PieceSource` reads a node down to a depth from the chunk store, as far as it's held,
+   asking the filler for the rest; answers are kept for the next asker and checked against the
+   versions of the chunks they were read from, and let go where the filler writes under them.
+   `server::PieceSending` sends each client what it asks for in its order, remembers a stamp of
+   what each piece it holds was read from, and on a touch sends only the kinds whose stamp moved;
+   a piece short of its depth waits until something is written under it. Tests: answers match the
+   store and the generator; a chunk written lets go of what was read from it; a client is sent a
+   changed piece once, with only the kinds changed; a short piece goes again once filled.
 5. **The client asks by region and holds one tree.** Regions sized by distance, the depth the
    view wants, what's ahead first; meshing reads the merged tree. Tests: asks cover what the
    view needs with no overlap; detail arrives coarse first; turning re-ranks.

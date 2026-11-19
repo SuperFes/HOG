@@ -4,6 +4,7 @@ add_library(hog_grid
     src/heat.cpp
     src/kinds.cpp
     src/page.cpp
+    src/piece.cpp
     src/tree.cpp
     src/view.cpp
     src/water_bodies.cpp)
@@ -20,6 +21,8 @@ hog_add_tests(hog_grid
     tests/kinds_tests.cpp
     tests/key_tests.cpp
     tests/page_tests.cpp
+    tests/piece_tests.cpp
     tests/tree_tests.cpp
     tests/view_tests.cpp
-    tests/water_bodies_tests.cpp)
+    tests/water_bodies_tests.cpp
+    tests/z_order_tests.cpp)

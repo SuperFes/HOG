@@ -160,6 +160,7 @@ public:
 
     [[nodiscard]] const std::filesystem::path& directory() const noexcept;
     [[nodiscard]] const Bands& bands() const noexcept;
+    [[nodiscard]] const Baking& baking() const noexcept;
 
     [[nodiscard]] Result<Snapshot> read() const;
     // Runs `body` in one batch, committing it where it succeeds and dropping it where it fails.

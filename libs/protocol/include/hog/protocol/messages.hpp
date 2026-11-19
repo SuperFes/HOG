@@ -357,6 +357,42 @@ struct Bodies {
     friend bool operator==(const Bodies&, const Bodies&) = default;
 };
 
+// Bytes a piece's coding may take, and the pieces a message may carry.
+inline constexpr std::size_t most_piece = std::size_t{1} << 20U;
+inline constexpr std::size_t most_pieces = 1024;
+
+// Server to client: pieces of the ground, each as `grid::Piece::encode` codes it, in the order
+// asked; one carries only the kinds the client didn't hold as they are now, unless it goes deeper
+// than held. Sent bulk, so they never hold up moves.
+struct Pieces {
+    std::vector<std::vector<std::byte>> pieces; // at most most_pieces, each at most most_piece
+
+    friend bool operator==(const Pieces&, const Pieces&) = default;
+};
+
+// A node a client asks for: the node, the depth it wants it down to, and how big it looks from
+// the client, a node's size over its distance, which the server ranks filling it by.
+struct AskedPiece {
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+    std::uint8_t to = 0;
+    float priority = 0.0F;
+
+    friend bool operator==(const AskedPiece&, const AskedPiece&) = default;
+};
+
+// Client to server: the nodes it wants now, most wanted first, in place of any it asked for
+// before. Each is sent as deep as the server holds it, up to as deep as asked, and deeper once
+// it's filled; one sent isn't sent again unless it changes or is asked for deeper. Sent reliably,
+// as it replaces what came before.
+struct AskPieces {
+    std::vector<AskedPiece> pieces; // at most most_asked
+
+    friend bool operator==(const AskPieces&, const AskPieces&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -391,13 +427,14 @@ struct Grains {
 
 using Message =
     std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said, Hurry,
-                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask>;
+                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask, Pieces, AskPieces>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
 // characters, a stance it doesn't know, an edit of no width or too wide, tiles, pages or bodies
-// too many or too big, or pages asked for too many or ranked by no finite size.
+// too many or too big, pages or pieces asked for too many or ranked by no finite size, or pieces
+// too many or too big.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

@@ -2,6 +2,7 @@
 
 #include <hog/baked/chunk_store.hpp>
 #include <hog/core/bytes.hpp>
+#include <hog/grid/z_order.hpp>
 
 #include <lmdb++.h>
 
@@ -24,6 +25,8 @@ using detail::get;
 using detail::guarded;
 using detail::Removed;
 using detail::tag_of;
+using grid::aligned;
+using grid::aligned_end;
 
 constexpr const char* chunks_name = "chunks";
 // Not the page store's, so neither is taken for the other.
@@ -40,17 +43,6 @@ struct Shared {
     Baking baking;
     Bands bands;
 };
-
-// A node's Morton bits moved up to the deepest a key goes, so a node and everything under it lie
-// together in order, the node first.
-std::uint64_t aligned(grid::Key key) noexcept {
-    return grid::morton(key) << (3U * (grid::max_depth - key.depth));
-}
-
-// The last aligned code under the node.
-std::uint64_t aligned_end(grid::Key key) noexcept {
-    return aligned(key) + ((std::uint64_t{1} << (3U * (grid::max_depth - key.depth))) - 1U);
-}
 
 // A chunk's key: which kind and band, then its root's aligned code, big-endian, then its depth,
 // so a band's chunks lie in Z order, each before those under it.
@@ -646,6 +638,10 @@ const std::filesystem::path& ChunkStore::directory() const noexcept {
 
 const Bands& ChunkStore::bands() const noexcept {
     return impl_->shared.bands;
+}
+
+const Baking& ChunkStore::baking() const noexcept {
+    return impl_->shared.baking;
 }
 
 Result<ChunkStore::Snapshot> ChunkStore::read() const {

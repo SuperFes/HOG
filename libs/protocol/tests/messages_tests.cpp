@@ -129,6 +129,12 @@ std::vector<Message> examples() {
         Ask{},
         Ask{.pages = {{.depth = 12, .x = 4000, .y = 3, .z = 4095, .levels = 6, .priority = 0.75F},
                       {.depth = 0, .levels = 2, .priority = 3.0e-4F}}},
+        Pieces{},
+        Pieces{.pieces = {bytes({4, 5}), {}, bytes({250, 1})}},
+        AskPieces{},
+        AskPieces{
+            .pieces = {{.depth = 14, .x = 9000, .y = 3, .z = 16383, .to = 18, .priority = 0.5F},
+                       {.depth = 0, .to = 3, .priority = 2.0e-5F}}},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
         Grains{},
         Grains{.tick = 7,
@@ -495,6 +501,32 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
     auto short_ask = encode(Ask{.pages = {{.depth = 1, .levels = 1}}});
     short_ask.pop_back();
     CHECK(decode(short_ask).error().code == ErrorCode::Parse);
+    // Pieces: a count over the most, one claiming more bytes than allowed, and one cut short.
+    CHECK(decode(bytes({22, 0, static_cast<int>((most_pieces + 1) & 0xFFU),
+                        static_cast<int>((most_pieces + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto big_piece = bytes({22, 0, 1, 0});
+    const auto piece_length = static_cast<std::uint32_t>(most_piece + 1);
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        big_piece.push_back(static_cast<std::byte>((piece_length >> shift) & 0xFFU));
+    }
+    big_piece.resize(big_piece.size() + piece_length);
+    CHECK(decode(big_piece).error().code == ErrorCode::OutOfRange);
+    auto short_piece = encode(Pieces{.pieces = {bytes({1, 2})}});
+    short_piece.pop_back();
+    CHECK(decode(short_piece).error().code == ErrorCode::Parse);
+    // Pieces asked for: a count over the most, one ranked by no finite size, and one cut short.
+    CHECK(decode(bytes({23, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto unranked_piece = encode(AskPieces{
+        .pieces = {{.depth = 1, .to = 2, .priority = std::numeric_limits<float>::quiet_NaN()}}});
+    CHECK(decode(unranked_piece).error().code == ErrorCode::OutOfRange);
+    auto short_ask_pieces = encode(AskPieces{.pieces = {{.depth = 1, .to = 2}}});
+    short_ask_pieces.pop_back();
+    CHECK(decode(short_ask_pieces).error().code == ErrorCode::Parse);
     // Grains: a count over the most, ids not going up, and one cut short.
     CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
           ErrorCode::OutOfRange);

@@ -8,6 +8,8 @@ add_library(hog_server
     src/pacer.cpp
     src/page_sending.cpp
     src/page_source.cpp
+    src/piece_sending.cpp
+    src/piece_source.cpp
     src/persistence.cpp
     src/players.cpp
     src/server_config.cpp
@@ -38,6 +40,8 @@ hog_add_tests(hog_server
     tests/pacer_tests.cpp
     tests/page_sending_tests.cpp
     tests/page_source_tests.cpp
+    tests/piece_sending_tests.cpp
+    tests/piece_source_tests.cpp
     tests/persistence_tests.cpp
     tests/players_tests.cpp
     tests/server_config_tests.cpp

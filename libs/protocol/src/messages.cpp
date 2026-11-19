@@ -40,6 +40,8 @@ enum class Kind : std::uint16_t {
     Pages = 19,
     Bodies = 20,
     Ask = 21,
+    Pieces = 22,
+    AskPieces = 23,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -664,6 +666,67 @@ struct Ball {
     return finished(in, std::move(ask));
 }
 
+[[nodiscard]] Result<Message> read_pieces(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "pieces");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_pieces) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} pieces in a message; {} allowed", *count, most_pieces));
+    }
+    Pieces pieces;
+    pieces.pieces.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto length = read<std::uint32_t>(in, "a piece");
+        if (!length) {
+            return make_error(ErrorCode::Parse, "a piece cut short");
+        }
+        if (*length > most_piece) {
+            return make_error(
+                ErrorCode::OutOfRange,
+                std::format("a piece of {} bytes is over the {} allowed", *length, most_piece));
+        }
+        const auto bytes = in.read_bytes(*length);
+        if (!bytes) {
+            return make_error(ErrorCode::Parse, "a piece cut short");
+        }
+        pieces.pieces.emplace_back(bytes->begin(), bytes->end());
+    }
+    return finished(in, std::move(pieces));
+}
+
+[[nodiscard]] Result<Message> read_ask_pieces(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "pieces asked for");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_asked) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} pieces asked for; {} allowed", *count, most_asked));
+    }
+    AskPieces ask;
+    ask.pieces.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto depth = read<std::uint8_t>(in, "a piece asked for");
+        const auto x = read<std::uint32_t>(in, "a piece asked for");
+        const auto y = read<std::uint32_t>(in, "a piece asked for");
+        const auto z = read<std::uint32_t>(in, "a piece asked for");
+        const auto to = read<std::uint8_t>(in, "a piece asked for");
+        const auto priority = read<std::uint32_t>(in, "a piece asked for");
+        if (!depth || !x || !y || !z || !to || !priority) {
+            return make_error(ErrorCode::Parse, "a piece asked for cut short");
+        }
+        const auto size = std::bit_cast<float>(*priority);
+        if (!std::isfinite(size)) {
+            return make_error(ErrorCode::OutOfRange, "a piece asked for ranked by no finite size");
+        }
+        ask.pieces.push_back(
+            {.depth = *depth, .x = *x, .y = *y, .z = *z, .to = *to, .priority = size});
+    }
+    return finished(in, std::move(ask));
+}
+
 [[nodiscard]] Result<Message> read_bodies(ByteReader& in) {
     const auto length = read<std::uint32_t>(in, "bodies");
     if (!length) {
@@ -881,6 +944,31 @@ void write_ask(ByteWriter& out, const Ask& ask) {
     }
 }
 
+void write_pieces(ByteWriter& out, const Pieces& pieces) {
+    HOG_ASSERT(pieces.pieces.size() <= most_pieces, "too many pieces to send at once");
+    out.write(static_cast<std::uint16_t>(Kind::Pieces));
+    out.write(static_cast<std::uint16_t>(pieces.pieces.size()));
+    for (const std::vector<std::byte>& piece : pieces.pieces) {
+        HOG_ASSERT(piece.size() <= most_piece, "a piece too big to send");
+        out.write(static_cast<std::uint32_t>(piece.size()));
+        out.write_bytes(piece);
+    }
+}
+
+void write_ask_pieces(ByteWriter& out, const AskPieces& ask) {
+    HOG_ASSERT(ask.pieces.size() <= most_asked, "too many pieces to ask for at once");
+    out.write(static_cast<std::uint16_t>(Kind::AskPieces));
+    out.write(static_cast<std::uint16_t>(ask.pieces.size()));
+    for (const AskedPiece& piece : ask.pieces) {
+        out.write(piece.depth);
+        out.write(piece.x);
+        out.write(piece.y);
+        out.write(piece.z);
+        out.write(piece.to);
+        out.write(std::bit_cast<std::uint32_t>(piece.priority));
+    }
+}
+
 void write_bodies(ByteWriter& out, const Bodies& bodies) {
     HOG_ASSERT(bodies.bytes.size() <= most_bodies, "too many bodies to send at once");
     out.write(static_cast<std::uint16_t>(Kind::Bodies));
@@ -1022,6 +1110,10 @@ std::vector<std::byte> encode(const Message& message) {
                 write_bodies(out, body);
             } else if constexpr (std::is_same_v<Body, Ask>) {
                 write_ask(out, body);
+            } else if constexpr (std::is_same_v<Body, Pieces>) {
+                write_pieces(out, body);
+            } else if constexpr (std::is_same_v<Body, AskPieces>) {
+                write_ask_pieces(out, body);
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 write_grains(out, body);
             } else if constexpr (std::is_same_v<Body, Ack>) {
@@ -1113,6 +1205,10 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_bodies(in);
     case Kind::Ask:
         return read_ask(in);
+    case Kind::Pieces:
+        return read_pieces(in);
+    case Kind::AskPieces:
+        return read_ask_pieces(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {
