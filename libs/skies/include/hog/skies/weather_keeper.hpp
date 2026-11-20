@@ -37,7 +37,7 @@ struct WeatherSettings {
     // Game time the most one job runs on, so a hurried clock does not hold a job for long.
     GameDuration longest = std::chrono::hours{1};
     // Game time a new world's still air is run on before it is shown, for its winds to build.
-    GameDuration spin_up = std::chrono::hours{48};
+    GameDuration spin_up = std::chrono::minutes{4};
     // Game time the air may fall behind the clock once it is shown; when the clock runs faster
     // than the air can be stepped, the air skips ahead rather than fall further.
     GameDuration lag = std::chrono::hours{6};

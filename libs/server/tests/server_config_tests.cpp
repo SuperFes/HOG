@@ -57,6 +57,8 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK_FALSE(config->debug.start);
     CHECK_FALSE(config->ground.store);
     CHECK(config->ground.generate);
+    // The air's run on two of its steps before it's shown, not days.
+    CHECK(config->weather.spin_up == std::chrono::minutes{4});
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {

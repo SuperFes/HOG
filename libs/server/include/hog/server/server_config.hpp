@@ -51,7 +51,8 @@ struct DebugSettings {
 struct WeatherConfig {
     bool on = true;
     int layers = 24;
-    GameDuration spin_up = std::chrono::hours{48};
+    // Two of the air's steps: enough to start the winds without holding a starting server up.
+    GameDuration spin_up = std::chrono::minutes{4};
 };
 
 // Where the ground the server streams is kept: a chunk store, baked or filled as players need.
@@ -107,7 +108,7 @@ struct ServerConfig {
 //     on = true
 //     level = 4                  # 1 to 5: the cube-sphere level of the air's columns
 //     layers = 24                # 8 to 24
-//     spin_up_hours = 48         # game time a new world's air is run on first
+//     spin_up_hours = 0          # game time a new world's air is run on first; two steps if unset
 //
 //     [wildlife]                 # optional
 //     ecology = "ecology.toml"

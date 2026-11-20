@@ -289,8 +289,9 @@ private:
     }
     config.on = on->value_or(config.on);
     config.layers = static_cast<int>(layers->value_or(config.layers));
-    config.spin_up = std::chrono::hours{
-        spin_up->value_or(std::chrono::duration_cast<std::chrono::hours>(config.spin_up).count())};
+    if (*spin_up) {
+        config.spin_up = std::chrono::hours{**spin_up};
+    }
     return {};
 }
 
