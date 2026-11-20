@@ -7,6 +7,7 @@
 #include <hog/grid/key.hpp>
 #include <hog/grid/kinds.hpp>
 #include <hog/grid/tree.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/net/events.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/chunk_sending.hpp>
@@ -16,6 +17,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <tuple>
@@ -66,6 +68,38 @@ ChunkSending::Next next_of(ChunkSending& sending, const hog::baked::ChunkStore& 
     const auto snapshot = store.read();
     REQUIRE(snapshot.has_value());
     return sending.next(player, *snapshot, room, most);
+}
+
+// What a player holds of what's been sent: each chunk by kind, band and root, as last sent.
+std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>>
+held_of(std::initializer_list<const ChunkSending::Next*> sent) {
+    std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> held;
+    for (const ChunkSending::Next* each : sent) {
+        for (const hog::protocol::SentChunk& chunk : each->chunks) {
+            if (chunk.version == 0) {
+                held.erase(id_of(chunk));
+            } else {
+                held.insert_or_assign(id_of(chunk), std::pair{chunk.version, chunk.tree});
+            }
+        }
+    }
+    return held;
+}
+
+// Has the store hold `node` down to `depth`, telling `sending` of what's written only where
+// `tell`.
+void fill_telling(const hog::globe::Generator& generator, hog::baked::ChunkStore& store,
+                  ChunkSending& sending, Key node, std::uint8_t depth, bool tell) {
+    hog::jobs::JobSystem jobs{2};
+    hog::baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    filler.want(node, depth);
+    while (!filler.idle()) {
+        auto written = filler.pump(true);
+        REQUIRE(written.has_value());
+        if (tell) {
+            sending.changed(*written);
+        }
+    }
 }
 
 } // namespace
@@ -258,6 +292,10 @@ TEST_CASE("asking again replaces what's due and what no one waits on any more is
     sending.answered(answered);
     CHECK(sending.waiting(player) == 0);
     CHECK(sending.wanted().empty());
+    // Gone over once more for what's stored, which is nothing.
+    CHECK(sending.due(player) == 1);
+    CHECK(next_of(sending, store).chunks.empty());
+    CHECK(sending.wanted().empty());
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
     CHECK(sending.due(player) == 0);
     sending.leave(player);
@@ -294,4 +332,52 @@ TEST_CASE("what two players wait on is wanted once at the higher rank and everyt
     sending.leave(other);
     CHECK(sending.next(player, *snapshot, lots, lots).chunks.empty());
     CHECK(sending.wanted().front().rank.priority == 0.25);
+}
+
+TEST_CASE("a want woken by a write still goes when the player asks again before it's sent",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    hog::testing::fill_chunks(generator, store, node, 9);
+    ChunkSending sending{store.bands()};
+    sending.join(player);
+    const std::vector<ChunkSending::Want> wants{{.node = node, .depth = 12}};
+    sending.ask(player, wants);
+    const ChunkSending::Next part = next_of(sending, store);
+    CHECK(sending.waiting(player) == 1);
+    fill_telling(generator, store, sending, node, 12, true);
+    CHECK(sending.due(player) == 1);
+    // Asked again, as a client does as pieces come, before what was written goes.
+    sending.ask(player, wants);
+    CHECK(sending.due(player) == 1);
+    const ChunkSending::Next rest = next_of(sending, store);
+    CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
+}
+
+TEST_CASE("a node answered goes over what's stored once more before it's whole",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    hog::testing::fill_chunks(generator, store, node, 9);
+    ChunkSending sending{store.bands()};
+    sending.join(player);
+    const std::vector<ChunkSending::Want> wants{{.node = node, .depth = 12}};
+    sending.ask(player, wants);
+    const ChunkSending::Next part = next_of(sending, store);
+    CHECK(sending.waiting(player) == 1);
+    // Filled with no word of what was written, as where that word was passed over.
+    fill_telling(generator, store, sending, node, 12, false);
+    const std::vector<hog::baked::ChunkFiller::Asked> answered{{.node = node, .depth = 12}};
+    sending.answered(answered);
+    CHECK(sending.waiting(player) == 0);
+    CHECK(sending.wanted().empty());
+    sending.ask(player, wants);
+    CHECK(sending.due(player) == 1);
+    const ChunkSending::Next rest = next_of(sending, store);
+    CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
+    CHECK(sending.wanted().empty());
+    sending.ask(player, wants);
+    CHECK(sending.due(player) == 0);
 }

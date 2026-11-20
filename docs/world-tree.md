@@ -110,8 +110,10 @@ Each step is its own commit with tests, and the world stays playable after each.
       to 0.35 s, a 2 km one from 10.9 s to 5.6 s.
    2. *Ground cells.* Done: each cell's ground is read at one detail for its level
       (`terms::cell_lod`) and kept in the generator's `GroundCells`, shared by every fill and
-      thread; slopes come from its gradient, never from reads beside it; the fallen-rock walk and
-      the woods read the same cells. Rockfall's walk had been 79% of a 2 km region's reads, made
+      thread; the fallen-rock walk and the woods read the same cells. Slopes stay measured across
+      the cells beside each, now read from the same store: the gradient at a cell's middle knows
+      nothing of the relief across the cell, so coarse nodes over a flat beside a cliff were held
+      solid where ground crossed them, and nodes over a cliff were held crossed in the air. Rockfall's walk had been 79% of a 2 km region's reads, made
       again for every batch of columns. A 32 m region went from 0.35 s to 0.28 s (0.11 s with its
       cells held), a 2 km one from 5.2 s to 3.8 s, now mostly the walk's own cells, which
       neighbouring fills share, and caves in the distance samples (step 5).

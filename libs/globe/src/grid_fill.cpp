@@ -354,7 +354,7 @@ private:
         if (wanted.empty()) {
             return;
         }
-        std::vector<Generator::Column> made = generator_->columns(wanted, lod, false);
+        std::vector<Generator::Column> made = generator_->columns(wanted, lod, 1, false);
         for (std::size_t n = 0; n < wanted.size(); ++n) {
             columns_.emplace(slot(wanted[n]), made[n]);
         }

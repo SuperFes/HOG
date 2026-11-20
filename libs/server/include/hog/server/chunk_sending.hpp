@@ -39,7 +39,8 @@ public:
         double priority = 0.0;
     };
     // Has the player sent the nodes it asks for, in its order, in place of whatever it was due
-    // before, where it hasn't been sent them whole as deep. Nodes outside the grid are left out;
+    // before, where it hasn't been sent them whole as deep; one still due from before, as one
+    // woken by a write, stays due. Nodes outside the grid are left out;
     // depths past the finest are taken as the finest, those over a node as the node's.
     void ask(net::ConnectionId player, std::span<const Want> wants);
 
@@ -48,7 +49,8 @@ public:
     void changed(std::span<const baked::Region> written);
     // Has everything sent or waiting gone over again, as where what changed is unknown.
     void changed_everything();
-    // Takes the nodes the filler found nothing more to fill under as whole.
+    // Has the nodes the filler found nothing more to fill under gone over once more, sent what's
+    // stored of them, then taken as whole however little that is.
     void answered(std::span<const baked::ChunkFiller::Asked> asked);
 
     // What every player waits on the store to hold more of, each node and depth once, at the
@@ -84,6 +86,7 @@ private:
         std::vector<Want> due; // in order
         grid::ZMap<Want> whole;
         grid::ZMap<Want> waiting;
+        grid::ZMap<Want> answered;             // due once more, then whole
         std::map<SentKey, std::uint64_t> sent; // by version
         std::uint64_t round = 0;               // when last asked
     };

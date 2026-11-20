@@ -4,6 +4,7 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/habitat.hpp>
+#include <hog/grid/z_order.hpp>
 #include <hog/testing/quick.hpp>
 #include <hog/testing/world.hpp>
 
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -338,6 +340,85 @@ TEST_CASE("solid ground has its material and open space none", "[globe][grid]") 
             }
         }
     }
+}
+
+namespace {
+
+// Whether ground at a node's own detail passes through it, across its corners and middle: any of
+// a solid one standing clear over the ground, or of an open one deep under it.
+bool ground_through(const hog::globe::Generator& world, const hog::grid::Grid& grid, Key node,
+                    bool solid) {
+    const double size = grid.size(node.depth);
+    const DVec3 low = grid.low(node);
+    for (int k = 0; k < 27; ++k) {
+        const DVec3 point = low + (DVec3{k % 3, (k / 3) % 3, k / 9} * (size / 2.0));
+        const double radius = glm::length(point);
+        // Deep inside, as at the centre, there's no way up to read.
+        if (radius < world.layers().floor) {
+            continue;
+        }
+        const double top = world.column(point / radius, size).ground();
+        if (solid ? radius > top + (size / 4.0) : radius < top - (size / 4.0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Every leaf of `filled` over `key`, `under` levels deep, the surface misses: each once, as the
+// node it is and whether it's solid.
+std::vector<std::pair<Key, bool>> missed_leaves(const Filled& filled, Key key, std::uint8_t under) {
+    std::set<Key, hog::grid::ZOrder> seen;
+    std::vector<std::pair<Key, bool>> found;
+    const std::uint32_t across = 1U << under;
+    for (std::uint32_t x = 0; x < across; ++x) {
+        for (std::uint32_t y = 0; y < across; ++y) {
+            for (std::uint32_t z = 0; z < across; ++z) {
+                const auto leaf = filled.shape.at(under, x, y, z);
+                const auto shift = static_cast<unsigned>(under - leaf.depth);
+                const Key node{.depth = static_cast<std::uint8_t>(key.depth + leaf.depth),
+                               .x = (key.x << leaf.depth) + (x >> shift),
+                               .y = (key.y << leaf.depth) + (y >> shift),
+                               .z = (key.z << leaf.depth) + (z >> shift)};
+                if (!leaf.value.crosses() && seen.insert(node).second) {
+                    found.emplace_back(node, leaf.value.is_solid());
+                }
+            }
+        }
+    }
+    return found;
+}
+
+} // namespace
+
+TEST_CASE("a coarse leaf the surface misses has no ground through it at its own detail",
+          "[globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    constexpr std::uint8_t under = 3;
+    int missed = 0;
+    int crossed = 0;
+    for (std::uint64_t n = 0; n < 6; ++n) {
+        const DVec3 up =
+            hog::globe::center(hog::globe::cell_at_index(5, (n * 2'654'435'761U) % 6'144U));
+        const double ground =
+            hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value_or(0.0);
+        for (std::uint8_t depth = 1; depth < grid.depth(); ++depth) {
+            const double side = grid.size(static_cast<std::uint8_t>(depth + under));
+            if (side > 2'000.0 || side < 200.0) {
+                continue;
+            }
+            const Key key = grid.key_at(up * ground, depth).value();
+            const Filled filled = fill(world, grid, key, under);
+            for (const auto& [node, solid] : missed_leaves(filled, key, under)) {
+                ++missed;
+                crossed += ground_through(world, grid, node, solid) ? 1 : 0;
+            }
+        }
+    }
+    UNSCOPED_INFO(crossed << " of " << missed << " leaves missed have ground through them");
+    CHECK(missed > 50);
+    CHECK(crossed == 0);
 }
 
 TEST_CASE("open space under the sea is the sea's basin", "[globe][grid]") {

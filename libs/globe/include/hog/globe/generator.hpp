@@ -247,14 +247,16 @@ public:
                                                       double lod);
 
     // The columns through the middles of a square of cells `side` across from `corner`, on its
-    // level, along i then j: each the same as column() through its middle. Voxels are filled
-    // from these.
+    // level, along i then j. Each takes the ground's slope from the cells beside it, so they
+    // share the work: cheaper than column() each, and a cell's column comes out the same in any
+    // square. Voxels are filled from these.
     [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
-    // The same through any cells of one level, in their order, the ground at each kept to be
-    // read again. Without `placed`, no fallen rock lies on any nor crag stands out of it, for
-    // those placed apart.
+    // The same through any cells of one level, in their order, each taking the slope from the
+    // cells `apart` beside it, as where every so many cells are taken for coarser detail; the
+    // ground at each kept to be read again. Without `placed`, no fallen rock lies on any nor crag
+    // stands out of it, for those placed apart.
     [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod,
-                                              bool placed = true) const;
+                                              int apart = 1, bool placed = true) const;
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {
@@ -269,7 +271,7 @@ public:
     [[nodiscard]] const GroundCells* ground_cells() const noexcept { return cells_.get(); }
 
 private:
-    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made,
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made, double slope,
                                 const terms::Fall& fall) const noexcept;
     [[nodiscard]] terms::Context context(bool crags = true) const noexcept;
 

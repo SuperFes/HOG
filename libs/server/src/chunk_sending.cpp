@@ -60,14 +60,29 @@ void ChunkSending::leave(net::ConnectionId player) {
 void ChunkSending::ask(net::ConnectionId player, std::span<const Want> wants) {
     Player& held = players_[player];
     held.round = ++rounds_;
+    grid::ZMap<Want> was_due;
+    for (const Want& due : held.due) {
+        was_due.insert_or_assign(due.node, due);
+    }
     held.due.clear();
     const std::uint8_t finest = bands_.foot(static_cast<std::uint8_t>(bands_.count() - 1));
     grid::ZMap<Want> waiting;
+    grid::ZMap<Want> answered;
     for (Want want : wants) {
         if (!want.node.is_valid() || want.node.depth > finest) {
             continue;
         }
         want.depth = std::clamp(want.depth, want.node.depth, finest);
+        if (const auto told = held.answered.find(want.node);
+            told != held.answered.end() && told->second.depth >= want.depth) {
+            answered.insert(*told);
+        }
+        // Woken by a write it hasn't been sent yet, it still goes.
+        if (const auto due = was_due.find(want.node);
+            due != was_due.end() && due->second.depth >= want.depth) {
+            held.due.push_back(want);
+            continue;
+        }
         if (const auto whole = held.whole.find(want.node);
             whole != held.whole.end() && whole->second.depth >= want.depth) {
             continue;
@@ -81,6 +96,7 @@ void ChunkSending::ask(net::ConnectionId player, std::span<const Want> wants) {
         held.due.push_back(want);
     }
     held.waiting = std::move(waiting);
+    held.answered = std::move(answered);
 }
 
 void ChunkSending::due_again(Player& player, const Want& want) {
@@ -149,8 +165,10 @@ void ChunkSending::answered(std::span<const baked::ChunkFiller::Asked> asked) {
             if (found == player.waiting.end() || found->second.depth > ask.depth) {
                 continue;
             }
-            player.whole.insert_or_assign(ask.node, found->second);
+            const Want want = found->second;
             player.waiting.erase(found);
+            player.answered.insert_or_assign(want.node, want);
+            due_again(player, want);
         }
     }
 }
@@ -276,9 +294,11 @@ ChunkSending::Next ChunkSending::next(net::ConnectionId player,
         if (limits.cut) {
             break;
         }
-        if (whole) {
+        const auto told = held.answered.find(want.node);
+        if (whole || (told != held.answered.end() && told->second.depth >= want.depth)) {
             held.whole.insert_or_assign(want.node, want);
             held.waiting.erase(want.node);
+            held.answered.erase(want.node);
         } else {
             held.waiting.insert_or_assign(want.node, want);
         }
