@@ -19,6 +19,7 @@ namespace hog::client {
 namespace {
 
 constexpr int most_threads = 256;
+constexpr int most_cache_gb = 1024;
 
 std::optional<int> integer(std::string_view text) {
     int value = 0;
@@ -146,6 +147,14 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--threads must be from 0 to {}, not {}", most_threads, value));
         }
         options.threads = static_cast<std::uint32_t>(*threads);
+    } else if (option == "--cache-gb") {
+        const std::optional<int> gigabytes = integer(value);
+        if (!gigabytes || *gigabytes < 0 || *gigabytes > most_cache_gb) {
+            return make_error(
+                ErrorCode::InvalidArgument,
+                std::format("--cache-gb must be from 0 to {}, not {}", most_cache_gb, value));
+        }
+        options.cache_gb = static_cast<std::uint32_t>(*gigabytes);
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--quit-after") {
@@ -242,6 +251,8 @@ options:
                          window's title shows
   --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            meshing the ground (default one per hardware thread)
+  --cache-gb N           gigabytes of the server's ground kept between runs under
+                         var/cache, read before asking again (default 4, 0 none)
   --connect ADDRESS      connect to a server at an IP address and port, such as
                          127.0.0.1:7675
   --login ADDRESS        log in there first, such as 127.0.0.1:4647, with --name

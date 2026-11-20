@@ -34,6 +34,8 @@ struct Options {
     // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.
     std::optional<double> time_of_day;
     std::uint32_t threads = 0; // meshing the ground, 0 for one per hardware thread
+    // Gigabytes of the server's chunks kept between runs, read before asking again; 0 keeps none.
+    std::uint32_t cache_gb = 4;
     // A server's IP address and port to connect to.
     std::optional<std::string> connect;
     // A login service's IP address and port, and the name to log in with, for a connect token

@@ -24,6 +24,7 @@ TEST_CASE("client options have defaults", "[client][options]") {
     CHECK_FALSE(options->start);
     CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
+    CHECK(options->cache_gb == 4);
     CHECK_FALSE(options->connect);
     CHECK_FALSE(options->login);
     CHECK_FALSE(options->name);
@@ -45,6 +46,8 @@ TEST_CASE("client options are parsed", "[client][options]") {
                                                  "18:30",
                                                  "--threads",
                                                  "2",
+                                                 "--cache-gb",
+                                                 "0",
                                                  "--connect",
                                                  "127.0.0.1:7675",
                                                  "--login",
@@ -68,6 +71,7 @@ TEST_CASE("client options are parsed", "[client][options]") {
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
     CHECK(options->time_of_day == 18.5 / 24.0);
     CHECK(options->threads == 2);
+    CHECK(options->cache_gb == 0);
     CHECK(options->connect == "127.0.0.1:7675");
     CHECK(options->login == "127.0.0.1:4647");
     CHECK(options->name == "Matt");
@@ -92,6 +96,8 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--at", "0,east,0"}));
     CHECK_FALSE(parse_options(Arguments{"--threads", "-1"}));
     CHECK_FALSE(parse_options(Arguments{"--threads", "many"}));
+    CHECK_FALSE(parse_options(Arguments{"--cache-gb", "-1"}));
+    CHECK_FALSE(parse_options(Arguments{"--cache-gb", "2000"}));
     CHECK_FALSE(parse_options(Arguments{"--quit-after", "1.5"}));
     CHECK_FALSE(parse_options(Arguments{"--time", "18"}));
     CHECK_FALSE(parse_options(Arguments{"--time", "24:00"}));

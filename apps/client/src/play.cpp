@@ -1074,8 +1074,6 @@ constexpr std::size_t pieces_asked = protocol::most_asked;
 constexpr auto asking_interval = std::chrono::milliseconds{100};
 constexpr double asking_turn = 0.94;
 
-// Bytes of chunks kept between runs at most.
-constexpr std::uint64_t cache_budget = std::uint64_t{1} << 30U;
 // Wishes looked up in the cache at once.
 constexpr std::size_t cache_reads = 512;
 
@@ -1477,7 +1475,10 @@ int show_streamed_world(const client::Options& options, render::Device& device,
     // One cache a world, so another world's chunks are never taken for this one's.
     const std::filesystem::path cache_file =
         std::filesystem::path{"var/cache"} / std::format("{:016x}.mdb", session->world());
-    if (auto cache = client::ChunkCache::open(cache_file, cache_budget); !cache) {
+    const std::uint64_t cache_budget = std::uint64_t{options.cache_gb} << 30U;
+    if (cache_budget == 0) {
+        log::info(connection_log, "keeping no chunks between runs");
+    } else if (auto cache = client::ChunkCache::open(cache_file, cache_budget); !cache) {
         log::warn(connection_log, "can't keep chunks between runs: {}", cache.error());
     } else {
         log::info(connection_log, "{} chunks kept from before, {} MB", cache->chunks(),
