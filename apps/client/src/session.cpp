@@ -93,7 +93,16 @@ void Session::look(std::optional<Whereabouts> player, MonotonicClock::time_point
     }
 }
 
-bool Session::took_ground(protocol::Message& message) {
+std::vector<protocol::SentChunk> Session::take_chunks() {
+    // Taken in, the server may send as much again.
+    if (chunk_bytes_heard_ > chunk_bytes_told_ && state_ == State::Welcomed) {
+        send(protocol::Took{.bytes = chunk_bytes_heard_}, net::Delivery::Reliable);
+        chunk_bytes_told_ = chunk_bytes_heard_;
+    }
+    return std::exchange(chunks_, {});
+}
+
+bool Session::took_ground(protocol::Message& message, std::size_t bytes) {
     if (auto* tiles = std::get_if<protocol::Tiles>(&message)) {
         tiles_.insert(tiles_.end(), std::make_move_iterator(tiles->tiles.begin()),
                       std::make_move_iterator(tiles->tiles.end()));
@@ -101,6 +110,7 @@ bool Session::took_ground(protocol::Message& message) {
         chunks_.insert(chunks_.end(), std::make_move_iterator(chunks->chunks.begin()),
                        std::make_move_iterator(chunks->chunks.end()));
         done_.insert(done_.end(), chunks->done.begin(), chunks->done.end());
+        chunk_bytes_heard_ += bytes;
     } else if (auto* bodies = std::get_if<protocol::Bodies>(&message)) {
         bodies_.push_back(std::move(bodies->bytes));
     } else {
@@ -157,7 +167,7 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         weather_ = std::move(*weather);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
-    } else if (took_ground(*message)) {
+    } else if (took_ground(*message, bytes.size())) {
     } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
         grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {

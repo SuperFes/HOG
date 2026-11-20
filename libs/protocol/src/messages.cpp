@@ -43,6 +43,7 @@ enum class Kind : std::uint16_t {
     Chunks = 22,
     AskPieces = 23,
     Report = 24,
+    Took = 25,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -1228,6 +1229,9 @@ std::vector<std::byte> encode(const Message& message) {
             } else if constexpr (std::is_same_v<Body, Report>) {
                 out.write(static_cast<std::uint16_t>(Kind::Report));
                 out.write(body.stamp);
+            } else if constexpr (std::is_same_v<Body, Took>) {
+                out.write(static_cast<std::uint16_t>(Kind::Took));
+                out.write(body.bytes);
             } else if constexpr (std::is_same_v<Body, Clock>) {
                 out.write(static_cast<std::uint16_t>(Kind::Clock));
                 out.write(body.scale);
@@ -1315,6 +1319,13 @@ Result<Message> decode(std::span<const std::byte> bytes) {
             return std::unexpected(stamp.error());
         }
         return finished(in, Report{.stamp = *stamp});
+    }
+    case Kind::Took: {
+        const auto taken = in.read<std::uint64_t>();
+        if (!taken) {
+            return std::unexpected(taken.error());
+        }
+        return finished(in, Took{.bytes = *taken});
     }
     case Kind::Hurry: {
         const auto scale = read_scale(in, "a hurry");

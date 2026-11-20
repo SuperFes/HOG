@@ -29,6 +29,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -50,6 +51,9 @@ constexpr std::size_t tile_queue = std::size_t{256} * 1'024;
 // The same for grid chunks, sent as many messages a tick as fit: on a near link it drains as fast
 // as it fills, and a far one holds it back by what's still queued.
 constexpr std::size_t chunk_queue = std::size_t{8} << 20U;
+// Bytes of chunks on the way to a player and not yet taken in at most: as much as it takes in a
+// frame or two, so what it asks next goes ahead of what's queued, and its queue never overflows.
+constexpr std::uint64_t chunk_window = std::uint64_t{4} << 20U;
 // Address space a chunk store may grow into; it takes only what's written.
 constexpr std::uint64_t chunk_store_bytes = std::uint64_t{1} << 36U;
 // A cavern pool's steady seep, cubic metres a second.
@@ -148,6 +152,8 @@ struct Server::PieceStreaming {
     grid::WaterBodies bodies;
     // Those who've asked for chunks, which draw them in place of tiles.
     std::set<net::ConnectionId> asking;
+    // Bytes of chunks messages on the way to each player.
+    std::map<net::ConnectionId, server::ChunkFlow> flows;
     // The last of the store's log read, and the wants as last written.
     std::uint64_t logged = 0;
     std::vector<baked::WantsTable::Want> written_wants;
@@ -446,6 +452,7 @@ void Server::serve_players() {
             if (pieces_) {
                 pieces_->sending.leave(lost->connection);
                 pieces_->asking.erase(lost->connection);
+                pieces_->flows.erase(lost->connection);
             }
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
@@ -545,6 +552,10 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         ask_pieces(connection, *ask);
     } else if (const auto* asked = std::get_if<protocol::Report>(&*message)) {
         report(connection, *asked);
+    } else if (const auto* took = std::get_if<protocol::Took>(&*message)) {
+        if (pieces_) {
+            pieces_->flows.try_emplace(connection, chunk_window).first->second.took(took->bytes);
+        }
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -839,9 +850,11 @@ void Server::send_pieces(net::ConnectionId connection) {
     auto& players = *players_;
     const std::optional<net::Stats> stats = players.stats(connection);
     std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
-    while (queued < chunk_queue && pieces.sending.due(connection) > 0) {
+    server::ChunkFlow& flow = pieces.flows.try_emplace(connection, chunk_window).first->second;
+    while (queued < chunk_queue && flow.room() > 0 && pieces.sending.due(connection) > 0) {
+        const auto open = static_cast<std::size_t>(flow.room());
         server::ChunkSending::Next next = pieces.sending.next(
-            connection, pieces.snapshot, std::min(chunk_queue - queued, most_chunk_bytes),
+            connection, pieces.snapshot, std::min({chunk_queue - queued, most_chunk_bytes, open}),
             protocol::most_chunks);
         if (next.too_big > 0) {
             log::warn(server_log, "{} grid chunks too big to send", next.too_big);
@@ -858,6 +871,7 @@ void Server::send_pieces(net::ConnectionId connection) {
                        std::to_underlying(connection), sent.error());
             return;
         }
+        flow.sent(message.size());
         chunks_sent_.add(count);
     }
 }

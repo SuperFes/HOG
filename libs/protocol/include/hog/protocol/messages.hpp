@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 45;
+inline constexpr std::uint32_t version = 46;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -445,6 +445,15 @@ struct Report {
     friend bool operator==(const Report&, const Report&) = default;
 };
 
+// Client to server: the bytes of chunks messages it's taken in since it was welcomed, so the server
+// keeps only so much more on the way as the client takes in, and what's asked next goes ahead of
+// what's queued.
+struct Took {
+    std::uint64_t bytes = 0;
+
+    friend bool operator==(const Took&, const Took&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -479,7 +488,7 @@ struct Grains {
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
                              Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies,
-                             Ask, Chunks, AskPieces, Report>;
+                             Ask, Chunks, AskPieces, Report, Took>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot

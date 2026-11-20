@@ -444,3 +444,20 @@ TEST_CASE("what's kept of a player reads as what's open, what waits and what the
     CHECK(text.find(":smw") == std::string::npos);
     CHECK(sending.describe(hog::net::ConnectionId{9}, *snapshot) == "not a player\n");
 }
+
+TEST_CASE("chunks on the way to a player stay under the window it takes them in by",
+          "[server][chunk_sending]") {
+    hog::server::ChunkFlow flow{1000};
+    CHECK(flow.room() == 1000);
+    flow.sent(600);
+    CHECK(flow.room() == 400);
+    flow.sent(700);
+    CHECK(flow.room() == 0);
+    flow.took(600);
+    CHECK(flow.room() == 300);
+    // An older word changes nothing, and none says more's taken than was sent.
+    flow.took(100);
+    CHECK(flow.room() == 300);
+    flow.took(5000);
+    CHECK(flow.room() == 1000);
+}

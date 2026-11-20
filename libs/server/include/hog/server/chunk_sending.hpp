@@ -11,6 +11,7 @@
 #include <hog/net/events.hpp>
 #include <hog/protocol/messages.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -148,6 +149,27 @@ private:
     baked::Bands bands_;
     std::map<net::ConnectionId, Player> players_;
     std::uint64_t rounds_ = 0;
+};
+
+// Bytes of chunks on the way to a player and not yet taken in, kept under a window, so what's
+// sent never runs ahead of what the player takes in by more than that.
+class ChunkFlow {
+public:
+    explicit ChunkFlow(std::uint64_t window) noexcept : window_{window} {}
+
+    // Bytes more that may be sent now.
+    [[nodiscard]] std::uint64_t room() const noexcept {
+        return window_ - std::min(window_, sent_ - took_);
+    }
+    void sent(std::uint64_t bytes) noexcept { sent_ += bytes; }
+    // What the player says it's taken in, all told: never more than it's been sent, and an
+    // older word, less than before, changes nothing.
+    void took(std::uint64_t bytes) noexcept { took_ = std::clamp(bytes, took_, sent_); }
+
+private:
+    std::uint64_t window_;
+    std::uint64_t sent_ = 0;
+    std::uint64_t took_ = 0;
 };
 
 // The bodies of `table` by `ids`, in messages' bytes as `grid::WaterBodies::encode` gives them,

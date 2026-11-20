@@ -629,6 +629,16 @@ TEST_CASE("a session takes the ground chunks and water bodies sent oldest first"
         return chunks.size() == 3 && bodies.size() == 1;
     });
     CHECK(chunks == std::vector{shape, gone, shape});
+    // Taken in, the server's told how many bytes of chunks that was, all told.
+    const std::uint64_t sent =
+        protocol::encode(protocol::Chunks{.chunks = {shape, gone}, .done = {}}).size() +
+        protocol::encode(protocol::Chunks{.chunks = {shape}, .done = {done}}).size();
+    look_until(session, stand, [&] {
+        return std::ranges::any_of(stand.heard, [&](const protocol::Message& message) {
+            const auto* took = std::get_if<protocol::Took>(&message);
+            return took != nullptr && took->bytes == sent;
+        });
+    });
     CHECK(session.take_done() == std::vector{done});
     CHECK(session.take_done().empty());
     CHECK(bodies[0] == std::vector{std::byte{9}});

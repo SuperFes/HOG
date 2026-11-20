@@ -97,9 +97,8 @@ public:
     }
 
     // Ground chunks the server sent since last asked, oldest first.
-    [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() noexcept {
-        return std::exchange(chunks_, {});
-    }
+    // Tells the server they're taken in, so it sends more.
+    [[nodiscard]] std::vector<protocol::SentChunk> take_chunks();
     // The nodes asked for the server said were done since last asked, oldest first; each after
     // the chunks it finishes.
     [[nodiscard]] std::vector<protocol::DonePiece> take_done() noexcept {
@@ -147,8 +146,8 @@ private:
     Session(net::Client client, std::string address, std::vector<std::byte> token) noexcept;
 
     void heard(std::span<const std::byte> bytes, MonotonicClock::time_point now);
-    // Keeps the ground sent, if that's what the message is.
-    bool took_ground(protocol::Message& message);
+    // Keeps the ground sent, if that's what the message is, `bytes` long as it came.
+    bool took_ground(protocol::Message& message, std::size_t bytes);
     void send(const protocol::Message& message, net::Delivery delivery);
 
     net::Client client_;
@@ -172,6 +171,9 @@ private:
     std::vector<protocol::SentTile> tiles_;
     std::vector<protocol::SentChunk> chunks_;
     std::vector<protocol::DonePiece> done_;
+    // Bytes of chunks messages heard, and as many as the server's been told are taken in.
+    std::uint64_t chunk_bytes_heard_ = 0;
+    std::uint64_t chunk_bytes_told_ = 0;
     std::vector<std::vector<std::byte>> bodies_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;

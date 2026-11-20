@@ -163,6 +163,8 @@ std::vector<Message> examples() {
         AskPieces{.pieces = {}, .dropped = {{.depth = 1}, {.depth = 2, .x = 3}}},
         Report{},
         Report{.stamp = 1'763'600'000},
+        Took{},
+        Took{.bytes = 0x0123'4567'89AB'CDEF},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
         Grains{},
         Grains{.tick = 7,
@@ -232,7 +234,7 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({25, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({26, 0})).error().code == ErrorCode::Unsupported);
     // A placing at the centre in a stance after flying.
     CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
