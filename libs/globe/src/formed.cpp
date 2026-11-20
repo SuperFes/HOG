@@ -1495,14 +1495,18 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // The line's chord and arc differ by far less than this, so none is missed by their
     // difference.
     constexpr double slack = 0.01;
+    // Spurs between one valley's bends round over no more height than this, so only the stretches
+    // standing within it of the lowest are read.
+    constexpr double spur_rounding = 4.0;
     Wall wall{.height = 0.0, .season = {}, .reaching = 0.0};
     double stretches = 0.0;
-    Lowest lowest_of{rounding, blend};
+    const double spur_blend = std::min(blend, spur_rounding);
+    Lowest lowest_of{rounding, spur_blend};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         // Weighed down to none at all by the furthest blended, so none drops out with a step.
-        constexpr double furthest = 6.0;
+        constexpr double furthest = 3.0;
         const double weight = maths::exp(-(rough[k] - lowest) / blending) - maths::exp(-furthest);
-        if (weight <= 0.0 && least[k] > surely + std::max(handing_over, blend) + slack) {
+        if (weight <= 0.0 && least[k] > surely + std::max(handing_over, spur_blend) + slack) {
             continue;
         }
         const Bends bends = bends_at(line, k);
