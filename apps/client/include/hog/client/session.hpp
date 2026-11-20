@@ -84,6 +84,8 @@ public:
     // Has the server check the chunks this client keeps from before; nothing before being
     // welcomed.
     void check(const protocol::CheckChunks& check);
+    // Asks the server for the water bodies of these ids; nothing before being welcomed.
+    void ask_bodies(std::span<const std::uint32_t> ids);
     // Tells the server a report was taken at `stamp`, for it to write its own beside; nothing
     // before being welcomed.
     void report(std::uint64_t stamp);

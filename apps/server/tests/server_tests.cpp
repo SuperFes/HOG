@@ -690,12 +690,20 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
 namespace {
 
 // What a player asking for chunks hears: the root's chunk of each kind, by kind, the bodies told,
-// and how many of them before the first chunk came.
+// how many of them before the first chunk came, and the bodies the root's water marks, once it's
+// asked for them.
 struct HeardChunks {
     std::map<std::uint8_t, hog::protocol::SentChunk> roots;
     hog::grid::WaterBodies told;
     std::optional<std::size_t> told_first;
+    std::optional<std::vector<std::uint32_t>> marked;
     MonotonicClock::duration took{};
+
+    // Whether every body the root's water marks has been told.
+    [[nodiscard]] bool told_marked() const {
+        return marked && std::ranges::all_of(
+                             *marked, [&](std::uint32_t id) { return told.bodies.contains(id); });
+    }
 
     void hear(const hog::protocol::Message& message) {
         if (const auto* bodies = std::get_if<hog::protocol::Bodies>(&message)) {
@@ -746,7 +754,21 @@ HeardChunks asked_root(Server& server, std::chrono::seconds patience) {
                 heard.hear(*decoded);
             }
         }
-        if (heard.roots.size() == 4 || MonotonicClock::now() >= give_up) {
+        // As a client asks for the bodies the water it holds marks.
+        if (!heard.marked && heard.roots.contains(2)) {
+            const auto water = hog::grid::Tree<hog::grid::Water>::decode(heard.roots.at(2).tree);
+            REQUIRE(water);
+            std::vector<std::uint32_t> ids;
+            for (const hog::grid::Water::Value id : water->leaf_values()) {
+                if (id != 0 && std::ranges::find(ids, id) == ids.end()) {
+                    ids.push_back(id);
+                }
+            }
+            REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                hog::protocol::encode(hog::protocol::AskBodies{.ids = ids})));
+            heard.marked = std::move(ids);
+        }
+        if ((heard.roots.size() == 4 && heard.told_marked()) || MonotonicClock::now() >= give_up) {
             stop = true;
         }
     }};
@@ -757,7 +779,7 @@ HeardChunks asked_root(Server& server, std::chrono::seconds patience) {
 
 } // namespace
 
-TEST_CASE("a player asking for the root is sent its chunks as stored with every water body first",
+TEST_CASE("a player asking for the root is sent its chunks as stored and the bodies it asks for",
           "[app][server]") {
     const World world;
     const auto server = playing(world.config());
@@ -769,15 +791,17 @@ TEST_CASE("a player asking for the root is sent its chunks as stored with every 
     CHECK(shape->levels() == 3);
     const auto water = hog::grid::Tree<hog::grid::Water>::decode(heard.roots.at(2).tree);
     REQUIRE(water);
-    // Every body went before any chunk.
+    // None went unasked, and those asked for, every one the water marks, came.
+    CHECK(heard.told_first == 0);
+    REQUIRE(heard.marked);
+    CHECK(heard.told_marked());
+    CHECK(heard.told.bodies.size() == heard.marked.value().size());
     const hog::grid::WaterBodies all = hog::globe::water_bodies(server->generator());
-    CHECK(heard.told_first == all.bodies.size());
-    for (const hog::grid::Water::Value body : water->leaf_values()) {
-        CAPTURE(body);
-        CHECK((body == 0 || heard.told.bodies.contains(body)));
+    for (const auto& [id, body] : heard.told.bodies) {
+        CAPTURE(id);
+        REQUIRE(all.bodies.contains(id));
+        CHECK(body == all.bodies.at(id));
     }
-    CHECK(heard.told.bodies.contains(hog::globe::sea_body) ==
-          server->generator().sea_level().has_value());
 }
 
 TEST_CASE("a server that leaves filling to another process sends what's stored when asked",

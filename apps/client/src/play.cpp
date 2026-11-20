@@ -664,6 +664,12 @@ public:
     [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() {
         return session_ ? session_->take_chunks() : std::vector<protocol::SentChunk>{};
     }
+    // Asks the server for these water bodies, once in.
+    void ask_bodies(std::span<const std::uint32_t> ids) {
+        if (session_) {
+            session_->ask_bodies(ids);
+        }
+    }
     // Has the server check the chunks kept from before, once in.
     void check(const protocol::CheckChunks& check) {
         if (session_) {
@@ -1050,7 +1056,8 @@ struct StreamedGround {
     bool asked_came = false;
     bool pieces_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pieces_seen; // where from
-    bool blocks_shown = false;        // any drawn from the pieces yet
+    MonotonicClock::time_point wanted_at;
+    bool blocks_shown = false; // any drawn from the pieces yet
 };
 
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
@@ -1065,8 +1072,10 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
         .level = water->top - radius, .rise = water->rise, .peak = water->peak};
 }
 
-// Metres the eye moves before what's drawn of the pieces is worked out again.
+// Metres the eye moves before what's drawn of the pieces is worked out again, and how often it's
+// worked out again at most while what was wanted is still meshing.
 constexpr double pieces_moved = 4.0;
+constexpr auto wanting_interval = std::chrono::milliseconds{250};
 
 // Pieces wished for at once, and how often what's asked for is worked out again at most, as the
 // eye moves, turns more than this cosine allows, or pieces come.
@@ -1153,14 +1162,27 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
     for (const std::vector<std::byte>& bytes : connection.take_bodies()) {
         if (auto taken = ground.pieces.take_bodies(bytes); !taken) {
             log::warn(connection_log, "can't hold water bodies sent: {}", taken.error());
+        } else {
+            ground.pieces_came = true;
         }
     }
     ask_pieces(connection, ground, eye, facing);
-    if (ground.block_meshes.settled() && (ground.pieces_came || !ground.pieces_seen ||
-                                          glm::length(eye - *ground.pieces_seen) > pieces_moved)) {
+    // Only the bodies the water held marks, as it's held from the server or from before.
+    if (const std::vector<std::uint32_t> unknown = ground.pieces.take_unknown_bodies();
+        !unknown.empty()) {
+        connection.ask_bodies(unknown);
+    }
+    // Wanted again as pieces come or the eye moves, while what was wanted is still meshing too,
+    // so what's near is drawn as soon as it's held.
+    const MonotonicClock::time_point now = MonotonicClock::now();
+    const bool due = ground.block_meshes.settled() || now - ground.wanted_at >= wanting_interval;
+    if (!ground.block_meshes.planning() && due &&
+        (ground.pieces_came || !ground.pieces_seen ||
+         glm::length(eye - *ground.pieces_seen) > pieces_moved)) {
         ground.block_meshes.want(ground.pieces, eye);
         ground.pieces_came = false;
         ground.pieces_seen = eye;
+        ground.wanted_at = now;
     }
     if (client::GroundChanges changes = ground.block_meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));

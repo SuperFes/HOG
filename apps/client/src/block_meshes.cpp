@@ -91,11 +91,11 @@ std::vector<DrawnBlock> BlockMeshes::drawn() const {
         for (const auto& [root, piece] : drawing.look.reads) {
             block.reads.push_back(root);
         }
-        if (drawing.mesh.ground) {
-            block.ground_triangles = drawing.mesh.ground->indices.size() / 3;
+        if (drawing.mesh && drawing.mesh->ground) {
+            block.ground_triangles = drawing.mesh->ground->indices.size() / 3;
         }
-        if (drawing.mesh.water) {
-            block.water_triangles = drawing.mesh.water->indices.size() / 3;
+        if (drawing.mesh && drawing.mesh->water) {
+            block.water_triangles = drawing.mesh->water->indices.size() / 3;
         }
         found.push_back(std::move(block));
     }
@@ -105,15 +105,20 @@ std::vector<DrawnBlock> BlockMeshes::drawn() const {
 BlockMeshes::~BlockMeshes() {
     gather(true);
     planning_.reset();
-    showing_.reset();
 }
 
 void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
-    HOG_ASSERT(settled(), "a drawing wanted while the last is still meshing");
-    wanted_.clear();
+    HOG_ASSERT(!planning(), "a drawing wanted while the last is still being planned");
+    // Every mesh made that may serve again: those drawn, and those meshed for what was wanted.
+    Drawings known = drawn_;
+    for (const auto& [node, drawing] : wanted_) {
+        if (drawing.mesh) {
+            known.insert_or_assign(node, drawing);
+        }
+    }
     planning_ = std::make_unique<jobs::Async<Plan>>(
         *jobs_, [grid = grid_, cells = cells_, entries = held.entries(),
-                 bodies = held.shared_bodies(), eye, was = &drawn_] mutable {
+                 bodies = held.shared_bodies(), eye, known = std::move(known)] mutable {
             Plan plan{.wanted = {},
                       .queued = {},
                       .pieces = std::make_shared<const PiecesSnapshot>(grid, std::move(entries)),
@@ -122,8 +127,8 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
             for (const Block& block : ground_blocks(*plan.pieces, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
                 drawing.look = {.block = block, .reads = plan.pieces->around(block.node)};
-                if (const auto found = was->find(block.node);
-                    found != was->end() && found->second.look.same(drawing.look)) {
+                if (const auto found = known.find(block.node);
+                    found != known.end() && found->second.look.same(drawing.look)) {
                     drawing.mesh = found->second.mesh;
                 } else {
                     to_mesh.emplace_back(grid.distance(block.node, eye), block.node);
@@ -136,18 +141,46 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
             }
             return plan;
         });
-    stage_ = Stage::Planning;
+}
+
+void BlockMeshes::take_plan(bool wait) {
+    if (!planning_ || !(wait || planning_->done())) {
+        return;
+    }
+    Plan plan = planning_->take();
+    planning_.reset();
+    wanted_ = std::move(plan.wanted);
+    pieces_ = std::move(plan.pieces);
+    bodies_ = std::move(plan.bodies);
+    pending_.clear();
+    for (const auto& [node, drawing] : wanted_) {
+        const auto found = drawn_.find(node);
+        if (drawing.mesh && (found == drawn_.end() || found->second.mesh != drawing.mesh)) {
+            pending_.insert(node);
+        }
+    }
+    // What's meshing as it's wanted now lands as it is; the rest is queued afresh.
+    queued_.clear();
+    for (const grid::Key node : plan.queued) {
+        const bool meshing = std::ranges::any_of(working_, [&](const Work& work) {
+            return work.node == node && work.look.same(wanted_.at(node).look);
+        });
+        if (!meshing) {
+            queued_.push_back(node);
+        }
+    }
 }
 
 void BlockMeshes::start() {
     while (!queued_.empty() && working_.size() < most_working_) {
         const grid::Key node = queued_.front();
         queued_.pop_front();
+        const Look& look = wanted_.at(node).look;
         working_.push_back(
             {.node = node,
+             .look = look,
              .job = std::make_unique<jobs::Async<Meshed>>(
-                 *jobs_, [grid = grid_, pieces = pieces_, bodies = bodies_,
-                          block = wanted_.at(node).look.block] {
+                 *jobs_, [grid = grid_, pieces = pieces_, bodies = bodies_, block = look.block] {
                      GroundField ground{*pieces};
                      Meshed meshed{.ground = std::make_shared<const terrain::BlockMesh>(
                                        block_of(mesh_block(grid, block, ground.field()))),
@@ -169,75 +202,114 @@ void BlockMeshes::gather(bool wait) {
             still.push_back(std::move(work));
             continue;
         }
-        auto mesh = work.job->take();
-        if (const auto found = wanted_.find(work.node); found != wanted_.end()) {
+        Meshed mesh = work.job->take();
+        // Wanted otherwise since it was started, it's left for the mesh queued as it's wanted.
+        if (const auto found = wanted_.find(work.node);
+            found != wanted_.end() && found->second.look.same(work.look)) {
             found->second.mesh = std::move(mesh);
+            pending_.insert(work.node);
         }
     }
     working_ = std::move(still);
 }
 
-void BlockMeshes::advance(bool wait) {
-    if (planning_ && (wait || planning_->done())) {
-        Plan plan = planning_->take();
-        planning_.reset();
-        wanted_ = std::move(plan.wanted);
-        pieces_ = std::move(plan.pieces);
-        bodies_ = std::move(plan.bodies);
-        queued_.insert(queued_.end(), plan.queued.begin(), plan.queued.end());
-        stage_ = Stage::Meshing;
+void BlockMeshes::hide(grid::Key node) {
+    const auto found = drawn_.find(node);
+    if (found == drawn_.end()) {
+        return;
     }
-    if (showing_ && (wait || showing_->done())) {
-        Shown shown = showing_->take();
-        showing_.reset();
-        drawn_ = std::move(shown.drawn);
-        changes_.shown.insert(changes_.shown.end(),
-                              std::make_move_iterator(shown.changes.shown.begin()),
-                              std::make_move_iterator(shown.changes.shown.end()));
-        changes_.gone.insert(changes_.gone.end(), shown.changes.gone.begin(),
-                             shown.changes.gone.end());
-        stage_ = Stage::Settled;
+    if (found->second.mesh) {
+        changed(changes_, block_key(node), {},
+                {found->second.mesh->ground, found->second.mesh->water});
     }
-    if (stage_ == Stage::Meshing && queued_.empty() && working_.empty()) {
-        pieces_.reset();
-        bodies_.reset();
-        showing_ = show();
-        stage_ = Stage::Showing;
-    }
-    start();
+    drawn_.erase(found);
 }
 
-std::unique_ptr<jobs::Async<BlockMeshes::Shown>> BlockMeshes::show() {
-    return std::make_unique<jobs::Async<Shown>>(
-        *jobs_, [wanted = std::move(wanted_), was = std::move(drawn_)] mutable {
-            GroundChanges changes;
-            const auto place = [&](grid::Key node, const Meshed& now, const Meshed& before) {
-                changed(changes, block_key(node), {now.ground, now.water},
-                        {before.ground, before.water});
-            };
-            for (const auto& [node, drawing] : wanted) {
-                const auto found = was.find(node);
-                place(node, drawing.mesh, found == was.end() ? Meshed{} : found->second.mesh);
+void BlockMeshes::show(grid::Key node) {
+    const Drawing& wanted = wanted_.at(node);
+    std::vector<grid::Key> under;
+    const std::uint64_t end = grid::aligned_end(node);
+    for (auto at = drawn_.lower_bound(node); at != drawn_.end() && grid::aligned(at->first) <= end;
+         ++at) {
+        if (at->first != node) {
+            under.push_back(at->first);
+        }
+    }
+    for (const grid::Key finer : under) {
+        hide(finer);
+    }
+    const auto found = drawn_.find(node);
+    const Pair before = found != drawn_.end() && found->second.mesh
+                            ? Pair{found->second.mesh->ground, found->second.mesh->water}
+                            : Pair{};
+    const Meshed& mesh = wanted.mesh.value();
+    changed(changes_, block_key(node), {mesh.ground, mesh.water}, before);
+    drawn_.insert_or_assign(node, wanted);
+    pending_.erase(node);
+}
+
+void BlockMeshes::publish() {
+    const std::vector<grid::Key> ready{pending_.begin(), pending_.end()};
+    for (const grid::Key node : ready) {
+        if (!pending_.contains(node)) {
+            continue;
+        }
+        // A coarser block drawn over it gives way only to all that's wanted under it at once.
+        std::optional<grid::Key> coarser;
+        for (std::uint8_t depth = 0; depth < node.depth && !coarser; ++depth) {
+            if (drawn_.contains(node.ancestor(depth))) {
+                coarser = node.ancestor(depth);
             }
-            for (const auto& [node, drawing] : was) {
-                if (!wanted.contains(node)) {
-                    place(node, Meshed{}, drawing.mesh);
-                }
+        }
+        if (coarser) {
+            refine(*coarser);
+        } else {
+            show(node);
+        }
+    }
+    if (settled()) {
+        std::vector<grid::Key> unwanted;
+        for (const auto& [node, drawing] : drawn_) {
+            if (!wanted_.contains(node)) {
+                unwanted.push_back(node);
             }
-            return Shown{.drawn = std::move(wanted), .changes = std::move(changes)};
-        });
+        }
+        for (const grid::Key node : unwanted) {
+            hide(node);
+        }
+    }
+}
+
+void BlockMeshes::refine(grid::Key coarser) {
+    std::vector<grid::Key> finer;
+    const std::uint64_t end = grid::aligned_end(coarser);
+    for (auto at = wanted_.upper_bound(coarser);
+         at != wanted_.end() && grid::aligned(at->first) <= end; ++at) {
+        if (!at->second.mesh) {
+            return;
+        }
+        finer.push_back(at->first);
+    }
+    hide(coarser);
+    for (const grid::Key each : finer) {
+        show(each);
+    }
 }
 
 GroundChanges BlockMeshes::collect() {
+    take_plan(false);
     gather(false);
-    advance(false);
+    publish();
+    start();
     return std::exchange(changes_, {});
 }
 
 void BlockMeshes::finish() {
     while (!settled()) {
+        take_plan(true);
+        start();
         gather(true);
-        advance(true);
+        publish();
     }
 }
 

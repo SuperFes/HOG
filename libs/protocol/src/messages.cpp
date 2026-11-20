@@ -45,6 +45,7 @@ enum class Kind : std::uint16_t {
     Report = 24,
     Took = 25,
     CheckChunks = 26,
+    AskBodies = 27,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -798,6 +799,27 @@ struct Ball {
     return finished(in, std::move(ask));
 }
 
+[[nodiscard]] Result<Message> read_ask_bodies(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "bodies asked for");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_asked) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} bodies asked for; {} allowed", *count, most_asked));
+    }
+    AskBodies ask;
+    ask.ids.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto id = read<std::uint32_t>(in, "a body asked for");
+        if (!id) {
+            return make_error(ErrorCode::Parse, "a body asked for cut short");
+        }
+        ask.ids.push_back(*id);
+    }
+    return finished(in, std::move(ask));
+}
+
 [[nodiscard]] Result<Message> read_check_chunks(ByteReader& in) {
     const auto count = read<std::uint16_t>(in, "chunks checked");
     if (!count) {
@@ -1194,6 +1216,42 @@ void write_grains(ByteWriter& out, const Grains& grains) {
     return finished(in, Placed{.at = *at, .stance = stance->stance, .facing = stance->facing});
 }
 
+// The messages streaming the ground and what's asked of it, each written as its own.
+void write_ground(ByteWriter& out, const Bodies& body) {
+    write_bodies(out, body);
+}
+void write_ground(ByteWriter& out, const Ask& body) {
+    write_ask(out, body);
+}
+void write_ground(ByteWriter& out, const Chunks& body) {
+    write_chunks(out, body);
+}
+void write_ground(ByteWriter& out, const AskPieces& body) {
+    write_ask_pieces(out, body);
+}
+void write_ground(ByteWriter& out, const CheckChunks& body) {
+    write_check_chunks(out, body);
+}
+void write_ground(ByteWriter& out, const Report& body) {
+    out.write(static_cast<std::uint16_t>(Kind::Report));
+    out.write(body.stamp);
+}
+void write_ground(ByteWriter& out, const Took& body) {
+    out.write(static_cast<std::uint16_t>(Kind::Took));
+    out.write(body.bytes);
+}
+void write_ground(ByteWriter& out, const AskBodies& body) {
+    HOG_ASSERT(body.ids.size() <= most_asked, "too many bodies to ask for at once");
+    out.write(static_cast<std::uint16_t>(Kind::AskBodies));
+    out.write(static_cast<std::uint16_t>(body.ids.size()));
+    for (const std::uint32_t id : body.ids) {
+        out.write(id);
+    }
+}
+
+template <typename Body>
+concept GroundMessage = requires(ByteWriter& out, const Body& body) { write_ground(out, body); };
+
 } // namespace
 
 CellWeather as_sent(const CellWeather& cell) {
@@ -1255,14 +1313,8 @@ std::vector<std::byte> encode(const Message& message) {
                 write_tiles(out, body);
             } else if constexpr (std::is_same_v<Body, Pages>) {
                 write_pages(out, body);
-            } else if constexpr (std::is_same_v<Body, Bodies>) {
-                write_bodies(out, body);
-            } else if constexpr (std::is_same_v<Body, Ask>) {
-                write_ask(out, body);
-            } else if constexpr (std::is_same_v<Body, Chunks>) {
-                write_chunks(out, body);
-            } else if constexpr (std::is_same_v<Body, AskPieces>) {
-                write_ask_pieces(out, body);
+            } else if constexpr (GroundMessage<Body>) {
+                write_ground(out, body);
             } else if constexpr (std::is_same_v<Body, Grains>) {
                 write_grains(out, body);
             } else if constexpr (std::is_same_v<Body, Ack>) {
@@ -1279,14 +1331,6 @@ std::vector<std::byte> encode(const Message& message) {
             } else if constexpr (std::is_same_v<Body, Hurry>) {
                 out.write(static_cast<std::uint16_t>(Kind::Hurry));
                 out.write(body.scale);
-            } else if constexpr (std::is_same_v<Body, Report>) {
-                out.write(static_cast<std::uint16_t>(Kind::Report));
-                out.write(body.stamp);
-            } else if constexpr (std::is_same_v<Body, Took>) {
-                out.write(static_cast<std::uint16_t>(Kind::Took));
-                out.write(body.bytes);
-            } else if constexpr (std::is_same_v<Body, CheckChunks>) {
-                write_check_chunks(out, body);
             } else if constexpr (std::is_same_v<Body, Clock>) {
                 out.write(static_cast<std::uint16_t>(Kind::Clock));
                 out.write(body.scale);
@@ -1377,6 +1421,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
     }
     case Kind::CheckChunks:
         return read_check_chunks(in);
+    case Kind::AskBodies:
+        return read_ask_bodies(in);
     case Kind::Took: {
         const auto taken = in.read<std::uint64_t>();
         if (!taken) {

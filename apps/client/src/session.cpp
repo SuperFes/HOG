@@ -230,6 +230,17 @@ void Session::check(const protocol::CheckChunks& check) {
     send(check, net::Delivery::Reliable);
 }
 
+void Session::ask_bodies(std::span<const std::uint32_t> ids) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    for (std::size_t from = 0; from < ids.size(); from += protocol::most_asked) {
+        const std::span<const std::uint32_t> some =
+            ids.subspan(from, std::min(protocol::most_asked, ids.size() - from));
+        send(protocol::AskBodies{.ids = {some.begin(), some.end()}}, net::Delivery::Reliable);
+    }
+}
+
 void Session::report(std::uint64_t stamp) {
     if (state_ != State::Welcomed) {
         return;

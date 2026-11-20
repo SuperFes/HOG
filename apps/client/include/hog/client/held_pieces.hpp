@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -75,6 +76,8 @@ public:
     [[nodiscard]] Result<void> take(const protocol::SentChunk& chunk);
     // Takes in bodies as `grid::WaterBodies::encode` codes them, in place of those of the same ids.
     [[nodiscard]] Result<void> take_bodies(std::span<const std::byte> bytes);
+    // The ids of bodies the water trees held mark that aren't held, each once: to ask for.
+    [[nodiscard]] std::vector<grid::Water::Value> take_unknown_bodies();
 
     // What's known at `node`, as Known has it; none where no piece over it holds `Kind`.
     template <typename Kind>
@@ -128,6 +131,9 @@ private:
     std::uint64_t depths_ = 0;
     std::size_t bytes_ = 0;
     std::shared_ptr<const grid::WaterBodies> bodies_ = std::make_shared<const grid::WaterBodies>();
+    // Bodies marked and not held, not yet asked for, and those asked for.
+    std::set<grid::Water::Value> unknown_bodies_;
+    std::set<grid::Water::Value> asked_bodies_;
 };
 
 extern template std::optional<Known<grid::Shape>> HeldPieces::at<grid::Shape>(grid::Key) const;

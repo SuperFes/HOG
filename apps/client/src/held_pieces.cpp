@@ -235,6 +235,13 @@ Result<void> HeldPieces::take_tree(const protocol::SentChunk& chunk, grid::Key r
     if (std::cmp_greater(held.bands.at(kind), chunk.band)) {
         return {};
     }
+    if constexpr (std::is_same_v<Kind, grid::Water>) {
+        for (const grid::Water::Value id : tree->leaf_values()) {
+            if (id != 0 && !bodies_->bodies.contains(id) && !asked_bodies_.contains(id)) {
+                unknown_bodies_.insert(id);
+            }
+        }
+    }
     // Held pieces are shared with what reads them, so a piece changed is a new one.
     grid::Piece piece = held.piece ? *held.piece : grid::Piece{};
     piece.root = root;
@@ -287,10 +294,18 @@ Result<void> HeldPieces::take_bodies(std::span<const std::byte> bytes) {
     }
     auto bodies = std::make_shared<grid::WaterBodies>(*bodies_);
     for (auto& [id, body] : sent->bodies) {
+        unknown_bodies_.erase(id);
         bodies->bodies.insert_or_assign(id, std::move(body));
     }
     bodies_ = std::move(bodies);
     return {};
+}
+
+std::vector<grid::Water::Value> HeldPieces::take_unknown_bodies() {
+    std::vector<grid::Water::Value> ids{unknown_bodies_.begin(), unknown_bodies_.end()};
+    asked_bodies_.insert(unknown_bodies_.begin(), unknown_bodies_.end());
+    unknown_bodies_.clear();
+    return ids;
 }
 
 const HeldPieces::Held* HeldPieces::find(grid::Key root) const {

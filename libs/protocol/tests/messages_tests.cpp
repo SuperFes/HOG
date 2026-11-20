@@ -165,6 +165,8 @@ std::vector<Message> examples() {
         Report{.stamp = 1'763'600'000},
         Took{},
         Took{.bytes = 0x0123'4567'89AB'CDEF},
+        AskBodies{},
+        AskBodies{.ids = {1, 70'000, 0xFFFF'FFFF}},
         CheckChunks{},
         CheckChunks{.chunks = {{.kind = 3,
                                 .band = 4,
@@ -243,7 +245,7 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({27, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({28, 0})).error().code == ErrorCode::Unsupported);
     // A placing at the centre in a stance after flying.
     CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
@@ -583,6 +585,14 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
     auto short_ask_pieces = encode(AskPieces{.pieces = {{.depth = 1, .to = 2}}, .dropped = {}});
     short_ask_pieces.pop_back();
     CHECK(decode(short_ask_pieces).error().code == ErrorCode::Parse);
+    // Bodies asked for: a count over the most, and one cut short.
+    CHECK(decode(bytes({27, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto short_bodies_ask = encode(AskBodies{.ids = {5}});
+    short_bodies_ask.pop_back();
+    CHECK(decode(short_bodies_ask).error().code == ErrorCode::Parse);
     // Chunks checked: a count over the most, one of no kind, and one cut short.
     CHECK(decode(bytes({26, 0, static_cast<int>((most_asked + 1) & 0xFFU),
                         static_cast<int>((most_asked + 1) >> 8U)}))

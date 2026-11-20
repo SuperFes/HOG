@@ -530,6 +530,27 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
     }
 }
 
+bool Server::heard_ground(net::ConnectionId connection, const protocol::Message& message) {
+    if (const auto* ask = std::get_if<protocol::AskPieces>(&message)) {
+        ask_pieces(connection, *ask);
+    } else if (const auto* asked = std::get_if<protocol::Report>(&message)) {
+        report(connection, *asked);
+    } else if (const auto* bodies = std::get_if<protocol::AskBodies>(&message)) {
+        if (pieces_ && joined_.find(connection)) {
+            tell_bodies(connection, bodies->ids);
+        }
+    } else if (const auto* check = std::get_if<protocol::CheckChunks>(&message)) {
+        check_chunks(connection, *check);
+    } else if (const auto* took = std::get_if<protocol::Took>(&message)) {
+        if (pieces_) {
+            pieces_->flows.try_emplace(connection, chunk_window).first->second.took(took->bytes);
+        }
+    } else {
+        return false;
+    }
+    return true;
+}
+
 void Server::heard(net::ConnectionId connection, std::span<const std::byte> bytes) {
     const auto message = protocol::decode(bytes);
     if (!message) {
@@ -560,16 +581,7 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         dig(connection, *dug);
     } else if (const auto* built = std::get_if<protocol::Built>(&*message)) {
         build(connection, *built);
-    } else if (const auto* ask = std::get_if<protocol::AskPieces>(&*message)) {
-        ask_pieces(connection, *ask);
-    } else if (const auto* asked = std::get_if<protocol::Report>(&*message)) {
-        report(connection, *asked);
-    } else if (const auto* check = std::get_if<protocol::CheckChunks>(&*message)) {
-        check_chunks(connection, *check);
-    } else if (const auto* took = std::get_if<protocol::Took>(&*message)) {
-        if (pieces_) {
-            pieces_->flows.try_emplace(connection, chunk_window).first->second.took(took->bytes);
-        }
+    } else if (heard_ground(connection, *message)) {
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -681,15 +693,7 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
 }
 
 void Server::begin_streaming(net::ConnectionId connection) {
-    // Every body the water trees may mark, before any chunk that marks one.
-    if (pieces_->asking.insert(connection).second) {
-        std::vector<grid::Water::Value> ids;
-        ids.reserve(pieces_->bodies.bodies.size());
-        for (const auto& [id, body] : pieces_->bodies.bodies) {
-            ids.push_back(id);
-        }
-        tell_bodies(connection, ids);
-    }
+    pieces_->asking.insert(connection);
 }
 
 void Server::check_chunks(net::ConnectionId connection, const protocol::CheckChunks& check) {

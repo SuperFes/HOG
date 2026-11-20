@@ -283,3 +283,24 @@ TEST_CASE("held pieces refuse what isn't a chunk of the grid", "[client][held_pi
     CHECK_FALSE(hold(held, coded(Key{.depth = 8}, stripes(4, 1))).has_value());
     CHECK(held.pieces() == 0);
 }
+
+TEST_CASE("held pieces ask once for each body their water marks and they don't hold",
+          "[client][held_pieces]") {
+    hog::client::HeldPieces held{test_grid()};
+    // Bodies 5 and 9 along x, and 5 and 12 in a piece beside it.
+    const auto marking = [](std::uint32_t first, std::uint32_t second) {
+        return Tree<Water>::build(
+            2, [=](int x, int /*y*/, int /*z*/) { return x < 2 ? first : second; });
+    };
+    REQUIRE(hog::testing::hold(held, coded(Key{.depth = 4, .x = 1}, std::nullopt, marking(5, 9))));
+    std::vector<std::uint32_t> unknown = held.take_unknown_bodies();
+    std::ranges::sort(unknown);
+    CHECK(unknown == std::vector<std::uint32_t>{5, 9});
+    CHECK(held.take_unknown_bodies().empty());
+
+    hog::grid::WaterBodies five;
+    five.bodies.emplace(5, hog::grid::Lake{.level = 1.0, .season = {}});
+    REQUIRE(held.take_bodies(five.encode()));
+    REQUIRE(hog::testing::hold(held, coded(Key{.depth = 4, .x = 2}, std::nullopt, marking(5, 12))));
+    CHECK(held.take_unknown_bodies() == std::vector<std::uint32_t>{12});
+}
