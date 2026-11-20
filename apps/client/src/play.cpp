@@ -2,6 +2,7 @@
 #include <hog/client/block_meshes.hpp>
 #include <hog/client/chat.hpp>
 #include <hog/client/chunk_cache.hpp>
+#include <hog/client/chunk_intake.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/drawn.hpp>
 #include <hog/client/flight.hpp>
@@ -1043,10 +1044,11 @@ struct StreamedGround {
     grid::Grid grid;
     client::HeldPieces pieces;
     client::BlockMeshes block_meshes;
-    // The chunks kept from before, in a database of this client's own, and the wishes looked up
-    // in it since.
-    std::optional<client::ChunkCache> cache;
+    // Chunks taken in off this thread, kept from before in a database of this client's own; the
+    // wishes looked up in it since, and those not yet answered.
+    std::unique_ptr<client::ChunkIntake> intake;
     client::Looked looked;
+    client::Looked looking;
     // The pieces asked for and not yet done, from where and when last asked, and whether any
     // came since.
     client::PieceRequests requests;
@@ -1093,27 +1095,23 @@ constexpr double asking_turn = 0.94;
 // Wishes looked up in the cache at once.
 constexpr std::size_t cache_reads = 512;
 
-// Takes in what the cache keeps of the wishes not yet looked up there, nearest first, and has the
-// server check it; whether any came.
-bool read_cached(Connection& connection, StreamedGround& ground,
-                 const std::vector<client::PieceWish>& wishes) {
-    if (!ground.cache) {
-        return false;
+// Has what the cache keeps of the wishes not yet looked up there looked up, nearest first, off
+// this thread; until it's answered, they're asked of no one.
+void look_up_kept(StreamedGround& ground, const std::vector<client::PieceWish>& wishes) {
+    if (!ground.intake->caching()) {
+        return;
     }
-    auto taken =
-        client::take_kept(*ground.cache, ground.pieces, wishes, ground.looked, cache_reads);
-    if (!taken) {
-        log::warn(connection_log, "can't read the chunks kept: {}", taken.error());
-        return false;
+    std::vector<client::ChunkCache::Wanted> wanted;
+    for (const client::PieceWish& wish : wishes) {
+        if (wanted.size() == cache_reads) {
+            break;
+        }
+        if (ground.looked.emplace(wish.node, wish.depth).second) {
+            ground.looking.emplace(wish.node, wish.depth);
+            wanted.push_back({.node = wish.node, .depth = wish.depth});
+        }
     }
-    for (std::size_t from = 0; from < taken->size(); from += protocol::most_asked) {
-        const auto to = std::min(taken->size(), from + protocol::most_asked);
-        connection.check(
-            protocol::CheckChunks{.chunks = {taken->begin() + static_cast<std::ptrdiff_t>(from),
-                                             taken->begin() + static_cast<std::ptrdiff_t>(to)}});
-    }
-    ground.pieces_came = ground.pieces_came || !taken->empty();
-    return !taken->empty();
+    ground.intake->look_up(std::move(wanted));
 }
 
 // Asks the server for the pieces to see from `eye` looking along `facing` that aren't held as
@@ -1130,10 +1128,11 @@ void ask_pieces(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3
     }
     std::vector<client::PieceWish> wishes =
         client::pieces_to_ask(ground.pieces, eye, facing, grid::View{}, pieces_asked);
-    // What's kept from before is held at once, and what it still lacks asked.
-    if (read_cached(connection, ground, wishes)) {
-        wishes = client::pieces_to_ask(ground.pieces, eye, facing, grid::View{}, pieces_asked);
-    }
+    // What's kept from before is looked up first, and only what it lacks asked once it answers.
+    look_up_kept(ground, wishes);
+    std::erase_if(wishes, [&](const client::PieceWish& wish) {
+        return ground.looking.contains({wish.node, wish.depth});
+    });
     ground.asked_at = now;
     ground.asked_from = eye;
     ground.asked_facing = facing;
@@ -1143,27 +1142,44 @@ void ask_pieces(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3
     }
 }
 
-// Takes in the pieces the server sent, and draws them as seen from `eye` once what was last
-// wanted of them is drawn.
-void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
-                 DVec3 facing) {
-    HOG_ZONE("pieces");
-    const std::vector<protocol::SentChunk> chunks = connection.take_chunks();
-    const MonotonicClock::time_point taking = MonotonicClock::now();
-    for (const protocol::SentChunk& chunk : chunks) {
-        if (auto taken = ground.pieces.take(chunk); !taken) {
-            log::warn(connection_log, "can't hold a chunk sent: {}", taken.error());
+// Takes in what's been decoded, from the server or the cache, and has the server check what came
+// from the cache.
+void take_decoded(Connection& connection, StreamedGround& ground) {
+    client::ChunkIntake::Taken taken = ground.intake->take();
+    for (client::DecodedChunk& chunk : taken.chunks) {
+        if (auto held = ground.pieces.take(std::move(chunk)); !held) {
+            log::warn(connection_log, "can't hold a chunk: {}", held.error());
         } else {
             ground.pieces_came = true;
             ground.asked_came = true;
         }
     }
-    if (ground.cache && !chunks.empty()) {
-        if (auto kept = ground.cache->keep(chunks); !kept) {
-            log::warn(connection_log, "can't keep the chunks sent: {}", kept.error());
-        }
+    for (const Error& failed : taken.failed) {
+        log::warn(connection_log, "can't take a chunk in: {}", failed);
     }
+    for (std::size_t from = 0; from < taken.kept.size(); from += protocol::most_asked) {
+        const auto to = std::min(taken.kept.size(), from + protocol::most_asked);
+        connection.check(protocol::CheckChunks{
+            .chunks = {taken.kept.begin() + static_cast<std::ptrdiff_t>(from),
+                       taken.kept.begin() + static_cast<std::ptrdiff_t>(to)}});
+    }
+    for (const client::ChunkCache::Wanted& looked : taken.looked) {
+        ground.looking.erase({looked.node, looked.depth});
+        ground.asked_came = true;
+    }
+}
+
+// Takes in the pieces the server sent, and draws them as seen from `eye` once what was last
+// wanted of them is drawn.
+void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& scene, DVec3 eye,
+                 DVec3 facing) {
+    HOG_ZONE("pieces");
+    // Decoded and kept off this thread; taking in what's decoded is all that's done here.
+    const MonotonicClock::time_point taking = MonotonicClock::now();
+    std::vector<protocol::SentChunk> chunks = connection.take_chunks();
     ground.chunks_taken += chunks.size();
+    ground.intake->sent(std::move(chunks));
+    take_decoded(connection, ground);
     ground.taking_ms +=
         std::chrono::duration<double, std::milli>(MonotonicClock::now() - taking).count();
     if (const std::vector<protocol::DonePiece> done = connection.take_done(); !done.empty()) {
@@ -1518,6 +1534,7 @@ int show_streamed_world(const client::Options& options, render::Device& device,
     const std::filesystem::path cache_file =
         std::filesystem::path{"var/cache"} / std::format("{:016x}.mdb", session->world());
     const std::uint64_t cache_budget = std::uint64_t{options.cache_gb} << 30U;
+    std::optional<client::ChunkCache> kept;
     if (cache_budget == 0) {
         log::info(connection_log, "keeping no chunks between runs");
     } else if (auto cache = client::ChunkCache::open(cache_file, cache_budget); !cache) {
@@ -1525,8 +1542,9 @@ int show_streamed_world(const client::Options& options, render::Device& device,
     } else {
         log::info(connection_log, "{} chunks kept from before, {} MB", cache->chunks(),
                   cache->bytes() >> 20U);
-        ground.cache = std::move(*cache);
+        kept = std::move(*cache);
     }
+    ground.intake = std::make_unique<client::ChunkIntake>(jobs, std::move(kept));
     startup("ready");
     const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
                                             device, presenter, window, recent);

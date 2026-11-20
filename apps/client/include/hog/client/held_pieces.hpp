@@ -20,6 +20,7 @@
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace hog::client {
@@ -62,6 +63,22 @@ private:
     std::uint64_t depths_ = 0; // a bit for each depth a piece is rooted at
 };
 
+// A chunk as sent with its tree decoded, to be taken in without decoding it again: decoding is
+// most of taking one in, and this can be done on any thread.
+struct DecodedChunk {
+    std::uint8_t kind = 0;
+    std::uint8_t band = 0;
+    grid::Key root;
+    std::uint64_t version = 0;
+    std::variant<std::monostate, grid::Tree<grid::Shape>, grid::Tree<grid::Material>,
+                 grid::Tree<grid::Water>, grid::Tree<grid::Woods>>
+        tree;              // none at version 0
+    std::size_t bytes = 0; // of the tree as coded
+};
+
+// Decodes a chunk's tree; fails on a tree that doesn't decode or a chunk of no kind.
+[[nodiscard]] Result<DecodedChunk> decode_chunk(const protocol::SentChunk& chunk);
+
 // The chunks the server has sent, as new as last sent, held as pieces by their roots, a tree of
 // each kind, and read as one tree: at a node, the piece reaching deepest there answers. And the
 // water bodies their water trees mark.
@@ -74,6 +91,8 @@ public:
     // One no longer held is let go of where it's what's held there. Fails on a tree that doesn't
     // decode, a chunk of no kind, or one rooted off the grid or reaching deeper than it.
     [[nodiscard]] Result<void> take(const protocol::SentChunk& chunk);
+    // The same, decoded already. Fails on a chunk rooted off the grid or reaching deeper.
+    [[nodiscard]] Result<void> take(DecodedChunk chunk);
     // Takes in bodies as `grid::WaterBodies::encode` codes them, in place of those of the same ids.
     [[nodiscard]] Result<void> take_bodies(std::span<const std::byte> bytes);
     // The ids of bodies the water trees held mark that aren't held, each once: to ask for.
@@ -117,7 +136,7 @@ private:
     };
 
     template <typename Kind>
-    [[nodiscard]] Result<void> take_tree(const protocol::SentChunk& chunk, grid::Key root);
+    [[nodiscard]] Result<void> take_tree(DecodedChunk& chunk);
     void let_go(std::size_t kind, int band, grid::Key root);
     [[nodiscard]] const Held* find(grid::Key root) const;
     // Whether a piece over the node reaches `depth`, or a closed leaf holds all of it.

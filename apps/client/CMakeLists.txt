@@ -8,6 +8,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 add_library(hog_client
     src/chat.cpp
     src/chunk_cache.cpp
+    src/chunk_intake.cpp
     src/drawn.cpp
     src/tile_meshes.cpp
     src/cutaway.cpp
@@ -47,6 +48,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/chunk_cache_tests.cpp
+    tests/chunk_intake_tests.cpp
     tests/drawn_tests.cpp
     tests/tile_meshes_tests.cpp
     tests/tile_look_tests.cpp

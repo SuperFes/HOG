@@ -101,9 +101,9 @@ private:
 
         friend bool operator==(const Meshed&, const Meshed&) noexcept = default;
     };
-    // A block and its mesh, none till it's meshed.
+    // A block and its mesh, none till it's meshed. The look is shared, so drawings copy cheaply.
     struct Drawing {
-        Look look;
+        std::shared_ptr<const Look> look;
         std::optional<Meshed> mesh;
     };
     using Drawings = grid::ZMap<Drawing>;
@@ -115,7 +115,7 @@ private:
     };
     struct Work {
         grid::Key node;
-        Look look;
+        std::shared_ptr<const Look> look;
         std::unique_ptr<jobs::Async<Meshed>> job;
     };
 

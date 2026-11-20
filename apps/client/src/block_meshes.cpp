@@ -88,8 +88,8 @@ std::vector<DrawnBlock> BlockMeshes::drawn() const {
     std::vector<DrawnBlock> found;
     found.reserve(drawn_.size());
     for (const auto& [node, drawing] : drawn_) {
-        DrawnBlock block{.block = drawing.look.block, .reads = {}};
-        for (const auto& [root, piece] : drawing.look.reads) {
+        DrawnBlock block{.block = drawing.look->block, .reads = {}};
+        for (const auto& [root, piece] : drawing.look->reads) {
             block.reads.push_back(root);
         }
         if (drawing.mesh && drawing.mesh->ground) {
@@ -126,9 +126,10 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
             std::vector<std::pair<double, grid::Key>> to_mesh;
             for (const Block& block : ground_blocks(pieces, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
-                drawing.look = {.block = block, .reads = pieces.around(block.node)};
+                drawing.look = std::make_shared<const Look>(
+                    Look{.block = block, .reads = pieces.around(block.node)});
                 if (const auto found = known.find(block.node);
-                    found != known.end() && found->second.look.same(drawing.look)) {
+                    found != known.end() && found->second.look->same(*drawing.look)) {
                     drawing.mesh = found->second.mesh;
                 } else {
                     to_mesh.emplace_back(grid.distance(block.node, eye), block.node);
@@ -167,7 +168,7 @@ void BlockMeshes::take_plan(bool wait) {
     queued_.clear();
     for (const grid::Key node : plan.queued) {
         const bool meshing = std::ranges::any_of(working_, [&](const Work& work) {
-            return work.node == node && work.look.same(wanted_.at(node).look);
+            return work.node == node && work.look->same(*wanted_.at(node).look);
         });
         if (!meshing) {
             queued_.push_back(node);
@@ -179,14 +180,14 @@ void BlockMeshes::start() {
     while (!queued_.empty() && working_.size() < most_working_) {
         const grid::Key node = queued_.front();
         queued_.pop_front();
-        const Look& look = wanted_.at(node).look;
+        const std::shared_ptr<const Look>& look = wanted_.at(node).look;
         working_.push_back(
             {.node = node,
              .look = look,
              .job = std::make_unique<jobs::Async<Meshed>>(
-                 *jobs_, [grid = grid_, reads = look.reads, bodies = bodies_, block = look.block] {
+                 *jobs_, [grid = grid_, look, bodies = bodies_, block = look->block] {
                      // Only what the block reads, so looking it up stays in the cache.
-                     const auto pieces = std::make_shared<const PiecesSnapshot>(grid, reads);
+                     const auto pieces = std::make_shared<const PiecesSnapshot>(grid, look->reads);
                      GroundField ground{*pieces};
                      Meshed meshed{.ground = std::make_shared<const terrain::BlockMesh>(
                                        block_of(mesh_block(grid, block, ground.field()))),
@@ -212,7 +213,7 @@ void BlockMeshes::gather(bool wait) {
         ++stats_.meshed;
         // Wanted otherwise since it was started, it's left for the mesh queued as it's wanted.
         if (const auto found = wanted_.find(work.node);
-            found != wanted_.end() && found->second.look.same(work.look)) {
+            found != wanted_.end() && found->second.look->same(*work.look)) {
             found->second.mesh = std::move(mesh);
             pending_.insert(work.node);
         } else {

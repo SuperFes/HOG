@@ -179,8 +179,57 @@ std::vector<PiecesSnapshot::Entry> PiecesSnapshot::around(grid::Key node) const 
 
 HeldPieces::HeldPieces(const grid::Grid& grid) : grid_{grid} {}
 
+Result<DecodedChunk> decode_chunk(const protocol::SentChunk& chunk) {
+    DecodedChunk decoded{.kind = chunk.kind,
+                         .band = chunk.band,
+                         .root = {.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z},
+                         .version = chunk.version,
+                         .tree = {},
+                         .bytes = chunk.tree.size()};
+    if (chunk.version == 0) {
+        return decoded;
+    }
+    const auto decode = [&]<typename Kind> -> Result<void> {
+        auto tree = grid::Tree<Kind>::decode(chunk.tree);
+        if (!tree) {
+            return std::unexpected{tree.error()};
+        }
+        decoded.tree = std::move(*tree);
+        return {};
+    };
+    Result<void> made;
+    switch (chunk.kind) {
+    case 0:
+        made = decode.operator()<grid::Shape>();
+        break;
+    case 1:
+        made = decode.operator()<grid::Material>();
+        break;
+    case 2:
+        made = decode.operator()<grid::Water>();
+        break;
+    case 3:
+        made = decode.operator()<grid::Woods>();
+        break;
+    default:
+        return make_error(ErrorCode::InvalidArgument, "a chunk of no kind");
+    }
+    if (!made) {
+        return std::unexpected{made.error()};
+    }
+    return decoded;
+}
+
 Result<void> HeldPieces::take(const protocol::SentChunk& chunk) {
-    const grid::Key root{.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z};
+    auto decoded = decode_chunk(chunk);
+    if (!decoded) {
+        return std::unexpected{decoded.error()};
+    }
+    return take(std::move(*decoded));
+}
+
+Result<void> HeldPieces::take(DecodedChunk chunk) {
+    const grid::Key root = chunk.root;
     if (!root.is_valid() || root.depth > grid_.depth()) {
         return make_error(ErrorCode::InvalidArgument, "a chunk rooted off the grid");
     }
@@ -211,22 +260,23 @@ Result<void> HeldPieces::take(const protocol::SentChunk& chunk) {
     }
     switch (chunk.kind) {
     case 0:
-        return take_tree<grid::Shape>(chunk, root);
+        return take_tree<grid::Shape>(chunk);
     case 1:
-        return take_tree<grid::Material>(chunk, root);
+        return take_tree<grid::Material>(chunk);
     case 2:
-        return take_tree<grid::Water>(chunk, root);
+        return take_tree<grid::Water>(chunk);
     default:
-        return take_tree<grid::Woods>(chunk, root);
+        return take_tree<grid::Woods>(chunk);
     }
 }
 
 template <typename Kind>
-Result<void> HeldPieces::take_tree(const protocol::SentChunk& chunk, grid::Key root) {
-    auto tree = grid::Tree<Kind>::decode(chunk.tree);
-    if (!tree) {
-        return std::unexpected{tree.error()};
+Result<void> HeldPieces::take_tree(DecodedChunk& chunk) {
+    auto* tree = std::get_if<grid::Tree<Kind>>(&chunk.tree);
+    if (tree == nullptr) {
+        return make_error(ErrorCode::InvalidArgument, "a chunk's tree not of its kind");
     }
+    const grid::Key root = chunk.root;
     if (root.depth + tree->levels() > grid_.depth()) {
         return make_error(ErrorCode::InvalidArgument, "a chunk deeper than the grid");
     }
@@ -248,8 +298,8 @@ Result<void> HeldPieces::take_tree(const protocol::SentChunk& chunk, grid::Key r
     tree_of<Kind>(piece) = std::move(*tree);
     held.piece = std::make_shared<const grid::Piece>(std::move(piece));
     held.bands.at(kind) = chunk.band;
-    bytes_ += chunk.tree.size() - held.bytes.at(kind);
-    held.bytes.at(kind) = chunk.tree.size();
+    bytes_ += chunk.bytes - held.bytes.at(kind);
+    held.bytes.at(kind) = chunk.bytes;
     held.reach = static_cast<std::uint8_t>(root.depth + std::max(levels_of(*held.piece), 0));
     depths_ |= depth_bit(root.depth);
     return {};
