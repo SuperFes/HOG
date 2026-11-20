@@ -12,9 +12,10 @@ namespace hog::grid {
 
 // How finely the grid is seen, as the client draws it: a node may span so many pixels of a
 // picture 900 high, through a vertical field of view of a radian, before finer is wanted. The
-// server sends by it and the client draws by it, so they agree.
+// server sends by it and the client draws by it, so they agree. Materials blend across triangles,
+// so nodes 16 pixels across look much as 8 did, at a quarter of the nodes.
 struct View {
-    static constexpr double node_pixels = 8.0;
+    static constexpr double node_pixels = 16.0;
     static constexpr double picture_height = 900.0;
     static constexpr double fov = 1.0;
 

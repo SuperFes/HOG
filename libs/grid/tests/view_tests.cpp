@@ -22,7 +22,7 @@ TEST_CASE("a page is seen as deep as its nodes span the pixels allowed", "[grid]
     CHECK(view.coarse(grid, 5, two));
     CHECK_FALSE(view.coarse(grid, 7, two));
     // Half the pixels: as deep from twice as far.
-    CHECK(View{4.0}.levels_at(grid, page, two * 2.0) == 2);
+    CHECK(View{View::node_pixels / 2.0}.levels_at(grid, page, two * 2.0) == 2);
 }
 
 TEST_CASE("pages under an open leaf are seen where coarse, caves and doubt only near",
