@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 46;
+inline constexpr std::uint32_t version = 47;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -454,6 +454,27 @@ struct Took {
     friend bool operator==(const Took&, const Took&) = default;
 };
 
+// A chunk a client keeps from before: its kind, band, root and version.
+struct CheckedChunk {
+    std::uint8_t kind = 0;
+    std::uint8_t band = 0;
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+    std::uint64_t version = 0;
+
+    friend bool operator==(const CheckedChunk&, const CheckedChunk&) = default;
+};
+
+// Client to server: chunks it keeps from before, to be sent again only where they've changed,
+// as they are now, or at version 0 where the store holds them no more. Most wanted first.
+struct CheckChunks {
+    std::vector<CheckedChunk> chunks; // at most most_asked
+
+    friend bool operator==(const CheckChunks&, const CheckChunks&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -488,7 +509,7 @@ struct Grains {
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
                              Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies,
-                             Ask, Chunks, AskPieces, Report, Took>;
+                             Ask, Chunks, AskPieces, Report, Took, CheckChunks>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot

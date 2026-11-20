@@ -7,6 +7,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/chat.cpp
+    src/chunk_cache.cpp
     src/drawn.cpp
     src/tile_meshes.cpp
     src/cutaway.cpp
@@ -40,11 +41,12 @@ target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(hog_client
     PUBLIC hog::atmosphere hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
         hog::protocol hog::render hog::replication hog::sim hog::terrain
-    PRIVATE stb_image tomlplusplus)
+    PRIVATE lmdbxx stb_image tomlplusplus)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
     tests/chat_tests.cpp
+    tests/chunk_cache_tests.cpp
     tests/drawn_tests.cpp
     tests/tile_meshes_tests.cpp
     tests/tile_look_tests.cpp

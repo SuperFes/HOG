@@ -148,6 +148,10 @@ private:
     // Has the player sent the grid pieces it asks for besides those it asked before, and those it
     // no longer wants.
     void ask_pieces(net::ConnectionId connection, const protocol::AskPieces& ask);
+    // Has the player streamed grid chunks in place of tiles, sent every water body first.
+    void begin_streaming(net::ConnectionId connection);
+    // Has the chunks the player keeps from before checked, sending those that changed.
+    void check_chunks(net::ConnectionId connection, const protocol::CheckChunks& check);
     // Writes what's kept of the player beside the report it took at `stamp`.
     void report(net::ConnectionId connection, const protocol::Report& asked);
     // Sends each player the tiles due to them, as their connection has room, and cuts the land

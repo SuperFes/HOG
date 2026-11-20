@@ -564,6 +564,8 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         ask_pieces(connection, *ask);
     } else if (const auto* asked = std::get_if<protocol::Report>(&*message)) {
         report(connection, *asked);
+    } else if (const auto* check = std::get_if<protocol::CheckChunks>(&*message)) {
+        check_chunks(connection, *check);
     } else if (const auto* took = std::get_if<protocol::Took>(&*message)) {
         if (pieces_) {
             pieces_->flows.try_emplace(connection, chunk_window).first->second.took(took->bytes);
@@ -675,6 +677,10 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
     }
     pieces_->sending.drop(connection, dropped);
     pieces_->sending.ask(connection, wants);
+    begin_streaming(connection);
+}
+
+void Server::begin_streaming(net::ConnectionId connection) {
     // Every body the water trees may mark, before any chunk that marks one.
     if (pieces_->asking.insert(connection).second) {
         std::vector<grid::Water::Value> ids;
@@ -684,6 +690,23 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
         }
         tell_bodies(connection, ids);
     }
+}
+
+void Server::check_chunks(net::ConnectionId connection, const protocol::CheckChunks& check) {
+    if (!pieces_ || !joined_.find(connection)) {
+        return;
+    }
+    std::vector<server::ChunkSending::Kept> kept;
+    kept.reserve(check.chunks.size());
+    for (const protocol::CheckedChunk& chunk : check.chunks) {
+        const grid::Key root{.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z};
+        if (root.is_valid()) {
+            kept.push_back(
+                {.kind = chunk.kind, .band = chunk.band, .root = root, .version = chunk.version});
+        }
+    }
+    pieces_->sending.check(connection, kept);
+    begin_streaming(connection);
 }
 
 void Server::report(net::ConnectionId connection, const protocol::Report& asked) {

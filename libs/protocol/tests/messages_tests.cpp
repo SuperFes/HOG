@@ -165,6 +165,15 @@ std::vector<Message> examples() {
         Report{.stamp = 1'763'600'000},
         Took{},
         Took{.bytes = 0x0123'4567'89AB'CDEF},
+        CheckChunks{},
+        CheckChunks{.chunks = {{.kind = 3,
+                                .band = 4,
+                                .depth = 12,
+                                .x = 4000,
+                                .y = 1,
+                                .z = 4095,
+                                .version = 0x0123'4567'89AB'CDEF},
+                               {.kind = 0, .band = 0}}},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
         Grains{},
         Grains{.tick = 7,
@@ -234,7 +243,7 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({26, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({27, 0})).error().code == ErrorCode::Unsupported);
     // A placing at the centre in a stance after flying.
     CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
@@ -574,6 +583,17 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
     auto short_ask_pieces = encode(AskPieces{.pieces = {{.depth = 1, .to = 2}}, .dropped = {}});
     short_ask_pieces.pop_back();
     CHECK(decode(short_ask_pieces).error().code == ErrorCode::Parse);
+    // Chunks checked: a count over the most, one of no kind, and one cut short.
+    CHECK(decode(bytes({26, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto unkind = encode(CheckChunks{.chunks = {{.kind = 3}}});
+    unkind.at(4) = std::byte{4};
+    CHECK(decode(unkind).error().code == ErrorCode::OutOfRange);
+    auto short_check = encode(CheckChunks{.chunks = {{.kind = 1}}});
+    short_check.pop_back();
+    CHECK(decode(short_check).error().code == ErrorCode::Parse);
     // Pieces dropped: a count over the most, and one cut short.
     CHECK(decode(bytes({23, 0, 0, 0, static_cast<int>((most_asked + 1) & 0xFFU),
                         static_cast<int>((most_asked + 1) >> 8U)}))

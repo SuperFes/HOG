@@ -461,3 +461,39 @@ TEST_CASE("chunks on the way to a player stay under the window it takes them in 
     flow.took(5000);
     CHECK(flow.room() == 1000);
 }
+
+TEST_CASE("chunks a player keeps go again only where they've changed or gone",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    hog::testing::fill_chunks(generator, store, node, 12);
+    const auto stored = stored_about(store, node, 12);
+    REQUIRE(stored.size() >= 2);
+    const auto first = stored.begin();
+    const auto second = std::next(first);
+    const auto kept = [](const auto& entry, std::uint64_t version) {
+        const auto& [kind, band, root] = entry.first;
+        return ChunkSending::Kept{.kind = kind, .band = band, .root = root, .version = version};
+    };
+    // As stored, at an older version, and one the store doesn't hold.
+    const Key nowhere = hog::testing::ground_key(generator, there, 14);
+    const std::vector<ChunkSending::Kept> checks{
+        kept(*first, first->second.first), kept(*second, second->second.first - 1),
+        ChunkSending::Kept{.kind = 0, .band = 3, .root = nowhere, .version = 5}};
+
+    ChunkSending sending{store.bands()};
+    sending.join(player);
+    sending.check(player, checks);
+    CHECK(sending.due(player) == 3);
+    const ChunkSending::Next next = next_of(sending, store);
+    CHECK(sending.due(player) == 0);
+    REQUIRE(next.chunks.size() == 2);
+    CHECK(id_of(next.chunks[0]) == second->first);
+    CHECK(next.chunks[0].version == second->second.first);
+    CHECK(next.chunks[0].tree == second->second.second);
+    CHECK(id_of(next.chunks[1]) == Id{0, 3, nowhere});
+    CHECK(next.chunks[1].version == 0);
+    CHECK(next.chunks[1].tree.empty());
+    CHECK(next.done.empty());
+}

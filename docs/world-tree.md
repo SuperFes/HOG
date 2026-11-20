@@ -81,6 +81,20 @@ eye; it says how deep it already holds each node, so bands it has aren't sent ag
 store holds only part of is told done short and stays open, waiting on fills, outside the window.
 What's open is all the server keeps of a client, and it's gone once done.
 
+Chunks are paced to what the client takes in: it tells the server the bytes of chunks it's taken
+in, and the server keeps no more than 4 MB beyond that on the way, so a near ask is never queued
+behind the horizon and the client's receive queue never overflows.
+
+The client keeps a database of its own, a cache of the chunks it's been sent, so coming back is
+nearly instant and asks only what's missing or may have changed. It's one LMDB file keyed as the
+store's chunks are, by kind, band and root, holding each chunk's version, when it was last used,
+and its tree as sent. Every chunk taken in is written to it, in batches on a thread of its own. A
+node the walk wants and doesn't hold is looked up there first and drawn at once; what's read from
+it is checked with the server in batches, nearest first, as each chunk's key and version, and the
+server answers only those that moved, with the chunk as it is now or version 0 for one let go.
+The cache keeps under a byte budget, letting go of what was used longest ago. With it, what's
+held in memory can let go of far detail freely: having it again is a local read, not an ask.
+
 The server keeps nothing of what a client holds. The client is the cache: it asks only for what it
 lacks, nearest the player first, so each ask is answered from the store afresh, and taking a chunk
 drops what it holds of that band and kind over or under it, as a band's chunks never nest. When

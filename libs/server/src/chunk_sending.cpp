@@ -109,6 +109,46 @@ void ChunkSending::drop(net::ConnectionId player, std::span<const grid::Key> nod
     }
 }
 
+void ChunkSending::check(net::ConnectionId player, std::span<const Kept> kept) {
+    Player& held = players_[player];
+    held.checks.insert(held.checks.end(), kept.begin(), kept.end());
+}
+
+template <typename Kind>
+bool ChunkSending::check_kept(const baked::ChunkStore::Snapshot& snapshot, const Kept& kept,
+                              Limits& limits, Next& next) {
+    const std::uint64_t now = snapshot.version<Kind>(kept.band, kept.root);
+    if (now == kept.version) {
+        return true;
+    }
+    protocol::SentChunk chunk{.kind = kind_of<Kind>(),
+                              .band = kept.band,
+                              .depth = kept.root.depth,
+                              .x = kept.root.x,
+                              .y = kept.root.y,
+                              .z = kept.root.z,
+                              .version = now,
+                              .tree = {}};
+    if (now != 0) {
+        for (const baked::StoredChunk& each : snapshot.stored<Kind>(kept.band, kept.root)) {
+            if (each.chunk.root == kept.root) {
+                chunk.tree.assign(each.tree.begin(), each.tree.end());
+            }
+        }
+        if (chunk.tree.size() > protocol::most_chunk) {
+            ++next.too_big;
+            return true;
+        }
+    }
+    if (!limits.fits(next, chunk.tree.size())) {
+        limits.cut = true;
+        return false;
+    }
+    limits.bytes += chunk.tree.size();
+    next.chunks.push_back(std::move(chunk));
+    return true;
+}
+
 void ChunkSending::changed(std::span<const baked::Region> written) {
     for (auto& [id, player] : players_) {
         for (const baked::Region& region : written) {
@@ -275,6 +315,28 @@ ChunkSending::Next ChunkSending::next(net::ConnectionId player,
     }
     Player& held = found->second;
     Limits limits{.room = room, .most = most};
+    while (!held.checks.empty() && limits.fits(next, 0)) {
+        const Kept& kept = held.checks.front();
+        bool fit = true;
+        switch (kept.kind) {
+        case 0:
+            fit = check_kept<grid::Shape>(snapshot, kept, limits, next);
+            break;
+        case 1:
+            fit = check_kept<grid::Material>(snapshot, kept, limits, next);
+            break;
+        case 2:
+            fit = check_kept<grid::Water>(snapshot, kept, limits, next);
+            break;
+        default:
+            fit = check_kept<grid::Woods>(snapshot, kept, limits, next);
+            break;
+        }
+        if (!fit) {
+            return next;
+        }
+        held.checks.pop_front();
+    }
     // Cut off, it's gone over again next, past what's gone already.
     for (std::deque<Open>* queue : {&held.again, &held.due}) {
         while (!queue->empty() && limits.fits(next, 0) && next.done.size() < protocol::most_asked) {
@@ -296,7 +358,9 @@ ChunkSending::Next ChunkSending::next(net::ConnectionId player,
 
 std::size_t ChunkSending::due(net::ConnectionId player) const {
     const auto found = players_.find(player);
-    return found == players_.end() ? 0 : found->second.again.size() + found->second.due.size();
+    return found == players_.end() ? 0
+                                   : found->second.checks.size() + found->second.again.size() +
+                                         found->second.due.size();
 }
 
 std::size_t ChunkSending::waiting(net::ConnectionId player) const {

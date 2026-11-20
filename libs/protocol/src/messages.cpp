@@ -44,6 +44,7 @@ enum class Kind : std::uint16_t {
     AskPieces = 23,
     Report = 24,
     Took = 25,
+    CheckChunks = 26,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -797,6 +798,43 @@ struct Ball {
     return finished(in, std::move(ask));
 }
 
+[[nodiscard]] Result<Message> read_check_chunks(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "chunks checked");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_asked) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} chunks checked; {} allowed", *count, most_asked));
+    }
+    CheckChunks check;
+    check.chunks.reserve(*count);
+    for (std::uint16_t n = 0; n < *count; ++n) {
+        const auto kind = read<std::uint8_t>(in, "a chunk checked");
+        const auto band = read<std::uint8_t>(in, "a chunk checked");
+        const auto depth = read<std::uint8_t>(in, "a chunk checked");
+        const auto x = read<std::uint32_t>(in, "a chunk checked");
+        const auto y = read<std::uint32_t>(in, "a chunk checked");
+        const auto z = read<std::uint32_t>(in, "a chunk checked");
+        const auto stamp = read<std::uint64_t>(in, "a chunk checked");
+        if (!kind || !band || !depth || !x || !y || !z || !stamp) {
+            return make_error(ErrorCode::Parse, "a chunk checked cut short");
+        }
+        if (*kind > 3) {
+            return make_error(ErrorCode::OutOfRange,
+                              std::format("a chunk checked of kind {}", *kind));
+        }
+        check.chunks.push_back({.kind = *kind,
+                                .band = *band,
+                                .depth = *depth,
+                                .x = *x,
+                                .y = *y,
+                                .z = *z,
+                                .version = *stamp});
+    }
+    return finished(in, std::move(check));
+}
+
 [[nodiscard]] Result<Message> read_bodies(ByteReader& in) {
     const auto length = read<std::uint32_t>(in, "bodies");
     if (!length) {
@@ -1065,6 +1103,21 @@ void write_ask_pieces(ByteWriter& out, const AskPieces& ask) {
     }
 }
 
+void write_check_chunks(ByteWriter& out, const CheckChunks& check) {
+    HOG_ASSERT(check.chunks.size() <= most_asked, "too many chunks to check at once");
+    out.write(static_cast<std::uint16_t>(Kind::CheckChunks));
+    out.write(static_cast<std::uint16_t>(check.chunks.size()));
+    for (const CheckedChunk& chunk : check.chunks) {
+        out.write(chunk.kind);
+        out.write(chunk.band);
+        out.write(chunk.depth);
+        out.write(chunk.x);
+        out.write(chunk.y);
+        out.write(chunk.z);
+        out.write(chunk.version);
+    }
+}
+
 void write_bodies(ByteWriter& out, const Bodies& bodies) {
     HOG_ASSERT(bodies.bytes.size() <= most_bodies, "too many bodies to send at once");
     out.write(static_cast<std::uint16_t>(Kind::Bodies));
@@ -1232,6 +1285,8 @@ std::vector<std::byte> encode(const Message& message) {
             } else if constexpr (std::is_same_v<Body, Took>) {
                 out.write(static_cast<std::uint16_t>(Kind::Took));
                 out.write(body.bytes);
+            } else if constexpr (std::is_same_v<Body, CheckChunks>) {
+                write_check_chunks(out, body);
             } else if constexpr (std::is_same_v<Body, Clock>) {
                 out.write(static_cast<std::uint16_t>(Kind::Clock));
                 out.write(body.scale);
@@ -1320,6 +1375,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         }
         return finished(in, Report{.stamp = *stamp});
     }
+    case Kind::CheckChunks:
+        return read_check_chunks(in);
     case Kind::Took: {
         const auto taken = in.read<std::uint64_t>();
         if (!taken) {

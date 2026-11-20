@@ -78,9 +78,12 @@ public:
     // welcomed, or of a scale of nothing.
     void hurry(std::uint32_t scale);
 
-    // Asks the server for the grid pieces in `ask`, in place of those asked for before; nothing
+    // Asks the server for the grid pieces in `ask`, besides those asked for before; nothing
     // before being welcomed.
     void ask(const protocol::AskPieces& ask);
+    // Has the server check the chunks this client keeps from before; nothing before being
+    // welcomed.
+    void check(const protocol::CheckChunks& check);
     // Tells the server a report was taken at `stamp`, for it to write its own beside; nothing
     // before being welcomed.
     void report(std::uint64_t stamp);
@@ -118,6 +121,9 @@ public:
     void dig(WorldPosition centre, double radius);
     void build(WorldPosition centre, double radius, std::uint8_t material);
 
+    // The planet the server runs, as its seed said when it welcomed; 0 before, or where it
+    // didn't say.
+    [[nodiscard]] std::uint64_t world() const noexcept { return world_id_; }
     // The planet the server runs, as it said when it welcomed; empty before.
     [[nodiscard]] const std::vector<std::byte>& planet() const noexcept { return planet_; }
     // The voxel layers the server's ground stands on, as hog::globe::volume_header has them.
@@ -156,6 +162,7 @@ private:
     std::optional<std::uint64_t> world_;
     std::vector<std::byte> planet_;
     std::vector<std::byte> ground_origin_;
+    std::uint64_t world_id_ = 0;
     State state_ = State::Connecting;
     std::string reason_;
     replication::Replica replica_;

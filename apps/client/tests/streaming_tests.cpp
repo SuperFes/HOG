@@ -1,6 +1,7 @@
 #include <hog/baked/chunk_store.hpp>
 #include <hog/baked/generating.hpp>
 #include <hog/baked/wants_table.hpp>
+#include <hog/client/chunk_cache.hpp>
 #include <hog/client/held_pieces.hpp>
 #include <hog/client/piece_asking.hpp>
 #include <hog/globe/generator.hpp>
@@ -43,6 +44,9 @@ struct Player {
     // Chunks taken in, each time, and each chunk as it was taken.
     std::size_t taken = 0;
     std::set<std::tuple<std::uint8_t, std::uint8_t, Key, std::uint64_t>> distinct;
+    // Where it keeps what it's sent between runs, if it does, and what it's looked up there.
+    hog::client::ChunkCache* cache = nullptr;
+    hog::client::Looked looked;
 };
 
 using Root = std::tuple<std::uint8_t, std::uint32_t, std::uint32_t, std::uint32_t>;
@@ -84,8 +88,27 @@ public:
         if (!std::exchange(player.came, false)) {
             return;
         }
-        const std::vector<hog::client::PieceWish> wishes =
+        std::vector<hog::client::PieceWish> wishes =
             hog::client::pieces_to_ask(player.held, eye, facing, view, hog::protocol::most_asked);
+        if (player.cache != nullptr) {
+            const auto kept = hog::client::take_kept(*player.cache, player.held, wishes,
+                                                     player.looked, hog::protocol::most_asked);
+            REQUIRE(kept.has_value());
+            if (!kept->empty()) {
+                std::vector<hog::server::ChunkSending::Kept> checks;
+                checks.reserve(kept->size());
+                for (const hog::protocol::CheckedChunk& chunk : *kept) {
+                    checks.push_back(
+                        {.kind = chunk.kind,
+                         .band = chunk.band,
+                         .root = {.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z},
+                         .version = chunk.version});
+                }
+                sending_.check(player.id, checks);
+                wishes = hog::client::pieces_to_ask(player.held, eye, facing, view,
+                                                    hog::protocol::most_asked);
+            }
+        }
         const std::optional<hog::protocol::AskPieces> ask =
             player.requests.ask(player.held, wishes);
         if (!ask) {
@@ -125,6 +148,9 @@ public:
                     {chunk.kind, chunk.band,
                      Key{.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z},
                      chunk.version});
+            }
+            if (player.cache != nullptr && !next.chunks.empty()) {
+                REQUIRE(player.cache->keep(next.chunks).has_value());
             }
             player.requests.done(next.done);
             const bool any = !next.chunks.empty() || !next.done.empty();
@@ -224,14 +250,18 @@ TEST_CASE("players asking from one place come to hold the same ground, all they 
                                          .requests = {},
                                          .came = true,
                                          .taken = 0,
-                                         .distinct = {}},
+                                         .distinct = {},
+                                         .cache = nullptr,
+                                         .looked = {}},
                                   Player{.id = hog::net::ConnectionId{2},
                                          .room = std::size_t{8} << 10U,
                                          .held = hog::client::HeldPieces{grid},
                                          .requests = {},
                                          .came = true,
                                          .taken = 0,
-                                         .distinct = {}}};
+                                         .distinct = {},
+                                         .cache = nullptr,
+                                         .looked = {}}};
     for (const Player& player : players) {
         streaming.join(player);
     }
@@ -257,4 +287,51 @@ TEST_CASE("players asking from one place come to hold the same ground, all they 
         UNSCOPED_INFO(differ[n]);
     }
     CHECK(differ.empty());
+}
+
+TEST_CASE("a player coming back holds what it kept at once and is sent only what changed",
+          "[client][streaming]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    Streaming streaming{generator};
+    const hog::grid::View view{64.0};
+    const hog::DVec3 up = glm::normalize(hog::DVec3{0.2, 0.7, -0.68});
+    const hog::DVec3 eye =
+        up * (generator.column(up, hog::globe::voxel_lod(generator)).ground() + 300.0);
+    const hog::DVec3 facing =
+        glm::normalize(glm::cross(up, hog::DVec3{0.0, 0.0, 1.0}) - (0.3 * up));
+    const hog::testing::TemporaryDirectory directory;
+    hog::client::ChunkCache cache =
+        hog::client::ChunkCache::open(directory.path() / "cache.mdb", std::uint64_t{1} << 30U)
+            .value();
+    const auto streamed = [&](Player& player) {
+        streaming.join(player);
+        const std::span<Player> one{&player, 1};
+        int quiet = 0;
+        for (int tick = 0; tick < 20'000 && quiet < 50; ++tick) {
+            streaming.ask(player, eye, facing, view);
+            quiet = streaming.tick(one) ? 0 : quiet + 1;
+        }
+        CHECK(hog::client::pieces_to_ask(player.held, eye, facing, view, hog::protocol::most_asked)
+                  .empty());
+    };
+    const auto player_of = [&](std::uint32_t id) {
+        return Player{.id = hog::net::ConnectionId{id},
+                      .room = std::size_t{256} << 10U,
+                      .held = hog::client::HeldPieces{grid},
+                      .requests = {},
+                      .came = true,
+                      .taken = 0,
+                      .distinct = {},
+                      .cache = &cache,
+                      .looked = {}};
+    };
+    Player first = player_of(1);
+    streamed(first);
+    CHECK(cache.chunks() > 0);
+    Player again = player_of(2);
+    streamed(again);
+    CHECK(differences(ground_of(first.held), ground_of(again.held)).empty());
+    // Nothing changed between them, so hardly anything's sent again.
+    CHECK(again.taken * 10 < first.taken);
 }

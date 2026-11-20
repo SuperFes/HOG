@@ -640,6 +640,15 @@ TEST_CASE("a session takes the ground chunks and water bodies sent oldest first"
         });
     });
     CHECK(session.take_done() == std::vector{done});
+    // What's kept from before goes to be checked.
+    const protocol::CheckChunks check{.chunks = {{.kind = 1, .band = 2, .depth = 4, .version = 7}}};
+    session.check(check);
+    look_until(session, stand, [&] {
+        return std::ranges::any_of(stand.heard, [&](const protocol::Message& message) {
+            const auto* heard = std::get_if<protocol::CheckChunks>(&message);
+            return heard != nullptr && *heard == check;
+        });
+    });
     CHECK(session.take_done().empty());
     CHECK(bodies[0] == std::vector{std::byte{9}});
     CHECK(session.take_chunks().empty());

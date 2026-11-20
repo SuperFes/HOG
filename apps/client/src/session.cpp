@@ -139,6 +139,7 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         log::info(session_log, "welcomed by {}", address_);
         planet_ = welcome->planet;
         ground_origin_ = welcome->ground;
+        world_id_ = welcome->world;
         state_ = State::Welcomed;
     } else if (const auto* refused = std::get_if<protocol::Refused>(&*message)) {
         reason_ = protocol::explain(*refused);
@@ -220,6 +221,13 @@ void Session::ask(const protocol::AskPieces& ask) {
         return;
     }
     send(ask, net::Delivery::Reliable);
+}
+
+void Session::check(const protocol::CheckChunks& check) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    send(check, net::Delivery::Reliable);
 }
 
 void Session::report(std::uint64_t stamp) {

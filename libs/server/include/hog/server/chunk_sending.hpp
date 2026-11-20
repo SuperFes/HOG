@@ -51,6 +51,18 @@ public:
     // Has the player want the nodes no more, whether they're due or wait on fills.
     void drop(net::ConnectionId player, std::span<const grid::Key> nodes);
 
+    // A chunk the player keeps from before: its kind, band, root and version.
+    struct Kept {
+        std::uint8_t kind = 0;
+        std::uint8_t band = 0;
+        grid::Key root;
+        std::uint64_t version = 0;
+    };
+    // Has the chunks the player keeps checked, ahead of what it asks: each sent again only where
+    // the store holds it at another version, as it is now, or at version 0 where it holds it no
+    // more.
+    void check(net::ConnectionId player, std::span<const Kept> kept);
+
     // Has the nodes waiting on what's written gone over again.
     void changed(std::span<const baked::Region> written);
     // Has everything each player asked gone over again, as where what changed is unknown.
@@ -77,7 +89,7 @@ public:
     [[nodiscard]] Next next(net::ConnectionId player, const baked::ChunkStore::Snapshot& snapshot,
                             std::size_t room, std::size_t most);
 
-    // Nodes still to go over for the player.
+    // Nodes still to go over for the player, and chunks to check.
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
     // Nodes gone over short, waiting on something written under them.
     [[nodiscard]] std::size_t waiting(net::ConnectionId player) const;
@@ -110,8 +122,9 @@ private:
         std::size_t open = 0;
     };
     struct Player {
-        std::deque<Open> again; // to go over once more, ahead of the rest
-        std::deque<Open> due;   // in the order asked
+        std::deque<Kept> checks; // ahead of the rest
+        std::deque<Open> again;  // to go over once more, ahead of the rest
+        std::deque<Open> due;    // in the order asked
         grid::ZMap<Open> waiting;
         std::map<std::uint64_t, Asked> asks;
         std::uint64_t asked = 0; // asks so far
@@ -136,6 +149,11 @@ private:
     template <typename Kind>
     static bool send_band(Sent& sent, const baked::ChunkStore::Snapshot& snapshot,
                           std::uint8_t band, grid::Key node, Limits& limits, Next& next);
+    // Into `next`, the chunk kept as `kept` as the store holds it now, where that's changed;
+    // whether it fit.
+    template <typename Kind>
+    static bool check_kept(const baked::ChunkStore::Snapshot& snapshot, const Kept& kept,
+                           Limits& limits, Next& next);
     // Goes over `open`: whether it was cut short for want of room; if not, whether it's still
     // open, waiting on fills.
     enum class Over : std::uint8_t { Cut, Done, Waiting };
