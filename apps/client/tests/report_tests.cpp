@@ -1,5 +1,6 @@
 #include "held_chunks.hpp"
 
+#include <hog/client/block_meshes.hpp>
 #include <hog/client/held_pieces.hpp>
 #include <hog/client/report.hpp>
 #include <hog/core/log.hpp>
@@ -8,11 +9,18 @@
 #include <hog/grid/kinds.hpp>
 #include <hog/grid/piece.hpp>
 #include <hog/grid/tree.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <print>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -102,4 +110,35 @@ TEST_CASE("the lines logged lately are kept, the oldest let go", "[client][repor
     REQUIRE(lines.size() == 3);
     CHECK(contains(lines.front(), "line 2"));
     CHECK(contains(lines.back(), "line 4"));
+}
+
+TEST_CASE("meshing what a report holds as seen from its eye", "[.bench][client][report]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read once, before any thread starts
+    const char* folder = std::getenv("HOG_REPORT");
+    if (folder == nullptr) {
+        SKIP("HOG_REPORT names a report's folder");
+    }
+    // A planet's grid: nodes a third of a metre across at the finest, 18 levels down.
+    const hog::grid::Grid grid{43'000.0, 1.0 / 3.0};
+    HeldPieces held{grid};
+    REQUIRE(hog::client::read_report(folder, held).has_value());
+    std::ifstream about{std::filesystem::path{folder} / "about.txt"};
+    hog::DVec3 eye{0.0};
+    for (std::string line; std::getline(about, line);) {
+        if (line.starts_with("eye = ")) {
+            std::istringstream{line.substr(6)} >> eye.x >> eye.y >> eye.z;
+        }
+    }
+    hog::jobs::JobSystem jobs{0};
+    hog::client::BlockMeshes meshes{grid, jobs, 4};
+    const auto started = std::chrono::steady_clock::now();
+    meshes.want(held, eye);
+    meshes.finish();
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const std::size_t blocks = meshes.collect().shown.size();
+    std::println("{} pieces, {} blocks meshed in {:.2f} s on {} threads, {:.2f} ms a block",
+                 held.pieces(), blocks, seconds, jobs.thread_count(),
+                 1e3 * seconds * jobs.thread_count() /
+                     static_cast<double>(std::max<std::size_t>(blocks, 1)));
 }

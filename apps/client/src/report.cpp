@@ -29,13 +29,18 @@ Result<void> write_text(const std::filesystem::path& path, const std::string& te
 }
 
 Result<std::vector<std::byte>> read_file(const std::filesystem::path& path) {
+    std::error_code failed;
+    const std::uintmax_t size = std::filesystem::file_size(path, failed);
     std::ifstream in{path, std::ios::binary};
-    if (!in) {
+    if (failed || !in) {
         return make_error(ErrorCode::NotFound, std::format("can't read {}", path.string()));
     }
-    const std::string text{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
-    const auto bytes = std::as_bytes(std::span{text});
-    return std::vector<std::byte>{bytes.begin(), bytes.end()};
+    std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+    if (!in.read(reinterpret_cast<char*>(bytes.data()), // NOLINT(*-reinterpret-cast)
+                 static_cast<std::streamsize>(size))) {
+        return make_error(ErrorCode::Io, std::format("can't read all of {}", path.string()));
+    }
+    return bytes;
 }
 
 std::string key_text(grid::Key key) {
