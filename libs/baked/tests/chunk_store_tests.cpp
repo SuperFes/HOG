@@ -223,6 +223,7 @@ TEST_CASE("open sky is one chunk a band, and smooth ground takes fewer than rugg
     const hog::grid::Grid grid = hog::globe::grid_of(world);
     constexpr std::uint8_t height = 2;
     std::vector<std::size_t> counts;
+    std::vector<std::size_t> bytes;
     for (const bool land : {false, true}) {
         const Place& at = place(land);
         ChunkStore store = scratch(hog::baked::baking_of(world), height, 1024);
@@ -232,10 +233,16 @@ TEST_CASE("open sky is one chunk a band, and smooth ground takes fewer than rugg
             hold(store, key, cut_at(at.filled.shape, at.key, key, at.key.depth + 5));
         const auto snapshot = store.read();
         REQUIRE(snapshot.has_value());
-        counts.push_back(
-            snapshot->chunks<hog::grid::Shape>(store.bands().band_of(deepest), key).size());
+        const std::uint8_t band = store.bands().band_of(deepest);
+        counts.push_back(snapshot->chunks<hog::grid::Shape>(band, key).size());
+        std::size_t held = 0;
+        for (const hog::baked::StoredChunk& chunk : snapshot->stored<hog::grid::Shape>(band, key)) {
+            held += chunk.tree.size();
+        }
+        bytes.push_back(held);
     }
-    CHECK(counts[0] < counts[1]);
+    CHECK(counts[0] <= counts[1]);
+    CHECK(bytes[0] < bytes[1]);
 
     const double sea = world.sea_level().value_or(world.planet().body.radius);
     const hog::DVec3 sky = glm::normalize(place(false).point) * (sea + 1000.0);

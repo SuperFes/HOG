@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -97,6 +98,16 @@ struct Server::PieceStreaming {
         : store{std::move(opened)}, wants{std::move(table)}, snapshot{std::move(read)},
           sending{store.bands()}, bodies{globe::water_bodies(generator)},
           logged{snapshot.last_logged()} {}
+    PieceStreaming(const PieceStreaming&) = delete;
+    PieceStreaming& operator=(const PieceStreaming&) = delete;
+    PieceStreaming(PieceStreaming&&) = delete;
+    PieceStreaming& operator=(PieceStreaming&&) = delete;
+    ~PieceStreaming() {
+        stop_generating = true;
+        if (generator_thread.joinable()) {
+            generator_thread.join();
+        }
+    }
 
     // Opens the store the config names, or a scratch one, to fill from `generator` here or as
     // another process does.
@@ -134,12 +145,12 @@ struct Server::PieceStreaming {
 
     // Fills what players wait on, on threads of its own, all but a couple of the machine's.
     void start_generating(const globe::Generator& generator) {
-        generator_thread = std::jthread{[this, &generator](const std::stop_token& stop) {
+        generator_thread = std::thread{[this, &generator] {
             // The pool takes the thread that makes it as one of its own.
             const unsigned cores = std::max(std::thread::hardware_concurrency(), 3U);
             jobs::JobSystem jobs{cores - 2};
             baked::Generating generating{generator, store, wants, jobs};
-            generating.run(stop, [](const Error& error) {
+            generating.run(stop_generating, [](const Error& error) {
                 log::warn(server_log, "couldn't fill grid chunks: {}", error);
             });
         }};
@@ -158,7 +169,8 @@ struct Server::PieceStreaming {
     std::uint64_t logged = 0;
     std::vector<baked::WantsTable::Want> written_wants;
     // Last, so it stops before what it fills goes.
-    std::jthread generator_thread;
+    std::atomic<bool> stop_generating = false;
+    std::thread generator_thread;
 };
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,

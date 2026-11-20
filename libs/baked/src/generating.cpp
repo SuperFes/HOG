@@ -56,10 +56,10 @@ Result<bool> Generating::step(bool wait) {
     return !filler_.idle();
 }
 
-void Generating::run(const std::stop_token& stop, const std::function<void(const Error&)>& failed,
+void Generating::run(const std::atomic<bool>& stop, const std::function<void(const Error&)>& failed,
                      std::chrono::milliseconds rest) {
     bool busy = false;
-    while (!stop.stop_requested()) {
+    while (!stop.load(std::memory_order_relaxed)) {
         const Result<bool> stepped = step(busy);
         if (!stepped) {
             failed(stepped.error());

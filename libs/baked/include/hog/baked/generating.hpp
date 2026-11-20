@@ -7,10 +7,10 @@
 #include <hog/globe/generator.hpp>
 #include <hog/jobs/job_system.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <set>
-#include <stop_token>
 
 namespace hog::baked {
 
@@ -29,7 +29,7 @@ public:
 
     // Steps until `stop`, resting `rest` between looks at the table while nothing's being
     // filled. Each step that fails is told to `failed`, and the next goes on after a rest.
-    void run(const std::stop_token& stop, const std::function<void(const Error&)>& failed,
+    void run(const std::atomic<bool>& stop, const std::function<void(const Error&)>& failed,
              std::chrono::milliseconds rest = std::chrono::milliseconds{50});
 
 private:

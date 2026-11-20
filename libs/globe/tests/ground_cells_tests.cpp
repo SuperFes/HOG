@@ -89,11 +89,14 @@ TEST_CASE("cells read on many threads at once are each read alike", "[globe][gro
     const std::vector<terms::Ground> fresh = terms::ground(context_of(generator), square, lod);
     std::vector<std::vector<terms::Ground>> read(4);
     {
-        std::vector<std::jthread> threads;
+        std::vector<std::thread> threads;
         threads.reserve(read.size());
         for (std::vector<terms::Ground>& each : read) {
             threads.emplace_back(
                 [&] { each = terms::ground(context_of(generator, &cells), square, lod); });
+        }
+        for (std::thread& thread : threads) {
+            thread.join();
         }
     }
     for (const std::vector<terms::Ground>& each : read) {

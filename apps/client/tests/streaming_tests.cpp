@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <tuple>
@@ -39,6 +40,9 @@ struct Player {
     hog::client::HeldPieces held;
     hog::client::PieceRequests requests;
     bool came = true;
+    // Chunks taken in, each time, and each chunk as it was taken.
+    std::size_t taken = 0;
+    std::set<std::tuple<std::uint8_t, std::uint8_t, Key, std::uint64_t>> distinct;
 };
 
 using Root = std::tuple<std::uint8_t, std::uint32_t, std::uint32_t, std::uint32_t>;
@@ -116,6 +120,11 @@ public:
                 sending_.next(player.id, *snapshot, player.room, hog::protocol::most_chunks);
             for (const hog::protocol::SentChunk& chunk : next.chunks) {
                 REQUIRE(player.held.take(chunk).has_value());
+                ++player.taken;
+                player.distinct.insert(
+                    {chunk.kind, chunk.band,
+                     Key{.depth = chunk.depth, .x = chunk.x, .y = chunk.y, .z = chunk.z},
+                     chunk.version});
             }
             player.requests.done(next.done);
             const bool any = !next.chunks.empty() || !next.done.empty();
@@ -213,12 +222,16 @@ TEST_CASE("players asking from one place come to hold the same ground, all they 
                                          .room = std::size_t{256} << 10U,
                                          .held = hog::client::HeldPieces{grid},
                                          .requests = {},
-                                         .came = true},
+                                         .came = true,
+                                         .taken = 0,
+                                         .distinct = {}},
                                   Player{.id = hog::net::ConnectionId{2},
                                          .room = std::size_t{8} << 10U,
                                          .held = hog::client::HeldPieces{grid},
                                          .requests = {},
-                                         .came = true}};
+                                         .came = true,
+                                         .taken = 0,
+                                         .distinct = {}}};
     for (const Player& player : players) {
         streaming.join(player);
     }
@@ -234,6 +247,9 @@ TEST_CASE("players asking from one place come to hold the same ground, all they 
         CHECK(hog::client::pieces_to_ask(player.held, eye, facing, view, hog::protocol::most_asked)
                   .empty());
         CHECK(player.held.pieces() > 0);
+        // Each goes about once: only what's asked together shares what's sent.
+        CHECK(static_cast<double>(player.taken) <=
+              1.1 * static_cast<double>(player.distinct.size()));
     }
     const std::vector<std::string> differ =
         differences(ground_of(players[0].held), ground_of(players[1].held));

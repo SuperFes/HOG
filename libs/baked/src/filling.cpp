@@ -11,7 +11,6 @@
 #include <mutex>
 #include <optional>
 #include <set>
-#include <stop_token>
 #include <thread>
 #include <utility>
 
@@ -52,7 +51,19 @@ Result<void> write_filled(PageStore& store, std::span<const grid::Key> pages,
 struct Filler::Impl {
     Impl(const globe::Generator& from, PageStore& into, jobs::JobSystem& on)
         : generator(&from), store(&into), jobs(&on), grid(globe::grid_of(from)),
-          writer([this](const std::stop_token& stop) { write_on(stop); }) {}
+          writer([this] { write_on(); }) {}
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+    ~Impl() {
+        {
+            const std::scoped_lock guard{writes_lock};
+            stopping = true;
+        }
+        writes_changed.notify_all();
+        writer.join();
+    }
 
     const globe::Generator* generator;
     PageStore* store;
@@ -85,12 +96,17 @@ struct Filler::Impl {
     std::deque<Batch> to_write;                                         // guarded by writes_lock
     std::vector<std::pair<std::vector<grid::Key>, Result<void>>> wrote; // guarded by writes_lock
     std::size_t writes_out = 0;
+    bool stopping = false; // guarded by writes_lock
     // Last, so it stops before what it writes from goes.
-    std::jthread writer;
+    std::thread writer;
 
-    void write_on(const std::stop_token& stop) {
+    void write_on() {
         std::unique_lock guard{writes_lock};
-        while (writes_changed.wait(guard, stop, [&] { return !to_write.empty(); })) {
+        while (true) {
+            writes_changed.wait(guard, [&] { return stopping || !to_write.empty(); });
+            if (stopping) {
+                return;
+            }
             Batch batch = std::move(to_write.front());
             to_write.pop_front();
             guard.unlock();
