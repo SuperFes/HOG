@@ -303,6 +303,32 @@ const grid::Piece* HeldPieces::piece(grid::Key root) const {
     return held == nullptr ? nullptr : held->piece.get();
 }
 
+std::vector<protocol::SentChunk> HeldPieces::chunks_near(DVec3 point, double reach) const {
+    std::vector<protocol::SentChunk> chunks;
+    for (const auto& [root, held] : held_) {
+        if (grid_.distance(root, point) > reach) {
+            continue;
+        }
+        const auto add = [&](std::uint8_t kind, const auto& tree) {
+            if (tree && held.bands.at(kind) >= 0) {
+                chunks.push_back({.kind = kind,
+                                  .band = static_cast<std::uint8_t>(held.bands.at(kind)),
+                                  .depth = root.depth,
+                                  .x = root.x,
+                                  .y = root.y,
+                                  .z = root.z,
+                                  .version = 1,
+                                  .tree = tree->encode()});
+            }
+        };
+        add(0, held.piece->shape);
+        add(1, held.piece->material);
+        add(2, held.piece->water);
+        add(3, held.piece->woods);
+    }
+    return chunks;
+}
+
 std::optional<std::uint8_t> HeldPieces::reach(grid::Key root) const {
     const Held* held = find(root);
     return held == nullptr ? std::nullopt : std::optional{held->reach};

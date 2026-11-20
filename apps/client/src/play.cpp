@@ -13,12 +13,14 @@
 #include <hog/client/piece_asking.hpp>
 #include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
+#include <hog/client/report.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/client/sonar.hpp>
 #include <hog/client/tile_meshes.hpp>
 #include <hog/client/water_field.hpp>
 #include <hog/core/image.hpp>
+#include <hog/core/line_sink.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
@@ -109,8 +111,9 @@ struct Controls {
     bool may_chat = false;    // connected to a server to chat on
     bool chatting = false;    // typing into the chat box, which takes the keys
     bool quit = false;
-    bool dig = false;   // asked to dig a ball out of the ground ahead
-    bool build = false; // asked to build one up
+    bool report = false; // asked to save a report of what's shown
+    bool dig = false;    // asked to dig a ball out of the ground ahead
+    bool build = false;  // asked to build one up
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
     // The same for the server's whole world, where it allows time control.
@@ -141,6 +144,9 @@ void press_afresh(SDL_Keycode key, Controls& controls) {
         break;
     case SDLK_F4:
         controls.next_clouds = true;
+        break;
+    case SDLK_F12:
+        controls.report = true;
         break;
     case SDLK_X:
         controls.dig = true;
@@ -631,6 +637,11 @@ public:
     void ask(const protocol::AskPieces& ask) {
         if (session_) {
             session_->ask(ask);
+        }
+    }
+    void report(std::uint64_t stamp) {
+        if (session_) {
+            session_->report(stamp);
         }
     }
     [[nodiscard]] bool welcomed() const noexcept {
@@ -1140,12 +1151,69 @@ void take_part_streamed(Controls& controls, std::optional<client::Player>& playe
     take_part(controls, player, flight, camera, ground.world);
 }
 
+// Saves a report of what's shown into a fresh directory under var/reports, the picture left
+// to the frame drawn next; where it went, or none where it couldn't be saved.
+std::optional<std::filesystem::path>
+save_report(Connection& connection, const StreamedGround& ground, const render::Camera& camera,
+            const std::optional<client::Player>& player, const client::Flight& flight,
+            double radius, const client::FrameTimes& times, const client::PlanetClock& clock,
+            const client::RecentLog& recent) {
+    // As far as the pieces a block could read reach round the eye, and the coarse ones over it.
+    constexpr double reach = 2'000.0;
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    std::filesystem::path directory =
+        std::filesystem::path{"var/reports"} / std::format("{:%Y%m%d-%H%M%S}", now);
+    client::ReportAbout about{.eye = camera.eye.metres(),
+                              .forward = camera.forward,
+                              .up = camera.up,
+                              .feet =
+                                  player ? std::optional{player->feet().metres()} : std::nullopt,
+                              .lines = {}};
+    about.lines.emplace_back("at",
+                             client::at_argument(seen_from(flight, camera.eye.metres(), radius)));
+    about.lines.emplace_back("metres over the radius",
+                             std::format("{:.3f}", glm::length(camera.eye.metres()) - radius));
+    about.lines.emplace_back("seed", std::to_string(ground.planet.body.seed));
+    about.lines.emplace_back("radius", std::format("{:.17g}", radius));
+    about.lines.emplace_back("game time", std::to_string(clock.time().time_since_epoch().count()));
+    about.lines.emplace_back("pieces held", std::to_string(ground.pieces.pieces()));
+    about.lines.emplace_back("piece bytes", std::to_string(ground.pieces.bytes()));
+    about.lines.emplace_back("blocks meshing", std::to_string(ground.block_meshes.in_flight()));
+    about.lines.emplace_back("blocks settled", ground.block_meshes.settled() ? "yes" : "no");
+    const client::Timing cpu = times.cpu();
+    about.lines.emplace_back("frame ms",
+                             std::format("mean {:.2f} worst {:.2f}", cpu.mean, cpu.worst));
+    for (const client::Timing& pass : times.gpu()) {
+        about.lines.emplace_back(std::format("gpu {} ms", pass.name),
+                                 std::format("mean {:.2f} worst {:.2f}", pass.mean, pass.worst));
+    }
+    const std::vector<client::PieceWish> wanted = client::pieces_to_ask(
+        ground.pieces, camera.eye.metres(), camera.forward, grid::View{}, protocol::most_asked);
+    const std::vector<client::DrawnBlock> drawn = ground.block_meshes.drawn();
+    const std::vector<std::string> lines = recent.lines();
+    const client::Report report{.about = about,
+                                .held = &ground.pieces,
+                                .reach = reach,
+                                .asked = ground.asked,
+                                .wanted = wanted,
+                                .drawn = drawn,
+                                .log = lines};
+    if (const Result<void> written = client::write_report(directory, report); !written) {
+        log::warn(connection_log, "can't save a report: {}", written.error());
+        return std::nullopt;
+    }
+    log::info(connection_log, "report saved to {}", directory.string());
+    connection.report(static_cast<std::uint64_t>(now.time_since_epoch().count()));
+    return directory;
+}
+
 // Flies or walks over the ground the server streams until the window closes or it's time to quit,
 // drawing it from the tiles held.
 Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, StreamedGround& ground,
                           client::Flight flight, Connection& connection,
                           const client::Options& options, const render::Device& device,
-                          render::Presenter& presenter, SDL_Window* window) {
+                          render::Presenter& presenter, SDL_Window* window,
+                          const client::RecentLog& recent) {
     const globe::Planet& planet = ground.planet;
     const double radius = planet.body.radius;
     Controls controls;
@@ -1231,9 +1299,17 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
                               .chat = &chat,
                               .chatting = &controls.chatting,
                               .chat_opened = chat_opened};
-        if (auto shown =
-                show_frame(scene, shot, device, presenter, window, overlay,
-                           controls.quit ? options.capture : std::nullopt, chat, connection);
+        std::optional<std::filesystem::path> capture =
+            controls.quit ? options.capture : std::nullopt;
+        if (std::exchange(controls.report, false)) {
+            if (const auto saved = save_report(connection, ground, camera, player, flight, radius,
+                                               times, clock, recent);
+                saved) {
+                capture = *saved / client::report_picture;
+            }
+        }
+        if (auto shown = show_frame(scene, shot, device, presenter, window, overlay, capture, chat,
+                                    connection);
             !shown) {
             return shown;
         }
@@ -1278,7 +1354,8 @@ Result<globe::Planet> welcomed_to(Connection& connection) {
 // The client: connects, is told the planet, and draws the surfaces the server streams, with none
 // of its own and nothing made of the planet here.
 int show_streamed_world(const client::Options& options, render::Device& device,
-                        render::Presenter& presenter, SDL_Window* window) {
+                        render::Presenter& presenter, SDL_Window* window,
+                        const client::RecentLog& recent) {
     startup("starting");
     auto connection = Connection::open(options, std::nullopt);
     if (!connection) {
@@ -1344,7 +1421,7 @@ int show_streamed_world(const client::Options& options, render::Device& device,
     StreamedGround ground{*planet, origin->layers, jobs};
     startup("ready");
     const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
-                                            device, presenter, window);
+                                            device, presenter, window, recent);
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
         std::cerr << std::format("{}: {}\n", program, flown.error());
@@ -1357,6 +1434,37 @@ int show_streamed_world(const client::Options& options, render::Device& device,
     }
     return EXIT_SUCCESS;
 }
+
+// Logs to the console, to a file a run under var/logs, and keeps the lines lately logged for
+// reports; undone as it goes.
+struct ClientLogging {
+    explicit ClientLogging(const std::string& name) {
+        sinks.push_back(
+            log::add_sink(std::make_unique<log::LineSink>(std::clog, log::LineFormat::Text)));
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        if (auto file = log::LineSink::open(std::filesystem::path{"var/logs"} /
+                                                std::format("{}-{:%Y%m%d-%H%M%S}.log", name, now),
+                                            log::LineFormat::Text);
+            file) {
+            sinks.push_back(log::add_sink(std::move(*file)));
+        }
+        auto kept = std::make_unique<client::RecentLog>();
+        recent = kept.get();
+        sinks.push_back(log::add_sink(std::move(kept)));
+    }
+    ClientLogging(const ClientLogging&) = delete;
+    ClientLogging& operator=(const ClientLogging&) = delete;
+    ClientLogging(ClientLogging&&) = delete;
+    ClientLogging& operator=(ClientLogging&&) = delete;
+    ~ClientLogging() {
+        for (const log::SinkHandle sink : sinks) {
+            log::remove_sink(sink);
+        }
+    }
+
+    std::vector<log::SinkHandle> sinks;
+    const client::RecentLog* recent = nullptr; // owned by the log while it's added
+};
 
 int run(std::span<const std::string_view> arguments) {
     auto options = client::parse_options(arguments);
@@ -1372,6 +1480,7 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << "hog-client: --connect ADDRESS is required\n";
         return EXIT_FAILURE;
     }
+    const ClientLogging logging{options->name.value_or("client")};
     // Declared in the order they're made, so each goes before what it was made with.
     const window::Sdl sdl;
     if (!sdl.started()) {
@@ -1406,7 +1515,7 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("{}: can't show frames: {}\n", program, presenter.error());
         return EXIT_FAILURE;
     }
-    return show_streamed_world(*options, **device, **presenter, window.get());
+    return show_streamed_world(*options, **device, **presenter, window.get(), *logging.recent);
 }
 
 } // namespace

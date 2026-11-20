@@ -150,6 +150,8 @@ std::vector<Message> examples() {
         AskPieces{
             .pieces = {{.depth = 14, .x = 9000, .y = 3, .z = 16383, .to = 18, .priority = 0.5F},
                        {.depth = 0, .to = 3, .priority = 2.0e-5F}}},
+        Report{},
+        Report{.stamp = 1'763'600'000},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
         Grains{},
         Grains{.tick = 7,

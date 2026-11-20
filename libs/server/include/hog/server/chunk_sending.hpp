@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace hog::server {
@@ -69,6 +70,11 @@ public:
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
     // Nodes gone over short, waiting on something written under them.
     [[nodiscard]] std::size_t waiting(net::ConnectionId player) const;
+    // All that's kept of the player, for people to read: its ask, how far it's been gone over,
+    // and what waits on fills or is known filled, each with whether `snapshot` holds it in each
+    // band asked.
+    [[nodiscard]] std::string describe(net::ConnectionId player,
+                                       const baked::ChunkStore::Snapshot& snapshot) const;
 
 private:
     // A chunk as it was sent: kind, band, then its root as the store orders them.

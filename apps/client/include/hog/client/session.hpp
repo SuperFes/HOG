@@ -81,6 +81,9 @@ public:
     // Asks the server for the grid pieces in `ask`, in place of those asked for before; nothing
     // before being welcomed.
     void ask(const protocol::AskPieces& ask);
+    // Tells the server a report was taken at `stamp`, for it to write its own beside; nothing
+    // before being welcomed.
+    void report(std::uint64_t stamp);
 
     // Game seconds a real one the server says its world runs at, 1 until it says otherwise.
     [[nodiscard]] std::uint32_t world_rate() const noexcept { return world_rate_; }

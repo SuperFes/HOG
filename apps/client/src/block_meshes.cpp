@@ -83,6 +83,25 @@ BlockMeshes::BlockMeshes(const grid::Grid& grid, jobs::JobSystem& jobs, std::uin
     : grid_{grid}, jobs_{&jobs}, cells_{cells},
       most_working_{std::max<std::size_t>(2, jobs.thread_count())} {}
 
+std::vector<DrawnBlock> BlockMeshes::drawn() const {
+    std::vector<DrawnBlock> found;
+    found.reserve(drawn_.size());
+    for (const auto& [node, drawing] : drawn_) {
+        DrawnBlock block{.block = drawing.look.block, .reads = {}};
+        for (const auto& [root, piece] : drawing.look.reads) {
+            block.reads.push_back(root);
+        }
+        if (drawing.mesh.ground) {
+            block.ground_triangles = drawing.mesh.ground->indices.size() / 3;
+        }
+        if (drawing.mesh.water) {
+            block.water_triangles = drawing.mesh.water->indices.size() / 3;
+        }
+        found.push_back(std::move(block));
+    }
+    return found;
+}
+
 BlockMeshes::~BlockMeshes() {
     gather(true);
     planning_.reset();

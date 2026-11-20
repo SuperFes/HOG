@@ -147,6 +147,8 @@ private:
     void build(net::ConnectionId connection, const protocol::Built& built);
     // Has the player sent the grid pieces it asks for, and only those, from now on.
     void ask_pieces(net::ConnectionId connection, const protocol::AskPieces& ask);
+    // Writes what's kept of the player beside the report it took at `stamp`.
+    void report(net::ConnectionId connection, const protocol::Report& asked);
     // Sends each player the tiles due to them, as their connection has room, and cuts the land
     // afresh for one that's moved on, in the background, the land left to it meanwhile.
     void tell_tiles();

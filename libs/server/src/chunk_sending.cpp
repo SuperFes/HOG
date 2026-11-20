@@ -1,6 +1,7 @@
 #include <hog/server/chunk_sending.hpp>
 
 #include <algorithm>
+#include <format>
 #include <type_traits>
 #include <utility>
 
@@ -245,6 +246,50 @@ std::size_t ChunkSending::due(net::ConnectionId player) const {
 std::size_t ChunkSending::waiting(net::ConnectionId player) const {
     const auto found = players_.find(player);
     return found == players_.end() ? 0 : found->second.waiting.size();
+}
+
+std::string ChunkSending::describe(net::ConnectionId player,
+                                   const baked::ChunkStore::Snapshot& snapshot) const {
+    const auto found = players_.find(player);
+    if (found == players_.end()) {
+        return "not a player\n";
+    }
+    const Player& held = found->second;
+    // Each band the want reaches, as the store holds its shape, material and water there.
+    const auto bands = [&](const Want& want) {
+        std::string text;
+        for (std::uint8_t band = bands_.band_of(want.node.depth);
+             band <= bands_.band_of(want.depth); ++band) {
+            text += std::format(" b{}:{}{}{}", band,
+                                snapshot.holds<grid::Shape>(band, want.node) ? 's' : '-',
+                                snapshot.holds<grid::Material>(band, want.node) ? 'm' : '-',
+                                snapshot.holds<grid::Water>(band, want.node) ? 'w' : '-');
+        }
+        return text;
+    };
+    const auto line = [&](const Want& want) {
+        return std::format("{} {} {} {} to {} rank {:.6g} |{}\n", want.node.depth, want.node.x,
+                           want.node.y, want.node.z, want.depth, want.priority, bands(want));
+    };
+    std::string text = std::format("round {}; {} asked, {} gone over; {} sent this ask\n",
+                                   held.round, held.asked.size(), held.gone, held.sent.size());
+    text += std::format("\nagain ({}):\n", held.again.size());
+    for (const Want& want : held.again) {
+        text += line(want);
+    }
+    text += std::format("\nwaiting ({}):\n", held.waiting.size());
+    for (const auto& [node, want] : held.waiting) {
+        text += line(want);
+    }
+    text += std::format("\nknown filled ({}):\n", held.answered.size());
+    for (const auto& [node, want] : held.answered) {
+        text += line(want);
+    }
+    text += std::format("\nasked ({}):\n", held.asked.size());
+    for (std::size_t n = 0; n < held.asked.size(); ++n) {
+        text += (n < held.gone ? "  done " : "  due  ") + line(held.asked[n]);
+    }
+    return text;
 }
 
 std::vector<std::vector<std::byte>> bodies_coded(const grid::WaterBodies& table,

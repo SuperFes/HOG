@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 43;
+inline constexpr std::uint32_t version = 44;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -409,6 +409,14 @@ struct AskPieces {
     friend bool operator==(const AskPieces&, const AskPieces&) = default;
 };
 
+// Client to server: a report of what the client shows was taken at `stamp`, seconds of the system
+// clock since its epoch; the server writes what it holds about the client beside it.
+struct Report {
+    std::uint64_t stamp = 0;
+
+    friend bool operator==(const Report&, const Report&) = default;
+};
+
 // Grain in flight at most in a message; a client is told of the nearest to it.
 inline constexpr std::size_t most_grains = 256;
 
@@ -441,9 +449,9 @@ struct Grains {
 // As a cell's weather reads back once sent.
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell);
 
-using Message =
-    std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said, Hurry,
-                 Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies, Ask, Chunks, AskPieces>;
+using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
+                             Said, Hurry, Clock, Placed, Dug, Built, Grains, Tiles, Pages, Bodies,
+                             Ask, Chunks, AskPieces, Report>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot

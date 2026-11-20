@@ -211,6 +211,13 @@ void Session::ask(const protocol::AskPieces& ask) {
     send(ask, net::Delivery::Reliable);
 }
 
+void Session::report(std::uint64_t stamp) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    send(protocol::Report{.stamp = stamp}, net::Delivery::Reliable);
+}
+
 namespace {
 
 // A ball's radius as sent, in whole millimetres; none if it couldn't be.

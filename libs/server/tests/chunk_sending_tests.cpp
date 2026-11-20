@@ -17,9 +17,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -344,4 +346,25 @@ TEST_CASE("a node answered goes over what's stored once more and is waited on no
     const ChunkSending::Next rest = next_of(sending, store);
     CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
     CHECK(sending.wanted().empty());
+}
+
+TEST_CASE("what's kept of a player reads as its ask, what waits and what the store holds",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    ChunkSending sending{store.bands()};
+    sending.join(player);
+    sending.ask(player, std::vector<ChunkSending::Want>{{.node = node, .depth = 12}});
+    CHECK(next_of(sending, store).chunks.empty());
+    const auto snapshot = store.read();
+    REQUIRE(snapshot.has_value());
+    const std::string text = sending.describe(player, *snapshot);
+    const std::string line = std::format("{} {} {} {} to 12", node.depth, node.x, node.y, node.z);
+    CHECK(text.find("waiting (1)") != std::string::npos);
+    CHECK(text.find("asked (1)") != std::string::npos);
+    CHECK(text.find(line) != std::string::npos);
+    // Nothing's stored there yet.
+    CHECK(text.find(":smw") == std::string::npos);
+    CHECK(sending.describe(hog::net::ConnectionId{9}, *snapshot) == "not a player\n");
 }

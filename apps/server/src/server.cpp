@@ -22,9 +22,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <string>
@@ -537,6 +539,8 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         build(connection, *built);
     } else if (const auto* ask = std::get_if<protocol::AskPieces>(&*message)) {
         ask_pieces(connection, *ask);
+    } else if (const auto* asked = std::get_if<protocol::Report>(&*message)) {
+        report(connection, *asked);
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -646,6 +650,36 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
         }
         tell_bodies(connection, ids);
     }
+}
+
+void Server::report(net::ConnectionId connection, const protocol::Report& asked) {
+    if (!pieces_ || !joined_.find(connection)) {
+        return;
+    }
+    const std::chrono::sys_seconds at{std::chrono::seconds{asked.stamp}};
+    const std::filesystem::path directory =
+        std::filesystem::path{"var/reports"} / std::format("{:%Y%m%d-%H%M%S}", at);
+    std::error_code made;
+    std::filesystem::create_directories(directory, made);
+    const std::filesystem::path path =
+        directory / std::format("server-{}.txt", std::to_underlying(connection));
+    std::ofstream out{path, std::ios::trunc};
+    out << std::format("connection {}; grid store {}; {} logged\n\n",
+                       std::to_underlying(connection), pieces_->store.directory().string(),
+                       pieces_->logged);
+    out << "wanted of the store:\n";
+    for (const baked::WantsTable::Want& want : pieces_->written_wants) {
+        out << std::format("{} {} {} {} to {}\n", want.node.depth, want.node.x, want.node.y,
+                           want.node.z, want.depth);
+    }
+    out << "\n" << pieces_->sending.describe(connection, pieces_->snapshot);
+    if (!out) {
+        log::warn(server_log, "couldn't write connection {}'s report to {}",
+                  std::to_underlying(connection), path.string());
+        return;
+    }
+    log::info(server_log, "connection {}'s report written to {}", std::to_underlying(connection),
+              path.string());
 }
 
 void Server::build(net::ConnectionId connection, const protocol::Built& built) {

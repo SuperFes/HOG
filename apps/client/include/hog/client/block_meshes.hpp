@@ -30,6 +30,15 @@ namespace hog::client {
 // to draw. The water bodies a piece marks come before it, so they're held by then. What's drawn
 // changes all at once, once all that's wanted is meshed, so the ground never shows a hole. All
 // but taking in what the jobs give is done on them, so a frame never waits on it.
+// A block as it's drawn: its node, how it's cut, the pieces its mesh was made from, and its
+// triangles.
+struct DrawnBlock {
+    Block block;
+    std::vector<grid::Key> reads;
+    std::size_t ground_triangles = 0;
+    std::size_t water_triangles = 0;
+};
+
 class BlockMeshes {
 public:
     // Blocks of `cells` levels of cells. The jobs must outlive it.
@@ -49,6 +58,9 @@ public:
     [[nodiscard]] GroundChanges collect();
     // Meshes all that's wanted, waiting for it.
     void finish();
+
+    // Each block drawn now, in the order of its node.
+    [[nodiscard]] std::vector<DrawnBlock> drawn() const;
 
     [[nodiscard]] std::size_t in_flight() const noexcept {
         return queued_.size() + working_.size() + (planning_ ? 1 : 0) + (showing_ ? 1 : 0);

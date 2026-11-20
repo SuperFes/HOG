@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
@@ -83,6 +84,9 @@ public:
     // reaches that deep, a closed leaf holds all of it, or what's under it does, child by child.
     // Each kind is held apart, as the server's store splits each into chunks of its own.
     [[nodiscard]] bool covers(grid::Key node, std::uint8_t depth) const;
+    // Every tree held of a piece whose root's node comes within `reach` metres of `point`, as
+    // the chunk it came in, so taking them in again holds them as they are.
+    [[nodiscard]] std::vector<protocol::SentChunk> chunks_near(DVec3 point, double reach) const;
     // How deep in the grid the piece rooted at `root` reaches; none where it isn't held.
     [[nodiscard]] std::optional<std::uint8_t> reach(grid::Key root) const;
 
