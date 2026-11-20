@@ -16,8 +16,9 @@ namespace hog::client {
 
 // Chunks decoded off the thread that draws, so a frame never waits on decoding them or on the
 // disk: those the server sends, kept in the cache as they come, and those looked up in the cache.
-// All on the jobs, the cache used by one at a time; what's handed over comes back decoded in the
-// order it was handed over. Used by the thread that made the jobs.
+// All on the jobs, a few at a time, the cache used by one at a time: chunks sent come back decoded
+// in the order they were sent, and what's looked up in the order it was. Used by the thread that
+// made the jobs.
 class ChunkIntake {
 public:
     // The jobs must outlive it.
@@ -50,13 +51,14 @@ public:
     // Waits for all that's handed over, and takes it.
     [[nodiscard]] Taken finish();
     // What's handed over and not yet taken.
-    [[nodiscard]] std::size_t waiting() const noexcept { return steps_.size(); }
+    [[nodiscard]] std::size_t waiting() const noexcept {
+        return decoding_.size() + caching_.size();
+    }
 
 private:
-    // A piece of work, started once it may be: decoding chunks sent, any number at once, or
-    // using the cache, one at a time.
+    // A piece of work: chunks sent, decoded any number at once, or the cache used, one at a
+    // time, looking up what's wanted or keeping what was sent.
     struct Step {
-        bool uses_cache = false;
         std::vector<protocol::SentChunk> sent{};   // NOLINT(readability-redundant-member-init)
         std::vector<ChunkCache::Wanted> wanted{};  // NOLINT(readability-redundant-member-init)
         bool keep = false;                         // the chunks sent, into the cache
@@ -65,10 +67,16 @@ private:
 
     void start();
     void gather(bool wait, Taken& into);
+    [[nodiscard]] std::unique_ptr<jobs::Async<Taken>> cache_job(Step& step);
 
     jobs::JobSystem* jobs_;
+    // Steps started and not yet taken at most: past enkiTS's pipe, a job runs on the thread
+    // starting it, which is the one drawing.
+    std::size_t most_;
+    std::size_t started_ = 0; // steps started and not yet taken
     std::shared_ptr<ChunkCache> cache_;
-    std::deque<Step> steps_;
+    std::deque<Step> decoding_;
+    std::deque<Step> caching_;
 };
 
 } // namespace hog::client

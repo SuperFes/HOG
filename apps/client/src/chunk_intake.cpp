@@ -46,7 +46,8 @@ void append(ChunkIntake::Taken& into, ChunkIntake::Taken from) {
 } // namespace
 
 ChunkIntake::ChunkIntake(jobs::JobSystem& jobs, std::optional<ChunkCache> cache)
-    : jobs_{&jobs}, cache_{cache ? std::make_shared<ChunkCache>(std::move(*cache)) : nullptr} {}
+    : jobs_{&jobs}, most_{2 * std::max<std::size_t>(1, jobs.thread_count())},
+      cache_{cache ? std::make_shared<ChunkCache>(std::move(*cache)) : nullptr} {}
 
 ChunkIntake::~ChunkIntake() {
     Taken ignored;
@@ -54,20 +55,15 @@ ChunkIntake::~ChunkIntake() {
 }
 
 void ChunkIntake::sent(std::vector<protocol::SentChunk> chunks) {
-    if (chunks.empty()) {
-        return;
-    }
     for (std::size_t from = 0; from < chunks.size(); from += slice) {
         const auto to = std::min(chunks.size(), from + slice);
-        steps_.push_back(
-            {.sent = {std::make_move_iterator(chunks.begin() + static_cast<std::ptrdiff_t>(from)),
-                      std::make_move_iterator(chunks.begin() + static_cast<std::ptrdiff_t>(to))}});
+        Step decode{.sent = {chunks.begin() + static_cast<std::ptrdiff_t>(from),
+                             chunks.begin() + static_cast<std::ptrdiff_t>(to)}};
         if (cache_) {
-            // Kept as they're decoded, in order with what's looked up.
-            Step keep{.uses_cache = true, .keep = true};
-            keep.sent = steps_.back().sent;
-            steps_.push_back(std::move(keep));
+            // Kept in order with what's looked up, never holding up what's decoded.
+            caching_.push_back({.sent = decode.sent, .keep = true});
         }
+        decoding_.push_back(std::move(decode));
     }
     start();
 }
@@ -76,90 +72,78 @@ void ChunkIntake::look_up(std::vector<ChunkCache::Wanted> wanted) {
     if (wanted.empty()) {
         return;
     }
-    if (!cache_) {
-        Step none;
-        none.wanted = std::move(wanted);
-        steps_.push_back(std::move(none));
-    } else {
-        steps_.push_back({.uses_cache = true, .wanted = std::move(wanted)});
-    }
+    caching_.push_back({.wanted = std::move(wanted)});
     start();
 }
 
-void ChunkIntake::start() {
-    bool cache_busy = std::ranges::any_of(
-        steps_, [](const Step& step) { return step.uses_cache && step.job && !step.job->done(); });
-    for (Step& step : steps_) {
-        if (step.job) {
-            continue;
-        }
-        if (step.uses_cache) {
-            // Never two at the cache at once, and never one past another waiting for it.
-            if (cache_busy) {
-                continue;
-            }
-            cache_busy = true;
-            if (step.keep) {
-                step.job = std::make_unique<jobs::Async<Taken>>(
-                    *jobs_, [cache = cache_, chunks = std::move(step.sent)] {
-                        Taken taken;
-                        if (auto kept = cache->keep(chunks); !kept) {
-                            taken.failed.push_back(kept.error());
-                        }
-                        return taken;
-                    });
-            } else {
-                step.job = std::make_unique<jobs::Async<Taken>>(
-                    *jobs_, [cache = cache_, wanted = step.wanted] {
-                        auto read = cache->read(wanted);
-                        if (!read) {
-                            Taken taken;
-                            taken.failed.push_back(read.error());
-                            taken.looked = wanted;
-                            return taken;
-                        }
-                        Taken taken = decoded(*read, true);
-                        taken.looked = wanted;
-                        return taken;
-                    });
-            }
-            continue;
-        }
-        if (!step.wanted.empty()) {
-            // Nothing kept to look up in.
-            step.job = std::make_unique<jobs::Async<Taken>>(*jobs_, [wanted = step.wanted] {
+std::unique_ptr<jobs::Async<ChunkIntake::Taken>> ChunkIntake::cache_job(Step& step) {
+    if (!cache_) {
+        // Nothing kept to look up in, nor to keep.
+        return std::make_unique<jobs::Async<Taken>>(*jobs_, [wanted = std::move(step.wanted)] {
+            Taken taken;
+            taken.looked = wanted;
+            return taken;
+        });
+    }
+    if (step.keep) {
+        return std::make_unique<jobs::Async<Taken>>(
+            *jobs_, [cache = cache_, chunks = std::move(step.sent)] {
                 Taken taken;
-                taken.looked = wanted;
+                if (auto kept = cache->keep(chunks); !kept) {
+                    taken.failed.push_back(kept.error());
+                }
                 return taken;
             });
-            continue;
+    }
+    return std::make_unique<jobs::Async<Taken>>(*jobs_,
+                                                [cache = cache_, wanted = std::move(step.wanted)] {
+                                                    auto read = cache->read(wanted);
+                                                    Taken taken;
+                                                    if (!read) {
+                                                        taken.failed.push_back(read.error());
+                                                    } else {
+                                                        taken = decoded(*read, true);
+                                                    }
+                                                    taken.looked = wanted;
+                                                    return taken;
+                                                });
+}
+
+void ChunkIntake::start() {
+    // The cache one job at a time, in order.
+    if (!caching_.empty() && !caching_.front().job && started_ < most_) {
+        caching_.front().job = cache_job(caching_.front());
+        ++started_;
+    }
+    for (Step& step : decoding_) {
+        if (started_ == most_) {
+            return;
         }
-        step.job = std::make_unique<jobs::Async<Taken>>(
-            *jobs_, [chunks = std::move(step.sent)] { return decoded(chunks, false); });
+        if (!step.job) {
+            step.job = std::make_unique<jobs::Async<Taken>>(
+                *jobs_, [chunks = std::move(step.sent)] { return decoded(chunks, false); });
+            ++started_;
+        }
     }
 }
 
 void ChunkIntake::gather(bool wait, Taken& into) {
-    while (!steps_.empty()) {
-        Step& front = steps_.front();
-        if (!front.job) {
-            if (!wait) {
-                return;
-            }
+    for (std::deque<Step>* queue : {&decoding_, &caching_}) {
+        while (!queue->empty()) {
             start();
-            continue;
+            Step& front = queue->front();
+            if (!front.job || (!wait && !front.job->done())) {
+                break;
+            }
+            append(into, front.job->take());
+            --started_;
+            queue->pop_front();
         }
-        if (!wait && !front.job->done()) {
-            return;
-        }
-        append(into, front.job->take());
-        steps_.pop_front();
-        start();
     }
+    start();
 }
 
 ChunkIntake::Taken ChunkIntake::take() {
-    start();
     Taken taken;
     gather(false, taken);
     return taken;
@@ -167,7 +151,9 @@ ChunkIntake::Taken ChunkIntake::take() {
 
 ChunkIntake::Taken ChunkIntake::finish() {
     Taken taken;
-    gather(true, taken);
+    while (waiting() > 0) {
+        gather(true, taken);
+    }
     return taken;
 }
 

@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -97,4 +98,29 @@ TEST_CASE("what's looked up with no cache comes back looked up and empty",
     const ChunkIntake::Taken taken = intake.finish();
     CHECK(taken.looked.size() == 1);
     CHECK(taken.chunks.empty());
+}
+
+TEST_CASE("a flood of chunks is decoded a few jobs at a time and comes back in order",
+          "[client][chunk_intake]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    hog::jobs::JobSystem jobs{2};
+    const std::vector<hog::protocol::SentChunk> once = sloped_chunks(grid);
+    // Far more slices than jobs may be in flight, each told apart by its version.
+    std::vector<hog::protocol::SentChunk> flood;
+    for (std::uint64_t round = 1; flood.size() < 20'000; ++round) {
+        for (hog::protocol::SentChunk chunk : once) {
+            chunk.version = round;
+            flood.push_back(std::move(chunk));
+        }
+    }
+    ChunkIntake intake{jobs, std::nullopt};
+    intake.sent(flood);
+    std::vector<std::uint64_t> versions;
+    while (intake.waiting() > 0) {
+        for (const hog::client::DecodedChunk& chunk : intake.take().chunks) {
+            versions.push_back(chunk.version);
+        }
+    }
+    REQUIRE(versions.size() == flood.size());
+    CHECK(std::ranges::is_sorted(versions));
 }
