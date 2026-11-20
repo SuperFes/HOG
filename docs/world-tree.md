@@ -72,6 +72,12 @@ bytes of the chunks covering it, already in the mapped file. The client decodes 
 and a chunk's version is its change stamp. A client's new asks replace its last; leaving drops
 them, so nothing is filled for someone gone.
 
+The server keeps nothing of what a client holds. The client is the cache: it asks only for what it
+lacks, nearest the player first, so each ask is answered from the store afresh, and taking a chunk
+drops what it holds of that band and kind over or under it, as a band's chunks never nest. When
+the ground changes, the server streams the change out to the clients about it as an update to
+take in place of what they hold, rather than remembering who was sent what.
+
 ## Steps
 
 Each step is its own commit with tests, and the world stays playable after each.

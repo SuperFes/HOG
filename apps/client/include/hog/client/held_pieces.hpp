@@ -78,8 +78,10 @@ public:
     // What's known at `node`, as Known has it; none where no piece over it holds `Kind`.
     template <typename Kind>
     [[nodiscard]] std::optional<Known<Kind>> at(grid::Key node) const;
-    // Whether what's held reaches `depth` all through `node`: a piece over it reaches that deep, a
-    // closed leaf holds all of it, or what's under it does, child by child.
+    // Whether the ground held reaches `depth` all through `node`, its shape, material and water,
+    // woods being an overlay of their own: a piece over it
+    // reaches that deep, a closed leaf holds all of it, or what's under it does, child by child.
+    // Each kind is held apart, as the server's store splits each into chunks of its own.
     [[nodiscard]] bool covers(grid::Key node, std::uint8_t depth) const;
     // How deep in the grid the piece rooted at `root` reaches; none where it isn't held.
     [[nodiscard]] std::optional<std::uint8_t> reach(grid::Key root) const;
@@ -112,6 +114,9 @@ private:
     void let_go(std::size_t kind, int band, grid::Key root);
     [[nodiscard]] const Held* find(grid::Key root) const;
     // Whether a piece over the node reaches `depth`, or a closed leaf holds all of it.
+    template <typename Kind>
+    [[nodiscard]] bool covers_kind(grid::Key node, std::uint8_t depth) const;
+    template <typename Kind>
     [[nodiscard]] bool held_over(grid::Key node, std::uint8_t depth) const;
 
     grid::Grid grid_;

@@ -191,6 +191,24 @@ Result<void> HeldPieces::take(const protocol::SentChunk& chunk) {
         let_go(chunk.kind, chunk.band, root);
         return {};
     }
+    // A band's chunks never nest, so one of its kind held over or under this one is out of date.
+    std::vector<grid::Key> stale;
+    for (std::uint8_t depth = 0; depth < root.depth; ++depth) {
+        if (const auto over = held_.find(root.ancestor(depth));
+            over != held_.end() && std::cmp_equal(over->second.bands.at(chunk.kind), chunk.band)) {
+            stale.push_back(over->first);
+        }
+    }
+    const std::uint64_t end = grid::aligned_end(root);
+    for (auto under = held_.upper_bound(root);
+         under != held_.end() && grid::aligned(under->first) <= end; ++under) {
+        if (std::cmp_equal(under->second.bands.at(chunk.kind), chunk.band)) {
+            stale.push_back(under->first);
+        }
+    }
+    for (const grid::Key key : stale) {
+        let_go(chunk.kind, chunk.band, key);
+    }
     switch (chunk.kind) {
     case 0:
         return take_tree<grid::Shape>(chunk, root);
@@ -305,11 +323,18 @@ bool HeldPieces::covers(grid::Key node, std::uint8_t depth) const {
         return false;
     }
     depth = std::min(std::max(depth, node.depth), grid_.depth());
+    // Woods lie over the ground as an overlay of their own, so the ground doesn't wait on them.
+    return covers_kind<grid::Shape>(node, depth) && covers_kind<grid::Material>(node, depth) &&
+           covers_kind<grid::Water>(node, depth);
+}
+
+template <typename Kind>
+bool HeldPieces::covers_kind(grid::Key node, std::uint8_t depth) const {
     std::vector<grid::Key> pending{node};
     while (!pending.empty()) {
         const grid::Key next = pending.back();
         pending.pop_back();
-        if (held_over(next, depth)) {
+        if (held_over<Kind>(next, depth)) {
             continue;
         }
         // Only worth going down where pieces lie under the node.
@@ -325,16 +350,22 @@ bool HeldPieces::covers(grid::Key node, std::uint8_t depth) const {
     return true;
 }
 
+template <typename Kind>
 bool HeldPieces::held_over(grid::Key node, std::uint8_t depth) const {
     for (std::uint8_t over = 0; over <= node.depth; ++over) {
         if ((depths_ & depth_bit(over)) == 0U) {
             continue;
         }
-        if (const Held* held = find(node.ancestor(over)); held != nullptr && held->reach >= depth) {
-            return true;
+        const grid::Key root = node.ancestor(over);
+        if (const Held* held = find(root); held != nullptr) {
+            const std::optional<grid::Tree<Kind>>& tree = tree_of<Kind>(*held->piece);
+            if (tree && root.depth + tree->levels() >= depth) {
+                return true;
+            }
         }
     }
-    // A node found as itself may split; one found over a child of it is a leaf.
+    // A node found as itself may split; one found over a child of it is a leaf. Where the
+    // shape's leaf is closed nothing finer of any kind is made, though another kind's be open.
     const grid::Key probe = node.depth < grid_.depth() ? node.child(0) : node;
     const auto known = at<grid::Shape>(probe);
     return known && !known->found.open && known->found.depth <= node.depth;

@@ -14,9 +14,9 @@
 
 namespace hog::client {
 
-// A node to ask the server for, the depth to have it down to, and how big it looks from the eye:
-// its size over its distance, the finest size added so the node holding the eye has one, less
-// where it lies behind where the eye looks.
+// A node to ask the server for, the depth to have it down to, and how much it's wanted: the
+// nearer the eye the more, however big, the finest size added to its distance so the node
+// holding the eye has one, less where it lies behind where the eye looks.
 struct PieceWish {
     grid::Key node;
     std::uint8_t depth = 0;
@@ -42,7 +42,7 @@ inline constexpr double behind_eye = 0.25;
 // should be seen to; one wanted deeper is gone down through where it's held, and asked
 // `region_levels` deep where it isn't yet, so what's coarse comes first and finer is asked only
 // where ground lies. A leaf closed is gone no further, nor an open one the surface misses but
-// where the finest is wanted. Regions never overlap. Biggest looking first, `most` at most.
+// where the finest is wanted. Regions never overlap. Nearest first, `most` at most.
 [[nodiscard]] std::vector<PieceWish> pieces_to_ask(const HeldPieces& held, DVec3 eye,
                                                    std::optional<DVec3> facing,
                                                    const grid::View& view, std::size_t most);

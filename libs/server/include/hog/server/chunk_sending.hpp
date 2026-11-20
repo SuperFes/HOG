@@ -21,9 +21,9 @@ namespace hog::server {
 
 // The store's chunks each player asks for, sent as they're stored, never decoded: for each node
 // asked, in the player's order, every band's chunks over it or under it down to the depth asked.
-// A chunk goes once at each version it's held at, and one the store no longer holds is told let
-// go of. A node the store doesn't hold all of yet is handed on to be filled, and gone over again
-// when something's written under it; so is one sent whole, so the player hears what changed.
+// Nothing is kept of what a player holds: what it asks for is what it lacks, so each ask is
+// answered from the store afresh, a chunk going once an ask. A node the store doesn't hold all of
+// yet is handed on to be filled, and gone over again when something's written under it.
 class ChunkSending {
 public:
     explicit ChunkSending(const baked::Bands& bands) noexcept : bands_{bands} {}
@@ -31,26 +31,24 @@ public:
     void join(net::ConnectionId player);
     void leave(net::ConnectionId player);
 
-    // A node, the depth it's wanted down to, and how big it looks from the player, which filling
-    // it is ranked by.
+    // A node, the depth it's wanted down to, and how much it's wanted, which filling it is
+    // ranked by.
     struct Want {
         grid::Key node;
         std::uint8_t depth = 0;
         double priority = 0.0;
     };
-    // Has the player sent the nodes it asks for, in its order, in place of whatever it was due
-    // before, where it hasn't been sent them whole as deep; one still due from before, as one
-    // woken by a write, stays due. Nodes outside the grid are left out;
-    // depths past the finest are taken as the finest, those over a node as the node's.
+    // Has the player sent the nodes it asks for, in its order, in place of whatever it asked
+    // before. Nodes outside the grid are left out; depths past the finest are taken as the
+    // finest, those over a node as the node's.
     void ask(net::ConnectionId player, std::span<const Want> wants);
 
-    // Has the nodes sent or waiting over what's written gone over again, in order of how big
-    // they look.
+    // Has the nodes waiting on what's written gone over again.
     void changed(std::span<const baked::Region> written);
-    // Has everything sent or waiting gone over again, as where what changed is unknown.
+    // Has everything each player asked gone over again, as where what changed is unknown.
     void changed_everything();
-    // Has the nodes the filler found nothing more to fill under gone over once more, sent what's
-    // stored of them, then taken as whole however little that is.
+    // Has the nodes the filler found nothing more to fill under gone over once more for what's
+    // stored of them, and waited on no more however little that is.
     void answered(std::span<const baked::ChunkFiller::Asked> asked);
 
     // What every player waits on the store to hold more of, each node and depth once, at the
@@ -67,13 +65,13 @@ public:
     [[nodiscard]] Next next(net::ConnectionId player, const baked::ChunkStore::Snapshot& snapshot,
                             std::size_t room, std::size_t most);
 
-    // Nodes still due to the player.
+    // Nodes still to go over for the player.
     [[nodiscard]] std::size_t due(net::ConnectionId player) const;
-    // Nodes sent short, waiting on something written under them.
+    // Nodes gone over short, waiting on something written under them.
     [[nodiscard]] std::size_t waiting(net::ConnectionId player) const;
 
 private:
-    // A chunk as the player was sent it: kind, band, then its root as the store orders them.
+    // A chunk as it was sent: kind, band, then its root as the store orders them.
     struct SentKey {
         std::uint8_t kind = 0;
         std::uint8_t band = 0;
@@ -83,11 +81,12 @@ private:
         friend constexpr auto operator<=>(const SentKey&, const SentKey&) noexcept = default;
     };
     struct Player {
-        std::vector<Want> due; // in order
-        grid::ZMap<Want> whole;
+        std::vector<Want> asked; // the last ask, in order
+        std::size_t gone = 0;    // how many of it have been gone over
+        std::vector<Want> again; // to go over once more, ahead of the rest
         grid::ZMap<Want> waiting;
-        grid::ZMap<Want> answered;             // due once more, then whole
-        std::map<SentKey, std::uint64_t> sent; // by version
+        grid::ZMap<Want> answered;             // nothing more to fill under
+        std::map<SentKey, std::uint64_t> sent; // this ask, by version
         std::uint64_t round = 0;               // when last asked
     };
 
@@ -104,14 +103,14 @@ private:
             return next.chunks.empty() || (next.chunks.size() < most && bytes + tree <= room);
         }
     };
-    // Into `next`, the band's chunks of `Kind` about `node` that the player hasn't as they're
-    // held, and those it was sent there that are held no more, while they fit; whether they hold
-    // all of `node`. Cut short, `limits.cut` says so.
+    // Into `next`, the band's chunks of `Kind` about `node` not sent this ask as they're held,
+    // while they fit; whether they hold all of `node`. Cut short, `limits.cut` says so.
     template <typename Kind>
     bool send_band(Player& player, const baked::ChunkStore::Snapshot& snapshot, std::uint8_t band,
                    grid::Key node, Limits& limits, Next& next) const;
-    // Puts `want` among those due in order of how big it looks, unless its node is due already.
-    static void due_again(Player& player, const Want& want);
+    // Goes over `want`: whether it was cut short for want of room.
+    bool go_over(Player& player, const baked::ChunkStore::Snapshot& snapshot, const Want& want,
+                 Limits& limits, Next& next) const;
 
     baked::Bands bands_;
     std::map<net::ConnectionId, Player> players_;

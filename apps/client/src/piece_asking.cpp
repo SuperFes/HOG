@@ -26,9 +26,11 @@ bool worth_going_into(const HeldPieces& held, const grid::View& view, grid::Key 
     return !missed || grid.distance(child, eye) <= grid.finest() / view.angle;
 }
 
+// Nearest first, however big: what's far waits on what's near, so the ground about the player is
+// filled and sent before the planet's coarse levels round it.
 double priority_of(const grid::Grid& grid, grid::Key node, double away, DVec3 eye,
                    std::optional<DVec3> facing) {
-    double priority = grid.size(node.depth) / (away + grid.finest());
+    double priority = 1.0 / (away + grid.finest());
     // Wholly behind where the eye looks: its nearest point is behind the eye.
     if (facing && away > 0.0) {
         const DVec3 low = grid.low(node);

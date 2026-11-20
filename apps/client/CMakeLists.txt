@@ -71,6 +71,7 @@ hog_add_tests(hog_client
     tests/transvoxel_tests.cpp
     tests/sonar_tests.cpp
     tests/session_tests.cpp
+    tests/streaming_tests.cpp
     tests/tides_tests.cpp)
 if(TARGET hog_client_tests)
     # The server, for players to meet through.

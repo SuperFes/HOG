@@ -4,6 +4,7 @@
 #include <hog/client/held_pieces.hpp>
 #include <hog/client/piece_asking.hpp>
 #include <hog/grid/grid.hpp>
+#include <hog/grid/kinds.hpp>
 #include <hog/grid/piece.hpp>
 #include <hog/grid/view.hpp>
 #include <hog/grid/z_order.hpp>
@@ -54,6 +55,10 @@ hog::grid::Piece slope_piece(const hog::grid::Grid& grid, Key node, std::uint8_t
     piece.root = node;
     piece.generator = 1;
     piece.shape = Shapes::grow(levels, decide);
+    // Every kind, as the server's bands hold them.
+    piece.material = hog::grid::Tree<hog::grid::Material>{levels, 1, false};
+    piece.water = hog::grid::Tree<hog::grid::Water>{levels, 0, false};
+    piece.woods = hog::grid::Tree<hog::grid::Woods>{levels, {}, false};
     return piece;
 }
 
@@ -152,10 +157,27 @@ TEST_CASE("a client asks first for what lies where it looks, and asks again as i
     };
     CHECK_FALSE(std::ranges::equal(nodes(ahead), nodes(behind)));
 
-    // No more than asked for, the biggest looking kept.
+    // No more than asked for, the nearest kept.
     const std::vector<PieceWish> few = pieces_to_ask(held, eye, std::nullopt, view, 3);
     REQUIRE(few.size() == 3);
     CHECK(std::ranges::equal(few, plain | std::views::take(3)));
+}
+
+TEST_CASE("a client asks for what's nearest first, however big what's further is",
+          "[client][piece_asking]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const hog::grid::View view;
+    hog::client::HeldPieces held{grid};
+    const hog::DVec3 eye = hog::sloped::on_ground + (hog::sloped::normal() * 2.0);
+    for (int round = 0; round < 2; ++round) {
+        answer(held, pieces_to_ask(held, eye, std::nullopt, view, lots));
+    }
+    const std::vector<PieceWish> wishes = pieces_to_ask(held, eye, std::nullopt, view, lots);
+    REQUIRE(wishes.size() > 4);
+    for (std::size_t n = 1; n < wishes.size(); ++n) {
+        CAPTURE(n, wishes[n - 1].node.depth, wishes[n].node.depth);
+        CHECK(grid.distance(wishes[n - 1].node, eye) <= grid.distance(wishes[n].node, eye));
+    }
 }
 
 TEST_CASE("piece wishes go over the wire as asked, no more than allowed",

@@ -1173,7 +1173,9 @@ Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock, Stre
         shaders.look(device, now);
         take_part_streamed(controls, player, flight, camera, ground);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        take_ground(connection, ground, scene, player, camera.eye.metres(), camera.forward);
+        // Ground is asked for and meshed about the player, wherever the camera has gone.
+        const DVec3 focus = player ? player->feet().metres() : flight.eye.metres();
+        take_ground(connection, ground, scene, player, focus, camera.forward);
         // Where the server remembers the player, unless they said where to start.
         if (const auto placed = connection.take_placed(); placed && !options.start) {
             const WorldPosition at = protocol::to_world(placed->at);

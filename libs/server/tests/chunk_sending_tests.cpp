@@ -140,10 +140,14 @@ TEST_CASE("a player is sent the chunks about what it asks for as stored and each
     }
     CHECK(sent == expected);
 
-    // Asked again, all of it went whole: nothing's due.
+    // Asked again, it's answered afresh, as a player asks only for what it hasn't.
     sending.ask(player, wants);
-    CHECK(sending.due(player) == 0);
-    CHECK(next_of(sending, store).chunks.empty());
+    CHECK(sending.due(player) == 2);
+    std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> again;
+    for (const hog::protocol::SentChunk& chunk : next_of(sending, store).chunks) {
+        again.emplace(id_of(chunk), std::pair{chunk.version, chunk.tree});
+    }
+    CHECK(again == expected);
 }
 
 TEST_CASE("what the store holds only part of goes as it is and the rest once it's filled",
@@ -165,8 +169,6 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     CHECK(wanted.front().depth == 12);
     CHECK(wanted.front().rank.priority == 0.5);
     CHECK(sending.waiting(player) == 1);
-    // Asked again while it waits, it's not gone over again.
-    sending.ask(player, wants);
     CHECK(sending.due(player) == 0);
 
     // Filled under it, what's new goes, and nothing it was sent before.
@@ -195,45 +197,6 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
         }
     }
     CHECK(held == stored_about(store, node, 12));
-}
-
-TEST_CASE("a chunk no longer stored is told let go of and one changed goes again",
-          "[server][chunk_sending]") {
-    const hog::globe::Generator& generator = hog::testing::small_world();
-    hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
-    const Key node = hog::testing::ground_key(generator, here, 7);
-    const Key wider = node.ancestor(6);
-    const std::uint8_t band = store.bands().band_of(10);
-    hog::testing::put_material(store, band, node, 7);
-    ChunkSending sending{store.bands()};
-    sending.join(player);
-    sending.ask(player, std::vector<ChunkSending::Want>{{.node = node, .depth = 12}});
-    const ChunkSending::Next first = next_of(sending, store);
-    REQUIRE(first.chunks.size() == 1);
-    CHECK(id_of(first.chunks.front()) == Id{1, band, node});
-
-    // Changed, it goes again.
-    hog::testing::put_material(store, band, node, 8);
-    const std::vector<hog::baked::Region> changed{{.band = band, .root = node}};
-    sending.changed(changed);
-    const ChunkSending::Next again = next_of(sending, store);
-    REQUIRE(again.chunks.size() == 1);
-    CHECK(id_of(again.chunks.front()) == Id{1, band, node});
-    CHECK(again.chunks.front().version > first.chunks.front().version);
-
-    // Held as part of a chunk over it, the one at the node goes.
-    hog::testing::put_material(store, band, wider, 9);
-    const std::vector<hog::baked::Region> widened{{.band = band, .root = wider}};
-    sending.changed(widened);
-    const ChunkSending::Next after = next_of(sending, store);
-    std::vector<Id> gone;
-    std::vector<Id> came;
-    for (const hog::protocol::SentChunk& chunk : after.chunks) {
-        (chunk.version == 0 ? gone : came).push_back(id_of(chunk));
-        CHECK(chunk.tree.empty() == (chunk.version == 0));
-    }
-    CHECK(gone == std::vector<Id>{{1, band, node}});
-    CHECK(came == std::vector<Id>{{1, band, wider}});
 }
 
 TEST_CASE("a message carries no more chunks than allowed with the rest going next",
@@ -296,8 +259,11 @@ TEST_CASE("asking again replaces what's due and what no one waits on any more is
     CHECK(sending.due(player) == 1);
     CHECK(next_of(sending, store).chunks.empty());
     CHECK(sending.wanted().empty());
+    // Asked again, it's gone over again but not waited on.
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
-    CHECK(sending.due(player) == 0);
+    CHECK(sending.due(player) == 1);
+    CHECK(next_of(sending, store).chunks.empty());
+    CHECK(sending.wanted().empty());
     sending.leave(player);
     CHECK(sending.due(player) == 0);
 }
@@ -328,7 +294,7 @@ TEST_CASE("what two players wait on is wanted once at the higher rank and everyt
     sending.changed_everything();
     CHECK(sending.due(player) == 1);
     CHECK(sending.due(other) == 1);
-    CHECK(sending.waiting(player) == 0);
+    CHECK(sending.waiting(player) == 1);
     sending.leave(other);
     CHECK(sending.next(player, *snapshot, lots, lots).chunks.empty());
     CHECK(sending.wanted().front().rank.priority == 0.25);
@@ -355,7 +321,7 @@ TEST_CASE("a want woken by a write still goes when the player asks again before 
     CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
 }
 
-TEST_CASE("a node answered goes over what's stored once more before it's whole",
+TEST_CASE("a node answered goes over what's stored once more and is waited on no more",
           "[server][chunk_sending]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
@@ -378,6 +344,4 @@ TEST_CASE("a node answered goes over what's stored once more before it's whole",
     const ChunkSending::Next rest = next_of(sending, store);
     CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
     CHECK(sending.wanted().empty());
-    sending.ask(player, wants);
-    CHECK(sending.due(player) == 0);
 }
