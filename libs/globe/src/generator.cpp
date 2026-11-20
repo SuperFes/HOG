@@ -35,6 +35,16 @@ namespace {
 // A cave can carve the ground only this near it, the widest passage's radius and some.
 constexpr double cave_surface_reach = 8.0;
 
+// How far from a column at detail `lod` it keeps the caves' pieces: as far as a cave changes its
+// samples, and as far as a node its width or two across asks after them.
+double gathered(double lod) noexcept {
+    return terms::cave_reach + (4.0 * lod);
+}
+
+// Metres about a column caves are gathered from at most to say where they may lie: a few cave
+// cells about it, kept for what's near to read again.
+constexpr double most_gathered = 1'000.0;
+
 // The way the ground rises, in metres per metre, and how steeply.
 // The ground's slope measured across a small step either way. Gullies turn with the slope they're
 // cut in, which their own gradients can't know without the ground's curvature, and the loose
@@ -70,6 +80,7 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     shape_.highest = formed->highest();
     shape_.formed = formed;
     cells_ = std::make_shared<const GroundCells>();
+    caves_ = std::make_shared<const CaveCells>();
     say("laying out the voxel layers");
     // No shell reaches more than halfway to the centre, however deep a small planet's seas run:
     // what lies under its floor is rock.
@@ -91,7 +102,8 @@ terms::Context Generator::context(bool crags) const noexcept {
             .derived = &derived_,
             .shape = &shape_,
             .crags = crags,
-            .cells = cells_.get()};
+            .cells = cells_.get(),
+            .caves = caves_.get()};
 }
 
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
@@ -125,6 +137,15 @@ std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
         }
     }
     return found;
+}
+
+std::vector<CavePiece> Generator::caves_within(DVec3 toward, double reach) const {
+    return terms::caves_near(context(), glm::normalize(toward), reach);
+}
+
+std::vector<CavePiece> Generator::caves_begun(DVec3 toward) const {
+    return *terms::caves_in(context(),
+                            cell_under(glm::normalize(toward), terms::cave_level(planet_)));
 }
 
 std::vector<Rock> Generator::rocks_within(DVec3 toward, double reach, double lod) const {
@@ -365,54 +386,77 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.strata_.cover += fall.rubble.depth;
     column.scatter_ = terms::scatter_at(context, down, column.strata_);
     column.rock_ = fall.rock;
+    // Coarser than any cave, a column's samples show none; a node may still ask after them.
+    if (lod < terms::widest_cave) {
+        column.gathered_ = gathered(lod);
+        column.caves_ = terms::caves_near(context, down, column.gathered_);
+    }
     return column;
 }
 
-bool Generator::Column::caves_may_lie(double lowest, double highest) const noexcept {
-    const terms::Context context = generator_->context();
-    return std::max(lowest, ground_ - terms::cave_floor(context)) < std::min(highest, ground_) &&
-           terms::cave_district(context, direction_) > 0.0;
+bool Generator::Column::caves_may_lie(double lowest, double highest, double within) const {
+    // Wider than caves are gathered, they may lie anywhere their depth allows under any ground.
+    if (within > most_gathered) {
+        const terms::Context context = generator_->context();
+        const double radius = generator_->planet().body.radius;
+        const Shape& shape = generator_->shape();
+        return highest >= radius + shape.lowest - terms::cave_floor(context) - terms::widest_cave &&
+               lowest <= radius + shape.highest + terms::widest_cave;
+    }
+    const auto lies = [&](const CavePiece& piece) {
+        const auto span = piece.along(direction_, piece.radius + within);
+        return span && span->first <= highest && span->second >= lowest;
+    };
+    if (within <= gathered_) {
+        return std::ranges::any_of(caves_, lies);
+    }
+    return std::ranges::any_of(terms::caves_near(generator_->context(), direction_, within), lies);
 }
 
 std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, double highest,
                                                                 double within) const {
-    std::vector<std::pair<double, double>> found;
-    const terms::Context context = generator_->context();
-    if (!caves_may_lie(lowest, highest)) {
-        return found;
+    if (lod_ >= terms::widest_cave) {
+        return {};
     }
-    const double deepest = std::max(lowest, ground_ - terms::cave_floor(context));
+    // Wider than caves are gathered, all the depth they may lie at under the ground.
+    if (within > most_gathered) {
+        const double radius = generator_->planet().body.radius;
+        const double bottom =
+            std::max(lowest, radius + generator_->shape().lowest -
+                                 terms::cave_floor(generator_->context()) - terms::widest_cave);
+        const double top = std::min(highest, ground_);
+        return bottom < top ? std::vector{std::pair{bottom, top}}
+                            : std::vector<std::pair<double, double>>{};
+    }
+    const std::vector<CavePiece> regathered =
+        within > gathered_ ? terms::caves_near(generator_->context(), direction_, within)
+                           : std::vector<CavePiece>{};
+    const std::span<const CavePiece> pieces = within > gathered_ ? regathered : caves_;
     const double top_most = std::min(highest, ground_);
-    // Down by as far as no cave can lie within `within`. Nearer than a voxel's step counts as
-    // within, so every step outside a stretch is one no cave lies across.
-    const double least = std::max(lod_ / 2.0, 1.0);
-    std::optional<double> top;
-    double above = top_most;
-    for (double radius = top_most; radius > deepest;) {
-        const double away =
-            terms::cave_bound(context, strata_, direction_, radius, ground_, lod_) - within;
-        if (away < least) {
-            if (!top) {
-                // Back within reach at the next sample: the same stretch.
-                if (!found.empty() && found.back().first == above) {
-                    top = found.back().second;
-                    found.pop_back();
-                } else {
-                    top = above;
-                }
-            }
-        } else if (top) {
-            found.emplace_back(radius, *top);
-            top.reset();
+    std::vector<std::pair<double, double>> found;
+    for (const CavePiece& piece : pieces) {
+        const double shown = shown_radius(piece.radius, lod_);
+        if (shown <= 0.0) {
+            continue;
         }
-        above = radius;
-        radius -= std::max(away, least);
+        if (const auto span = piece.along(direction_, shown + within)) {
+            const double bottom = std::max(span->first, lowest);
+            const double top = std::min(span->second, top_most);
+            if (bottom < top) {
+                found.emplace_back(bottom, top);
+            }
+        }
     }
-    if (top) {
-        found.emplace_back(deepest, *top);
+    std::ranges::sort(found);
+    std::vector<std::pair<double, double>> merged;
+    for (const auto& [bottom, top] : found) {
+        if (!merged.empty() && bottom <= merged.back().second) {
+            merged.back().second = std::max(merged.back().second, top);
+        } else {
+            merged.emplace_back(bottom, top);
+        }
     }
-    std::ranges::reverse(found);
-    return found;
+    return merged;
 }
 
 std::vector<Generator::Column::Boundary> Generator::Column::boundaries(double lowest,
@@ -487,8 +531,13 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     // within reach counts: at the reach, none is known to be near, and the ground's distance
     // stands.
     if (caves && sample.distance < cave_surface_reach) {
-        const double cave =
-            terms::cave_distance(context, strata_, direction_, radius, ground_, lod_);
+        const DVec3 point = direction_ * radius;
+        double cave = terms::cave_reach;
+        for (const CavePiece& piece : caves_) {
+            if (const double shown = shown_radius(piece.radius, lod_); shown > 0.0) {
+                cave = std::min(cave, piece.distance(point, shown));
+            }
+        }
         if (cave < terms::cave_reach) {
             sample.distance = std::max(sample.distance, -cave);
         }

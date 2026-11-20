@@ -1,6 +1,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/vents.hpp>
+#include <hog/testing/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,8 +10,19 @@
 using hog::globe::Generator;
 using hog::globe::Planet;
 
+namespace {
+
+// The small test world losing `heat` W/m², hot enough for vents and pools to be found on it.
+Planet small_losing(double heat) {
+    Planet planet = hog::testing::small_planet();
+    planet.heat_flow = heat;
+    return planet;
+}
+
+} // namespace
+
 TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vents]") {
-    const Generator generator{Planet{}};
+    const Generator generator{small_losing(1.0)};
     const auto vents = hog::globe::vent_sites(generator);
     CHECK(!vents.empty());
     CHECK(vents.size() < 400);
@@ -28,9 +40,7 @@ TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vent
 TEST_CASE("some vents are pools on cave floors under the ground", "[globe][vents]") {
     // Pools are rare, a few in a thousand tries finding a cave open near the ground; a hotter
     // planet tries more often.
-    Planet hot;
-    hot.heat_flow = 0.2;
-    const Generator generator{hot};
+    const Generator generator{small_losing(1.0)};
     int pools = 0;
     for (const auto& vent : hog::globe::vent_sites(generator)) {
         if (!vent.pool) {
@@ -63,10 +73,8 @@ TEST_CASE("some volcanoes are dead, which have no vent", "[globe][vents]") {
 }
 
 TEST_CASE("a planet that loses less heat has fewer vents", "[globe][vents]") {
-    Planet cold;
-    cold.heat_flow = 0.03;
-    Planet hot;
-    hot.heat_flow = 0.2;
+    const Planet cold = small_losing(0.1);
+    const Planet hot = small_losing(1.0);
     CHECK(hot.heat_flow > cold.heat_flow);
     CHECK(hog::globe::vent_sites(Generator{hot}).size() >
           hog::globe::vent_sites(Generator{cold}).size());

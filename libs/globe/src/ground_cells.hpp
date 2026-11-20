@@ -1,54 +1,47 @@
 #pragma once
 
+#include "kept_cells.hpp"
 #include "terms.hpp"
 
+#include <hog/globe/cave_piece.hpp>
 #include <hog/globe/cell.hpp>
 
-#include <array>
 #include <cstddef>
-#include <cstdint>
-#include <mutex>
-#include <optional>
-#include <unordered_map>
+#include <memory>
+#include <vector>
 
 namespace hog::globe {
 
-// The ground at the middles of the cube's cells, kept once made for whoever reads it next, on
-// any thread. What's kept is what reading afresh gives, so keeping it never changes a read. About
-// `most` of those read last are kept, never more than twice that.
-class GroundCells {
+struct GroundKey {
+    Cell cell;
+    double lod = 0.0;
+    bool crags = true;
+    friend bool operator==(const GroundKey&, const GroundKey&) noexcept = default;
+};
+
+struct GroundKeyHash {
+    std::size_t operator()(const GroundKey& key) const noexcept;
+};
+
+// The ground at the middles of the cube's cells, as terms::ground reads it.
+class GroundCells : public KeptCells<GroundKey, terms::Ground, GroundKeyHash> {
 public:
+    using Key = GroundKey;
     static constexpr std::size_t default_most = std::size_t{1} << 17U;
-    explicit GroundCells(std::size_t most = default_most);
+    explicit GroundCells(std::size_t most = default_most) : KeptCells{most} {}
+};
 
-    struct Key {
-        Cell cell;
-        double lod = 0.0;
-        bool crags = true;
-        friend bool operator==(const Key&, const Key&) noexcept = default;
-    };
+struct CellHash {
+    std::size_t operator()(const Cell& cell) const noexcept;
+};
 
-    [[nodiscard]] std::optional<terms::Ground> find(const Key& key) const;
-    void keep(const Key& key, const terms::Ground& ground) const;
-    [[nodiscard]] std::size_t size() const;
+using CavePieces = std::shared_ptr<const std::vector<CavePiece>>;
 
-private:
-    struct Hash {
-        std::size_t operator()(const Key& key) const noexcept;
-    };
-    using Held = std::unordered_map<Key, terms::Ground, Hash>;
-    // Those read since the last turn over, and those before it, let go at the next.
-    struct Shard {
-        std::mutex mutex;
-        Held fresh;
-        Held old;
-    };
-    static constexpr std::size_t shards = 64;
-    std::size_t per_shard_;
-    mutable std::array<Shard, shards> shards_;
-
-    [[nodiscard]] Shard& shard_of(const Key& key) const noexcept;
-    static void hold(Shard& shard, std::size_t most, const Key& key, const terms::Ground& ground);
+// The caves laid out in each cave cell, as terms::caves_in lays them out.
+class CaveCells : public KeptCells<Cell, CavePieces, CellHash> {
+public:
+    static constexpr std::size_t default_most = std::size_t{1} << 14U;
+    explicit CaveCells(std::size_t most = default_most) : KeptCells{most} {}
 };
 
 } // namespace hog::globe

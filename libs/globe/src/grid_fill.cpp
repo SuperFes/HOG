@@ -228,7 +228,7 @@ private:
             return false;
         }
         const double half = half_diagonal * probe.size;
-        probe.caves = column.caves_may_lie(probe.radius - half, probe.radius + half);
+        probe.caves = column.caves_may_lie(probe.radius - half, probe.radius + half, half);
         return true;
     }
 

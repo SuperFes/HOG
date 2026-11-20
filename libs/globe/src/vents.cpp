@@ -26,6 +26,8 @@ constexpr std::uint64_t pool_salt = 0x706F6F6CULL;
 // How far under the ground a pool's cave is sought, and the tries each candidate gets.
 constexpr double pool_reach = 60.0;
 constexpr int pool_tries = 4;
+// The caves under the ground looked at about each try.
+constexpr int pool_looks = 8;
 // A cave lower than this is no place for a pool.
 constexpr double pool_headroom = 2.0;
 constexpr double pool_step = 0.5;
@@ -138,18 +140,39 @@ std::optional<VentSite> pool_in(const Generator& generator, Cell cell) {
     const DVec3 side_axis = std::abs(middle.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side_axis, middle));
     const DVec3 north = glm::cross(middle, east);
+    const double half = 0.5 * side / planet.body.radius;
+    const auto inside = [&](DVec3 direction) {
+        const DVec3 off = direction - middle;
+        return std::abs(glm::dot(off, east)) <= half && std::abs(glm::dot(off, north)) <= half;
+    };
     for (int attempt = 0; attempt < pool_tries; ++attempt) {
         const std::uint64_t own = hash_values(key, attempt);
-        const DVec3 direction =
-            glm::normalize(middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
-                                      ((unit(hash_values(own, 2)) - 0.5) * north)) *
-                                     (side / planet.body.radius)));
-        const Generator::Column column = generator.column(direction, 0.5);
-        if (column.ground() <= sea) {
+        const DVec3 near = glm::normalize(middle + ((((unit(hash_values(own, 1)) - 0.5) * east) +
+                                                     ((unit(hash_values(own, 2)) - 0.5) * north)) *
+                                                    (side / planet.body.radius)));
+        if (generator.column(near, 0.5).ground() <= sea) {
             continue;
         }
-        if (const std::optional<double> floor = pool_floor(column)) {
-            return VentSite{.direction = direction, .ground = *floor, .pool = true, .key = own};
+        // On the caves begun about it, where one runs under the ground near enough to be found
+        // from it.
+        int looked = 0;
+        for (const CavePiece& piece : generator.caves_begun(near)) {
+            const DVec3 point = 0.5 * (piece.from + piece.to);
+            const DVec3 direction = glm::normalize(point);
+            if (!inside(direction)) {
+                continue;
+            }
+            const Generator::Column column = generator.column(direction, 0.5);
+            const double depth = column.ground() - glm::length(point);
+            if (column.ground() <= sea || depth < 0.0 || depth > pool_reach) {
+                continue;
+            }
+            if (const std::optional<double> floor = pool_floor(column)) {
+                return VentSite{.direction = direction, .ground = *floor, .pool = true, .key = own};
+            }
+            if (++looked == pool_looks) {
+                break;
+            }
         }
     }
     return std::nullopt;

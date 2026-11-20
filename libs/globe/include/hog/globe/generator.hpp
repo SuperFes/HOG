@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/globe/cave_piece.hpp>
 #include <hog/globe/layers.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
@@ -23,6 +24,7 @@ class Formed;
 inline constexpr std::uint32_t generator_version = 1;
 
 class GroundCells;
+class CaveCells;
 namespace terms {
 struct Ground;
 struct Fall;
@@ -183,16 +185,15 @@ public:
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;
         }
-        // Where a cave may lie within `within` metres of the column under its ground, between
-        // `lowest` and `highest` metres from the centre: each stretch as the radii of its bottom
-        // and top, lowest first, apart from each other; nowhere outside them is any cave that
-        // near. Found by casting down the column by the caves' bounded distance, so a column
-        // with none near is cheap.
+        // Where a cave shown at its detail may lie within `within` metres of the column under its
+        // ground, between `lowest` and `highest` metres from the centre: each stretch as the radii
+        // of its bottom and top, lowest first, apart from each other; nowhere outside them is any
+        // cave that near.
         [[nodiscard]] std::vector<std::pair<double, double>> caves(double lowest, double highest,
                                                                    double within) const;
-        // Whether a cave at any detail may lie between `lowest` and `highest` metres from the
-        // centre: under the ground, above the deepest caves reach, where caves gather.
-        [[nodiscard]] bool caves_may_lie(double lowest, double highest) const noexcept;
+        // Whether a cave at any detail may lie within `within` metres of the column between
+        // `lowest` and `highest` metres from the centre.
+        [[nodiscard]] bool caves_may_lie(double lowest, double highest, double within = 0.0) const;
         // A stretch of radius, from its bottom to its top, and whether a cave may be in it.
         struct Boundary {
             double bottom = 0.0;
@@ -228,6 +229,9 @@ public:
         Strata strata_;
         Scatter scatter_;
         std::optional<Rock> rock_; // lying on this column, if one does
+        // The caves' pieces within `gathered_` metres of it, at any detail.
+        std::vector<CavePiece> caves_;
+        double gathered_ = 0.0;
     };
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
@@ -242,6 +246,12 @@ public:
     // direction `toward`, each once: standing over the column through its block where it stands
     // highest, as high as the ground left out of columns() without `placed` would raise there.
     [[nodiscard]] std::vector<Crag> crags_within(DVec3 toward, double reach, double lod) const;
+    // Every cave's piece, at any detail, whose open space may come within `reach` metres of the
+    // line through the centre along the unit direction `toward`.
+    [[nodiscard]] std::vector<CavePiece> caves_within(DVec3 toward, double reach) const;
+    // The caves' pieces begun in the cave cell, about a kilometre across, under the unit
+    // direction `toward`.
+    [[nodiscard]] std::vector<CavePiece> caves_begun(DVec3 toward) const;
     // The crags standing out of `columns`, made at `lod` without `placed`, each once.
     [[nodiscard]] static std::vector<Crag> crags_from(std::span<const Column* const> columns,
                                                       double lod);
@@ -279,8 +289,9 @@ private:
     Derived derived_;
     Shape shape_;
     Layers layers_;
-    // Shared by copies, which read the same ground.
+    // Shared by copies, which read the same ground and caves.
     std::shared_ptr<const GroundCells> cells_;
+    std::shared_ptr<const CaveCells> caves_;
 };
 
 // The finest detail generated into voxels: two of them across, as finer would alias into steps a

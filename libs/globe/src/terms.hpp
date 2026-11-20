@@ -1,17 +1,21 @@
 #pragma once
 
+#include <hog/globe/cave_piece.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/noise.hpp>
 
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
 
 namespace hog::globe {
 class GroundCells;
+class CaveCells;
 } // namespace hog::globe
 
 // The generator's terms, one file each. Heights are metres over the planet's raw radius, as
@@ -39,6 +43,8 @@ struct Context {
     bool crags = true; // standing out of the ground, rather than placed apart
     // Where the cells' ground read is kept to be read again; none, read afresh each time.
     const GroundCells* cells = nullptr;
+    // Where the caves laid out in cave cells are kept; none, laid out afresh each time.
+    const CaveCells* caves = nullptr;
 
     [[nodiscard]] std::uint64_t seed(Term term) const noexcept;
 };
@@ -91,6 +97,8 @@ struct Ground {
 
 // Caves never reach a point more than this many metres from open rock.
 inline constexpr double cave_reach = 50.0;
+// No cave's piece is wider across its line than this: none shows at coarser detail.
+inline constexpr double widest_cave = 18.0;
 // How far under the ground the deepest cave on this planet can open: the stress round a passage
 // overcomes any rock's strength below it, more slowly where gravity is weaker.
 [[nodiscard]] double cave_floor(const Context& context) noexcept;
@@ -98,16 +106,29 @@ inline constexpr double cave_reach = 50.0;
 // Where caves gather, from 0 where none open to 1.
 [[nodiscard]] double cave_district(const Context& context, DVec3 direction) noexcept;
 
-// Metres from a point to the nearest cave's open space: negative inside it, `cave_reach` at most.
-// Each cave keeps to the rock it was dissolved or flowed in, a bed or the basement, as the shape
-// both share. `ground` is the column's, metres from the centre, before caves open it.
-[[nodiscard]] double cave_distance(const Context& context, const Layering& layers, DVec3 direction,
-                                   double radius, double ground, double lod) noexcept;
-// As cave_distance, but never more than the true distance: the noise's steepest slope stands in
-// for its slope at the point, so no cave lies nearer than this in any direction, and a cast
-// can step that far.
-[[nodiscard]] double cave_bound(const Context& context, const Layering& layers, DVec3 direction,
-                                double radius, double ground, double lod) noexcept;
+// The ground caves are laid out under, along a direction: metres from the centre, and what lies
+// under it.
+struct CaveGround {
+    double ground = 0.0;
+    Layering layers;
+};
+using GroundUnder = std::function<CaveGround(DVec3 direction)>;
+
+// The level of the cells caves are laid out in, about a kilometre across.
+[[nodiscard]] int cave_level(const Planet& planet) noexcept;
+// The caves begun in a cave cell, where water found its way into rock that holds them open:
+// passages wandering along the beds as chains of capsules, as wide as the rock opens them, and
+// chambers where water pooled in limestone. Each keeps within the cells beside its own, and under
+// the ground but where it breaks out of it.
+[[nodiscard]] std::vector<CavePiece> lay_out_caves(const Context& context, Cell cell,
+                                                   const GroundUnder& under);
+// The same, the ground read from the context's ground cells, kept in its cave cells.
+[[nodiscard]] std::shared_ptr<const std::vector<CavePiece>> caves_in(const Context& context,
+                                                                     Cell cell);
+// Every piece whose open space may come within `reach` of the line through the centre along the
+// unit `direction`, from the cave cells about it.
+[[nodiscard]] std::vector<CavePiece> caves_near(const Context& context, DVec3 direction,
+                                                double reach);
 
 // The blocks of rock lying on the ground, fallen from the crags above or broken where they lie:
 // one at most to a cell, kept wholly inside it, in cells of `rock_sizes` levels from about

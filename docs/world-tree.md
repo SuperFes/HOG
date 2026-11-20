@@ -122,14 +122,30 @@ Each step is its own commit with tests, and the world stays playable after each.
       solid where ground crossed them, and nodes over a cliff were held crossed in the air. Rockfall's walk had been 79% of a 2 km region's reads, made
       again for every batch of columns. A 32 m region went from 0.35 s to 0.28 s (0.11 s with its
       cells held), a 2 km one from 5.2 s to 3.8 s, now mostly the walk's own cells, which
-      neighbouring fills share, and caves in the distance samples (step 5).
-   3. *Fields from the parent.* Under forming's spacing, a cell's smooth fields (soils, deposits,
+      neighbouring fills share, and caves in the distance samples (part 3).
+   3. *Caves as pieces.* Caves were a field read at every point under the ground: the beds
+      round it, the district's noise, two passage fields and a chamber field, at every sample
+      down to the cave floor, and a node in a district couldn't be held solid without walking
+      the field's bound down it, so the fill went down to its foot through all the rock a cave
+      could lie in. That was 41% of a band 3 bake. Now each cave cell (about a kilometre) lays
+      out its caves once, from its district, ground and beds: passages as chains of capsules
+      wandering along the beds, as wide as the rock opens them, and chambers as balls where
+      water pooled in limestone, kept in the generator's `CaveCells` beside its ground cells. A
+      column holds the pieces near it; a sample costs the distance to those, a node none unless
+      one reaches it, and a piece narrower than a node's detail isn't there for it. The ground
+      under the caves is only rock: a node no piece reaches is solid. A node wider than a few
+      cave cells is answered from depth alone, caves lying anywhere from the lowest ground less
+      the cave floor up to the highest, so coarse bands lay out none. Tests: pieces are
+      deterministic, lie in rock that opens, under the ground but where they break out of it,
+      within the cells beside theirs; a fill opens where pieces are and nowhere else; nodes no
+      piece reaches aren't split.
+   4. *Fields from the parent.* Under forming's spacing, a cell's smooth fields (soils, deposits,
       walls, strength, weathering, the ground before valleys) come from its parent level's cells,
       not from weighing the points again.
-   4. *Noise a level at a time.* A cell adds only the octaves of its own size to its parent's.
-   5. *Valley lists.* The course table, wander baked in, and each cell's list cut from its
+   5. *Noise a level at a time.* A cell adds only the octaves of its own size to its parent's.
+   6. *Valley lists.* The course table, wander baked in, and each cell's list cut from its
       parent's by `wall_bounds`.
-   6. *Gullies, settling, beaches, crags and lakes* made the same way.
+   7. *Gullies, settling, beaches, crags and lakes* made the same way.
 
    Tests: what's made agrees with `Formed::at` within a tolerance on the test world, over land,
    coast and sea floor; time per region, coarse and fine, against the last part's.
