@@ -8,6 +8,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/testing/world.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
@@ -25,8 +26,8 @@ using hog::grid::Key;
 
 namespace {
 
-Reach coarse(double metres) {
-    return {.coarse = metres, .around = std::nullopt, .across = 0.0};
+Reach through(std::uint8_t band) {
+    return {.band = band, .around = std::nullopt, .across = 0.0};
 }
 
 } // namespace
@@ -55,16 +56,17 @@ TEST_CASE("a bake goes down through the band holding the level its size rounds t
 
     // Bands of 3: level 5 lies in band 1, down to level 6.
     const Bands bands{3, grid.depth()};
+    CHECK(bands.band_of(depth_of(grid, grid.size(5))) == 1);
     const Key node{.depth = 3, .x = 2, .y = 5, .z = 1};
-    CHECK(wanted(grid, bands, coarse(grid.size(5)), {.band = 1, .root = node}, true));
-    CHECK_FALSE(wanted(grid, bands, coarse(grid.size(5)), {.band = 2, .root = node}, true));
-    CHECK_FALSE(wanted(grid, bands, coarse(grid.size(5)), {.band = 1, .root = node}, false));
-    CHECK_FALSE(wanted(grid, bands, Reach{}, {.band = 0, .root = Key{}}, true));
+    CHECK(wanted(grid, through(1), {.band = 1, .root = node}, true));
+    CHECK(wanted(grid, through(1), {.band = 0, .root = Key{}}, true));
+    CHECK_FALSE(wanted(grid, through(1), {.band = 2, .root = node}, true));
+    CHECK_FALSE(wanted(grid, through(1), {.band = 1, .root = node}, false));
+    CHECK_FALSE(wanted(grid, Reach{}, {.band = 0, .root = Key{}}, true));
     // Near the place, any band, caves too.
-    const Reach near{.around = grid.centre(node), .across = 1.0};
-    CHECK(wanted(grid, bands, near, {.band = 3, .root = node}, false));
-    CHECK_FALSE(
-        wanted(grid, bands, near, {.band = 3, .root = node.beside(2, 0, 0).value()}, false));
+    const Reach near{.band = std::nullopt, .around = grid.centre(node), .across = 1.0};
+    CHECK(wanted(grid, near, {.band = 3, .root = node}, false));
+    CHECK_FALSE(wanted(grid, near, {.band = 3, .root = node.beside(2, 0, 0).value()}, false));
 }
 
 TEST_CASE("a bake holds what the generator fills, once, and deepens without filling again",
@@ -78,8 +80,8 @@ TEST_CASE("a bake holds what the generator fills, once, and deepens without fill
     const hog::bake::Pace pace{.batch = 2, .fill_levels = 6};
     const hog::baked::Regions regions{bands, pace.fill_levels};
 
-    // Level 4 lies in band 1; regions of both are the root's.
-    const Reach shallow = coarse(grid.size(4));
+    // Bands 0 and 1; regions of both are the root's.
+    const Reach shallow = through(1);
     const auto first = hog::bake::bake(generator, *store, jobs, shallow, pace);
     REQUIRE(first.has_value());
     CHECK(first->filled == 2);
@@ -88,17 +90,23 @@ TEST_CASE("a bake holds what the generator fills, once, and deepens without fill
     const hog::DVec3 direction = glm::normalize(hog::DVec3{0.3, -0.2, 0.93});
     const hog::DVec3 place =
         direction * generator.column(direction, hog::globe::voxel_lod(generator)).ground();
-    const Reach near{.around = place, .across = 0.5};
-    std::vector<std::size_t> reported;
+    const Reach near{.band = std::nullopt, .around = place, .across = 0.5};
+    std::vector<hog::bake::Progressed> reported;
     const auto deeper =
         hog::bake::bake(generator, *store, jobs, near, pace,
-                        [&](std::size_t done, std::size_t) { reported.push_back(done); });
+                        [&](const hog::bake::Progressed& at) { reported.push_back(at); });
     REQUIRE(deeper.has_value());
     CHECK(deeper->kept == 2);
     CHECK(deeper->filled >= bands.count() - 2U);
     CHECK(deeper->shape_bytes > 0);
     REQUIRE_FALSE(reported.empty());
-    CHECK(reported.back() == deeper->filled + deeper->kept);
+    CHECK(reported.back().done == deeper->filled + deeper->kept);
+    CHECK(reported.back().waiting == 0);
+    // The share done only grows, and comes to the whole.
+    for (std::size_t n = 1; n < reported.size(); ++n) {
+        CHECK(reported[n].share >= reported[n - 1].share);
+    }
+    CHECK(reported.back().share == Catch::Approx(1.0).margin(1e-9));
 
     // Every band's region over the place, as a fill of it gives.
     auto snapshot = store->read();

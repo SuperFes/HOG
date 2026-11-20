@@ -143,6 +143,11 @@ private:
 
 // Metres to the open space of the caves in `rock` as `open` as it is there, were it all that rock.
 double cave_in(Fields& fields, Material rock, double open, bool watered, double lod, bool bound) {
+    const bool chambered = rock == Material::Limestone && watered;
+    // Passages are no wider than the rock opens them, however many the district holds.
+    if (tunnel_radius * open <= lod && !chambered) {
+        return cave_reach;
+    }
     const double presence = open * fields.district();
     const double size = tunnel_radius * presence;
     // Passages too narrow for the detail asked for close up smoothly.
@@ -198,6 +203,11 @@ double cave_nearest(const Context& context, const Layering& layers, DVec3 direct
     const double depth = ground - radius;
     const double opening = bound ? std::max(0.0, depth - cave_reach) : depth;
     if (depth >= cave_floor(context)) {
+        return cave_reach;
+    }
+    // Passages close up below the detail asked for, so past it only chambers could show, and
+    // those only in limestone, laid in seas, opened by water.
+    if (lod >= tunnel_radius && !(watered && context.shape->sea)) {
         return cave_reach;
     }
 

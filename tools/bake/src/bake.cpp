@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -13,57 +14,166 @@
 namespace hog::bake {
 namespace {
 
-// The shape trees of `regions`, held or filled now, filling and writing together those the store
-// doesn't hold yet.
-Result<std::vector<grid::Tree<grid::Shape>>>
-bake_regions(const globe::Generator& generator, const grid::Grid& grid, baked::ChunkStore& store,
-             jobs::JobSystem& jobs, std::span<const baked::Region> regions, Baked& baked) {
-    const baked::Bands& bands = store.bands();
-    Result<baked::ChunkStore::Snapshot> snapshot = store.read();
-    if (!snapshot) {
-        return std::unexpected{snapshot.error()};
-    }
-    std::vector<std::optional<grid::Tree<grid::Shape>>> shapes(regions.size());
-    std::vector<baked::Region> missing;
-    std::vector<std::size_t> slots;
-    for (std::size_t n = 0; n < regions.size(); ++n) {
-        const baked::Region region = regions[n];
-        if (baked::holds(*snapshot, region)) {
-            if (auto piece = snapshot->piece<grid::Shape>(region.root, bands.foot(region.band))) {
-                shapes[n] = std::move(piece->tree);
-                continue;
+// A region found, with its share of the whole bake: its parent's split evenly among those wanted
+// under it.
+struct Found {
+    baked::Region region;
+    double share = 0.0;
+};
+
+// A region being filled on the workers.
+struct Filling {
+    Found found;
+    std::unique_ptr<jobs::Async<globe::Filled>> trees;
+};
+
+class Baking {
+public:
+    Baking(const globe::Generator& generator, baked::ChunkStore& store, jobs::JobSystem& jobs,
+           const Reach& reach, const Pace& pace)
+        : generator_{&generator}, grid_{globe::grid_of(generator)}, store_{&store}, jobs_{&jobs},
+          reach_{reach}, regions_{store.bands(), std::max<std::uint8_t>(pace.fill_levels, 1)},
+          batch_{std::max<std::size_t>(pace.batch, 1)} {}
+
+    // Depth first off a stack, regions under one on top in Z order, so only those along the way
+    // down wait and neighbours are filled together; as many filled at once as the batch, those done
+    // written a batch at a time.
+    Result<Baked> run(const Progress& progress) {
+        if (const baked::Region top{}; wanted(grid_, reach_, top, true)) {
+            pending_.push_back({.region = top, .share = 1.0});
+        }
+        Result<baked::ChunkStore::Snapshot> snapshot = store_->read();
+        while (!pending_.empty() || !filling_.empty() || !done_.empty()) {
+            if (!snapshot) {
+                return std::unexpected{snapshot.error()};
+            }
+            start(*snapshot);
+            if (!collect() && !filling_.empty()) {
+                finish(0);
+            }
+            if (done_.size() >= batch_ || (filling_.empty() && !done_.empty())) {
+                if (Result<void> written = write(); !written) {
+                    return std::unexpected{written.error()};
+                }
+                snapshot = store_->read();
+                if (progress) {
+                    progress({.done = baked_.filled + baked_.kept,
+                              .waiting = pending_.size() + filling_.size(),
+                              .share = shared_});
+                }
             }
         }
-        missing.push_back(region);
-        slots.push_back(n);
+        if (progress) {
+            progress({.done = baked_.filled + baked_.kept, .waiting = 0, .share = shared_});
+        }
+        return baked_;
     }
-    std::vector<std::optional<globe::Filled>> filled(missing.size());
-    jobs.parallel_for(static_cast<std::uint32_t>(missing.size()), 1,
-                      [&](jobs::Range range, std::uint32_t) {
-                          for (std::uint32_t n = range.begin; n < range.end; ++n) {
-                              filled[n] = baked::fill_region(generator, grid, bands, missing[n]);
-                          }
-                      });
-    if (Result<void> written = baked::write_regions(store, missing, filled); !written) {
-        return std::unexpected{written.error()};
+
+private:
+    // Takes regions off the stack while there's room: those held go down at once, the rest start
+    // filling.
+    void start(const baked::ChunkStore::Snapshot& snapshot) {
+        const baked::Bands& bands = store_->bands();
+        while (!pending_.empty() && filling_.size() < batch_) {
+            const Found found = pending_.back();
+            const baked::Region region = found.region;
+            pending_.pop_back();
+            if (baked::holds(snapshot, region)) {
+                if (auto piece =
+                        snapshot.piece<grid::Shape>(region.root, bands.foot(region.band))) {
+                    ++baked_.kept;
+                    under(found, piece->tree);
+                    continue;
+                }
+            }
+            filling_.push_back(
+                {.found = found,
+                 .trees = std::make_unique<jobs::Async<globe::Filled>>(*jobs_, [this, region] {
+                     return baked::fill_region(*generator_, grid_, store_->bands(), region);
+                 })});
+        }
     }
-    for (std::size_t m = 0; m < missing.size(); ++m) {
-        globe::Filled& trees = filled[m].value();
-        baked.shape_bytes += trees.shape.encode().size();
-        baked.material_bytes += trees.material.encode().size();
-        baked.water_bytes += trees.water.encode().size();
-        baked.woods_bytes += trees.woods.encode().size();
-        shapes[slots[m]] = std::move(trees.shape);
+
+    // Takes in the fills done; whether there were any.
+    bool collect() {
+        bool any = false;
+        for (std::size_t n = 0; n < filling_.size();) {
+            if (filling_[n].trees->done()) {
+                finish(n);
+                any = true;
+            } else {
+                ++n;
+            }
+        }
+        return any;
     }
-    baked.filled += missing.size();
-    baked.kept += regions.size() - missing.size();
-    std::vector<grid::Tree<grid::Shape>> made;
-    made.reserve(regions.size());
-    for (std::optional<grid::Tree<grid::Shape>>& shape : shapes) {
-        made.push_back(std::move(shape).value());
+
+    // Waits for fill `n` if it's still going, then goes on under it.
+    void finish(std::size_t n) {
+        Filling filling = std::move(filling_[n]);
+        filling_.erase(filling_.begin() + static_cast<std::ptrdiff_t>(n));
+        globe::Filled trees = filling.trees->take();
+        under(filling.found, trees.shape);
+        done_.emplace_back(filling.found.region, std::move(trees));
     }
-    return made;
-}
+
+    // Puts the regions wanted under `found` on the stack, or counts its share done where there
+    // are none.
+    void under(const Found& found, const grid::Tree<grid::Shape>& shape) {
+        const auto next = static_cast<std::uint8_t>(found.region.band + 1);
+        const std::size_t from = pending_.size();
+        if (next < store_->bands().count()) {
+            regions_.each_under(next, found.region.root, shape,
+                                [&](baked::Region region, const auto& leaf) {
+                                    if (wanted(grid_, reach_, region, !leaf.value.is_solid())) {
+                                        pending_.push_back({.region = region, .share = 0.0});
+                                    }
+                                });
+        }
+        const std::size_t count = pending_.size() - from;
+        if (count == 0) {
+            shared_ += found.share;
+            return;
+        }
+        const auto first = pending_.begin() + static_cast<std::ptrdiff_t>(from);
+        for (auto each = first; each != pending_.end(); ++each) {
+            each->share = found.share / static_cast<double>(count);
+        }
+        std::sort(first, pending_.end(),
+                  [](const Found& a, const Found& b) { return a.region.root > b.region.root; });
+    }
+
+    Result<void> write() {
+        std::vector<baked::Region> regions;
+        std::vector<std::optional<globe::Filled>> filled;
+        regions.reserve(done_.size());
+        filled.reserve(done_.size());
+        for (auto& [region, trees] : done_) {
+            baked_.shape_bytes += trees.shape.encode().size();
+            baked_.material_bytes += trees.material.encode().size();
+            baked_.water_bytes += trees.water.encode().size();
+            baked_.woods_bytes += trees.woods.encode().size();
+            regions.push_back(region);
+            filled.emplace_back(std::move(trees));
+        }
+        baked_.filled += done_.size();
+        done_.clear();
+        return baked::write_regions(*store_, regions, filled);
+    }
+
+    const globe::Generator* generator_;
+    grid::Grid grid_;
+    baked::ChunkStore* store_;
+    jobs::JobSystem* jobs_;
+    Reach reach_;
+    baked::Regions regions_;
+    std::size_t batch_;
+    std::vector<Found> pending_;
+    std::vector<Filling> filling_;
+    std::vector<std::pair<baked::Region, globe::Filled>> done_;
+    Baked baked_;
+    double shared_ = 0.0; // of the whole, in regions with nothing wanted under them
+};
 
 } // namespace
 
@@ -78,59 +188,18 @@ std::uint8_t depth_of(const grid::Grid& grid, double metres) noexcept {
     return grid.depth();
 }
 
-bool wanted(const grid::Grid& grid, const baked::Bands& bands, const Reach& reach,
-            baked::Region region, bool surface) noexcept {
+bool wanted(const grid::Grid& grid, const Reach& reach, baked::Region region,
+            bool surface) noexcept {
     if (reach.around && grid.distance(region.root, *reach.around) <= reach.across / 2.0) {
         return true;
     }
-    return surface && std::isfinite(reach.coarse) &&
-           region.band <= bands.band_of(depth_of(grid, reach.coarse));
+    return surface && reach.band && region.band <= *reach.band;
 }
 
 Result<Baked> bake(const globe::Generator& generator, baked::ChunkStore& store,
                    jobs::JobSystem& jobs, const Reach& reach, const Pace& pace,
                    const Progress& progress) {
-    const grid::Grid grid = globe::grid_of(generator);
-    const baked::Bands& bands = store.bands();
-    const baked::Regions regions{bands, std::max<std::uint8_t>(pace.fill_levels, 1)};
-    const std::size_t batch = std::max<std::size_t>(pace.batch, 1);
-    Baked baked;
-    // Depth first: a batch off the top, then the regions under it on top in Z order, so only those
-    // along the way down wait, and neighbours are filled and written together.
-    std::vector<baked::Region> pending;
-    if (const baked::Region top{}; wanted(grid, bands, reach, top, true)) {
-        pending.push_back(top);
-    }
-    std::vector<baked::Region> taken;
-    std::vector<baked::Region> under;
-    while (!pending.empty()) {
-        const std::size_t take = std::min(batch, pending.size());
-        taken.assign(pending.end() - static_cast<std::ptrdiff_t>(take), pending.end());
-        pending.resize(pending.size() - take);
-        auto shapes = bake_regions(generator, grid, store, jobs, taken, baked);
-        if (!shapes) {
-            return std::unexpected{shapes.error()};
-        }
-        under.clear();
-        for (std::size_t n = 0; n < taken.size(); ++n) {
-            const auto next = static_cast<std::uint8_t>(taken[n].band + 1);
-            if (next >= bands.count()) {
-                continue;
-            }
-            regions.each_under(
-                next, taken[n].root, (*shapes)[n], [&](baked::Region region, const auto& found) {
-                    if (wanted(grid, bands, reach, region, !found.value.is_solid())) {
-                        under.push_back(region);
-                    }
-                });
-        }
-        std::ranges::sort(under, std::ranges::greater{}, &baked::Region::root);
-        pending.insert(pending.end(), under.begin(), under.end());
-        if (progress) {
-            progress(baked.filled + baked.kept, pending.size());
-        }
-    }
-    return baked;
+    return Baking{generator, store, jobs, reach, pace}.run(progress);
 }
 
 } // namespace hog::bake

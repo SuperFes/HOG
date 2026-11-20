@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -31,12 +32,13 @@
 namespace {
 
 constexpr std::string_view usage =
-    "usage: hog-bake --store DIR (--coarse METRES | --at LAT,LON [--across METRES] | both | "
-    "--serve)\n"
+    "usage: hog-bake --store DIR (EVERYWHERE | --at LAT,LON [--across METRES] | both | --serve)\n"
     "                [--planet FILE] [--threads N] [--map-gb N]\n"
+    "       EVERYWHERE is one of --coarse METRES, --depth LEVEL or --band BAND\n"
     "Bakes the world's grid into the store at DIR ahead of play: over the whole planet down\n"
-    "to the band holding the first level whose nodes are --coarse metres across or less, and\n"
-    "within --across metres (1000 by default) about --at down to the finest. Regions already\n"
+    "through a band, the one holding the first level whose nodes are --coarse metres across\n"
+    "or less, the one holding level --depth, or band --band itself; and within --across metres\n"
+    "(1000 by default) about --at down to the finest. Regions already\n"
     "held as this generator makes them are kept, so a stopped bake carries on. With --serve,\n"
     "fills what a server's players wait on instead, as its wants table beside the store asks,\n"
     "until stopped. The planet is config/planet.toml where that's found, else the default.\n";
@@ -47,6 +49,8 @@ struct Options {
     std::uint32_t threads = 0;
     std::uint64_t map_gb = 256;
     std::optional<double> coarse;
+    std::optional<std::uint32_t> depth;
+    std::optional<std::uint32_t> band;
     std::optional<std::pair<double, double>> at; // degrees
     double across = 1000.0;
     bool serve = false;
@@ -136,6 +140,10 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.map_gb = static_cast<std::uint64_t>(*given);
     } else if (name == "--coarse" && *given > 0.0) {
         options.coarse = given;
+    } else if (name == "--depth" && *given == std::floor(*given) && *given <= 255.0) {
+        options.depth = static_cast<std::uint32_t>(*given);
+    } else if (name == "--band" && *given == std::floor(*given) && *given <= 255.0) {
+        options.band = static_cast<std::uint32_t>(*given);
     } else if (name == "--across" && *given > 0.0) {
         options.across = *given;
     } else {
@@ -151,17 +159,35 @@ hog::DVec3 direction_of(double latitude, double longitude) {
     return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
 }
 
-int run(std::span<const std::string_view> arguments) {
+// The band baked everywhere, from whichever of --coarse, --depth and --band was given.
+std::expected<std::optional<std::uint8_t>, std::string>
+band_asked(const Options& options, const hog::grid::Grid& grid, const hog::baked::Bands& bands) {
+    if (options.coarse) {
+        return bands.band_of(hog::bake::depth_of(grid, *options.coarse));
+    }
+    if (options.depth) {
+        if (*options.depth > grid.depth()) {
+            return std::unexpected{std::format("--depth goes to {} at most", grid.depth())};
+        }
+        return bands.band_of(static_cast<std::uint8_t>(*options.depth));
+    }
+    if (options.band) {
+        if (*options.band >= bands.count()) {
+            return std::unexpected{std::format("--band goes to {} at most", bands.count() - 1U)};
+        }
+        return static_cast<std::uint8_t>(*options.band);
+    }
+    return std::nullopt;
+}
+
+// The options given, over the planet config where that's found.
+std::expected<Options, std::string> parse(std::span<const std::string_view> arguments) {
     Options options;
     if (std::filesystem::exists("config/planet.toml")) {
         if (const auto loaded = hog::globe::load_planet("config/planet.toml")) {
             options.planet = *loaded;
         }
     }
-    const auto refuse = [](std::string_view why) {
-        std::cerr << std::format("hog-bake: {}\n\n{}", why, usage);
-        return EXIT_FAILURE;
-    };
     for (std::size_t k = 0; k < arguments.size();) {
         if (arguments[k] == "--serve") {
             options.serve = true;
@@ -169,20 +195,40 @@ int run(std::span<const std::string_view> arguments) {
             continue;
         }
         if (k + 1 >= arguments.size()) {
-            return refuse(std::format("{} needs a value", arguments[k]));
+            return std::unexpected{std::format("{} needs a value", arguments[k])};
         }
         if (!apply(options, arguments[k], arguments[k + 1])) {
-            return refuse(std::format("can't take {} {}", arguments[k], arguments[k + 1]));
+            return std::unexpected{std::format("can't take {} {}", arguments[k], arguments[k + 1])};
         }
         k += 2;
     }
+    return options;
+}
+
+int run(std::span<const std::string_view> arguments) {
+    const auto refuse = [](std::string_view why) {
+        std::cerr << std::format("hog-bake: {}\n\n{}", why, usage);
+        return EXIT_FAILURE;
+    };
+    const auto parsed = parse(arguments);
+    if (!parsed) {
+        return refuse(parsed.error());
+    }
+    const Options& options = *parsed;
     if (!options.store) {
         return refuse("--store is required");
     }
-    if (!options.coarse && !options.at && !options.serve) {
-        return refuse("give --coarse, --at, or both, to say what to bake, or --serve");
+    const int everywhere = static_cast<int>(options.coarse.has_value()) +
+                           static_cast<int>(options.depth.has_value()) +
+                           static_cast<int>(options.band.has_value());
+    if (everywhere > 1) {
+        return refuse("give one of --coarse, --depth and --band");
     }
-    if (options.serve && (options.coarse || options.at)) {
+    if (everywhere == 0 && !options.at && !options.serve) {
+        return refuse("give --coarse, --depth or --band, --at, or both, to say what to bake, or "
+                      "--serve");
+    }
+    if (options.serve && (everywhere > 0 || options.at)) {
         return refuse("--serve bakes nothing ahead");
     }
     const auto formed = std::chrono::steady_clock::now();
@@ -205,9 +251,13 @@ int run(std::span<const std::string_view> arguments) {
     if (options.serve) {
         return serve(generator, *store, options.threads);
     }
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    const hog::baked::Bands& bands = store->bands();
     hog::bake::Reach reach;
-    if (options.coarse) {
-        reach.coarse = *options.coarse;
+    if (auto band = band_asked(options, grid, bands)) {
+        reach.band = *band;
+    } else {
+        return refuse(band.error());
     }
     if (options.at) {
         const hog::DVec3 direction = direction_of(options.at->first, options.at->second);
@@ -215,26 +265,33 @@ int run(std::span<const std::string_view> arguments) {
             direction * generator.column(direction, hog::globe::voxel_lod(generator)).ground();
         reach.across = options.across;
     }
-    const hog::grid::Grid grid = hog::globe::grid_of(generator);
-    if (options.coarse) {
-        const std::uint8_t depth = hog::bake::depth_of(grid, *options.coarse);
-        const hog::baked::Bands& bands = store->bands();
-        const std::uint8_t foot = bands.foot(bands.band_of(depth));
+    if (reach.band) {
+        const std::uint8_t foot = bands.foot(*reach.band);
         std::cerr << std::format(
-            "everywhere down to level {} of {}, nodes {:.3g} m across, through its band to {}\n",
-            depth, grid.depth(), grid.size(depth), foot);
+            "everywhere through band {} of {}, down to level {} of {}, nodes {:.3g} m across\n",
+            *reach.band, bands.count(), foot, grid.depth(), grid.size(foot));
     }
     hog::jobs::JobSystem jobs{options.threads};
     const auto started = std::chrono::steady_clock::now();
+    // The rate over the last few seconds, as the whole run's average hides how it goes now.
+    auto lately = started;
+    std::size_t done_lately = 0;
     const auto baked = hog::bake::bake(
         generator, *store, jobs, reach,
         {.batch = std::size_t{4} * jobs.thread_count(), .fill_levels = 6},
-        [&](std::size_t done, std::size_t waiting) {
-            const double seconds =
-                std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-            std::cerr << std::format(
-                "{} regions done, {:.1f} a second, {} found waiting, {:.0f} s\n", done,
-                static_cast<double>(done) / std::max(seconds, 1e-3), waiting, seconds);
+        [&](const hog::bake::Progressed& at) {
+            const auto now = std::chrono::steady_clock::now();
+            const double since = std::chrono::duration<double>(now - lately).count();
+            if (since >= 2.0 || at.waiting == 0) {
+                const double rate =
+                    static_cast<double>(at.done - done_lately) / std::max(since, 1e-3);
+                lately = now;
+                done_lately = at.done;
+                std::cerr << std::format("{:5.1f}% {} regions done, {:.1f} a second lately, {} "
+                                         "found waiting, {:.0f} s\n",
+                                         100.0 * at.share, at.done, rate, at.waiting,
+                                         std::chrono::duration<double>(now - started).count());
+            }
         });
     if (!baked) {
         std::cerr << std::format("hog-bake: {}\n", baked.error());

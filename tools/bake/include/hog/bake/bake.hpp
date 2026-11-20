@@ -11,16 +11,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <optional>
 
 namespace hog::bake {
 
 // How far a bake goes, down from the root through what each band leaves open: where the surface
-// runs, down to the band holding the level `coarse` metres rounds to; within `across` / 2 metres
-// of `around` (metres from the centre), down to the finest, caves and all.
+// runs, down through band `band`; within `across` / 2 metres of `around` (metres from the centre),
+// down to the finest, caves and all.
 struct Reach {
-    double coarse = std::numeric_limits<double>::infinity();
+    std::optional<std::uint8_t> band;
     std::optional<DVec3> around;
     double across = 0.0;
 };
@@ -30,9 +29,9 @@ struct Reach {
 [[nodiscard]] std::uint8_t depth_of(const grid::Grid& grid, double metres) noexcept;
 
 // Whether a bake reaching as `reach` fills `region`: near the place, or where `surface` says the
-// ground runs through it and its band is no deeper than the one holding the level asked for.
-[[nodiscard]] bool wanted(const grid::Grid& grid, const baked::Bands& bands, const Reach& reach,
-                          baked::Region region, bool surface) noexcept;
+// ground runs through it and its band is no deeper than the one asked for.
+[[nodiscard]] bool wanted(const grid::Grid& grid, const Reach& reach, baked::Region region,
+                          bool surface) noexcept;
 
 struct Baked {
     std::size_t filled = 0; // regions filled and written
@@ -44,18 +43,28 @@ struct Baked {
     std::size_t woods_bytes = 0;
 };
 
-// Called after each batch with the regions done and those found but not done yet.
-using Progress = std::function<void(std::size_t done, std::size_t waiting)>;
+struct Progressed {
+    std::size_t done = 0;    // regions filled or found held
+    std::size_t waiting = 0; // found but not done yet
+    // Roughly how much of the bake is done, 0 to 1: each region's share of the whole is its
+    // parent's split evenly among those wanted under it, done once nothing's wanted under it.
+    double share = 0.0;
+};
+
+// Called after each write, and once at the end.
+using Progress = std::function<void(const Progressed&)>;
 
 struct Pace {
-    // Regions filled at once across the job system's threads and written together.
+    // Regions filling at once across the job system's threads, and how many done are written
+    // together.
     std::size_t batch = 64;
     // How many levels one fill takes at most.
     std::uint8_t fill_levels = 6;
 };
 
 // Fills the regions `reach` asks for that the store doesn't hold yet as this generator makes them,
-// a batch at a time, each batch written together, so a stopped bake carries on where it left off.
+// as a queue on the job system's workers, those done written a batch at a time, so a stopped bake
+// carries on where it left off.
 // It goes depth first, so what it holds in memory is bounded by the regions along one way down,
 // however many it fills. Regions held are read for what's open under them.
 [[nodiscard]] Result<Baked> bake(const globe::Generator& generator, baked::ChunkStore& store,
