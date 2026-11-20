@@ -75,6 +75,9 @@ TEST_CASE("block meshes are kept until a piece they read changes", "[client][blo
     const GroundChanges first = meshes.collect();
     const std::vector<std::uint64_t> all = shown_keys(first);
     REQUIRE(!all.empty());
+    CHECK(meshes.stats().plans == 1);
+    CHECK(meshes.stats().meshed >= all.size());
+    CHECK(meshes.stats().wasted == 0);
     CHECK(std::ranges::adjacent_find(all) == all.end());
     CHECK(first.gone.empty());
     for (const auto& shown : first.shown) {

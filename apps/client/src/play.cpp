@@ -1057,6 +1057,13 @@ struct StreamedGround {
     bool pieces_came = false;         // since what's drawn of them was last worked out
     std::optional<DVec3> pieces_seen; // where from
     MonotonicClock::time_point wanted_at;
+    // Chunks taken in since starting, the milliseconds of frames that took, and when it started.
+    std::size_t chunks_taken = 0;
+    double taking_ms = 0.0;
+    MonotonicClock::time_point started = MonotonicClock::now();
+    [[nodiscard]] double since_start() const {
+        return std::chrono::duration<double>(MonotonicClock::now() - started).count();
+    }
     bool blocks_shown = false; // any drawn from the pieces yet
 };
 
@@ -1142,6 +1149,7 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
                  DVec3 facing) {
     HOG_ZONE("pieces");
     const std::vector<protocol::SentChunk> chunks = connection.take_chunks();
+    const MonotonicClock::time_point taking = MonotonicClock::now();
     for (const protocol::SentChunk& chunk : chunks) {
         if (auto taken = ground.pieces.take(chunk); !taken) {
             log::warn(connection_log, "can't hold a chunk sent: {}", taken.error());
@@ -1155,6 +1163,9 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
             log::warn(connection_log, "can't keep the chunks sent: {}", kept.error());
         }
     }
+    ground.chunks_taken += chunks.size();
+    ground.taking_ms +=
+        std::chrono::duration<double, std::milli>(MonotonicClock::now() - taking).count();
     if (const std::vector<protocol::DonePiece> done = connection.take_done(); !done.empty()) {
         ground.requests.done(done);
         ground.asked_came = true;
@@ -1254,6 +1265,15 @@ save_report(Connection& connection, const StreamedGround& ground, const render::
     about.lines.emplace_back("piece bytes", std::to_string(ground.pieces.bytes()));
     about.lines.emplace_back("blocks meshing", std::to_string(ground.block_meshes.in_flight()));
     about.lines.emplace_back("blocks settled", ground.block_meshes.settled() ? "yes" : "no");
+    const client::BlockMeshes::Stats& meshing = ground.block_meshes.stats();
+    about.lines.emplace_back("drawing plans", std::format("{}, the last {:.1f} ms", meshing.plans,
+                                                          meshing.last_plan_ms));
+    about.lines.emplace_back("blocks meshed", std::format("{}, {} of them wanted otherwise by then",
+                                                          meshing.meshed, meshing.wasted));
+    about.lines.emplace_back("chunks taken",
+                             std::format("{}, {:.1f} ms of frames taking them in all",
+                                         ground.chunks_taken, ground.taking_ms));
+    about.lines.emplace_back("since connecting", std::format("{:.1f} s", ground.since_start()));
     const client::Timing cpu = times.cpu();
     about.lines.emplace_back("frame ms",
                              std::format("mean {:.2f} worst {:.2f}", cpu.mean, cpu.worst));

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <iterator>
 #include <utility>
 
@@ -119,14 +120,13 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
     planning_ = std::make_unique<jobs::Async<Plan>>(
         *jobs_, [grid = grid_, cells = cells_, entries = held.entries(),
                  bodies = held.shared_bodies(), eye, known = std::move(known)] mutable {
-            Plan plan{.wanted = {},
-                      .queued = {},
-                      .pieces = std::make_shared<const PiecesSnapshot>(grid, std::move(entries)),
-                      .bodies = std::move(bodies)};
+            const auto started = std::chrono::steady_clock::now();
+            const PiecesSnapshot pieces{grid, std::move(entries)};
+            Plan plan{.wanted = {}, .queued = {}, .bodies = std::move(bodies)};
             std::vector<std::pair<double, grid::Key>> to_mesh;
-            for (const Block& block : ground_blocks(*plan.pieces, eye, cells)) {
+            for (const Block& block : ground_blocks(pieces, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
-                drawing.look = {.block = block, .reads = plan.pieces->around(block.node)};
+                drawing.look = {.block = block, .reads = pieces.around(block.node)};
                 if (const auto found = known.find(block.node);
                     found != known.end() && found->second.look.same(drawing.look)) {
                     drawing.mesh = found->second.mesh;
@@ -139,6 +139,9 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
             for (const auto& [metres, node] : to_mesh) {
                 plan.queued.push_back(node);
             }
+            plan.milliseconds = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - started)
+                                    .count();
             return plan;
         });
 }
@@ -150,8 +153,9 @@ void BlockMeshes::take_plan(bool wait) {
     Plan plan = planning_->take();
     planning_.reset();
     wanted_ = std::move(plan.wanted);
-    pieces_ = std::move(plan.pieces);
     bodies_ = std::move(plan.bodies);
+    ++stats_.plans;
+    stats_.last_plan_ms = plan.milliseconds;
     pending_.clear();
     for (const auto& [node, drawing] : wanted_) {
         const auto found = drawn_.find(node);
@@ -180,7 +184,9 @@ void BlockMeshes::start() {
             {.node = node,
              .look = look,
              .job = std::make_unique<jobs::Async<Meshed>>(
-                 *jobs_, [grid = grid_, pieces = pieces_, bodies = bodies_, block = look.block] {
+                 *jobs_, [grid = grid_, reads = look.reads, bodies = bodies_, block = look.block] {
+                     // Only what the block reads, so looking it up stays in the cache.
+                     const auto pieces = std::make_shared<const PiecesSnapshot>(grid, reads);
                      GroundField ground{*pieces};
                      Meshed meshed{.ground = std::make_shared<const terrain::BlockMesh>(
                                        block_of(mesh_block(grid, block, ground.field()))),
@@ -203,11 +209,14 @@ void BlockMeshes::gather(bool wait) {
             continue;
         }
         Meshed mesh = work.job->take();
+        ++stats_.meshed;
         // Wanted otherwise since it was started, it's left for the mesh queued as it's wanted.
         if (const auto found = wanted_.find(work.node);
             found != wanted_.end() && found->second.look.same(work.look)) {
             found->second.mesh = std::move(mesh);
             pending_.insert(work.node);
+        } else {
+            ++stats_.wasted;
         }
     }
     working_ = std::move(still);

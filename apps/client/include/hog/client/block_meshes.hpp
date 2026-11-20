@@ -73,6 +73,16 @@ public:
     // Each block drawn now, in the order of its node.
     [[nodiscard]] std::vector<DrawnBlock> drawn() const;
 
+    // How much work drawing's taken: the plans made, the last one's milliseconds, the blocks
+    // meshed, and of those how many were wanted otherwise by the time they were done.
+    struct Stats {
+        std::size_t plans = 0;
+        double last_plan_ms = 0.0;
+        std::size_t meshed = 0;
+        std::size_t wasted = 0;
+    };
+    [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
+
     [[nodiscard]] std::size_t in_flight() const noexcept {
         return queued_.size() + working_.size() + pending_.size() + (planning_ ? 1 : 0);
     }
@@ -100,8 +110,8 @@ private:
     struct Plan {
         Drawings wanted;
         std::vector<grid::Key> queued; // nearest first
-        std::shared_ptr<const PiecesSnapshot> pieces;
         std::shared_ptr<const grid::WaterBodies> bodies;
+        double milliseconds = 0.0;
     };
     struct Work {
         grid::Key node;
@@ -130,7 +140,6 @@ private:
     std::uint8_t cells_;
     Drawings drawn_;
     Drawings wanted_;
-    std::shared_ptr<const PiecesSnapshot> pieces_; // what's wanted is meshed from
     std::shared_ptr<const grid::WaterBodies> bodies_;
     std::deque<grid::Key> queued_; // nearest first
     std::vector<Work> working_;
@@ -139,6 +148,7 @@ private:
     std::size_t most_working_;
     std::unique_ptr<jobs::Async<Plan>> planning_;
     GroundChanges changes_;
+    Stats stats_;
 };
 
 } // namespace hog::client
