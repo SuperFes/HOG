@@ -685,9 +685,9 @@ struct Ball {
         const auto x = read<std::uint32_t>(in, "a chunk");
         const auto y = read<std::uint32_t>(in, "a chunk");
         const auto z = read<std::uint32_t>(in, "a chunk");
-        const auto version = read<std::uint64_t>(in, "a chunk");
+        const auto stamp = read<std::uint64_t>(in, "a chunk");
         const auto length = read<std::uint32_t>(in, "a chunk");
-        if (!kind || !band || !depth || !x || !y || !z || !version || !length) {
+        if (!kind || !band || !depth || !x || !y || !z || !stamp || !length) {
             return make_error(ErrorCode::Parse, "a chunk cut short");
         }
         if (*kind > 3) {
@@ -708,8 +708,34 @@ struct Ball {
                                  .x = *x,
                                  .y = *y,
                                  .z = *z,
-                                 .version = *version,
+                                 .version = *stamp,
                                  .tree = {tree->begin(), tree->end()}});
+    }
+    const auto done = read<std::uint16_t>(in, "pieces done");
+    if (!done) {
+        return std::unexpected(done.error());
+    }
+    if (*done > most_asked) {
+        return make_error(
+            ErrorCode::OutOfRange,
+            std::format("{} pieces done in a message; {} allowed", *done, most_asked));
+    }
+    chunks.done.reserve(*done);
+    for (std::uint16_t n = 0; n < *done; ++n) {
+        const auto depth = read<std::uint8_t>(in, "a piece done");
+        const auto x = read<std::uint32_t>(in, "a piece done");
+        const auto y = read<std::uint32_t>(in, "a piece done");
+        const auto z = read<std::uint32_t>(in, "a piece done");
+        const auto to = read<std::uint8_t>(in, "a piece done");
+        const auto whole = read<std::uint8_t>(in, "a piece done");
+        if (!depth || !x || !y || !z || !to || !whole) {
+            return make_error(ErrorCode::Parse, "a piece done cut short");
+        }
+        if (*whole > 1) {
+            return make_error(ErrorCode::OutOfRange, "a piece done neither whole nor not");
+        }
+        chunks.done.push_back(
+            {.depth = *depth, .x = *x, .y = *y, .z = *z, .to = *to, .whole = *whole == 1});
     }
     return finished(in, std::move(chunks));
 }
@@ -731,16 +757,41 @@ struct Ball {
         const auto y = read<std::uint32_t>(in, "a piece asked for");
         const auto z = read<std::uint32_t>(in, "a piece asked for");
         const auto to = read<std::uint8_t>(in, "a piece asked for");
+        const auto held = read<std::uint8_t>(in, "a piece asked for");
         const auto priority = read<std::uint32_t>(in, "a piece asked for");
-        if (!depth || !x || !y || !z || !to || !priority) {
+        if (!depth || !x || !y || !z || !to || !held || !priority) {
             return make_error(ErrorCode::Parse, "a piece asked for cut short");
         }
         const auto size = std::bit_cast<float>(*priority);
         if (!std::isfinite(size)) {
             return make_error(ErrorCode::OutOfRange, "a piece asked for ranked by no finite size");
         }
-        ask.pieces.push_back(
-            {.depth = *depth, .x = *x, .y = *y, .z = *z, .to = *to, .priority = size});
+        ask.pieces.push_back({.depth = *depth,
+                              .x = *x,
+                              .y = *y,
+                              .z = *z,
+                              .to = *to,
+                              .held = *held,
+                              .priority = size});
+    }
+    const auto dropped = read<std::uint16_t>(in, "pieces dropped");
+    if (!dropped) {
+        return std::unexpected(dropped.error());
+    }
+    if (*dropped > most_asked) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} pieces dropped; {} allowed", *dropped, most_asked));
+    }
+    ask.dropped.reserve(*dropped);
+    for (std::uint16_t n = 0; n < *dropped; ++n) {
+        const auto depth = read<std::uint8_t>(in, "a piece dropped");
+        const auto x = read<std::uint32_t>(in, "a piece dropped");
+        const auto y = read<std::uint32_t>(in, "a piece dropped");
+        const auto z = read<std::uint32_t>(in, "a piece dropped");
+        if (!depth || !x || !y || !z) {
+            return make_error(ErrorCode::Parse, "a piece dropped cut short");
+        }
+        ask.dropped.push_back({.depth = *depth, .x = *x, .y = *y, .z = *z});
     }
     return finished(in, std::move(ask));
 }
@@ -978,6 +1029,16 @@ void write_chunks(ByteWriter& out, const Chunks& chunks) {
         out.write(static_cast<std::uint32_t>(chunk.tree.size()));
         out.write_bytes(chunk.tree);
     }
+    HOG_ASSERT(chunks.done.size() <= most_asked, "too many pieces done at once");
+    out.write(static_cast<std::uint16_t>(chunks.done.size()));
+    for (const DonePiece& done : chunks.done) {
+        out.write(done.depth);
+        out.write(done.x);
+        out.write(done.y);
+        out.write(done.z);
+        out.write(done.to);
+        out.write(static_cast<std::uint8_t>(done.whole ? 1 : 0));
+    }
 }
 
 void write_ask_pieces(ByteWriter& out, const AskPieces& ask) {
@@ -990,7 +1051,16 @@ void write_ask_pieces(ByteWriter& out, const AskPieces& ask) {
         out.write(piece.y);
         out.write(piece.z);
         out.write(piece.to);
+        out.write(piece.held);
         out.write(std::bit_cast<std::uint32_t>(piece.priority));
+    }
+    HOG_ASSERT(ask.dropped.size() <= most_asked, "too many pieces to drop at once");
+    out.write(static_cast<std::uint16_t>(ask.dropped.size()));
+    for (const DroppedPiece& piece : ask.dropped) {
+        out.write(piece.depth);
+        out.write(piece.x);
+        out.write(piece.y);
+        out.write(piece.z);
     }
 }
 

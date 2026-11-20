@@ -738,9 +738,10 @@ HeardChunks asked_root(Server& server, std::chrono::seconds patience) {
                 auto decoded = hog::protocol::decode(message->bytes());
                 REQUIRE(decoded);
                 if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
-                    REQUIRE(client.send(hog::net::Delivery::Reliable,
-                                        hog::protocol::encode(hog::protocol::AskPieces{
-                                            .pieces = {{.to = 3, .priority = 1.0F}}})));
+                    REQUIRE(
+                        client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::AskPieces{
+                                        .pieces = {{.to = 3, .priority = 1.0F}}, .dropped = {}})));
                 }
                 heard.hear(*decoded);
             }

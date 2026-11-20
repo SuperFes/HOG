@@ -1,6 +1,7 @@
 #include <hog/client/piece_asking.hpp>
 
 #include <algorithm>
+#include <set>
 
 namespace hog::client {
 namespace {
@@ -97,21 +98,117 @@ std::vector<PieceWish> pieces_to_ask(const HeldPieces& held, DVec3 eye, std::opt
     return wishes;
 }
 
-protocol::AskPieces ask_of(const std::vector<PieceWish>& wishes) {
+namespace {
+
+// The deepest depth short of `to` that `held` covers all of `node` down to; 0 where it doesn't
+// cover the node itself.
+std::uint8_t held_down_to(const HeldPieces& held, grid::Key node, std::uint8_t to) {
+    if (!held.covers(node, node.depth)) {
+        return 0;
+    }
+    std::uint8_t depth = node.depth;
+    while (depth + 1 < to && held.covers(node, static_cast<std::uint8_t>(depth + 1))) {
+        ++depth;
+    }
+    return depth;
+}
+
+} // namespace
+
+std::optional<protocol::AskPieces> PieceRequests::ask(const HeldPieces& held,
+                                                      std::span<const PieceWish> wishes) {
     protocol::AskPieces ask;
-    ask.pieces.reserve(std::min(wishes.size(), protocol::most_asked));
-    for (const PieceWish& wish : wishes) {
-        if (ask.pieces.size() == protocol::most_asked) {
-            break;
-        }
+    Needed needed;
+    const auto add = [&](const PieceWish& wish) {
         ask.pieces.push_back({.depth = wish.node.depth,
                               .x = wish.node.x,
                               .y = wish.node.y,
                               .z = wish.node.z,
                               .to = wish.depth,
+                              .held = held_down_to(held, wish.node, wish.depth),
                               .priority = static_cast<float>(wish.priority)});
+    };
+    for (const PieceWish& wish : wishes) {
+        if (const auto found = open_.find(wish.node); found != open_.end()) {
+            needed.insert(wish.node);
+            if (found->second.depth < wish.depth && ask.pieces.size() < protocol::most_asked) {
+                // Asked again deeper, in place of what was asked.
+                asked_ += found->second.waiting ? 1U : 0U;
+                found->second = {.depth = wish.depth, .waiting = false, .priority = wish.priority};
+                add(wish);
+            }
+            continue;
+        }
+        // Coming whole with a node over it that's open deep enough.
+        if (const std::optional<grid::Key> over = open_over(wish.node, wish.depth)) {
+            needed.insert(*over);
+            continue;
+        }
+        if (asked_ >= window_ || ask.pieces.size() >= protocol::most_asked) {
+            continue;
+        }
+        open_.emplace(wish.node, Open{.depth = wish.depth, .priority = wish.priority});
+        ++asked_;
+        needed.insert(wish.node);
+        add(wish);
+    }
+    drop_unneeded(needed, ask);
+    if (ask.pieces.empty() && ask.dropped.empty()) {
+        return std::nullopt;
     }
     return ask;
+}
+
+std::optional<grid::Key> PieceRequests::open_over(grid::Key node, std::uint8_t depth) const {
+    for (std::uint8_t over = node.depth; over-- > 0;) {
+        const grid::Key key = node.ancestor(over);
+        if (const auto found = open_.find(key);
+            found != open_.end() && found->second.depth >= depth) {
+            return key;
+        }
+    }
+    return std::nullopt;
+}
+
+void PieceRequests::drop_unneeded(const Needed& needed, protocol::AskPieces& ask) {
+    for (auto at = open_.begin(); at != open_.end() && ask.dropped.size() < protocol::most_asked;) {
+        if (needed.contains(at->first)) {
+            ++at;
+            continue;
+        }
+        ask.dropped.push_back(
+            {.depth = at->first.depth, .x = at->first.x, .y = at->first.y, .z = at->first.z});
+        asked_ -= at->second.waiting ? 0U : 1U;
+        at = open_.erase(at);
+    }
+}
+
+std::vector<PieceWish> PieceRequests::open() const {
+    std::vector<PieceWish> wishes;
+    wishes.reserve(open_.size());
+    for (const auto& [node, open] : open_) {
+        wishes.push_back({.node = node, .depth = open.depth, .priority = open.priority});
+    }
+    return wishes;
+}
+
+void PieceRequests::done(std::span<const protocol::DonePiece> done) {
+    for (const protocol::DonePiece& piece : done) {
+        const grid::Key node{.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z};
+        const auto found = open_.find(node);
+        // Told of what was asked before it was asked again deeper, more is still to come.
+        if (found == open_.end() || found->second.depth != piece.to) {
+            continue;
+        }
+        if (!found->second.waiting) {
+            --asked_;
+        }
+        if (piece.whole) {
+            open_.erase(found);
+        } else {
+            found->second.waiting = true;
+        }
+    }
 }
 
 } // namespace hog::client

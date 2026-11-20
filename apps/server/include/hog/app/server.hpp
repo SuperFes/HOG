@@ -145,7 +145,8 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
-    // Has the player sent the grid pieces it asks for, and only those, from now on.
+    // Has the player sent the grid pieces it asks for besides those it asked before, and those it
+    // no longer wants.
     void ask_pieces(net::ConnectionId connection, const protocol::AskPieces& ask);
     // Writes what's kept of the player beside the report it took at `stamp`.
     void report(net::ConnectionId connection, const protocol::Report& asked);

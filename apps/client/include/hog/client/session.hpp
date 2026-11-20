@@ -100,6 +100,11 @@ public:
     [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() noexcept {
         return std::exchange(chunks_, {});
     }
+    // The nodes asked for the server said were done since last asked, oldest first; each after
+    // the chunks it finishes.
+    [[nodiscard]] std::vector<protocol::DonePiece> take_done() noexcept {
+        return std::exchange(done_, {});
+    }
     // Water bodies the server sent since last asked, oldest first, each as
     // `grid::WaterBodies::encode` codes them.
     [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() noexcept {
@@ -166,6 +171,7 @@ private:
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentTile> tiles_;
     std::vector<protocol::SentChunk> chunks_;
+    std::vector<protocol::DonePiece> done_;
     std::vector<std::vector<std::byte>> bodies_;
     GrainField grains_;
     std::uint32_t world_rate_ = 1;

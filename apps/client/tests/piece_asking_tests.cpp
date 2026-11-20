@@ -180,13 +180,139 @@ TEST_CASE("a client asks for what's nearest first, however big what's further is
     }
 }
 
-TEST_CASE("piece wishes go over the wire as asked, no more than allowed",
+namespace {
+
+PieceWish wish_at(Key node, std::uint8_t depth, double priority = 1.0) {
+    return {.node = node, .depth = depth, .priority = priority};
+}
+
+hog::protocol::DonePiece done_of(Key node, std::uint8_t depth, bool whole) {
+    return {
+        .depth = node.depth, .x = node.x, .y = node.y, .z = node.z, .to = depth, .whole = whole};
+}
+
+std::vector<Key> asked_in(const hog::protocol::AskPieces& ask) {
+    std::vector<Key> nodes;
+    nodes.reserve(ask.pieces.size());
+    for (const hog::protocol::AskedPiece& piece : ask.pieces) {
+        nodes.push_back({.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z});
+    }
+    return nodes;
+}
+
+std::vector<Key> dropped_in(const hog::protocol::AskPieces& ask) {
+    std::vector<Key> nodes;
+    nodes.reserve(ask.dropped.size());
+    for (const hog::protocol::DroppedPiece& piece : ask.dropped) {
+        nodes.push_back({.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z});
+    }
+    return nodes;
+}
+
+} // namespace
+
+TEST_CASE("pieces are asked once each and no more at once than the window lets",
           "[client][piece_asking]") {
-    const std::vector<PieceWish> wishes(
-        hog::protocol::most_asked + 5,
-        PieceWish{.node = Key{.depth = 5, .x = 1}, .depth = 8, .priority = 0.5});
-    const hog::protocol::AskPieces ask = hog::client::ask_of(wishes);
-    REQUIRE(ask.pieces.size() == hog::protocol::most_asked);
-    CHECK(ask.pieces.front() ==
-          hog::protocol::AskedPiece{.depth = 5, .x = 1, .to = 8, .priority = 0.5F});
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const hog::client::HeldPieces held{grid};
+    std::vector<PieceWish> wishes;
+    std::vector<Key> nodes;
+    wishes.reserve(10);
+    nodes.reserve(10);
+    for (std::uint32_t x = 0; x < 10; ++x) {
+        nodes.push_back({.depth = 5, .x = x});
+        wishes.push_back(wish_at(nodes.back(), 8, 10.0 - x));
+    }
+    hog::client::PieceRequests requests{4};
+    const hog::protocol::AskPieces first = requests.ask(held, wishes).value();
+    CHECK(asked_in(first) == std::vector(nodes.begin(), nodes.begin() + 4));
+    CHECK(first.dropped.empty());
+    CHECK(first.pieces.front() ==
+          hog::protocol::AskedPiece{.depth = 5, .x = 0, .to = 8, .held = 0, .priority = 10.0F});
+    CHECK(requests.asked() == 4);
+    // Asked already, nothing goes again.
+    CHECK_FALSE(requests.ask(held, wishes));
+
+    // Done whole, done short, and word of a depth not asked, which is passed over.
+    const std::vector<hog::protocol::DonePiece> done{
+        done_of(nodes[0], 8, true), done_of(nodes[1], 8, false), done_of(nodes[2], 9, true)};
+    requests.done(done);
+    CHECK(requests.asked() == 2);
+    CHECK(requests.waiting() == 1);
+    // Held now, the one done whole is wished no more.
+    wishes.erase(wishes.begin());
+    const hog::protocol::AskPieces next = requests.ask(held, wishes).value();
+    CHECK(asked_in(next) == std::vector(nodes.begin() + 4, nodes.begin() + 6));
+    CHECK(next.dropped.empty());
+    CHECK(requests.asked() == 4);
+}
+
+TEST_CASE("what no wish needs is dropped and what a node over it brings isn't asked",
+          "[client][piece_asking]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const hog::client::HeldPieces held{grid};
+    const Key one{.depth = 5, .x = 0};
+    const Key two{.depth = 5, .x = 1};
+    hog::client::PieceRequests requests;
+    REQUIRE(requests.ask(held, std::vector{wish_at(one, 8), wish_at(two, 8)}));
+
+    // Its children wished no deeper than it was asked come with it; the other isn't wished.
+    std::vector<PieceWish> children;
+    children.reserve(8);
+    for (std::size_t octant = 0; octant < 8; ++octant) {
+        children.push_back(wish_at(one.child(octant), 8));
+    }
+    const hog::protocol::AskPieces narrowed = requests.ask(held, children).value();
+    CHECK(narrowed.pieces.empty());
+    CHECK(dropped_in(narrowed) == std::vector{two});
+    CHECK(requests.asked() == 1);
+
+    // Wished deeper, it's asked again in its own place.
+    const hog::protocol::AskPieces deeper =
+        requests.ask(held, std::vector{wish_at(one, 10)}).value();
+    CHECK(asked_in(deeper) == std::vector{one});
+    CHECK(deeper.pieces.front().to == 10);
+    CHECK(deeper.dropped.empty());
+    CHECK(requests.asked() == 1);
+
+    // A node under it wished deeper still is asked, and it's dropped.
+    const hog::protocol::AskPieces under =
+        requests.ask(held, std::vector{wish_at(one.child(3), 12)}).value();
+    CHECK(asked_in(under) == std::vector{one.child(3)});
+    CHECK(dropped_in(under) == std::vector{one});
+    CHECK(requests.asked() == 1);
+    // One waiting on fills goes when no longer wished, and holds up nothing.
+    const std::vector<hog::protocol::DonePiece> waiting{done_of(one.child(3), 12, false)};
+    requests.done(waiting);
+    CHECK(requests.asked() == 0);
+    CHECK(requests.waiting() == 1);
+    const hog::protocol::AskPieces none = requests.ask(held, std::vector<PieceWish>{}).value();
+    CHECK(dropped_in(none) == std::vector{one.child(3)});
+    CHECK(requests.waiting() == 0);
+}
+
+TEST_CASE("a piece is asked with how deep what's held covers it", "[client][piece_asking]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    hog::client::HeldPieces held{grid};
+    const Key node = grid.key_at(hog::sloped::on_ground, 5).value();
+    answer(held, std::vector{wish_at(node, 7)});
+    REQUIRE(held.covers(node, 7));
+    REQUIRE_FALSE(held.covers(node, 8));
+    hog::client::PieceRequests requests;
+    const hog::protocol::AskPieces ask = requests.ask(held, std::vector{wish_at(node, 10)}).value();
+    CHECK(ask.pieces.front().held == 7);
+}
+
+TEST_CASE("no more pieces go in an ask than allowed", "[client][piece_asking]") {
+    const hog::grid::Grid grid{1000.0, 1.0};
+    const hog::client::HeldPieces held{grid};
+    std::vector<PieceWish> wishes;
+    wishes.reserve(hog::protocol::most_asked + 5);
+    for (std::uint32_t x = 0; x < hog::protocol::most_asked + 5; ++x) {
+        wishes.push_back(wish_at(Key{.depth = 13, .x = x}, 15));
+    }
+    hog::client::PieceRequests requests{lots};
+    const hog::protocol::AskPieces ask = requests.ask(held, wishes).value();
+    CHECK(ask.pieces.size() == hog::protocol::most_asked);
+    CHECK(requests.asked() == hog::protocol::most_asked);
 }

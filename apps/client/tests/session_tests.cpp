@@ -613,9 +613,10 @@ TEST_CASE("a session takes the ground chunks and water bodies sent oldest first"
                                     .tree = {std::byte{1}, std::byte{2}}};
     const protocol::SentChunk gone{
         .kind = 2, .band = 0, .depth = 0, .x = 0, .y = 0, .z = 0, .version = 0, .tree = {}};
-    stand.send(protocol::Chunks{.chunks = {shape, gone}});
+    stand.send(protocol::Chunks{.chunks = {shape, gone}, .done = {}});
     stand.send(protocol::Bodies{.bytes = {std::byte{9}}});
-    stand.send(protocol::Chunks{.chunks = {shape}});
+    const protocol::DonePiece done{.depth = 4, .x = 3, .y = 2, .z = 1, .to = 9, .whole = true};
+    stand.send(protocol::Chunks{.chunks = {shape}, .done = {done}});
     std::vector<protocol::SentChunk> chunks;
     std::vector<std::vector<std::byte>> bodies;
     look_until(session, stand, [&] {
@@ -628,6 +629,8 @@ TEST_CASE("a session takes the ground chunks and water bodies sent oldest first"
         return chunks.size() == 3 && bodies.size() == 1;
     });
     CHECK(chunks == std::vector{shape, gone, shape});
+    CHECK(session.take_done() == std::vector{done});
+    CHECK(session.take_done().empty());
     CHECK(bodies[0] == std::vector{std::byte{9}});
     CHECK(session.take_chunks().empty());
     CHECK(session.take_bodies().empty());

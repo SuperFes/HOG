@@ -50,49 +50,77 @@ void ChunkSending::leave(net::ConnectionId player) {
     players_.erase(player);
 }
 
+std::optional<ChunkSending::Open> ChunkSending::take_open(Player& player, grid::Key node) {
+    for (std::deque<Open>* queue : {&player.again, &player.due}) {
+        const auto found =
+            std::ranges::find(*queue, node, [](const Open& open) { return open.want.node; });
+        if (found != queue->end()) {
+            Open open = *found;
+            queue->erase(found);
+            return open;
+        }
+    }
+    if (const auto found = player.waiting.find(node); found != player.waiting.end()) {
+        Open open = found->second;
+        player.waiting.erase(found);
+        return open;
+    }
+    return std::nullopt;
+}
+
+void ChunkSending::close(Player& player, std::uint64_t ask) {
+    const auto found = player.asks.find(ask);
+    if (found != player.asks.end() && --found->second.open == 0) {
+        player.asks.erase(found);
+    }
+}
+
 void ChunkSending::ask(net::ConnectionId player, std::span<const Want> wants) {
     Player& held = players_[player];
     held.round = ++rounds_;
+    const std::uint64_t ask = ++held.asked;
     const std::uint8_t finest = bands_.foot(static_cast<std::uint8_t>(bands_.count() - 1));
-    std::vector<Want> asked;
-    asked.reserve(wants.size());
-    grid::ZMap<Want> waiting;
-    grid::ZMap<Want> answered;
     for (Want want : wants) {
         if (!want.node.is_valid() || want.node.depth > finest) {
             continue;
         }
         want.depth = std::clamp(want.depth, want.node.depth, finest);
-        // Still asked, what it waits on and what's known filled stay so till it's gone over.
-        for (const auto& [from, into] :
-             {std::pair{&held.waiting, &waiting}, std::pair{&held.answered, &answered}}) {
-            if (const auto found = from->find(want.node);
-                found != from->end() && found->second.depth >= want.depth) {
-                into->insert(*found);
-            }
+        Open open{.want = want, .ask = ask};
+        // In place of one asked of the node, what it was sent goes on counting as sent.
+        if (const std::optional<Open> was = take_open(held, want.node)) {
+            open.ask = was->ask;
+            open.answered = was->answered && was->want.depth >= want.depth;
+        } else {
+            ++held.asks[ask].open;
         }
-        asked.push_back(want);
+        held.due.push_back(open);
     }
-    held.asked = std::move(asked);
-    held.gone = 0;
-    held.again.clear();
-    held.sent.clear();
-    held.waiting = std::move(waiting);
-    held.answered = std::move(answered);
+}
+
+void ChunkSending::drop(net::ConnectionId player, std::span<const grid::Key> nodes) {
+    const auto found = players_.find(player);
+    if (found == players_.end()) {
+        return;
+    }
+    for (const grid::Key node : nodes) {
+        if (const std::optional<Open> was = take_open(found->second, node)) {
+            close(found->second, was->ask);
+        }
+    }
 }
 
 void ChunkSending::changed(std::span<const baked::Region> written) {
     for (auto& [id, player] : players_) {
         for (const baked::Region& region : written) {
-            std::vector<Want> woken;
-            grid::for_nested(player.waiting, region.root, [&](grid::Key node, const Want& want) {
-                if (overlaps(bands_, region, node, want.depth)) {
-                    woken.push_back(want);
+            std::vector<Open> woken;
+            grid::for_nested(player.waiting, region.root, [&](grid::Key node, const Open& open) {
+                if (overlaps(bands_, region, node, open.want.depth)) {
+                    woken.push_back(open);
                 }
             });
-            for (const Want& want : woken) {
-                player.waiting.erase(want.node);
-                player.again.push_back(want);
+            for (const Open& open : woken) {
+                player.waiting.erase(open.want.node);
+                player.again.push_back(open);
             }
         }
     }
@@ -100,18 +128,25 @@ void ChunkSending::changed(std::span<const baked::Region> written) {
 
 void ChunkSending::changed_everything() {
     for (auto& [id, player] : players_) {
-        player.gone = 0;
-        player.again.clear();
-        player.sent.clear();
+        for (auto& [ask, asked] : player.asks) {
+            asked.sent.clear();
+        }
+        for (const auto& [node, open] : player.waiting) {
+            player.again.push_back(open);
+        }
+        player.waiting.clear();
     }
 }
 
 std::vector<baked::WantsTable::Want> ChunkSending::wanted() const {
     std::map<std::pair<grid::Key, std::uint8_t>, baked::Rank, std::less<>> ranked;
     for (const auto& [id, player] : players_) {
-        for (const auto& [node, want] : player.waiting) {
-            const baked::Rank rank{.round = player.round, .priority = want.priority};
-            auto [at, fresh] = ranked.try_emplace({node, want.depth}, rank);
+        for (const auto& [node, open] : player.waiting) {
+            if (open.answered) {
+                continue;
+            }
+            const baked::Rank rank{.round = player.round, .priority = open.want.priority};
+            auto [at, fresh] = ranked.try_emplace({node, open.want.depth}, rank);
             if (!fresh) {
                 at->second = std::max(at->second, rank);
             }
@@ -129,20 +164,20 @@ void ChunkSending::answered(std::span<const baked::ChunkFiller::Asked> asked) {
     for (auto& [id, player] : players_) {
         for (const baked::ChunkFiller::Asked& ask : asked) {
             const auto found = player.waiting.find(ask.node);
-            if (found == player.waiting.end() || found->second.depth > ask.depth) {
+            if (found == player.waiting.end() || found->second.want.depth > ask.depth) {
                 continue;
             }
-            const Want want = found->second;
+            Open open = found->second;
             player.waiting.erase(found);
-            player.answered.insert_or_assign(want.node, want);
-            player.again.push_back(want);
+            open.answered = true;
+            player.again.push_back(open);
         }
     }
 }
 
 template <typename Kind>
-bool ChunkSending::send_band(Player& player, const baked::ChunkStore::Snapshot& snapshot,
-                             std::uint8_t band, grid::Key node, Limits& limits, Next& next) const {
+bool ChunkSending::send_band(Sent& sent, const baked::ChunkStore::Snapshot& snapshot,
+                             std::uint8_t band, grid::Key node, Limits& limits, Next& next) {
     constexpr std::uint8_t kind = kind_of<Kind>();
     bool over = false;
     std::uint64_t under = 0;
@@ -155,12 +190,12 @@ bool ChunkSending::send_band(Player& player, const baked::ChunkStore::Snapshot& 
         } else {
             under += volume(root);
         }
-        const auto at = player.sent.find(key);
-        if (at != player.sent.end() && at->second == each.chunk.version) {
+        const auto at = sent.find(key);
+        if (at != sent.end() && at->second == each.chunk.version) {
             continue;
         }
         if (each.tree.size() > protocol::most_chunk) {
-            player.sent.insert_or_assign(key, each.chunk.version);
+            sent.insert_or_assign(key, each.chunk.version);
             ++next.too_big;
             continue;
         }
@@ -168,7 +203,7 @@ bool ChunkSending::send_band(Player& player, const baked::ChunkStore::Snapshot& 
             limits.cut = true;
             return false;
         }
-        player.sent.insert_or_assign(key, each.chunk.version);
+        sent.insert_or_assign(key, each.chunk.version);
         next.chunks.push_back({.kind = kind,
                                .band = band,
                                .depth = root.depth,
@@ -182,32 +217,52 @@ bool ChunkSending::send_band(Player& player, const baked::ChunkStore::Snapshot& 
     return over || under == volume(node);
 }
 
-bool ChunkSending::go_over(Player& player, const baked::ChunkStore::Snapshot& snapshot,
-                           const Want& want, Limits& limits, Next& next) const {
+ChunkSending::Over ChunkSending::go_over(Player& player,
+                                         const baked::ChunkStore::Snapshot& snapshot, Open& open,
+                                         Limits& limits, Next& next) const {
+    const Want& want = open.want;
+    Sent& sent = player.asks[open.ask].sent;
     bool whole = true;
     for (std::uint8_t band = bands_.band_of(want.node.depth);
          band <= bands_.band_of(want.depth) && !limits.cut; ++band) {
-        whole = send_band<grid::Shape>(player, snapshot, band, want.node, limits, next) && whole;
+        // Held all through the band already, the player needs none of it.
+        if (bands_.foot(band) <= want.held) {
+            continue;
+        }
+        whole = send_band<grid::Shape>(sent, snapshot, band, want.node, limits, next) && whole;
         if (!limits.cut) {
-            send_band<grid::Material>(player, snapshot, band, want.node, limits, next);
+            send_band<grid::Material>(sent, snapshot, band, want.node, limits, next);
         }
         if (!limits.cut) {
-            send_band<grid::Water>(player, snapshot, band, want.node, limits, next);
+            send_band<grid::Water>(sent, snapshot, band, want.node, limits, next);
         }
         if (!limits.cut) {
-            send_band<grid::Woods>(player, snapshot, band, want.node, limits, next);
+            send_band<grid::Woods>(sent, snapshot, band, want.node, limits, next);
         }
     }
     if (limits.cut) {
-        return true;
+        return Over::Cut;
     }
-    const auto told = player.answered.find(want.node);
-    if (whole || (told != player.answered.end() && told->second.depth >= want.depth)) {
-        player.waiting.erase(want.node);
-    } else {
-        player.waiting.insert_or_assign(want.node, want);
+    const protocol::DonePiece done{.depth = want.node.depth,
+                                   .x = want.node.x,
+                                   .y = want.node.y,
+                                   .z = want.node.z,
+                                   .to = want.depth,
+                                   .whole = true};
+    if (whole || open.answered) {
+        next.done.push_back(done);
+        return Over::Done;
     }
-    return false;
+    if (!open.told) {
+        next.done.push_back({.depth = done.depth,
+                             .x = done.x,
+                             .y = done.y,
+                             .z = done.z,
+                             .to = done.to,
+                             .whole = false});
+        open.told = true;
+    }
+    return Over::Waiting;
 }
 
 ChunkSending::Next ChunkSending::next(net::ConnectionId player,
@@ -221,26 +276,27 @@ ChunkSending::Next ChunkSending::next(net::ConnectionId player,
     Player& held = found->second;
     Limits limits{.room = room, .most = most};
     // Cut off, it's gone over again next, past what's gone already.
-    while (!held.again.empty() && limits.fits(next, 0)) {
-        if (go_over(held, snapshot, held.again.front(), limits, next)) {
-            return next;
+    for (std::deque<Open>* queue : {&held.again, &held.due}) {
+        while (!queue->empty() && limits.fits(next, 0) && next.done.size() < protocol::most_asked) {
+            Open& open = queue->front();
+            const Over over = go_over(held, snapshot, open, limits, next);
+            if (over == Over::Cut) {
+                return next;
+            }
+            if (over == Over::Done) {
+                close(held, open.ask);
+            } else {
+                held.waiting.insert_or_assign(open.want.node, open);
+            }
+            queue->pop_front();
         }
-        held.again.erase(held.again.begin());
-    }
-    while (held.gone < held.asked.size() && limits.fits(next, 0)) {
-        if (go_over(held, snapshot, held.asked[held.gone], limits, next)) {
-            return next;
-        }
-        ++held.gone;
     }
     return next;
 }
 
 std::size_t ChunkSending::due(net::ConnectionId player) const {
     const auto found = players_.find(player);
-    return found == players_.end()
-               ? 0
-               : found->second.again.size() + (found->second.asked.size() - found->second.gone);
+    return found == players_.end() ? 0 : found->second.again.size() + found->second.due.size();
 }
 
 std::size_t ChunkSending::waiting(net::ConnectionId player) const {
@@ -267,27 +323,29 @@ std::string ChunkSending::describe(net::ConnectionId player,
         }
         return text;
     };
-    const auto line = [&](const Want& want) {
-        return std::format("{} {} {} {} to {} rank {:.6g} |{}\n", want.node.depth, want.node.x,
-                           want.node.y, want.node.z, want.depth, want.priority, bands(want));
+    const auto line = [&](const Open& open) {
+        const Want& want = open.want;
+        return std::format("{} {} {} {} to {} held {} rank {:.6g} ask {}{} |{}\n", want.node.depth,
+                           want.node.x, want.node.y, want.node.z, want.depth, want.held,
+                           want.priority, open.ask, open.answered ? " answered" : "", bands(want));
     };
-    std::string text = std::format("round {}; {} asked, {} gone over; {} sent this ask\n",
-                                   held.round, held.asked.size(), held.gone, held.sent.size());
+    std::size_t sent = 0;
+    for (const auto& [ask, asked] : held.asks) {
+        sent += asked.sent.size();
+    }
+    std::string text = std::format("round {}; {} asks, {} open, {} chunks sent for them\n",
+                                   held.round, held.asked, held.asks.size(), sent);
     text += std::format("\nagain ({}):\n", held.again.size());
-    for (const Want& want : held.again) {
-        text += line(want);
+    for (const Open& open : held.again) {
+        text += line(open);
+    }
+    text += std::format("\ndue ({}):\n", held.due.size());
+    for (const Open& open : held.due) {
+        text += line(open);
     }
     text += std::format("\nwaiting ({}):\n", held.waiting.size());
-    for (const auto& [node, want] : held.waiting) {
-        text += line(want);
-    }
-    text += std::format("\nknown filled ({}):\n", held.answered.size());
-    for (const auto& [node, want] : held.answered) {
-        text += line(want);
-    }
-    text += std::format("\nasked ({}):\n", held.asked.size());
-    for (std::size_t n = 0; n < held.asked.size(); ++n) {
-        text += (n < held.gone ? "  done " : "  due  ") + line(held.asked[n]);
+    for (const auto& [node, open] : held.waiting) {
+        text += line(open);
     }
     return text;
 }

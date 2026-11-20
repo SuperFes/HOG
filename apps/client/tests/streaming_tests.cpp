@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <tuple>
@@ -30,12 +31,13 @@ using hog::grid::Key;
 
 namespace {
 
-// A player as the client keeps one: what it holds and what it last asked for.
+// A player as the client keeps one: what it holds and what it's asked for and not been told is
+// done.
 struct Player {
-    hog::net::ConnectionId id;
+    hog::net::ConnectionId id{};
     std::size_t room = 0; // bytes of trees one message carries at most
     hog::client::HeldPieces held;
-    std::vector<hog::client::PieceWish> asked;
+    hog::client::PieceRequests requests;
     bool came = true;
 };
 
@@ -78,22 +80,28 @@ public:
         if (!std::exchange(player.came, false)) {
             return;
         }
-        std::vector<hog::client::PieceWish> wishes =
+        const std::vector<hog::client::PieceWish> wishes =
             hog::client::pieces_to_ask(player.held, eye, facing, view, hog::protocol::most_asked);
-        const bool same =
-            std::ranges::equal(wishes, player.asked, [](const auto& a, const auto& b) {
-                return a.node == b.node && a.depth == b.depth;
-            });
-        if (same) {
+        const std::optional<hog::protocol::AskPieces> ask =
+            player.requests.ask(player.held, wishes);
+        if (!ask) {
             return;
         }
-        std::vector<hog::server::ChunkSending::Want> asking;
-        asking.reserve(wishes.size());
-        for (const hog::client::PieceWish& wish : wishes) {
-            asking.push_back({.node = wish.node, .depth = wish.depth, .priority = wish.priority});
+        std::vector<Key> dropped;
+        for (const hog::protocol::DroppedPiece& piece : ask->dropped) {
+            dropped.push_back({.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z});
         }
+        std::vector<hog::server::ChunkSending::Want> asking;
+        asking.reserve(ask->pieces.size());
+        for (const hog::protocol::AskedPiece& piece : ask->pieces) {
+            asking.push_back(
+                {.node = {.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z},
+                 .depth = piece.to,
+                 .held = piece.held,
+                 .priority = static_cast<double>(piece.priority)});
+        }
+        sending_.drop(player.id, dropped);
         sending_.ask(player.id, asking);
-        player.asked = std::move(wishes);
     }
 
     // One of the server's ticks: what the log says changed, what's due to each player, and a
@@ -109,8 +117,10 @@ public:
             for (const hog::protocol::SentChunk& chunk : next.chunks) {
                 REQUIRE(player.held.take(chunk).has_value());
             }
-            player.came = player.came || !next.chunks.empty();
-            sent = sent || !next.chunks.empty();
+            player.requests.done(next.done);
+            const bool any = !next.chunks.empty() || !next.done.empty();
+            player.came = player.came || any;
+            sent = sent || any;
         }
         if (std::vector<hog::baked::WantsTable::Want> wanted = sending_.wanted(); wanted != told_) {
             REQUIRE(wants_.replace(wanted).has_value());
@@ -202,12 +212,12 @@ TEST_CASE("players asking from one place come to hold the same ground, all they 
     std::array<Player, 2> players{Player{.id = hog::net::ConnectionId{1},
                                          .room = std::size_t{256} << 10U,
                                          .held = hog::client::HeldPieces{grid},
-                                         .asked = {},
+                                         .requests = {},
                                          .came = true},
                                   Player{.id = hog::net::ConnectionId{2},
                                          .room = std::size_t{8} << 10U,
                                          .held = hog::client::HeldPieces{grid},
-                                         .asked = {},
+                                         .requests = {},
                                          .came = true}};
     for (const Player& player : players) {
         streaming.join(player);

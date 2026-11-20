@@ -100,6 +100,7 @@ bool Session::took_ground(protocol::Message& message) {
     } else if (auto* chunks = std::get_if<protocol::Chunks>(&message)) {
         chunks_.insert(chunks_.end(), std::make_move_iterator(chunks->chunks.begin()),
                        std::make_move_iterator(chunks->chunks.end()));
+        done_.insert(done_.end(), chunks->done.begin(), chunks->done.end());
     } else if (auto* bodies = std::get_if<protocol::Bodies>(&message)) {
         bodies_.push_back(std::move(bodies->bytes));
     } else {

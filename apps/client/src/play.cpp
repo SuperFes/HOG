@@ -633,7 +633,8 @@ public:
         }
     }
 
-    // Asks the server for grid pieces, in place of those asked for before, once in.
+    // Asks the server for grid pieces besides those asked for before, and drops those no longer
+    // wanted, once in.
     void ask(const protocol::AskPieces& ask) {
         if (session_) {
             session_->ask(ask);
@@ -660,6 +661,9 @@ public:
     // The grid pieces and water bodies the server sent since last asked, as coded.
     [[nodiscard]] std::vector<protocol::SentChunk> take_chunks() {
         return session_ ? session_->take_chunks() : std::vector<protocol::SentChunk>{};
+    }
+    [[nodiscard]] std::vector<protocol::DonePiece> take_done() {
+        return session_ ? session_->take_done() : std::vector<protocol::DonePiece>{};
     }
     [[nodiscard]] std::vector<std::vector<std::byte>> take_bodies() {
         return session_ ? session_->take_bodies() : std::vector<std::vector<std::byte>>{};
@@ -1025,8 +1029,9 @@ struct StreamedGround {
     grid::Grid grid;
     client::HeldPieces pieces;
     client::BlockMeshes block_meshes;
-    // The pieces last asked for, from where and when, and whether any came since.
-    std::vector<client::PieceWish> asked;
+    // The pieces asked for and not yet done, from where and when last asked, and whether any
+    // came since.
+    client::PieceRequests requests;
     std::optional<DVec3> asked_from;
     DVec3 asked_facing{};
     MonotonicClock::time_point asked_at;
@@ -1051,10 +1056,10 @@ std::optional<render::StillAtEye> still_at_eye(const StreamedGround& ground, Wor
 // Metres the eye moves before what's drawn of the pieces is worked out again.
 constexpr double pieces_moved = 4.0;
 
-// Pieces asked for at once, and how often what's asked for is worked out again at most, as the
+// Pieces wished for at once, and how often what's asked for is worked out again at most, as the
 // eye moves, turns more than this cosine allows, or pieces come.
 constexpr std::size_t pieces_asked = protocol::most_asked;
-constexpr auto asking_interval = std::chrono::milliseconds{200};
+constexpr auto asking_interval = std::chrono::milliseconds{100};
 constexpr double asking_turn = 0.94;
 
 // Asks the server for the pieces to see from `eye` looking along `facing` that aren't held as
@@ -1069,19 +1074,14 @@ void ask_pieces(Connection& connection, StreamedGround& ground, DVec3 eye, DVec3
         glm::dot(facing, ground.asked_facing) >= asking_turn) {
         return;
     }
-    std::vector<client::PieceWish> wishes =
+    const std::vector<client::PieceWish> wishes =
         client::pieces_to_ask(ground.pieces, eye, facing, grid::View{}, pieces_asked);
     ground.asked_at = now;
     ground.asked_from = eye;
     ground.asked_facing = facing;
     ground.asked_came = false;
-    // Only the order and depths matter to the server's answers; how big each looks is for fills.
-    const bool same = std::ranges::equal(wishes, ground.asked, [](const auto& a, const auto& b) {
-        return a.node == b.node && a.depth == b.depth;
-    });
-    if (!same) {
-        connection.ask(client::ask_of(wishes));
-        ground.asked = std::move(wishes);
+    if (const std::optional<protocol::AskPieces> ask = ground.requests.ask(ground.pieces, wishes)) {
+        connection.ask(*ask);
     }
 }
 
@@ -1097,6 +1097,10 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
             ground.pieces_came = true;
             ground.asked_came = true;
         }
+    }
+    if (const std::vector<protocol::DonePiece> done = connection.take_done(); !done.empty()) {
+        ground.requests.done(done);
+        ground.asked_came = true;
     }
     for (const std::vector<std::byte>& bytes : connection.take_bodies()) {
         if (auto taken = ground.pieces.take_bodies(bytes); !taken) {
@@ -1190,11 +1194,12 @@ save_report(Connection& connection, const StreamedGround& ground, const render::
     const std::vector<client::PieceWish> wanted = client::pieces_to_ask(
         ground.pieces, camera.eye.metres(), camera.forward, grid::View{}, protocol::most_asked);
     const std::vector<client::DrawnBlock> drawn = ground.block_meshes.drawn();
+    const std::vector<client::PieceWish> asked = ground.requests.open();
     const std::vector<std::string> lines = recent.lines();
     const client::Report report{.about = about,
                                 .held = &ground.pieces,
                                 .reach = reach,
-                                .asked = ground.asked,
+                                .asked = asked,
                                 .wanted = wanted,
                                 .drawn = drawn,
                                 .log = lines};

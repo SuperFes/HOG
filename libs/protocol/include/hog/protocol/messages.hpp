@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 44;
+inline constexpr std::uint32_t version = 45;
 // The longest planet a welcome carries: every knob, its stars, moons and neighbours with them.
 inline constexpr std::size_t most_planet = 65'536;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -378,33 +378,61 @@ struct SentChunk {
     friend bool operator==(const SentChunk&, const SentChunk&) = default;
 };
 
-// Server to client: chunks of the ground as stored, for the nodes asked, in the order asked; one
-// goes again only when its version changes. Sent bulk, so they never hold up moves.
+// A node asked for gone over: every chunk the store holds of it down to the depth asked has been
+// sent, in this message or before. Not `whole`, the store holds only some of it yet; the rest
+// comes as it's filled, and it's told whole again then.
+struct DonePiece {
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+    std::uint8_t to = 0;
+    bool whole = false;
+
+    friend bool operator==(const DonePiece&, const DonePiece&) = default;
+};
+
+// Server to client: chunks of the ground as stored, for the nodes asked, in the order asked, and
+// the nodes asked that they finish. Sent bulk, so they never hold up moves.
 struct Chunks {
     std::vector<SentChunk> chunks; // at most most_chunks
+    std::vector<DonePiece> done;   // at most most_asked
 
     friend bool operator==(const Chunks&, const Chunks&) = default;
 };
 
-// A node a client asks for: the node, the depth it wants it down to, and how big it looks from
-// the client, a node's size over its distance, which the server ranks filling it by.
+// A node a client asks for: the node, the depth it wants it down to, the depth it already holds
+// all of it down to, and how big it looks from the client, a node's size over its distance, which
+// the server ranks filling it by.
 struct AskedPiece {
     std::uint8_t depth = 0;
     std::uint32_t x = 0;
     std::uint32_t y = 0;
     std::uint32_t z = 0;
     std::uint8_t to = 0;
+    std::uint8_t held = 0;
     float priority = 0.0F;
 
     friend bool operator==(const AskedPiece&, const AskedPiece&) = default;
 };
 
-// Client to server: the nodes it wants now, most wanted first, in place of any it asked for
-// before. Each is sent as deep as the server holds it, up to as deep as asked, and deeper once
-// it's filled; one sent isn't sent again unless it changes or is asked for deeper. Sent reliably,
-// as it replaces what came before.
+// A node a client no longer wants.
+struct DroppedPiece {
+    std::uint8_t depth = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
+
+    friend bool operator==(const DroppedPiece&, const DroppedPiece&) = default;
+};
+
+// Client to server: nodes it wants besides those it asked for before and hasn't been told are
+// done, most wanted first, each in place of any asked of the same node; and those it no longer
+// wants. Each is sent from the band past what's held as deep as the server holds it, up to as deep
+// as asked, then told done; and the rest as it's filled. Sent reliably, as each builds on the last.
 struct AskPieces {
-    std::vector<AskedPiece> pieces; // at most most_asked
+    std::vector<AskedPiece> pieces;    // at most most_asked
+    std::vector<DroppedPiece> dropped; // at most most_asked
 
     friend bool operator==(const AskPieces&, const AskPieces&) = default;
 };

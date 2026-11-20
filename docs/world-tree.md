@@ -69,8 +69,17 @@ do to it (the levelled slab, a cellar dug) is an edit.
 
 The server sends chunks as stored, never decoding them: an answer to a node down to a depth is the
 bytes of the chunks covering it, already in the mapped file. The client decodes and grafts them,
-and a chunk's version is its change stamp. A client's new asks replace its last; leaving drops
-them, so nothing is filled for someone gone.
+and a chunk's version is its change stamp. Leaving drops a client's asks, so nothing is filled for
+someone gone.
+
+Asks are requests, as map and globe streamers make them (3D Tiles, virtual texturing): each node
+asked stays open on the server until it's gone over and the client is told it's done, in the same
+`Chunks` message as its last chunks, or until the client drops it. A new ask adds to what's open
+rather than replacing it, so nothing in flight is sent twice. The client keeps what's open and
+asks no more at once than keep the server busy (a window of 512), so what it asks next follows the
+eye; it says how deep it already holds each node, so bands it has aren't sent again. A node the
+store holds only part of is told done short and stays open, waiting on fills, outside the window.
+What's open is all the server keeps of a client, and it's gone once done.
 
 The server keeps nothing of what a client holds. The client is the cache: it asks only for what it
 lacks, nearest the player first, so each ask is answered from the store afresh, and taking a chunk

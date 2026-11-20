@@ -5,11 +5,14 @@
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
 #include <hog/grid/view.hpp>
+#include <hog/grid/z_order.hpp>
 #include <hog/protocol/messages.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
+#include <span>
 #include <vector>
 
 namespace hog::client {
@@ -47,7 +50,47 @@ inline constexpr double behind_eye = 0.25;
                                                    std::optional<DVec3> facing,
                                                    const grid::View& view, std::size_t most);
 
-// The wishes as asked for over the wire.
-[[nodiscard]] protocol::AskPieces ask_of(const std::vector<PieceWish>& wishes);
+// The nodes asked of the server it hasn't yet told are done, so none is asked twice, and what to
+// ask next. As few are asked at once as keep the server busy, so what's asked can follow the eye:
+// the rest wait to be asked as those asked are done, most wanted first. One told done short waits
+// on fills without holding up the rest.
+class PieceRequests {
+public:
+    static constexpr std::size_t default_window = 512;
+    PieceRequests() noexcept = default;
+    explicit PieceRequests(std::size_t window) noexcept : window_{window} {}
+
+    // The ask bringing what's open into line with `wishes`, most wanted first: those not open
+    // while there's room, or open less deep than wished, each with how deep `held` covers it;
+    // and those open that no wish needs any more dropped, where neither it nor a node under it
+    // is wished. Nothing to ask if nothing changes.
+    [[nodiscard]] std::optional<protocol::AskPieces> ask(const HeldPieces& held,
+                                                         std::span<const PieceWish> wishes);
+    // Takes in the server's word that these are done.
+    void done(std::span<const protocol::DonePiece> done);
+
+    // Asked and not yet told done.
+    [[nodiscard]] std::size_t asked() const noexcept { return asked_; }
+    // Told done short, waiting on fills.
+    [[nodiscard]] std::size_t waiting() const noexcept { return open_.size() - asked_; }
+    // Every node open, asked or waiting, as wished when asked, in Z order.
+    [[nodiscard]] std::vector<PieceWish> open() const;
+
+private:
+    struct Open {
+        std::uint8_t depth = 0;
+        bool waiting = false;
+        double priority = 0.0;
+    };
+    using Needed = std::set<grid::Key, grid::ZOrder>;
+    // The node over `node` open as deep as `depth`, if one is.
+    [[nodiscard]] std::optional<grid::Key> open_over(grid::Key node, std::uint8_t depth) const;
+    // Into `ask`, what's open and not `needed`, let go of.
+    void drop_unneeded(const Needed& needed, protocol::AskPieces& ask);
+
+    std::size_t window_ = default_window;
+    std::size_t asked_ = 0;
+    grid::ZMap<Open> open_;
+};
 
 } // namespace hog::client

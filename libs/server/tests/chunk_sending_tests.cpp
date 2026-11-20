@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -44,13 +45,16 @@ Id id_of(const hog::protocol::SentChunk& chunk) {
 
 // Every chunk of each band the store holds over `node` or under it down to `depth`, by kind,
 // band and root, with its version and tree's bytes.
+// From band `from` on, where given.
 std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>>
-stored_about(const hog::baked::ChunkStore& store, Key node, std::uint8_t depth) {
+stored_about(const hog::baked::ChunkStore& store, Key node, std::uint8_t depth,
+             std::uint8_t from = 0) {
     const auto snapshot = store.read();
     REQUIRE(snapshot.has_value());
     std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> found;
     const hog::baked::Bands& bands = store.bands();
-    for (std::uint8_t band = bands.band_of(node.depth); band <= bands.band_of(depth); ++band) {
+    for (std::uint8_t band = std::max(from, bands.band_of(node.depth));
+         band <= bands.band_of(depth); ++band) {
         const auto add = [&](std::uint8_t kind, const std::vector<hog::baked::StoredChunk>& each) {
             for (const hog::baked::StoredChunk& chunk : each) {
                 found[{kind, band, chunk.chunk.root}] = {chunk.chunk.version,
@@ -86,6 +90,11 @@ held_of(std::initializer_list<const ChunkSending::Next*> sent) {
         }
     }
     return held;
+}
+
+hog::protocol::DonePiece done_of(Key node, std::uint8_t depth, bool whole) {
+    return {
+        .depth = node.depth, .x = node.x, .y = node.y, .z = node.z, .to = depth, .whole = whole};
 }
 
 // Has the store hold `node` down to `depth`, telling `sending` of what's written only where
@@ -125,6 +134,7 @@ TEST_CASE("a player is sent the chunks about what it asks for as stored and each
     CHECK(sending.wanted().empty());
     CHECK(next.too_big == 0);
     CHECK(sending.due(player) == 0);
+    CHECK(next.done == std::vector{done_of(other, 12, true), done_of(node, 12, true)});
 
     // Each as stored, those about the first asked first, and none twice.
     auto expected = stored_about(store, other, 12);
@@ -165,6 +175,7 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     sending.ask(player, wants);
     const ChunkSending::Next part = next_of(sending, store);
     CHECK_FALSE(part.chunks.empty());
+    CHECK(part.done == std::vector{done_of(node, 12, false)});
     const std::vector<hog::baked::WantsTable::Want> wanted = sending.wanted();
     REQUIRE(wanted.size() == 1);
     CHECK(wanted.front().node == node);
@@ -187,6 +198,7 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     CHECK(sending.due(player) == 1);
     const ChunkSending::Next rest = next_of(sending, store);
     CHECK(sending.wanted().empty());
+    CHECK(rest.done == std::vector{done_of(node, 12, true)});
     std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> held;
     for (const ChunkSending::Next* each : {&part, &rest}) {
         for (const hog::protocol::SentChunk& chunk : each->chunks) {
@@ -213,11 +225,15 @@ TEST_CASE("a message carries no more chunks than allowed with the rest going nex
 
     std::size_t count = 0;
     std::size_t messages = 0;
+    std::vector<hog::protocol::DonePiece> done;
     for (;;) {
         const ChunkSending::Next next = next_of(sending, store, 2048, 3);
         if (next.chunks.empty()) {
             break;
         }
+        // Done with the last of its chunks.
+        CHECK(done.empty());
+        done.insert(done.end(), next.done.begin(), next.done.end());
         ++messages;
         CHECK(next.chunks.size() <= 3);
         std::size_t bytes = 0;
@@ -230,9 +246,10 @@ TEST_CASE("a message carries no more chunks than allowed with the rest going nex
     CHECK(messages > 1);
     CHECK(count == stored_about(store, node, 12).size());
     CHECK(sending.due(player) == 0);
+    CHECK(done == std::vector{done_of(node, 12, true)});
 }
 
-TEST_CASE("asking again replaces what's due and what no one waits on any more is forgotten",
+TEST_CASE("asking again adds to what's open and what's dropped is forgotten",
           "[server][chunk_sending]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
@@ -242,32 +259,90 @@ TEST_CASE("asking again replaces what's due and what no one waits on any more is
     sending.join(player);
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = node, .depth = 12}});
     // Nothing stored: it waits on a fill.
-    CHECK(next_of(sending, store).chunks.empty());
+    const ChunkSending::Next none = next_of(sending, store);
+    CHECK(none.chunks.empty());
+    CHECK(none.done == std::vector{done_of(node, 12, false)});
     CHECK(sending.waiting(player) == 1);
     CHECK(sending.wanted().size() == 1);
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
+    CHECK(sending.waiting(player) == 1);
+    CHECK(sending.due(player) == 1);
+    const std::vector<Key> dropped{node};
+    sending.drop(player, dropped);
     CHECK(sending.waiting(player) == 0);
     CHECK(sending.wanted().empty());
     CHECK(sending.due(player) == 1);
 
     // The filler finding nothing more to fill under a node makes it whole.
-    CHECK(next_of(sending, store).chunks.empty());
+    CHECK(next_of(sending, store).done == std::vector{done_of(other, 12, false)});
     CHECK(sending.wanted().size() == 1);
     const std::vector<hog::baked::ChunkFiller::Asked> answered{{.node = other, .depth = 12}};
     sending.answered(answered);
     CHECK(sending.waiting(player) == 0);
     CHECK(sending.wanted().empty());
-    // Gone over once more for what's stored, which is nothing.
+    // Gone over once more for what's stored, which is nothing, and told whole.
     CHECK(sending.due(player) == 1);
-    CHECK(next_of(sending, store).chunks.empty());
+    const ChunkSending::Next whole = next_of(sending, store);
+    CHECK(whole.chunks.empty());
+    CHECK(whole.done == std::vector{done_of(other, 12, true)});
     CHECK(sending.wanted().empty());
-    // Asked again, it's gone over again but not waited on.
+    CHECK(sending.due(player) == 0);
+    CHECK(next_of(sending, store).done.empty());
     sending.ask(player, std::vector<ChunkSending::Want>{{.node = other, .depth = 12}});
-    CHECK(sending.due(player) == 1);
-    CHECK(next_of(sending, store).chunks.empty());
-    CHECK(sending.wanted().empty());
     sending.leave(player);
     CHECK(sending.due(player) == 0);
+}
+
+TEST_CASE("what a player holds is not sent and what's asked together goes once",
+          "[server][chunk_sending]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
+    const Key node = hog::testing::ground_key(generator, here, 9);
+    hog::testing::fill_chunks(generator, store, node, 12);
+    const hog::baked::Bands& bands = store.bands();
+    const std::uint8_t first = bands.band_of(node.depth);
+    REQUIRE(bands.band_of(12) > first);
+    ChunkSending sending{bands};
+    sending.join(player);
+
+    // Held through its first band, only the bands past that go.
+    sending.ask(player, std::vector<ChunkSending::Want>{
+                            {.node = node, .depth = 12, .held = bands.foot(first)}});
+    const ChunkSending::Next past = next_of(sending, store);
+    CHECK(held_of({&past}) == stored_about(store, node, 12, static_cast<std::uint8_t>(first + 1)));
+    CHECK(past.done == std::vector{done_of(node, 12, true)});
+
+    // Its children asked together share the chunks over them: each goes once.
+    std::vector<ChunkSending::Want> children;
+    children.reserve(8);
+    for (std::size_t octant = 0; octant < 8; ++octant) {
+        children.push_back({.node = node.child(octant), .depth = 12});
+    }
+    sending.ask(player, children);
+    const ChunkSending::Next together = next_of(sending, store);
+    std::map<Id, int> times;
+    for (const hog::protocol::SentChunk& chunk : together.chunks) {
+        ++times[id_of(chunk)];
+    }
+    CHECK(std::ranges::all_of(times, [](const auto& each) { return each.second == 1; }));
+    CHECK(together.done.size() == 8);
+    std::map<Id, std::pair<std::uint64_t, std::vector<std::byte>>> about;
+    for (const ChunkSending::Want& child : children) {
+        about.merge(stored_about(store, child.node, 12));
+    }
+    CHECK(held_of({&together}) == about);
+
+    // Dropped part way, nothing more of it goes.
+    sending.ask(player, std::vector<ChunkSending::Want>{{.node = node, .depth = 12}});
+    const ChunkSending::Next begun = next_of(sending, store, 1, 1);
+    CHECK(begun.chunks.size() == 1);
+    CHECK(begun.done.empty());
+    const std::vector<Key> dropped{node};
+    sending.drop(player, dropped);
+    CHECK(sending.due(player) == 0);
+    const ChunkSending::Next after = next_of(sending, store);
+    CHECK(after.chunks.empty());
+    CHECK(after.done.empty());
 }
 
 TEST_CASE("what two players wait on is wanted once at the higher rank and everything goes again "
@@ -296,7 +371,7 @@ TEST_CASE("what two players wait on is wanted once at the higher rank and everyt
     sending.changed_everything();
     CHECK(sending.due(player) == 1);
     CHECK(sending.due(other) == 1);
-    CHECK(sending.waiting(player) == 1);
+    CHECK(sending.waiting(player) == 0);
     sending.leave(other);
     CHECK(sending.next(player, *snapshot, lots, lots).chunks.empty());
     CHECK(sending.wanted().front().rank.priority == 0.25);
@@ -345,10 +420,11 @@ TEST_CASE("a node answered goes over what's stored once more and is waited on no
     CHECK(sending.due(player) == 1);
     const ChunkSending::Next rest = next_of(sending, store);
     CHECK(held_of({&part, &rest}) == stored_about(store, node, 12));
+    CHECK(rest.done == std::vector{done_of(node, 12, true)});
     CHECK(sending.wanted().empty());
 }
 
-TEST_CASE("what's kept of a player reads as its ask, what waits and what the store holds",
+TEST_CASE("what's kept of a player reads as what's open, what waits and what the store holds",
           "[server][chunk_sending]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::baked::ChunkStore store = hog::testing::chunk_scratch(generator);
@@ -362,7 +438,7 @@ TEST_CASE("what's kept of a player reads as its ask, what waits and what the sto
     const std::string text = sending.describe(player, *snapshot);
     const std::string line = std::format("{} {} {} {} to 12", node.depth, node.x, node.y, node.z);
     CHECK(text.find("waiting (1)") != std::string::npos);
-    CHECK(text.find("asked (1)") != std::string::npos);
+    CHECK(text.find("1 asks, 1 open") != std::string::npos);
     CHECK(text.find(line) != std::string::npos);
     // Nothing's stored there yet.
     CHECK(text.find(":smw") == std::string::npos);

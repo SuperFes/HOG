@@ -47,6 +47,9 @@ constexpr double vent_reach = 4'000.0;
 // Bytes a connection may have queued before tiles wait; one more may go over it, and it
 // holds far more.
 constexpr std::size_t tile_queue = std::size_t{256} * 1'024;
+// The same for grid chunks, sent as many messages a tick as fit: on a near link it drains as fast
+// as it fills, and a far one holds it back by what's still queued.
+constexpr std::size_t chunk_queue = std::size_t{8} << 20U;
 // Address space a chunk store may grow into; it takes only what's written.
 constexpr std::uint64_t chunk_store_bytes = std::uint64_t{1} << 36U;
 // A cavern pool's steady seep, cubic metres a second.
@@ -76,8 +79,9 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 // Entries of the store's log read in a tick at most; the rest wait for the next.
 constexpr std::size_t most_logged_read = std::size_t{1} << 16U;
 
-// Chunks' bytes in one message, room left for their headings within what the connection lets go.
-constexpr std::size_t most_chunk_bytes = net::max_message_size - (std::size_t{64} << 10U);
+// Chunks' bytes in one message, room left for their headings and the pieces done within what the
+// connection lets go.
+constexpr std::size_t most_chunk_bytes = net::max_message_size - (std::size_t{128} << 10U);
 
 // Bodies' bytes in one message, as much as the protocol and the connection both let go.
 constexpr std::size_t most_bodies_sent =
@@ -638,8 +642,15 @@ void Server::ask_pieces(net::ConnectionId connection, const protocol::AskPieces&
     for (const protocol::AskedPiece& piece : ask.pieces) {
         wants.push_back({.node = {.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z},
                          .depth = piece.to,
+                         .held = piece.held,
                          .priority = static_cast<double>(piece.priority)});
     }
+    std::vector<grid::Key> dropped;
+    dropped.reserve(ask.dropped.size());
+    for (const protocol::DroppedPiece& piece : ask.dropped) {
+        dropped.push_back({.depth = piece.depth, .x = piece.x, .y = piece.y, .z = piece.z});
+    }
+    pieces_->sending.drop(connection, dropped);
     pieces_->sending.ask(connection, wants);
     // Every body the water trees may mark, before any chunk that marks one.
     if (pieces_->asking.insert(connection).second) {
@@ -827,29 +838,28 @@ void Server::send_pieces(net::ConnectionId connection) {
     PieceStreaming& pieces = *pieces_;
     auto& players = *players_;
     const std::optional<net::Stats> stats = players.stats(connection);
-    const std::size_t queued = stats ? stats->queued_bytes : tile_queue;
-    if (queued >= tile_queue || pieces.sending.due(connection) == 0) {
-        return;
+    std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
+    while (queued < chunk_queue && pieces.sending.due(connection) > 0) {
+        server::ChunkSending::Next next = pieces.sending.next(
+            connection, pieces.snapshot, std::min(chunk_queue - queued, most_chunk_bytes),
+            protocol::most_chunks);
+        if (next.too_big > 0) {
+            log::warn(server_log, "{} grid chunks too big to send", next.too_big);
+        }
+        if (next.chunks.empty() && next.done.empty()) {
+            return;
+        }
+        const std::size_t count = next.chunks.size();
+        std::vector<std::byte> message = protocol::encode(
+            protocol::Chunks{.chunks = std::move(next.chunks), .done = std::move(next.done)});
+        queued += message.size();
+        if (auto sent = players.send(connection, net::Delivery::Bulk, message); !sent) {
+            log::debug(server_log, "couldn't send connection {} grid chunks: {}",
+                       std::to_underlying(connection), sent.error());
+            return;
+        }
+        chunks_sent_.add(count);
     }
-    server::ChunkSending::Next next =
-        pieces.sending.next(connection, pieces.snapshot,
-                            std::min(tile_queue - queued, most_chunk_bytes), protocol::most_chunks);
-    if (next.too_big > 0) {
-        log::warn(server_log, "{} grid chunks too big to send", next.too_big);
-    }
-    if (next.chunks.empty()) {
-        return;
-    }
-    const std::size_t count = next.chunks.size();
-    if (auto sent =
-            players.send(connection, net::Delivery::Bulk,
-                         protocol::encode(protocol::Chunks{.chunks = std::move(next.chunks)}));
-        !sent) {
-        log::debug(server_log, "couldn't send connection {} grid chunks: {}",
-                   std::to_underlying(connection), sent.error());
-        return;
-    }
-    chunks_sent_.add(count);
 }
 
 void Server::tell_bodies(net::ConnectionId player, std::span<const grid::Water::Value> ids) {

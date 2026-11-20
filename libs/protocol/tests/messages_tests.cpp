@@ -145,11 +145,22 @@ std::vector<Message> examples() {
                            .y = 0,
                            .z = 0,
                            .version = 0,
-                           .tree = {}}}},
+                           .tree = {}}},
+               .done = {}},
+        Chunks{.chunks = {},
+               .done = {{.depth = 9, .x = 1, .y = 70'000, .z = 3, .to = 12, .whole = true},
+                        {.depth = 2, .to = 4}}},
         AskPieces{},
-        AskPieces{
-            .pieces = {{.depth = 14, .x = 9000, .y = 3, .z = 16383, .to = 18, .priority = 0.5F},
-                       {.depth = 0, .to = 3, .priority = 2.0e-5F}}},
+        AskPieces{.pieces = {{.depth = 14,
+                              .x = 9000,
+                              .y = 3,
+                              .z = 16383,
+                              .to = 18,
+                              .held = 15,
+                              .priority = 0.5F},
+                             {.depth = 0, .to = 3, .priority = 2.0e-5F}},
+                  .dropped = {{.depth = 7, .x = 100, .y = 2, .z = 99}}},
+        AskPieces{.pieces = {}, .dropped = {{.depth = 1}, {.depth = 2, .x = 3}}},
         Report{},
         Report{.stamp = 1'763'600'000},
         Welcome{.world = 3, .planet = bytes({1, 2, 3, 4}), .ground = {}},
@@ -524,31 +535,51 @@ TEST_CASE("an edit of no width or too wide, and tiles too many or too big, are r
                         static_cast<int>((most_chunks + 1) >> 8U)}))
               .error()
               .code == ErrorCode::OutOfRange);
-    auto no_kind = encode(Chunks{.chunks = {{.kind = 3, .tree = {}}}});
+    auto no_kind = encode(Chunks{.chunks = {{.kind = 3, .tree = {}}}, .done = {}});
     no_kind.at(4) = std::byte{4};
     CHECK(decode(no_kind).error().code == ErrorCode::OutOfRange);
-    auto big_chunk = encode(Chunks{.chunks = {{.kind = 1, .tree = {}}}});
+    auto big_chunk = encode(Chunks{.chunks = {{.kind = 1, .tree = {}}}, .done = {}});
     const auto chunk_length = static_cast<std::uint32_t>(most_chunk + 1);
     for (unsigned shift = 0; shift < 32; shift += 8) {
-        big_chunk.at(big_chunk.size() - 4 + (shift / 8)) =
+        big_chunk.at(big_chunk.size() - 6 + (shift / 8)) =
             static_cast<std::byte>((chunk_length >> shift) & 0xFFU);
     }
     big_chunk.resize(big_chunk.size() + chunk_length);
     CHECK(decode(big_chunk).error().code == ErrorCode::OutOfRange);
-    auto short_chunk = encode(Chunks{.chunks = {{.kind = 1, .tree = bytes({1, 2})}}});
+    auto short_chunk = encode(Chunks{.chunks = {{.kind = 1, .tree = bytes({1, 2})}}, .done = {}});
     short_chunk.pop_back();
     CHECK(decode(short_chunk).error().code == ErrorCode::Parse);
+    // Pieces done: a count over the most, one neither whole nor not, and one cut short.
+    CHECK(decode(bytes({22, 0, 0, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto neither = encode(Chunks{.chunks = {}, .done = {{.depth = 1, .to = 2, .whole = true}}});
+    neither.back() = std::byte{2};
+    CHECK(decode(neither).error().code == ErrorCode::OutOfRange);
+    auto short_done = encode(Chunks{.chunks = {}, .done = {{.depth = 1, .to = 2}}});
+    short_done.pop_back();
+    CHECK(decode(short_done).error().code == ErrorCode::Parse);
     // Pieces asked for: a count over the most, one ranked by no finite size, and one cut short.
     CHECK(decode(bytes({23, 0, static_cast<int>((most_asked + 1) & 0xFFU),
                         static_cast<int>((most_asked + 1) >> 8U)}))
               .error()
               .code == ErrorCode::OutOfRange);
     auto unranked_piece = encode(AskPieces{
-        .pieces = {{.depth = 1, .to = 2, .priority = std::numeric_limits<float>::quiet_NaN()}}});
+        .pieces = {{.depth = 1, .to = 2, .priority = std::numeric_limits<float>::quiet_NaN()}},
+        .dropped = {}});
     CHECK(decode(unranked_piece).error().code == ErrorCode::OutOfRange);
-    auto short_ask_pieces = encode(AskPieces{.pieces = {{.depth = 1, .to = 2}}});
+    auto short_ask_pieces = encode(AskPieces{.pieces = {{.depth = 1, .to = 2}}, .dropped = {}});
     short_ask_pieces.pop_back();
     CHECK(decode(short_ask_pieces).error().code == ErrorCode::Parse);
+    // Pieces dropped: a count over the most, and one cut short.
+    CHECK(decode(bytes({23, 0, 0, 0, static_cast<int>((most_asked + 1) & 0xFFU),
+                        static_cast<int>((most_asked + 1) >> 8U)}))
+              .error()
+              .code == ErrorCode::OutOfRange);
+    auto short_dropped = encode(AskPieces{.pieces = {}, .dropped = {{.depth = 1, .x = 2}}});
+    short_dropped.pop_back();
+    CHECK(decode(short_dropped).error().code == ErrorCode::Parse);
     // Grains: a count over the most, ids not going up, and one cut short.
     CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
           ErrorCode::OutOfRange);
