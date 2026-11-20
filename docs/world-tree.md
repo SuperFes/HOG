@@ -108,9 +108,13 @@ Each step is its own commit with tests, and the world stays playable after each.
       over 4 m at most, so a stretch standing higher than that over the lowest isn't read; the
       ground's other numbers blend over 15 m of height, not 30. A 32 m region went from 0.96 s
       to 0.35 s, a 2 km one from 10.9 s to 5.6 s.
-   2. *Ground cells.* The ground of each of the cube's cells, at every level, made once and kept
-      where fills share it; slopes from its gradient, never from reads beside it. Still made by
-      `Formed::at`.
+   2. *Ground cells.* Done: each cell's ground is read at one detail for its level
+      (`terms::cell_lod`) and kept in the generator's `GroundCells`, shared by every fill and
+      thread; slopes come from its gradient, never from reads beside it; the fallen-rock walk and
+      the woods read the same cells. Rockfall's walk had been 79% of a 2 km region's reads, made
+      again for every batch of columns. A 32 m region went from 0.35 s to 0.28 s (0.11 s with its
+      cells held), a 2 km one from 5.2 s to 3.8 s, now mostly the walk's own cells, which
+      neighbouring fills share, and caves in the distance samples (step 5).
    3. *Fields from the parent.* Under forming's spacing, a cell's smooth fields (soils, deposits,
       walls, strength, weathering, the ground before valleys) come from its parent level's cells,
       not from weighing the points again.

@@ -10,6 +10,7 @@ add_library(hog_globe
     src/valleys.cpp
     src/generator.cpp
     src/grid_fill.cpp
+    src/ground_cells.cpp
     src/habitat.cpp
     src/water_bodies.cpp
     src/grip.cpp
@@ -57,6 +58,7 @@ hog_add_tests(hog_globe
     tests/valleys_tests.cpp
     tests/generator_tests.cpp
     tests/grid_fill_tests.cpp
+    tests/ground_cells_tests.cpp
     tests/habitat_tests.cpp
     tests/grip_tests.cpp
     tests/held_tiles_tests.cpp

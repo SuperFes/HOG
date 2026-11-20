@@ -17,7 +17,9 @@ namespace hog::globe {
 // Detail finer than `lod` metres is left out, so coarse samples are smooth versions of fine ones.
 [[nodiscard]] flora::Lean lean(const Generator& generator, DVec3 direction, double lod);
 
-// The woods at `direction`: its habitat's, leaned by its stands. Precondition: a formed world.
+// The woods at `direction`: its habitat's, leaned by its stands, the habitat of the ground at the
+// middle of the cell under it about `lod` wide, as the ground's columns read it. Precondition: a
+// formed world.
 [[nodiscard]] flora::Woods woods(const Generator& generator, DVec3 direction, double lod);
 
 } // namespace hog::globe

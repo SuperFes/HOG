@@ -1,6 +1,7 @@
 #include "terms.hpp"
 
 #include <hog/core/hash.hpp>
+#include <hog/globe/layers.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,20 @@ std::uint64_t Context::seed(Term term) const noexcept {
 
 DVec3 tangential(DVec3 gradient, DVec3 direction) noexcept {
     return gradient - (glm::dot(gradient, direction) * direction);
+}
+
+double cell_lod(const Planet& planet, int level) noexcept {
+    const int voxels = level_about(planet.body.radius, planet.voxel);
+    return std::max(std::ldexp(planet.voxel, voxels - level), 2.0 * planet.voxel);
+}
+
+int cell_level(const Planet& planet, double lod) noexcept {
+    const int voxels = level_about(planet.body.radius, planet.voxel);
+    int level = voxels;
+    while (level > 0 && std::ldexp(planet.voxel, voxels - level + 1) <= lod) {
+        --level;
+    }
+    return level;
 }
 
 double smoothstep(double x) noexcept {

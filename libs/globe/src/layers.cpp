@@ -20,20 +20,23 @@ double Layers::volume(Cell cell, int layer) const {
     return prism_volume(cell, bottom(layer), top(layer));
 }
 
-Layers layers_about(double radius, double depth, double height, double thickness) {
-    HOG_ASSERT(radius > depth && depth >= 0.0 && height > 0.0 && thickness > 0.0,
-               "layers must stand outward from inside the planet");
-    // Whole layers out from the reference level each way, so it lies on a layer's floor.
-    const auto below = static_cast<int>(std::ceil(depth / thickness));
-    const auto above = static_cast<int>(std::ceil(height / thickness));
-    // Finer until a cell's mean width is under √2 layers, so it lies within √2 of one either way.
+int level_about(double radius, double thickness) noexcept {
     const double side_at_root = std::sqrt(4.0 * std::numbers::pi / 6.0) * radius;
     int level = 0;
     while (level < Cell::max_level &&
            side_at_root > std::ldexp(thickness * std::numbers::sqrt2, level)) {
         ++level;
     }
-    return {.level = level,
+    return level;
+}
+
+Layers layers_about(double radius, double depth, double height, double thickness) {
+    HOG_ASSERT(radius > depth && depth >= 0.0 && height > 0.0 && thickness > 0.0,
+               "layers must stand outward from inside the planet");
+    // Whole layers out from the reference level each way, so it lies on a layer's floor.
+    const auto below = static_cast<int>(std::ceil(depth / thickness));
+    const auto above = static_cast<int>(std::ceil(height / thickness));
+    return {.level = level_about(radius, thickness),
             .floor = radius - (static_cast<double>(below) * thickness),
             .thickness = thickness,
             .count = std::max(1, below + above)};

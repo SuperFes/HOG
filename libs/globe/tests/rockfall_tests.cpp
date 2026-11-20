@@ -347,19 +347,15 @@ TEST_CASE("a coarse tile's cells hold the rock that falls within them", "[globe]
                              .j = middle.j - 8 + j});
         }
     }
-    const auto grounds = hog::globe::terms::ground(setup.context, cells, lod);
     const auto alone = hog::globe::terms::fallen(setup.context, cells, lod);
-    const auto knowing = hog::globe::terms::fallen(setup.context, cells, lod, cells, grounds);
     REQUIRE(alone.size() == cells.size());
-    REQUIRE(knowing.size() == cells.size());
     int covered = 0;
     for (std::size_t n = 0; n < cells.size(); ++n) {
         const hog::globe::terms::Fall one =
             hog::globe::terms::fallen(setup.context, hog::globe::center(cells[n]), lod);
         CAPTURE(n);
-        // Too wide a cell for any block to show; the ground already read walks the same way.
+        // Too wide a cell for any block to show.
         CHECK_FALSE(alone[n].rock.has_value());
-        CHECK(knowing[n].rubble.depth == alone[n].rubble.depth);
         CHECK(one.rubble.depth == alone[n].rubble.depth);
         CHECK(alone[n].rubble.depth <= hog::globe::widest_joints);
         covered += alone[n].rubble.depth > 0.0 ? 1 : 0;

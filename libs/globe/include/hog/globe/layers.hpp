@@ -31,6 +31,10 @@ struct Layers {
     friend constexpr bool operator==(const Layers&, const Layers&) noexcept = default;
 };
 
+// The level whose cells' mean width at `radius` is first under √2 times `thickness`, so a cell
+// lies within √2 of that either way.
+[[nodiscard]] int level_about(double radius, double thickness) noexcept;
+
 // Layers `thickness` thick from at least `depth` below `radius` to at least `height` above it,
 // `radius` on a layer's floor, on the level whose cells are nearest as wide at `radius`.
 [[nodiscard]] Layers layers_about(double radius, double depth, double height, double thickness);

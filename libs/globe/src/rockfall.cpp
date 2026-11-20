@@ -181,12 +181,6 @@ Fallen fallen_about(const Planet& planet, Cell cell, const GroundOf& ground_of) 
     return fallen;
 }
 
-// The ground the walk up from a cell reads, as coarsely as its step so the way up isn't turned
-// by every crag and gully, and never finer than `lod`.
-double walk_lod(const Planet& planet, Cell cell, double lod) noexcept {
-    return std::max(lod, width_of(planet, cell) / 2.0);
-}
-
 // The level of the cells fallen rock is reckoned over at `lod`: the coarsest rock cells, or
 // the cells `lod` resolves where those are too fine to show, whose rock falls within them.
 int fall_level(const Planet& planet, double lod) noexcept {
@@ -331,15 +325,6 @@ class Rocks {
 public:
     Rocks(const Context& context, double lod) : context_{&context}, lod_{lod} {}
 
-    // The ground of `cells`, read at the detail asked, so walks over them needn't read it again.
-    void know(std::span<const Cell> cells, std::span<const Ground> grounds) {
-        for (std::size_t k = 0; k < cells.size() && k < grounds.size(); ++k) {
-            if (walk_lod(*context_->planet, cells[k], lod_) == lod_) {
-                grounds_.try_emplace(key(cells[k]), grounds[k]);
-            }
-        }
-    }
-
     // The block in `cell`, none where a block in a cell holding it lies across it.
     std::optional<Rock> in(Cell cell) {
         const Planet& planet = *context_->planet;
@@ -455,10 +440,11 @@ private:
         return kept->second;
     }
 
+    // As coarsely as the walk steps, so the way up isn't turned by every crag and gully.
     const Ground& ground_of(Cell cell) {
         const auto [kept, added] = grounds_.try_emplace(key(cell));
         if (added) {
-            kept->second = ground(*context_, center(cell), walk_lod(*context_->planet, cell, lod_));
+            kept->second = ground(*context_, cell, cell_lod(*context_->planet, cell.level));
         }
         return kept->second;
     }
@@ -481,11 +467,10 @@ double widest_rock(const Planet& planet) noexcept {
     return fits * std::numbers::pi / 2.0 * planet.body.radius / std::ldexp(1.0, rock_level(planet));
 }
 
-double fallen_cover(const Context& context, Cell coarsest) noexcept {
-    return fallen_about(*context.planet, coarsest,
-                        [&](Cell at) {
-                            return ground(context, center(at), walk_lod(*context.planet, at, 0.0));
-                        })
+double fallen_cover(const Context& context, Cell coarsest) {
+    return fallen_about(
+               *context.planet, coarsest,
+               [&](Cell at) { return ground(context, at, cell_lod(*context.planet, at.level)); })
         .cover;
 }
 
@@ -550,10 +535,8 @@ Fall fallen(const Context& context, DVec3 direction, double lod) {
     return {.rock = rocks.under(direction), .rubble = rocks.rubble(direction)};
 }
 
-std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells, double lod,
-                         std::span<const Cell> known, std::span<const Ground> grounds) {
+std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells, double lod) {
     Rocks rocks{context, lod};
-    rocks.know(known, grounds);
     std::vector<Fall> found;
     found.reserve(cells.size());
     for (const Cell cell : cells) {

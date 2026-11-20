@@ -1,8 +1,10 @@
 #include "formed.hpp"
+#include "terms.hpp"
 
 #include <hog/core/hash.hpp>
 #include <hog/core/portable_maths.hpp>
 #include <hog/formation/ice.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/habitat.hpp>
 #include <hog/globe/noise.hpp>
 
@@ -27,6 +29,32 @@ double rise(double value, double from, double to) noexcept {
     return t * t * (3.0 - (2.0 * t));
 }
 
+// The habitat at the unit direction `up` on `ground` read there.
+flora::Habitat habitat_on(const Generator& generator, DVec3 up, const terms::Ground& ground) {
+    const Formed& formed = *generator.shape().formed;
+    const Formed::Climate climate = formed.climate_at(up, ground.height);
+    const double latitude = maths::atan2(up.z, std::sqrt((up.x * up.x) + (up.y * up.y)));
+    const Strata& layers = ground.layers;
+    flora::Habitat made{.temperature = climate.temperature,
+                        .swing = formation::seasonal_swing(latitude, false, formed.world().body),
+                        .rain = climate.rain,
+                        .over_drainage = std::max(0.0, ground.above_floor),
+                        .flow = climate.flow,
+                        .soil = layers.organic + layers.topsoil + layers.subsoil,
+                        .bare = ground.bare,
+                        .slope = glm::length(ground.rise),
+                        .ice = layers.ice};
+    if (ground.lake) {
+        made.water = std::max(0.0, *ground.lake - ground.height);
+    } else if (ground.river) {
+        made.water = std::max(0.0, *ground.river - ground.height);
+    } else if (formed.has_sea() && ground.height < 0.0) {
+        made.water = -ground.height;
+        made.sea = true;
+    }
+    return made;
+}
+
 } // namespace
 
 flora::Habitat habitat(const Generator& generator, DVec3 direction) {
@@ -34,31 +62,12 @@ flora::Habitat habitat(const Generator& generator, DVec3 direction) {
 }
 
 flora::Habitat habitat(const Generator& generator, DVec3 direction, double lod) {
-    const Formed& formed = *generator.shape().formed;
+    const terms::Context context{.planet = &generator.planet(),
+                                 .derived = &generator.derived(),
+                                 .shape = &generator.shape()};
     const DVec3 up = glm::normalize(direction);
-    const Formed::Here here = formed.at(up, std::max(lod, voxel_lod(generator)));
-    const double ground = here.top.value;
-    const Formed::Climate climate = formed.climate_at(up, ground);
-    const double latitude = maths::atan2(up.z, std::sqrt((up.x * up.x) + (up.y * up.y)));
-    const Strata& layers = here.layers;
-    flora::Habitat made{.temperature = climate.temperature,
-                        .swing = formation::seasonal_swing(latitude, false, formed.world().body),
-                        .rain = climate.rain,
-                        .over_drainage = std::max(0.0, here.above_floor),
-                        .flow = climate.flow,
-                        .soil = layers.organic + layers.topsoil + layers.subsoil,
-                        .bare = here.weathering.bare,
-                        .slope = glm::length(here.top.gradient),
-                        .ice = layers.ice};
-    if (here.lake) {
-        made.water = std::max(0.0, *here.lake - ground);
-    } else if (here.river) {
-        made.water = std::max(0.0, here.river->level - ground);
-    } else if (formed.has_sea() && ground < 0.0) {
-        made.water = -ground;
-        made.sea = true;
-    }
-    return made;
+    return habitat_on(generator, up,
+                      terms::ground(context, up, std::max(lod, voxel_lod(generator))));
 }
 
 flora::Lean lean(const Generator& generator, DVec3 direction, double lod) {
@@ -76,7 +85,16 @@ flora::Lean lean(const Generator& generator, DVec3 direction, double lod) {
 }
 
 flora::Woods woods(const Generator& generator, DVec3 direction, double lod) {
-    return flora::woods_of(habitat(generator, direction, lod), lean(generator, direction, lod));
+    const DVec3 up = glm::normalize(direction);
+    const terms::Context context{.planet = &generator.planet(),
+                                 .derived = &generator.derived(),
+                                 .shape = &generator.shape(),
+                                 .crags = false,
+                                 .cells = generator.ground_cells()};
+    const int level = terms::cell_level(generator.planet(), lod);
+    const terms::Ground ground =
+        terms::ground(context, cell_under(up, level), terms::cell_lod(generator.planet(), level));
+    return flora::woods_of(habitat_on(generator, up, ground), lean(generator, up, lod));
 }
 
 } // namespace hog::globe

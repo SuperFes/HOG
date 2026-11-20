@@ -326,11 +326,14 @@ TEST_CASE("solid ground has its material and open space none", "[globe][grid]") 
                              .y = (key.y << levels) + y,
                              .z = (key.z << levels) + z};
                 const double out = held(grid, key, filled, grid.centre(at));
-                const auto material = filled.material.at(levels, x, y, z).value;
-                if (out > fine) {
-                    CHECK(material == air);
-                } else if (out < -fine) {
-                    CHECK(material != air);
+                const auto leaf = filled.material.at(levels, x, y, z);
+                // A leaf the surface crosses holds what most of it holds, as far as it reaches.
+                const double reach =
+                    std::max(fine, grid.size(static_cast<std::uint8_t>(key.depth + leaf.depth)));
+                if (out > reach) {
+                    CHECK(leaf.value == air);
+                } else if (out < -reach) {
+                    CHECK(leaf.value != air);
                 }
             }
         }

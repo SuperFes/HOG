@@ -10,6 +10,10 @@
 #include <span>
 #include <vector>
 
+namespace hog::globe {
+class GroundCells;
+} // namespace hog::globe
+
 // The generator's terms, one file each. Heights are metres over the planet's raw radius, as
 // functions of direction, their gradients taken against the point on the sphere at that radius.
 namespace hog::globe::terms {
@@ -33,6 +37,8 @@ struct Context {
     const Derived* derived = nullptr;
     const Generator::Shape* shape = nullptr;
     bool crags = true; // standing out of the ground, rather than placed apart
+    // Where the cells' ground read is kept to be read again; none, read afresh each time.
+    const GroundCells* cells = nullptr;
 
     [[nodiscard]] std::uint64_t seed(Term term) const noexcept;
 };
@@ -57,7 +63,8 @@ struct Ground {
     // of the year from the March equinox.
     double water_rise = 0.0;
     double water_peak = 0.0;
-    DVec3 rise{0.0}; // which way it climbs and how steeply, metres up per metre along
+    DVec3 rise{0.0};           // which way it climbs and how steeply, metres up per metre along
+    double above_floor = 1e30; // metres over the floor its valley drains along
     // The rock at its top: metres a year of it coming loose in blocks, metres a year it breaks up
     // where bare and the ground wears down, the years it has had, how well it stands, 0 to 1, and
     // the share standing bare.
@@ -70,9 +77,17 @@ struct Ground {
 };
 
 [[nodiscard]] Ground ground(const Context& context, DVec3 direction, double lod) noexcept;
-// The same at the middle of each of `cells`, all of one level: the same bits as one at a time.
+// The same at a cell's middle, kept in the context's cells to be read again.
+[[nodiscard]] Ground ground(const Context& context, Cell cell, double lod);
+// The same at the middle of each of `cells`.
 [[nodiscard]] std::vector<Ground> ground(const Context& context, std::span<const Cell> cells,
                                          double lod);
+// The detail the cells of `level` are read with: as fine as they're wide, but never finer than
+// two voxels.
+[[nodiscard]] double cell_lod(const Planet& planet, int level) noexcept;
+// The level of the cells read with detail `lod`: the coarsest no coarser than it, but at least
+// the root's.
+[[nodiscard]] int cell_level(const Planet& planet, double lod) noexcept;
 
 // Caves never reach a point more than this many metres from open rock.
 inline constexpr double cave_reach = 50.0;
@@ -108,7 +123,7 @@ inline constexpr int rock_sizes = 4;
 // the rock upslope, falling no further out than the shadow angle reaches, spread over how far it
 // runs out and lasting until it breaks down, with what comes loose from the rock there. None
 // lies on ground steeper than its rubble rests on.
-[[nodiscard]] double fallen_cover(const Context& context, Cell coarsest) noexcept;
+[[nodiscard]] double fallen_cover(const Context& context, Cell coarsest);
 // The rock in one cell of any of those levels, wherever its columns stand.
 [[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod);
 // Every rock in the coarsest cells `coarsest` and the cells inside them.
@@ -134,11 +149,10 @@ struct Fall {
     Rubble rubble;
 };
 [[nodiscard]] Fall fallen(const Context& context, DVec3 direction, double lod);
-// Over the cells `lod` resolves where they're coarser than the rock cells, whose rock falls
-// within them. `known` are cells of any level whose ground at `lod` is `grounds`.
+// The same at the middle of each of `cells`; over cells `lod` resolves where they're coarser
+// than the rock cells, whose rock falls within them.
 [[nodiscard]] std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells,
-                                       double lod, std::span<const Cell> known = {},
-                                       std::span<const Ground> grounds = {});
+                                       double lod);
 // The same at the middle of each of `cells`, all of one level, each rock made once.
 [[nodiscard]] std::vector<std::optional<Rock>> rockfall(const Context& context,
                                                         std::span<const Cell> cells, double lod);

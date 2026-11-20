@@ -10,6 +10,7 @@
 #include <hog/globe/world.hpp>
 #include <hog/testing/world.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -315,31 +316,29 @@ TEST_CASE("a ball dug across a cube's edge opens on both faces", "[globe][world]
     CHECK(faces == std::set<int>{0, 1});
 }
 
-TEST_CASE("columns far apart tell distance at their coarser detail as truly as small steps",
+TEST_CASE("coarse columns tell distance by the ground's own slope as truly as by the world's",
           "[globe][world]") {
     const Generator& generator = earth();
     const hog::globe::Layers& layers = generator.layers();
-    constexpr int apart = 16;
-    const double lod = hog::globe::voxel_lod(generator) * apart;
-    double shared_error = 0.0;
-    double stepped_error = 0.0;
+    const double lod = hog::globe::voxel_lod(generator) * 16.0;
+    double error = 0.0;
     int counted = 0;
     for (std::uint64_t k = 0; k < 16; ++k) {
         const hog::globe::Cell cell = hog::globe::cell_under(somewhere(k), layers.level);
         const DVec3 direction = hog::globe::center(cell);
         const double ground = hog::globe::ground_below(generator, direction, lod).value_or(0.0);
-        const Generator::Column shared = generator.columns(std::span{&cell, 1}, lod, apart)[0];
-        const Generator::Column stepped = generator.column(direction, lod);
+        const Generator::Column kept = generator.columns(std::span{&cell, 1}, lod)[0];
+        const Generator::Column alone = generator.column(direction, lod);
         for (const double height : {8.0, 16.0, 32.0}) {
             const double truth =
                 true_distance(generator, direction, ground + height, 2.0 * height, lod);
-            shared_error += std::abs(shared.sample(ground + height).distance - truth) / truth;
-            stepped_error += std::abs(stepped.sample(ground + height).distance - truth) / truth;
+            CHECK(kept.sample(ground + height).distance ==
+                  Catch::Approx(alone.sample(ground + height).distance).margin(1e-6));
+            error += std::abs(kept.sample(ground + height).distance - truth) / truth;
             ++counted;
         }
     }
-    CHECK(shared_error <= stepped_error * 1.2);
-    CHECK(shared_error / counted < 0.08);
+    CHECK(error / counted < 0.08);
 }
 
 TEST_CASE("voxels filled far apart are the world's, averaged through the layers they stand for",

@@ -1,4 +1,5 @@
 #include "formed.hpp"
+#include "ground_cells.hpp"
 #include "joints.hpp"
 #include "terms.hpp"
 
@@ -34,24 +35,6 @@ namespace {
 // A cave can carve the ground only this near it, the widest passage's radius and some.
 constexpr double cave_surface_reach = 8.0;
 
-// The way the ground rises, in metres per metre, and how steeply.
-// The ground's slope measured across a small step either way. Gullies turn with the slope they're
-// cut in, which their own gradients can't know without the ground's curvature, and the loose
-// cover lies by the slope, which its gradient can't know either.
-double ground_slope(const terms::Context& context, DVec3 direction, double lod) {
-    const double step = std::max(lod, context.planet->voxel) / 8.0;
-    const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
-    const DVec3 east = glm::normalize(glm::cross(side, direction));
-    const DVec3 north = glm::cross(direction, east);
-    const double turn = step / context.planet->body.radius;
-    const auto height = [&](DVec3 along, double by) {
-        return terms::ground(context, glm::normalize(direction + (along * by)), lod).height;
-    };
-    const double across_east = (height(east, turn) - height(east, -turn)) / (2.0 * step);
-    const double across_north = (height(north, turn) - height(north, -turn)) / (2.0 * step);
-    return std::sqrt((across_east * across_east) + (across_north * across_north));
-}
-
 } // namespace
 
 Generator::Generator(const Planet& planet, const Progress& progress)
@@ -68,6 +51,7 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     shape_.lowest = formed->lowest();
     shape_.highest = formed->highest();
     shape_.formed = formed;
+    cells_ = std::make_shared<const GroundCells>();
     say("laying out the voxel layers");
     // No shell reaches more than halfway to the centre, however deep a small planet's seas run:
     // what lies under its floor is rock.
@@ -84,15 +68,22 @@ std::optional<double> Generator::sea_level() const noexcept {
     return planet_.body.radius;
 }
 
+terms::Context Generator::context(bool crags) const noexcept {
+    return {.planet = &planet_,
+            .derived = &derived_,
+            .shape = &shape_,
+            .crags = crags,
+            .cells = cells_.get()};
+}
+
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const terms::Context context = this->context();
     const DVec3 down = glm::normalize(direction);
-    return finish(down, lod, terms::ground(context, down, lod), ground_slope(context, down, lod),
-                  terms::fallen(context, down, lod));
+    return finish(down, lod, terms::ground(context, down, lod), terms::fallen(context, down, lod));
 }
 
 std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const terms::Context context = this->context();
     const Cell cell = cell_under(glm::normalize(point), terms::rock_level(planet_));
     std::vector<Rock> found;
     // Each coarsest cell's block and those of the cells inside it.
@@ -121,7 +112,7 @@ std::vector<Rock> Generator::rocks_within(DVec3 toward, double reach, double lod
     if (terms::widest_rock(planet_) < lod) {
         return {};
     }
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const terms::Context context = this->context();
     const int level = terms::rock_level(planet_);
     const DVec3 middle = glm::normalize(toward);
     // A cell's every point lies within half its diagonal of its middle; none is wider than this.
@@ -162,7 +153,7 @@ std::vector<Crag> Generator::crags_within(DVec3 toward, double reach, double lod
             }
         }
     }
-    const std::vector<Column> made = columns(cells, lod, 1, false);
+    const std::vector<Column> made = columns(cells, lod, false);
     std::vector<const Column*> standing;
     for (const Column& column : made) {
         if (column.crag()) {
@@ -252,82 +243,27 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
 }
 
 std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod,
-                                                  int apart, bool placed) const {
+                                                  bool placed) const {
     HOG_ASSERT(
         std::ranges::all_of(
             cells, [&](Cell cell) { return cell.is_valid() && cell.level == cells.front().level; }),
         "the cells must be of one level");
-    const terms::Context context{
-        .planet = &planet_, .derived = &derived_, .shape = &shape_, .crags = placed};
-    const std::size_t count = cells.size();
+    const terms::Context context = this->context(placed);
     const std::vector<terms::Ground> found = terms::ground(context, cells, lod);
-    std::unordered_map<std::uint64_t, double> heights;
-    for (std::size_t k = 0; k < count; ++k) {
-        heights.emplace(index_of(cells[k]), found[k].height);
-    }
-    // Those beside them the slopes are taken across, made together too.
-    std::vector<Cell> beyond;
-    for (const Cell cell : cells) {
-        const CellNeighbors beside = sides(cell, apart);
-        for (const Cell next : beside.all()) {
-            if (!heights.contains(index_of(next))) {
-                heights.emplace(index_of(next), 0.0);
-                beyond.push_back(next);
-            }
-        }
-    }
-    const std::vector<terms::Ground> around_them = terms::ground(context, beyond, lod);
-    for (std::size_t k = 0; k < beyond.size(); ++k) {
-        heights[index_of(beyond[k])] = around_them[k].height;
-    }
-    const auto height_at = [&](Cell cell) { return heights.at(index_of(cell)); };
-
-    std::vector<Cell> known{cells.begin(), cells.end()};
-    known.insert(known.end(), beyond.begin(), beyond.end());
-    std::vector<terms::Ground> grounds = found;
-    grounds.insert(grounds.end(), around_them.begin(), around_them.end());
-    const std::vector<terms::Fall> falls = terms::fallen(context, cells, lod, known, grounds);
+    const std::vector<terms::Fall> falls = terms::fallen(context, cells, lod);
     std::vector<Column> made;
-    made.reserve(count);
-    for (std::size_t k = 0; k < count; ++k) {
-        const DVec3 down = center(cells[k]);
-        const DVec3 axis = std::abs(down.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
-        const DVec3 east = glm::normalize(glm::cross(axis, down));
-        const DVec3 north = glm::cross(down, east);
-        // The plane through the four heights `apart` beside it, by least squares; across a
-        // cube's edge the cells beside it needn't line up.
-        double xx = 0.0;
-        double xy = 0.0;
-        double yy = 0.0;
-        double xh = 0.0;
-        double yh = 0.0;
-        const CellNeighbors beside = sides(cells[k], apart);
-        for (const Cell cell : beside.all()) {
-            const DVec3 offset = (center(cell) - down) * planet_.body.radius;
-            const double x = glm::dot(offset, east);
-            const double y = glm::dot(offset, north);
-            const double rise = height_at(cell) - found[k].height;
-            xx += x * x;
-            xy += x * y;
-            yy += y * y;
-            xh += x * rise;
-            yh += y * rise;
-        }
-        const double determinant = (xx * yy) - (xy * xy);
-        const double across_east = ((yy * xh) - (xy * yh)) / determinant;
-        const double across_north = ((xx * yh) - (xy * xh)) / determinant;
+    made.reserve(cells.size());
+    for (std::size_t k = 0; k < cells.size(); ++k) {
         terms::Fall fall = falls[k];
         if (!placed) {
             fall.rock.reset();
         }
-        made.push_back(
-            finish(down, lod, found[k],
-                   std::sqrt((across_east * across_east) + (across_north * across_north)), fall));
+        made.push_back(finish(center(cells[k]), lod, found[k], fall));
     }
     return made;
 }
 
-Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made, double slope,
+Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made,
                                     const terms::Fall& fall) const noexcept {
     Column column;
     column.generator_ = this;
@@ -348,11 +284,11 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.water_rise_ = made.water_rise;
         column.water_peak_ = made.water_peak;
     }
-    column.slope_ = slope;
+    column.slope_ = glm::length(made.rise);
     column.crag_ = made.crag;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const terms::Context context = this->context();
     if (terms::rubble_shows(context, down, lod, fall.rubble.share)) {
         column.strata_.rubble = fall.rubble.depth;
         column.strata_.rubble_of = fall.rubble.of;
@@ -364,9 +300,7 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
 }
 
 bool Generator::Column::caves_may_lie(double lowest, double highest) const noexcept {
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
+    const terms::Context context = generator_->context();
     return std::max(lowest, ground_ - terms::cave_floor(context)) < std::min(highest, ground_) &&
            terms::cave_district(context, direction_) > 0.0;
 }
@@ -374,9 +308,7 @@ bool Generator::Column::caves_may_lie(double lowest, double highest) const noexc
 std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, double highest,
                                                                 double within) const {
     std::vector<std::pair<double, double>> found;
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
+    const terms::Context context = generator_->context();
     if (!caves_may_lie(lowest, highest)) {
         return found;
     }
@@ -418,9 +350,7 @@ std::vector<Generator::Column::Boundary> Generator::Column::boundaries(double lo
                                                                        double highest,
                                                                        double margin, bool beds,
                                                                        bool caves) const {
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
+    const terms::Context context = generator_->context();
     std::vector<Boundary> found;
     const auto add = [&](double bottom, double top, bool cave = false) {
         bottom -= margin;
@@ -470,9 +400,7 @@ std::vector<Generator::Column::Boundary> Generator::Column::boundaries(double lo
 }
 
 Material Generator::Column::inside(double radius) const noexcept {
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
+    const terms::Context context = generator_->context();
     const double shown = std::max(0.0, ground_ - radius - (lod_ / 2.0));
     return terms::material_at(context, strata_, scatter_, direction_, shown, ground_ - shown);
 }
@@ -483,9 +411,7 @@ Sample Generator::Column::sample(double radius, bool caves) const noexcept {
     const double slope = slope_ * planet.body.radius / radius;
     Sample sample;
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
+    const terms::Context context = generator_->context();
     const double depth = ground_ - radius;
 
     // A cave takes its voxels out of the rock, and opens the ground where it reaches it. Only one
@@ -673,6 +599,7 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
                                  .height = here.standing->height};
     }
     made.rise = tangential(here.top.gradient, direction);
+    made.above_floor = here.above_floor;
     made.loosening = here.weathering.loosening;
     made.weathering = here.weathering.rate;
     made.worn = here.weathering.worn;
@@ -688,11 +615,24 @@ Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
     return formed_ground(context, direction, lod);
 }
 
+Ground ground(const Context& context, Cell cell, double lod) {
+    if (context.cells == nullptr) {
+        return formed_ground(context, center(cell), lod);
+    }
+    const GroundCells::Key key{.cell = cell, .lod = lod, .crags = context.crags};
+    if (std::optional<Ground> kept = context.cells->find(key)) {
+        return *std::move(kept);
+    }
+    Ground made = formed_ground(context, center(cell), lod);
+    context.cells->keep(key, made);
+    return made;
+}
+
 std::vector<Ground> ground(const Context& context, std::span<const Cell> cells, double lod) {
     std::vector<Ground> made;
     made.reserve(cells.size());
     for (const Cell& cell : cells) {
-        made.push_back(formed_ground(context, center(cell), lod));
+        made.push_back(ground(context, cell, lod));
     }
     return made;
 }

@@ -117,8 +117,7 @@ public:
 
     // The finest columns made with a crag left out of their ground.
     [[nodiscard]] std::vector<const Generator::Column*> standing() const {
-        const int level =
-            std::max(generator_->layers().level - (grid_->depth() - (key_.depth + levels_)), 0);
+        const int level = level_at(static_cast<std::uint8_t>(key_.depth + levels_));
         std::vector<const Generator::Column*> found;
         for (const auto& [slot, column] : columns_) {
             if (std::cmp_equal(slot & 31U, level) && column.crag()) {
@@ -148,6 +147,11 @@ private:
                 .z = (key_.z << depth) + z};
     }
 
+    // The level of the cells about as wide as nodes at depth `at`.
+    [[nodiscard]] int level_at(std::uint8_t at) const noexcept {
+        return std::max(generator_->layers().level - (grid_->depth() - at), 0);
+    }
+
     [[nodiscard]] bool open(std::uint8_t depth, const Probe& here) const noexcept {
         return key_.depth + depth < grid_->depth() &&
                (std::abs(here.distance) < near * here.size || here.caves);
@@ -161,8 +165,8 @@ private:
             const auto at = static_cast<std::uint8_t>(key_.depth + depth);
             const double size = grid_->size(at);
             // Columns on cells about as wide as the nodes, detail no finer than them.
-            const int level = std::max(generator_->layers().level - (grid_->depth() - at), 0);
-            const double lod = std::max(size, voxel_lod(*generator_));
+            const int level = level_at(at);
+            const double lod = terms::cell_lod(generator_->planet(), level);
             std::vector<DVec3> middles;
             middles.reserve(nodes.size());
             for (const grid::Key node : nodes) {
@@ -350,7 +354,7 @@ private:
         if (wanted.empty()) {
             return;
         }
-        std::vector<Generator::Column> made = generator_->columns(wanted, lod, 1, false);
+        std::vector<Generator::Column> made = generator_->columns(wanted, lod, false);
         for (std::size_t n = 0; n < wanted.size(); ++n) {
             columns_.emplace(slot(wanted[n]), made[n]);
         }
