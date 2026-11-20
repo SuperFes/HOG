@@ -37,7 +37,8 @@ inline const GlobeWorld& globe() {
 }
 
 // Level land near the start on the globe, where there's ground to walk on without sliding:
-// the gentlest slope among spots some metres apart round the nearest land.
+// the gentlest slope among spots some metres apart round the nearest land, along the way north
+// a player walks from it too.
 inline DVec3 on_land() {
     static const DVec3 found = [] {
         const globe::Generator& generator = globe().generator;
@@ -59,10 +60,15 @@ inline DVec3 on_land() {
                 if (middle <= generator.sea_level().value_or(0.0) + 2.0) {
                     continue;
                 }
-                double slope = 0.0;
-                for (const DVec3 along : {east, north}) {
-                    const DVec3 beside = glm::normalize(at + (along * (2.0 / radius)));
-                    slope = std::max(slope, std::abs(height(beside) - middle) / 2.0);
+                const DVec3 beside = glm::normalize(at + (east * (2.0 / radius)));
+                double slope = std::abs(height(beside) - middle) / 2.0;
+                // All the way along the few metres north a player walks or runs from it.
+                double last = height(glm::normalize(at - (north * (1.0 / radius))));
+                for (int step = -1; step <= 8; ++step) {
+                    const double next =
+                        height(glm::normalize(at + (north * ((step + 1) * 0.5 / radius))));
+                    slope = std::max(slope, std::abs(next - last) / 0.5);
+                    last = next;
                 }
                 if (slope < gentlest) {
                     gentlest = slope;
