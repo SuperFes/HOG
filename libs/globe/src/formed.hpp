@@ -94,6 +94,15 @@ public:
     // Gullies and river channels narrower than twice `lod` are left out.
     // Without `crags`, none stands out of the ground, each noted as `standing` instead.
     [[nodiscard]] Here at(DVec3 direction, double lod = 0.0, bool crags = true) const;
+    // The same with forming's points counting as `weights` has them, as weigh() would.
+    [[nodiscard]] Here at(DVec3 direction, const formation::Smooth::Weights& weights, double lod,
+                          bool crags) const;
+    // How much each of forming's points counts at `direction`.
+    void weigh(DVec3 direction, formation::Smooth::Weights& into) const;
+    // The finest cube level whose cells are weighed for at their middles, the first no more than
+    // a quarter of the points' spacing across: finer ones can be read between them, the weights
+    // being smooth over so little.
+    [[nodiscard]] int seed_level() const noexcept;
 
     // The yearly mean temperature at `direction` where the ground stands `height` metres over the
     // sea, °C: the climate's at the points about, warmer or colder by the lapse rate from their

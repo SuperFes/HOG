@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/formation/smooth.hpp>
 #include <hog/globe/cave_piece.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
@@ -16,6 +17,7 @@
 namespace hog::globe {
 class GroundCells;
 class CaveCells;
+class WeightCells;
 } // namespace hog::globe
 
 // The generator's terms, one file each. Heights are metres over the planet's raw radius, as
@@ -45,6 +47,8 @@ struct Context {
     const GroundCells* cells = nullptr;
     // Where the caves laid out in cave cells are kept; none, laid out afresh each time.
     const CaveCells* caves = nullptr;
+    // Where the weights of forming's points at cells' middles are kept; none, found afresh.
+    const WeightCells* weights = nullptr;
 
     [[nodiscard]] std::uint64_t seed(Term term) const noexcept;
 };
@@ -83,6 +87,9 @@ struct Ground {
 };
 
 [[nodiscard]] Ground ground(const Context& context, DVec3 direction, double lod) noexcept;
+// How much each of forming's points counts at `direction`, as the ground's read with: between the
+// four cells of the formed world's seed level about it, weighed at their middles.
+void weights_at(const Context& context, DVec3 direction, formation::Smooth::Weights& into);
 // The same at a cell's middle, kept in the context's cells to be read again.
 [[nodiscard]] Ground ground(const Context& context, Cell cell, double lod);
 // The same at the middle of each of `cells`.

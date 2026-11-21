@@ -1,5 +1,6 @@
 #include "../src/formed.hpp"
 #include "../src/joints.hpp"
+#include "../src/terms.hpp"
 
 #include <hog/core/hash.hpp>
 #include <hog/globe/generator.hpp>
@@ -120,20 +121,31 @@ struct Settling {
     }
 };
 
+// Formed's ground at `direction` as the generator reads it: its points counting as the
+// generator's ground weighs them.
+hog::globe::Formed::Here as_read(const hog::globe::Generator& generator, DVec3 direction,
+                                 double lod) {
+    const hog::globe::terms::Context context{.planet = &generator.planet(),
+                                             .derived = &generator.derived(),
+                                             .shape = &generator.shape()};
+    hog::formation::Smooth::Weights weights;
+    hog::globe::terms::weights_at(context, direction, weights);
+    return generator.shape().formed->at(direction, weights, lod, true);
+}
+
 } // namespace
 
 TEST_CASE("a formed planet stands on the land that formed it, its sea at the radius",
           "[globe][formed]") {
     const Generator& generator = formed_generator();
     REQUIRE(generator.shape().formed);
-    const Formed& formed = *generator.shape().formed;
     const Planet& planet = generator.planet();
     CHECK(generator.shape().sea);
     int under_sea = 0;
     for (std::uint64_t n = 0; n < 300; ++n) {
         const DVec3 direction = somewhere(n);
         const Generator::Column column = generator.column(direction, planet.voxel);
-        const Formed::Here here = formed.at(direction, planet.voxel);
+        const Formed::Here here = as_read(generator, direction, planet.voxel);
         CHECK_THAT(column.ground(), WithinAbs(planet.body.radius + here.top.value, 1e-6));
         if (here.top.value < -100.0) {
             CHECK(column.water() >= planet.body.radius);

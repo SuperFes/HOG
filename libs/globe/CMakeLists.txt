@@ -50,6 +50,7 @@ hog_add_tests(hog_globe
     tests/caves_tests.cpp
     tests/courses_tests.cpp
     tests/cell_tests.cpp
+    tests/cell_weights_tests.cpp
     tests/dissection_tests.cpp
     tests/joints_tests.cpp
     tests/drainage_tests.cpp

@@ -1,4 +1,5 @@
 #include "../src/formed.hpp"
+#include "../src/terms.hpp"
 
 #include <hog/globe/cell.hpp>
 #include <hog/globe/habitat.hpp>
@@ -30,6 +31,18 @@ std::vector<DVec3> spread(std::uint64_t count) {
     return found;
 }
 
+// Formed's ground at `direction` as the generator reads it: its points counting as the
+// generator's ground weighs them.
+hog::globe::Formed::Here as_read(const hog::globe::Generator& generator, DVec3 direction,
+                                 double lod) {
+    const hog::globe::terms::Context context{.planet = &generator.planet(),
+                                             .derived = &generator.derived(),
+                                             .shape = &generator.shape()};
+    hog::formation::Smooth::Weights weights;
+    hog::globe::terms::weights_at(context, direction, weights);
+    return generator.shape().formed->at(direction, weights, lod, true);
+}
+
 } // namespace
 
 TEST_CASE("a place's climate warms and cools by the lapse rate with the ground's height",
@@ -57,7 +70,7 @@ TEST_CASE("a habitat is the place's own: its warmth at its height, its water, it
     int seas = 0;
     for (const DVec3& up : spread(300)) {
         const hog::flora::Habitat here = hog::globe::habitat(world, up);
-        const hog::globe::Formed::Here formed_here = formed.at(up, lod);
+        const hog::globe::Formed::Here formed_here = as_read(world, up, lod);
         CAPTURE(up.x, up.y, up.z);
         CHECK(here.temperature ==
               Catch::Approx(formed.climate_at(up, formed_here.top.value).temperature));

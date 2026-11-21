@@ -1213,7 +1213,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     // once as the points weighed change.
     const auto valley = [&](std::uint32_t point, double weighed, DVec3 weighed_gradient) {
         constexpr double weighed_fully = 0.02;
-        const double near = std::min(1.0, weighed / weighed_fully);
+        const double near = std::clamp(weighed / weighed_fully, 0.0, 1.0);
         const double present = near * near * (3.0 - (2.0 * near));
         const DVec3 present_gradient =
             near < 1.0 ? weighed_gradient * (6.0 * near * (1.0 - near) / weighed_fully)
@@ -1775,9 +1775,28 @@ Formed::Climate Formed::climate_at(DVec3 direction, double height) const {
                     seconds_a_year};
 }
 
+void Formed::weigh(DVec3 direction, formation::Smooth::Weights& into) const {
+    smooth_.weigh(direction, into, start_near(direction));
+}
+
+int Formed::seed_level() const noexcept {
+    constexpr double seed_share = 0.25;
+    const double widest = world_.sphere.spacing() * seed_share;
+    int level = 0;
+    while (level < Cell::max_level && std::numbers::pi / 2.0 / std::ldexp(1.0, level) > widest) {
+        ++level;
+    }
+    return level;
+}
+
 Formed::Here Formed::at(DVec3 direction, double lod, bool crags) const {
     formation::Smooth::Weights weights;
-    smooth_.weigh(direction, weights, start_near(direction));
+    weigh(direction, weights);
+    return at(direction, weights, lod, crags);
+}
+
+Formed::Here Formed::at(DVec3 direction, const formation::Smooth::Weights& weights, double lod,
+                        bool crags) const {
     const auto value = [&](const std::vector<double>& field) {
         return formation::Smooth::read(field, weights).value;
     };

@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -133,4 +134,73 @@ TEST_CASE("a field reads within its range anywhere in a cap", "[formation][smoot
             }
         }
     }
+}
+
+namespace {
+
+// The weights at `s`, `t` across a square `side` radians on a side about `middle`, read from its
+// corners, and the place they're for.
+struct Between {
+    DVec3 at{0.0};
+    Smooth::Weights weights;
+};
+Between weighed_between(const Smooth& smooth, const DVec3& middle, double side, double s,
+                        double t) {
+    const DVec3 u = tangent(middle) * side;
+    const DVec3 v = glm::cross(middle, tangent(middle)) * side;
+    const DVec3 corner = middle - ((u + v) * 0.5);
+    std::array<Smooth::Weights, 4> known;
+    std::array<Smooth::Corner, 4> corners;
+    for (std::size_t c = 0; c < 4; ++c) {
+        corners.at(c).direction = glm::normalize(corner + (u * static_cast<double>(c & 1U)) +
+                                                 (v * static_cast<double>(c >> 1U)));
+        smooth.weigh(corners.at(c).direction, known.at(c));
+        corners.at(c).weights = &known.at(c);
+    }
+    Between between{.at = glm::normalize(corner + (u * s) + (v * t)), .weights = {}};
+    Smooth::between(between.at, corners, s, t, between.weights);
+    return between;
+}
+
+} // namespace
+
+TEST_CASE("weights read between four places agree with those weighed there, closer the smaller "
+          "the square",
+          "[formation][smooth]") {
+    const Sphere sphere{4, 3};
+    const Smooth smooth{sphere};
+    std::vector<double> field(sphere.size());
+    for (std::uint32_t point = 0; point < sphere.size(); ++point) {
+        field[point] = 1'000.0 * unit(hog::hash_values(13, point));
+    }
+    Smooth::Weights weighed;
+    double coarser = 0.0;
+    for (const double share : {0.5, 0.25, 0.125}) {
+        double worst = 0.0;
+        double worst_slope = 0.0;
+        for (std::uint64_t n = 0; n < 200; ++n) {
+            const double s = unit(hog::hash_values(17, n, 0));
+            const double t = unit(hog::hash_values(17, n, 1));
+            const Between between =
+                weighed_between(smooth, somewhere(n), share * sphere.spacing(), s, t);
+            double sum = 0.0;
+            for (const double weight : between.weights.weights) {
+                sum += weight;
+            }
+            CHECK_THAT(sum, WithinAbs(1.0, 1e-9));
+            smooth.weigh(between.at, weighed);
+            const Smooth::Read read = Smooth::read(field, between.weights);
+            const Smooth::Read truth = Smooth::read(field, weighed);
+            worst = std::max(worst, std::abs(read.value - truth.value));
+            worst_slope = std::max(worst_slope, glm::length(read.gradient - truth.gradient) /
+                                                    (1.0 + glm::length(truth.gradient)));
+            CHECK(std::abs(glm::dot(read.gradient, between.at)) < 1e-9);
+        }
+        WARN("share " << share << " worst " << worst << " slope " << worst_slope);
+        if (coarser > 0.0) {
+            CHECK(worst < coarser / 4.0);
+        }
+        coarser = worst;
+    }
+    CHECK(coarser < 1.0);
 }

@@ -24,6 +24,7 @@ class Formed;
 inline constexpr std::uint32_t generator_version = 1;
 
 class GroundCells;
+class WeightCells;
 class CaveCells;
 namespace terms {
 struct Ground;
@@ -292,6 +293,7 @@ private:
     // Shared by copies, which read the same ground and caves.
     std::shared_ptr<const GroundCells> cells_;
     std::shared_ptr<const CaveCells> caves_;
+    std::shared_ptr<const WeightCells> weights_;
 };
 
 // The finest detail generated into voxels: two of them across, as finer would alias into steps a

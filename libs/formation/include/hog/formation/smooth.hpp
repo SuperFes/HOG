@@ -2,6 +2,7 @@
 
 #include <hog/formation/sphere.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -29,6 +30,20 @@ public:
         DVec3 gradient{0.0}; // per radian across the sphere, along it
     };
     [[nodiscard]] static Read read(std::span<const double> field, const Weights& weights);
+
+    // The weights at `direction`, `s` and `t` of the way across a square of four places whose
+    // weights are known, corners in the order (0, 0), (1, 0), (0, 1), (1, 1): each point's weight
+    // a cubic Hermite of its weights and slopes there, a point missing from a corner counting
+    // none, so a field read with them is near the same Hermite of its reads at the corners. A
+    // weight the Hermite takes under nothing counts none, the rest shared out to sum to 1, so a
+    // read lies between the points' values as a weighed one does. The nearest is the point
+    // counting most.
+    struct Corner {
+        DVec3 direction{0.0};
+        const Weights* weights = nullptr;
+    };
+    static void between(const DVec3& direction, const std::array<Corner, 4>& corners, double s,
+                        double t, Weights& into);
 
     // The least and the most `field` reads anywhere within `within` radians of `direction`: each
     // read is shared out among the points within reach of it, so it lies between theirs.

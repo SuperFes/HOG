@@ -47,6 +47,11 @@ after, and strike it off.
   12% are read again after the kept cells (2^17) let them go, at about 85 µs a read. A bake could
   keep more; or fill regions in an order that keeps neighbours close in time.
 
+- **Seams over cube edges.** Weights there are weighed, not read between seed cells, so the
+  ground can step by up to the reads' 8 cm along the cube's edges.
+- **Weighing forming's points.** `Smooth::weigh` walks its neighbours with a linear `find` and
+  an `atan2` for each point it passes; comparing cosines would skip most of the `atan2`s.
+
 ## Server and tooling
 
 - **Server teardown in tests waits minutes** on fills still in flight (about 4 min in

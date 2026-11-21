@@ -3,6 +3,7 @@
 #include "kept_cells.hpp"
 #include "terms.hpp"
 
+#include <hog/formation/smooth.hpp>
 #include <hog/globe/cave_piece.hpp>
 #include <hog/globe/cell.hpp>
 
@@ -42,6 +43,15 @@ class CaveCells : public KeptCells<Cell, CavePieces, CellHash> {
 public:
     static constexpr std::size_t default_most = std::size_t{1} << 14U;
     explicit CaveCells(std::size_t most = default_most) : KeptCells{most} {}
+};
+
+using CellWeights = std::shared_ptr<const formation::Smooth::Weights>;
+
+// How much each of forming's points counts at the middles of the seed level's cells.
+class WeightCells : public KeptCells<Cell, CellWeights, CellHash> {
+public:
+    static constexpr std::size_t default_most = std::size_t{1} << 16U;
+    explicit WeightCells(std::size_t most = default_most) : KeptCells{most} {}
 };
 
 } // namespace hog::globe

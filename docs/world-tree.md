@@ -171,17 +171,17 @@ Each step is its own commit with tests, and the world stays playable after each.
       `wall_at`, `dissect`), weighing forming's points 7%, caves 6.5%; finding each sample's cells
       was about 7% more, since cut (928 s). A cell asks 16.5 valleys on average, 2.8 get past
       the bound to a full read, 2.1 of those reach it and 1.0 stands under its ground.
-   4. *Cells from their parent.* The machinery parts 5 and 6 stand on, with the fields as its
-      first use. At the seed level, the first whose cells are under half forming's spacing
-      across, a cell weighs forming's points as now and keeps its inputs: each smooth field's
-      value and slope at its middle, each valley it reads with how much it counts and that
-      count's slope, and the lakes near. A finer cell weighs none: each input is read from the
-      four parent-level cells about its middle (those `around` finds) as a cubic Hermite of their
-      values and slopes. The fields are Wendland-weighed, smooth to their second slope, so the
-      error falls with the cube of the cell's size. Its valleys are the four's together, a
-      valley missing from one counting none there. Inputs are kept in cells of their own beside
-      the ground cells, a few hundred bytes each. Saves the weighing (7%); mostly it's what
-      part 5 needs.
+   4. *Weights from seed cells.* Done: forming's points are weighed only at the middles of the
+      seed level's cells, the first a quarter of the points' spacing across or less, and kept
+      (`WeightCells`); everywhere else, at any detail, each point's weight is a cubic Hermite of
+      its weights and slopes at the four seed cells about it (`Smooth::between`), its slope's
+      turn estimated from theirs, any it takes under nothing counting none. One smooth set of
+      weights for every level and every read, by cell or by direction, unbroken across the
+      squares' edges; reading each level from the one above instead let error build and step
+      between neighbours, which slopes across columns showed. Over a cube's edge, where the four
+      make no square, the point's weighed as before. The ground stands within 8 cm of weighing
+      it (300 cells each over land and sea on the test world, slopes within 0.0064); a read
+      costs 1.5 µs against 3.4 µs, so a fill saves a few percent. Parts 5 and 6 stand on it.
    5. *Noise a level at a time.* A cell's inputs also carry each fBm's sum over the octaves
       coarser than the next level's detail, with its slope; a finer cell reads that sum from its
       parents as it reads the fields and adds only the octaves of its own size. A warped noise

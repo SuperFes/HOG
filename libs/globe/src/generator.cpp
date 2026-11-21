@@ -81,6 +81,7 @@ Generator::Generator(const Planet& planet, const Progress& progress)
     shape_.formed = formed;
     cells_ = std::make_shared<const GroundCells>();
     caves_ = std::make_shared<const CaveCells>();
+    weights_ = std::make_shared<const WeightCells>();
     say("laying out the voxel layers");
     // No shell reaches more than halfway to the centre, however deep a small planet's seas run:
     // what lies under its floor is rock.
@@ -103,7 +104,8 @@ terms::Context Generator::context(bool crags) const noexcept {
             .shape = &shape_,
             .crags = crags,
             .cells = cells_.get(),
-            .caves = caves_.get()};
+            .caves = caves_.get(),
+            .weights = weights_.get()};
 }
 
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
@@ -693,9 +695,63 @@ Crag core_of(const Block& block, double rotted) noexcept {
             .key = block.id};
 }
 
+// How much each of forming's points counts at a seed-level cell's middle, weighed there; kept in
+// `kept` where there is one.
+CellWeights seed_weights(const Formed& formed, Cell cell, const WeightCells* kept) {
+    if (kept != nullptr) {
+        if (std::optional<CellWeights> found = kept->find(cell)) {
+            return *std::move(found);
+        }
+    }
+    auto made = std::make_shared<formation::Smooth::Weights>();
+    formed.weigh(center(cell), *made);
+    if (kept != nullptr) {
+        kept->keep(cell, made);
+    }
+    return made;
+}
+
+// How much each of forming's points counts at `direction`: read between the four seed-level cells
+// about it, so reads anywhere, at any detail, share one smooth set of weights; weighed there over
+// a cube's edge, where the four make no square.
+void weights_at(const Formed& formed, DVec3 direction, const WeightCells* kept,
+                formation::Smooth::Weights& into) {
+    const CellPlace place = place_under(direction, formed.seed_level());
+    const int di = place.i < 0.0 ? -1 : 1;
+    const int dj = place.j < 0.0 ? -1 : 1;
+    const std::optional<Cell> across = next_to(place.cell, di, 0);
+    const std::optional<Cell> along = next_to(place.cell, 0, dj);
+    const std::optional<Cell> corner = across ? next_to(*across, 0, dj) : std::optional<Cell>{};
+    const std::uint8_t face = place.cell.face;
+    if (!across || !along || !corner || across->face != face || along->face != face ||
+        corner->face != face) {
+        formed.weigh(direction, into);
+        return;
+    }
+    // In the order (0, 0), (1, 0), (0, 1), (1, 1) across the square.
+    const std::size_t own = (di < 0 ? 1U : 0U) | (dj < 0 ? 2U : 0U);
+    std::array<Cell, 4> square{};
+    square.at(own) = place.cell;
+    square.at(own ^ 1U) = *across;
+    square.at(own ^ 2U) = *along;
+    square.at(own ^ 3U) = *corner;
+    std::array<CellWeights, 4> known;
+    std::array<formation::Smooth::Corner, 4> corners;
+    for (std::size_t c = 0; c < 4; ++c) {
+        known.at(c) = seed_weights(formed, square.at(c), kept);
+        corners.at(c) = {.direction = center(square.at(c)), .weights = known.at(c).get()};
+    }
+    const double s = di < 0 ? 1.0 + place.i : place.i;
+    const double t = dj < 0 ? 1.0 + place.j : place.j;
+    formation::Smooth::between(direction, corners, s, t, into);
+}
+
 // A formed world's ground: its heights, layers and lakes all read from what formed it.
 Ground formed_ground(const Context& context, DVec3 direction, double lod) {
-    const Formed::Here here = context.shape->formed->at(direction, lod, context.crags);
+    const Formed& formed = *context.shape->formed;
+    thread_local formation::Smooth::Weights weights;
+    weights_at(formed, direction, context.weights, weights);
+    const Formed::Here here = formed.at(direction, weights, lod, context.crags);
     Ground made;
     const double latitude = maths::atan2(
         direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
@@ -731,6 +787,10 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
 
 Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
     return formed_ground(context, direction, lod);
+}
+
+void weights_at(const Context& context, DVec3 direction, formation::Smooth::Weights& into) {
+    weights_at(*context.shape->formed, direction, context.weights, into);
 }
 
 Ground ground(const Context& context, Cell cell, double lod) {
