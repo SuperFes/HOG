@@ -41,10 +41,11 @@ after, and strike it off.
 
 ## Baking (server)
 
-- **Finding cells per sample.** 13% of a band 3 bake: every sample point projects onto the cube
-  (`place_under`, `atan2`), steps to three neighbours (`next_to`) and hashes four cells to find
-  its columns. A region's samples lie on a regular lattice, so the cells and weights under each
-  lattice column could be found once and reused down it.
+- ~~**Finding cells per sample.**~~ Each sample's cells are now found once a fill, and steps
+  within a face skip the cube's geometry: band 3 went from 994 s to 928 s.
+- **Ground cells read again.** A band 3 bake reads 38.3M ground cells for 33.7M distinct ones:
+  12% are read again after the kept cells (2^17) let them go, at about 85 µs a read. A bake could
+  keep more; or fill regions in an order that keeps neighbours close in time.
 
 ## Server and tooling
 
