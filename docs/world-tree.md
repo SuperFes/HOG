@@ -164,18 +164,34 @@ Each step is its own commit with tests, and the world stays playable after each.
       piece reaches aren't split.
 
       Measured after it: a fresh band 3 bake of the dev world on 4 threads filled 18,342 regions
-      in 994 s. Nearly all of it is each ground cell's `Formed::at`, run in full once a cell:
-      noise 19% (twists, wander, roughness, strata, joints), valleys 14% (`valley_wall`,
-      `Lowered::rounded`, `wall_at`, `dissect`), finding cells 13% (`place_under` and neighbours
-      for every sample, outside `Formed::at`), weighing forming's points 7%, caves 6.5%.
-      Weighing the points also lists the valleys a cell reads, so part 4 saves only the reads
-      (1%) unless the valley list comes from the parent with it (part 6).
-   4. *Fields from the parent.* Under forming's spacing, a cell's smooth fields (soils, deposits,
-      walls, strength, weathering, the ground before valleys) come from its parent level's cells,
-      not from weighing the points again.
-   5. *Noise a level at a time.* A cell adds only the octaves of its own size to its parent's.
-   6. *Valley lists.* The course table, wander baked in, and each cell's list cut from its
-      parent's by `wall_bounds`.
+      in 994 s, reading 38.3M ground cells (33.7M distinct, the rest let go of and read again),
+      about 85 µs each. Nearly all of it is each cell's `Formed::at`: noise 19% (twists, wander,
+      roughness, worn walls, folds, strata, joints: about fifteen fBm a cell, each from forming's
+      spacing down to the cell's detail), valleys 14% (`valley_wall`, `Lowered::rounded`,
+      `wall_at`, `dissect`), weighing forming's points 7%, caves 6.5%; finding each sample's cells
+      was about 7% more, since cut (928 s). A cell asks 16.5 valleys on average, 2.8 get past
+      the bound to a full read, 2.1 of those reach it and 1.0 stands under its ground.
+   4. *Cells from their parent.* The machinery parts 5 and 6 stand on, with the fields as its
+      first use. At the seed level, the first whose cells are under half forming's spacing
+      across, a cell weighs forming's points as now and keeps its inputs: each smooth field's
+      value and slope at its middle, each valley it reads with how much it counts and that
+      count's slope, and the lakes near. A finer cell weighs none: each input is read from the
+      four parent-level cells about its middle (those `around` finds) as a cubic Hermite of their
+      values and slopes. The fields are Wendland-weighed, smooth to their second slope, so the
+      error falls with the cube of the cell's size. Its valleys are the four's together, a
+      valley missing from one counting none there. Inputs are kept in cells of their own beside
+      the ground cells, a few hundred bytes each. Saves the weighing (7%); mostly it's what
+      part 5 needs.
+   5. *Noise a level at a time.* A cell's inputs also carry each fBm's sum over the octaves
+      coarser than the next level's detail, with its slope; a finer cell reads that sum from its
+      parents as it reads the fields and adds only the octaves of its own size. A warped noise
+      (roughness at the twisted point, valleys at the wandered one) is smooth over its coarse
+      octaves too, so its coarse sum comes down the same way. Each fBm then costs a cell an
+      octave or two rather than ten: most of the 19%.
+   6. *Valley lists.* Each cell's list cut from its parent's by `wall_bounds` over the cell:
+      a valley that can't stand within its rounding of the lowest anywhere in the cell leaves
+      the list for good. At most the 0.7 of 2.8 full reads a cell that neither reach nor lower
+      it, so less than the plan first thought; the course table with wander baked in comes after.
    7. *Gullies, settling, beaches, crags and lakes* made the same way.
 
    Tests: what's made agrees with `Formed::at` within a tolerance on the test world, over land,
