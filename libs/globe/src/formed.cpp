@@ -1420,6 +1420,11 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     // How far the whole course lies, and which way from its nearest; out of its reach the valley
     // is the ground about it.
     const std::vector<DVec3>& line = course_of(point);
+    // Where along each stretch lies nearest, and how far off.
+    thread_local std::vector<double> alongs;
+    thread_local std::vector<double> aways;
+    alongs.resize(line.size() - 1);
+    aways.resize(line.size() - 1);
     double nearest = 1e300;
     DVec3 outward{0.0};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
@@ -1428,7 +1433,10 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                         std::max(glm::dot(along, along), 1e-300),
                                     0.0, 1.0);
         const DVec3 on = line[k] + (along * t);
-        if (const double away = glm::length(direction - on) * radius_; away < nearest) {
+        const double away = glm::length(direction - on) * radius_;
+        alongs[k] = t;
+        aways[k] = away;
+        if (away < nearest) {
             nearest = away;
             outward = outward_from(direction, on);
         }
@@ -1490,12 +1498,8 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                    1.0;
     double surely = 1e300;
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
-        const DVec3 along = line[k + 1] - line[k];
-        const double t = std::clamp(glm::dot(direction - line[k], along) /
-                                        std::max(glm::dot(along, along), 1e-300),
-                                    0.0, 1.0);
-        const DVec3 on = line[k] + (along * t);
-        const double away = glm::length(direction - on) * radius_;
+        const double t = alongs[k];
+        const double away = aways[k];
         const double floor_here = floor_at(runs[k] + (t * (runs[k + 1] - runs[k])));
         const double walls = floor_here + (slope * std::max(0.0, away - channel.belt));
         rough[k] = walls + rise_past(away, reach);

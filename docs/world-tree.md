@@ -188,6 +188,13 @@ Each step is its own commit with tests, and the world stays playable after each.
       (roughness at the twisted point, valleys at the wandered one) is smooth over its coarse
       octaves too, so its coarse sum comes down the same way. Each fBm then costs a cell an
       octave or two rather than ten: most of the 19%.
+
+      Measured before it: a read of the dev world sums 8 octaves at no detail, 54 at 40 m and 116
+      at 2.5 m (`wander` and `twist` three each, worn walls, roughness in two bands, bedforms,
+      patches; folds and swell at every detail). A bake 600 m about one spot down to the finest
+      spends about a quarter of its time in noise and a fifth in valleys (`valley_wall`'s own
+      loops over its course 16%, `wall_at` 2%, `Lowered` 2%), weighing down to 6%. At 40 m noise
+      is nearer a tenth of a read, so the bake's coarse bands gain least.
    6. *Valley lists.* Not made: of the 2.8 full reads a cell made, the 0.7 that didn't reach it
       added nothing, and now stop once the course's nearest lies out of reach, before the
       stretch, worn walls and `wall_at`s, at every level and with the same bits. The rest a list
