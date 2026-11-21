@@ -183,14 +183,27 @@ Noise gradient_noise(DVec3 point, std::uint64_t seed) noexcept {
     const auto y = static_cast<std::int64_t>(cell.y);
     const auto z = static_cast<std::int64_t>(cell.z);
 
-    const DVec3& ga = gradient_at(x, y, z, seed);
-    const DVec3& gb = gradient_at(x + 1, y, z, seed);
-    const DVec3& gc = gradient_at(x, y + 1, z, seed);
-    const DVec3& gd = gradient_at(x + 1, y + 1, z, seed);
-    const DVec3& ge = gradient_at(x, y, z + 1, seed);
-    const DVec3& gf = gradient_at(x + 1, y, z + 1, seed);
-    const DVec3& gg = gradient_at(x, y + 1, z + 1, seed);
-    const DVec3& gh = gradient_at(x + 1, y + 1, z + 1, seed);
+    // As gradient_at(), the corners sharing their hashes' first steps.
+    const auto step = [](std::uint64_t from, std::int64_t value) {
+        return hash_combine(from, static_cast<std::uint64_t>(value));
+    };
+    const auto corner = [&](std::uint64_t from, std::int64_t value) -> const DVec3& {
+        return gradients()[step(from, value) % gradient_count];
+    };
+    const std::uint64_t x0 = step(seed, x);
+    const std::uint64_t x1 = step(seed, x + 1);
+    const std::uint64_t x0y0 = step(x0, y);
+    const std::uint64_t x1y0 = step(x1, y);
+    const std::uint64_t x0y1 = step(x0, y + 1);
+    const std::uint64_t x1y1 = step(x1, y + 1);
+    const DVec3& ga = corner(x0y0, z);
+    const DVec3& gb = corner(x1y0, z);
+    const DVec3& gc = corner(x0y1, z);
+    const DVec3& gd = corner(x1y1, z);
+    const DVec3& ge = corner(x0y0, z + 1);
+    const DVec3& gf = corner(x1y0, z + 1);
+    const DVec3& gg = corner(x0y1, z + 1);
+    const DVec3& gh = corner(x1y1, z + 1);
 
     const double va = glm::dot(ga, f);
     const double vb = glm::dot(gb, f - DVec3{1.0, 0.0, 0.0});

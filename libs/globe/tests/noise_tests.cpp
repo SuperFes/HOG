@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -149,5 +150,19 @@ TEST_CASE("fbm stays within its bounds over a ball", "[globe][noise]") {
             WARN("reach " << reach << " m, lod " << lod << ": sampled span " << sampled / widest
                           << " of the bounds'");
         }
+    }
+}
+
+TEST_CASE("fbm cost", "[.bench][globe][noise]") {
+    const hog::globe::Octaves octaves{.wavelength = 512.0, .gain = 0.5, .finest = 1.0};
+    constexpr std::uint64_t reads = 200'000;
+    for (int round = 0; round < 3; ++round) {
+        double sink = 0.0;
+        const auto started = std::chrono::steady_clock::now();
+        for (std::uint64_t k = 0; k < reads; ++k) {
+            sink += hog::globe::fbm(scattered(k) * 300.0, octaves, 0.0, 11).value;
+        }
+        const std::chrono::duration<double> spent = std::chrono::steady_clock::now() - started;
+        WARN(spent.count() / reads * 1e9 / 10.0 << " ns an octave (" << sink << ")");
     }
 }

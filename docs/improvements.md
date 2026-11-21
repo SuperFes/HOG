@@ -50,6 +50,10 @@ after, and strike it off.
   now returns before its stretch, worn walls and `wall_at`s (0.7 of the 2.8 full reads a cell
   made, adding nothing). Same bits; `formed ground cost` 1–3% faster, within the noise of a bake
   running alongside.
+- ~~**Hashing noise corners.**~~ Each octave hashed its eight corners from scratch, three mixes
+  each; they now share their first steps (14 mixes, not 24). Same bits; an fBm takes 21% fewer
+  instructions and 26% fewer cycles (`fbm cost`, `perf stat`), and noise is about a quarter of a
+  fine bake.
 - **Seams over cube edges.** Weights there are weighed, not read between seed cells, so the
   ground can step by up to the reads' 8 cm along the cube's edges.
 - **Weighing forming's points.** `Smooth::weigh` walks its neighbours with a linear `find` and
