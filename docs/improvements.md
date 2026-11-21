@@ -39,6 +39,13 @@ after, and strike it off.
   head, fewer points where it runs straight, about a third the size.
 - **Client settings file.** Cache size, node pixels and the like as settings, not options.
 
+## Baking (server)
+
+- **Finding cells per sample.** 13% of a band 3 bake: every sample point projects onto the cube
+  (`place_under`, `atan2`), steps to three neighbours (`next_to`) and hashes four cells to find
+  its columns. A region's samples lie on a regular lattice, so the cells and weights under each
+  lattice column could be found once and reused down it.
+
 ## Server and tooling
 
 - **Server teardown in tests waits minutes** on fills still in flight (about 4 min in

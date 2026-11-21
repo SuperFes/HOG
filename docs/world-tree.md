@@ -162,6 +162,14 @@ Each step is its own commit with tests, and the world stays playable after each.
       deterministic, lie in rock that opens, under the ground but where they break out of it,
       within the cells beside theirs; a fill opens where pieces are and nowhere else; nodes no
       piece reaches aren't split.
+
+      Measured after it: a fresh band 3 bake of the dev world on 4 threads filled 18,342 regions
+      in 994 s. Nearly all of it is each ground cell's `Formed::at`, run in full once a cell:
+      noise 19% (twists, wander, roughness, strata, joints), valleys 14% (`valley_wall`,
+      `Lowered::rounded`, `wall_at`, `dissect`), finding cells 13% (`place_under` and neighbours
+      for every sample, outside `Formed::at`), weighing forming's points 7%, caves 6.5%.
+      Weighing the points also lists the valleys a cell reads, so part 4 saves only the reads
+      (1%) unless the valley list comes from the parent with it (part 6).
    4. *Fields from the parent.* Under forming's spacing, a cell's smooth fields (soils, deposits,
       walls, strength, weathering, the ground before valleys) come from its parent level's cells,
       not from weighing the points again.
