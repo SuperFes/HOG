@@ -187,8 +187,9 @@ Noise gradient_noise(DVec3 point, std::uint64_t seed) noexcept {
     const auto step = [](std::uint64_t from, std::int64_t value) {
         return hash_combine(from, static_cast<std::uint64_t>(value));
     };
+    const std::array<DVec3, gradient_count>& table = gradients();
     const auto corner = [&](std::uint64_t from, std::int64_t value) -> const DVec3& {
-        return gradients()[step(from, value) % gradient_count];
+        return table[step(from, value) % gradient_count];
     };
     const std::uint64_t x0 = step(seed, x);
     const std::uint64_t x1 = step(seed, x + 1);
@@ -238,29 +239,53 @@ Noise gradient_noise(DVec3 point, std::uint64_t seed) noexcept {
     return {.value = reach * value, .gradient = reach * (blended + (du * ramp))};
 }
 
+namespace {
+
+constexpr int most_octaves = 64;
+
+// Each octave's frame: a fixed rotation (orthonormal, no axis left in place) turned once more
+// per octave, and its way back.
+struct Frames {
+    std::array<glm::dmat3, most_octaves> to;
+    std::array<glm::dmat3, most_octaves> back;
+};
+const Frames& octave_frames() {
+    static const Frames frames = [] {
+        Frames made{};
+        const glm::dmat3 turn{0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64};
+        glm::dmat3 frame{1.0};
+        for (std::size_t octave = 0; octave < most_octaves; ++octave) {
+            made.to.at(octave) = frame;
+            made.back.at(octave) = glm::transpose(frame);
+            frame = turn * frame;
+        }
+        return made;
+    }();
+    return frames;
+}
+
+} // namespace
+
 Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed, Band band) noexcept {
     // Octaves whose wavelength is at least twice the detail asked for, and the next faded.
     const double shortest = std::max({2.0 * lod, octaves.finest, 1e-9});
     const double count = (maths::log(octaves.wavelength / shortest) / std::numbers::ln2) + 1.0;
-    // A fixed rotation between octaves (orthonormal, no axis left in place).
-    const glm::dmat3 turn{0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64};
+    const Frames& frames = octave_frames();
     Noise sum;
-    glm::dmat3 frame{1.0};
     double wavelength = octaves.wavelength;
     double amplitude = 1.0;
-    for (int octave = 0;
-         octave < 64 && static_cast<double>(octave) < count && wavelength > band.shorter_than;
+    for (int octave = 0; octave < most_octaves && static_cast<double>(octave) < count &&
+                         wavelength > band.shorter_than;
          ++octave) {
         if (wavelength <= band.longest) {
+            const auto at = static_cast<std::size_t>(octave);
             const double weight = std::min(1.0, count - static_cast<double>(octave));
             const Noise layer =
-                gradient_noise(frame * point / wavelength, hash_values(seed, octave));
+                gradient_noise(frames.to[at] * point / wavelength, hash_values(seed, octave));
             sum.value += amplitude * weight * layer.value;
             // Back from the turned, scaled lattice to the point's own frame.
-            sum.gradient +=
-                (amplitude * weight / wavelength) * (glm::transpose(frame) * layer.gradient);
+            sum.gradient += (amplitude * weight / wavelength) * (frames.back[at] * layer.gradient);
         }
-        frame = turn * frame;
         wavelength *= 0.5;
         amplitude *= octaves.gain;
     }
@@ -272,18 +297,17 @@ Interval fbm_bounds(DVec3 middle, double within, const Octaves& octaves, double 
     // The same octaves, weights and turns as fbm().
     const double shortest = std::max({2.0 * lod, octaves.finest, 1e-9});
     const double count = (maths::log(octaves.wavelength / shortest) / std::numbers::ln2) + 1.0;
-    const glm::dmat3 turn{0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64};
+    const Frames& frames = octave_frames();
     Interval sum{};
-    glm::dmat3 frame{1.0};
     double wavelength = octaves.wavelength;
     double amplitude = 1.0;
-    for (int octave = 0;
-         octave < 64 && static_cast<double>(octave) < count && wavelength > band.shorter_than;
+    for (int octave = 0; octave < most_octaves && static_cast<double>(octave) < count &&
+                         wavelength > band.shorter_than;
          ++octave) {
         if (wavelength <= band.longest) {
             const double weight = std::min(1.0, count - static_cast<double>(octave));
             // A ball stays a ball turned and scaled.
-            const DVec3 at = frame * middle / wavelength;
+            const DVec3 at = frames.to[static_cast<std::size_t>(octave)] * middle / wavelength;
             const double across = within / wavelength;
             const std::uint64_t layer = hash_values(seed, octave);
             const NoiseBounds bounds = noise_bounds(at - DVec3{across}, at + DVec3{across}, layer);
@@ -304,7 +328,6 @@ Interval fbm_bounds(DVec3 middle, double within, const Octaves& octaves, double 
             sum = sum + ((amplitude * weight) *
                          Interval{.low = one.low - slack, .high = one.high + slack});
         }
-        frame = turn * frame;
         wavelength *= 0.5;
         amplitude *= octaves.gain;
     }
