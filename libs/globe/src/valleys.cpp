@@ -4,9 +4,11 @@
 #include <hog/globe/noise.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -288,8 +290,8 @@ void Lowered::add(const formation::Smooth::Read& ground, double wall, double flo
 
 formation::Smooth::Read Lowered::rounded(const Ground& low) const noexcept {
     const double sinking = std::max(0.0, low.read.value - floor_under(low)) / 2.0;
-    thread_local std::vector<std::pair<double, DVec3>> drops;
-    drops.clear();
+    std::array<std::pair<double, DVec3>, std::tuple_size_v<decltype(grounds_)>> drops;
+    std::size_t dropped = 0;
     double deepest = 0.0;
     for (const Ground& one : std::span<const Ground>{grounds_.data(), count_}) {
         // Of two standing level, only one is rounded by the other.
@@ -306,11 +308,12 @@ formation::Smooth::Read Lowered::rounded(const Ground& low) const noexcept {
         const double share = (width - apart) / width;
         const double rounded = share * share * width / 4.0;
         // How the drop changes: held halfway down to the floor, it's half the ground's.
-        drops.emplace_back(std::min(rounded, sinking),
-                           rounded < sinking
-                               ? (low.read.gradient - one.read.gradient) * (share / 2.0)
-                               : low.read.gradient / 2.0);
-        deepest = std::max(deepest, drops.back().first);
+        drops[dropped] = {std::min(rounded, sinking),
+                          rounded < sinking
+                              ? (low.read.gradient - one.read.gradient) * (share / 2.0)
+                              : low.read.gradient / 2.0};
+        deepest = std::max(deepest, drops[dropped].first);
+        ++dropped;
     }
     if (deepest <= 0.0) {
         return low.read;
@@ -321,7 +324,7 @@ formation::Smooth::Read Lowered::rounded(const Ground& low) const noexcept {
     const double none = maths::exp(-deepest / lowest_softness);
     double sum = 0.0;
     DVec3 sum_gradient{0.0};
-    for (const auto& [drop, dropping] : drops) {
+    for (const auto& [drop, dropping] : std::span{drops.data(), dropped}) {
         const double weight = maths::exp((drop - deepest) / lowest_softness);
         sum += weight - none;
         sum_gradient += dropping * weight;
@@ -332,28 +335,25 @@ formation::Smooth::Read Lowered::rounded(const Ground& low) const noexcept {
 }
 
 formation::Smooth::Read Lowered::lowest() const noexcept {
-    // Each ground rounded down by the crests it meets; those that can't come within the hand-over
-    // of `bound` skipped.
-    const auto ways = [&](const double& bound, const auto& each) {
-        for (const Ground& low : std::span<const Ground>{grounds_.data(), count_}) {
-            if (low.read.value - (blend_ / 4.0) < bound + handing_over) {
-                const formation::Smooth::Read way = rounded(low);
-                each(way.value, way.gradient);
-            }
-        }
-    };
+    // Each ground rounded down by the crests it meets.
+    std::array<formation::Smooth::Read, std::tuple_size_v<decltype(grounds_)>> ways;
     double lowest = std::numeric_limits<double>::infinity();
-    ways(lowest, [&](double value, DVec3) { lowest = std::min(lowest, value); });
+    for (std::size_t at = 0; at < count_; ++at) {
+        ways[at] = rounded(grounds_[at]);
+        lowest = std::min(lowest, ways[at].value);
+    }
     // Turning as each way comes lowest over the hand-over, so what's rounded from it never steps:
-    // a soft minimum, whose slope is the ways' as they share it. Those past the hand-over count
-    // for next to nothing.
+    // a soft minimum, whose slope is the ways' as they share it. Those that can't come within the
+    // hand-over count for next to nothing.
     DVec3 gradient{0.0};
     double weights = 0.0;
-    ways(lowest, [&](double value, DVec3 way) {
-        const double weight = maths::exp(-(value - lowest) / lowest_softness);
-        gradient += way * weight;
-        weights += weight;
-    });
+    for (std::size_t at = 0; at < count_; ++at) {
+        if (grounds_[at].read.value - (blend_ / 4.0) < lowest + handing_over) {
+            const double weight = maths::exp(-(ways[at].value - lowest) / lowest_softness);
+            gradient += ways[at].gradient * weight;
+            weights += weight;
+        }
+    }
     return {.value = lowest - (lowest_softness * maths::log(weights)),
             .gradient = gradient / weights};
 }

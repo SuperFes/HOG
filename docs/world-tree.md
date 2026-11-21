@@ -211,7 +211,14 @@ Each step is its own commit with tests, and the world stays playable after each.
       would drop are the cheap bound misses, and those that reach shape its rivers, floors and
       fall even where they don't lower it, so a list cut by `wall_bounds` buys little more. The
       course table with wander baked in comes after.
-   7. *Gullies, settling, beaches, crags and lakes* made the same way.
+   7. *Gullies, settling, beaches, crags and lakes.* Not made: measured on the dev world, in
+      thousands of cycles of a `Formed::at` (about 57 at no detail and 40 m, 83 at 2.5 m), lakes
+      cost nothing, settling under 1, crags 0.7, beaches 2, folds and swell 2 at any detail;
+      gullies 0.9, 5 and 20 at 2.5 m. Only gullies are worth it, and each octave carries what
+      the coarser ones cut (room, the way down, the bend) with walls that turn sharply inside a
+      parent cell, so a Hermite between parents blurs them as it does fine noise. What costs is
+      `carved`, 44–49 of those thousands at every detail, nearly all `valley_wall`; made cheaper
+      with the same bits (8–9% of a read), what's left is in `docs/improvements.md`.
 
    Tests: what's made agrees with `Formed::at` within a tolerance on the test world, over land,
    coast and sea floor; time per region, coarse and fine, against the last part's.

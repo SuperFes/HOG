@@ -55,6 +55,18 @@ after, and strike it off.
   instructions and 26% fewer cycles (`fbm cost`, `perf stat`), and noise is about a quarter of a
   fine bake. Each octave's frame and its way back now come from a table built the same way
   rather than a matrix product each octave: 10% fewer instructions again, about 3% fewer cycles.
+- ~~**Valley reads' rounding and exponentials.**~~ `Lowered::lowest` rounded every way twice and
+  a valley's stretches each took an `exp` to find most count none; `maths::exp` called libm's
+  `ldexp` and `nearbyint`. Rounding is now kept from the first pass, far stretches skip the
+  `exp`, exp scales by a power of two exactly and rounds by the shift trick, and a stretch's
+  floor is read from its own stretch, not a binary search. Same bits; a formed read takes 8–9%
+  fewer instructions at every detail (`formed ground cost`, 400k at 2.5 m from 430k).
+- **Valleys still dominate a read.** `carved` is 60–75% of `Formed::at` at every detail, nearly all
+  `valley_wall`: of about 15 valleys asked a read, 4 pass the bound and 3.5 reach, and each scans
+  its whole course (about 31 stretches) three times: nearest 17%, floors and walls 11%, `wall_at` on
+  about 6.6 of them 16%, rounding them to the lowest 25%, channels (`stretch_of`, its `pow`s) 9%,
+  worn walls' fBm up to 8% at 2.5 m. Channels per point, kept, would save the 9% at about 128 bytes
+  a point; a per-cell list of the stretches near would cut the scans.
 - **Seams over cube edges.** Weights there are weighed, not read between seed cells, so the
   ground can step by up to the reads' 8 cm along the cube's edges.
 - **Weighing forming's points.** `Smooth::weigh` walks its neighbours with a linear `find` and

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 
@@ -23,6 +25,21 @@ template <std::size_t N>
         sum = (sum * x) + coefficients[k];
     }
     return sum;
+}
+
+// `x` times 2^`power`, as std::ldexp has it. A product with a power of two is exact while it's
+// normal, so only past that is ldexp itself called.
+[[nodiscard]] inline double scaled(double x, int power) noexcept {
+    if (power < -1021 || power > 1023) {
+        return std::ldexp(x, power);
+    }
+    return x * std::bit_cast<double>(static_cast<std::uint64_t>(power + 1023) << 52);
+}
+
+// The nearest whole number, ties to even as std::nearbyint has it, for |x| under 2^51.
+[[nodiscard]] inline double nearest_whole(double x) noexcept {
+    constexpr double shift = 0x1.8p52;
+    return (x + shift) - shift;
 }
 
 // π/2 in two parts, the first with its low bits clear so k times it is exact for |k| < 2^20.
@@ -147,13 +164,13 @@ struct Reduced {
     if (x < -745.0) {
         return 0.0;
     }
-    const double halvings = std::nearbyint(x * std::numbers::log2e);
+    const double halvings = detail::nearest_whole(x * std::numbers::log2e);
     const double rest = (x - (halvings * ln2_high)) - (halvings * ln2_low);
     const double series = detail::poly(
         rest, std::array{1.0 / 6227020800.0, 1.0 / 479001600.0, 1.0 / 39916800.0, 1.0 / 3628800.0,
                          1.0 / 362880.0, 1.0 / 40320.0, 1.0 / 5040.0, 1.0 / 720.0, 1.0 / 120.0,
                          1.0 / 24.0, 1.0 / 6.0, 0.5, 1.0, 1.0});
-    return std::ldexp(series, static_cast<int>(halvings));
+    return detail::scaled(series, static_cast<int>(halvings));
 }
 
 // Natural log of a positive number; NaN for less.

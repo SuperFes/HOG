@@ -80,3 +80,25 @@ TEST_CASE("the portable functions give the same bits forever", "[globe][maths]")
     // If this moves, worlds regenerate differently from before, or on another platform.
     CHECK(digest == 0x4704'822f'800e'808cULL);
 }
+
+TEST_CASE("scaling and rounding inside the portable functions match libm's exactly",
+          "[globe][maths]") {
+    for (int power = -1080; power <= 1030; ++power) {
+        for (const double x : {0.70710678118654757, 1.0, 1.3, 1.4142135623730951, -0.9}) {
+            CHECK(std::bit_cast<std::uint64_t>(hog::maths::detail::scaled(x, power)) ==
+                  std::bit_cast<std::uint64_t>(std::ldexp(x, power)));
+        }
+    }
+    for (int k = -4000; k <= 4000; ++k) {
+        for (const double x : {k * 0.5, (k * 0.37) + 1e-9, k * 0.25}) {
+            CHECK(hog::maths::detail::nearest_whole(x) == std::nearbyint(x));
+        }
+    }
+    // Down to where results run subnormal and past, up to where they overflow.
+    for (const double x : {-745.1, -744.4, -740.0, -708.4, -708.0, 708.0, 709.0}) {
+        const double halvings = std::nearbyint(x * std::numbers::log2e);
+        CHECK(std::abs(std::log(std::max(maths::exp(x), 1e-320)) - std::max(x, std::log(1e-320))) <
+              1e-3);
+        CHECK(halvings == hog::maths::detail::nearest_whole(x * std::numbers::log2e));
+    }
+}

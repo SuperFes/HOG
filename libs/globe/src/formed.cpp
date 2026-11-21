@@ -1500,7 +1500,13 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         const double t = alongs[k];
         const double away = aways[k];
-        const double floor_here = floor_at(runs[k] + (t * (runs[k + 1] - runs[k])));
+        // Its own stretch holds it but where rounding takes it past an end.
+        const double run = runs[k] + (t * (runs[k + 1] - runs[k]));
+        const double floor_here =
+            runs[k] <= run && run < runs[k + 1]
+                ? floors[k] + ((floors[k + 1] - floors[k]) *
+                               share_of(run - runs[k], runs[k + 1] - runs[k], 0.0))
+                : floor_at(run);
         const double walls = floor_here + (slope * std::max(0.0, away - channel.belt));
         rough[k] = walls + rise_past(away, reach);
         lowest = std::min(lowest, rough[k]);
@@ -1520,7 +1526,10 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         // Weighed down to none at all by the furthest blended, so none drops out with a step.
         constexpr double furthest = 3.0;
-        const double weight = maths::exp(-(rough[k] - lowest) / blending) - maths::exp(-furthest);
+        static const double none = maths::exp(-furthest);
+        const double off = -(rough[k] - lowest) / blending;
+        // Well past the furthest it counts none, without the exponential.
+        const double weight = off < -furthest - 1e-6 ? 0.0 : maths::exp(off) - none;
         if (weight <= 0.0 && least[k] > surely + std::max(handing_over, spur_blend) + slack) {
             continue;
         }
