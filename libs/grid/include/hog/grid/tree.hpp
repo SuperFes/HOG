@@ -37,7 +37,8 @@ public:
         friend constexpr bool operator==(const Found&, const Found&) noexcept = default;
     };
 
-    static constexpr std::uint8_t format = 1;
+    // Its kind's; any earlier still reads.
+    static constexpr std::uint8_t format = Kind::format;
 
     // One leaf over all of it.
     Tree(std::uint8_t levels, Value whole, bool open);
@@ -274,8 +275,9 @@ private:
         Id id = 0;
         std::uint8_t reach = 0;
     };
-    // One node, its children among those already decoded.
-    [[nodiscard]] Result<Decoded> decode_node(ByteReader& in, std::span<const Decoded> decoded);
+    // One node, its children among those already decoded, written in `version` of the format.
+    [[nodiscard]] Result<Decoded> decode_node(ByteReader& in, std::span<const Decoded> decoded,
+                                              std::uint8_t version);
     // Reachable ids, each after its children.
     [[nodiscard]] std::vector<Id> walk() const;
 

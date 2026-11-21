@@ -13,12 +13,18 @@
 namespace hog::grid {
 
 // The ground's surface through a node, as a plane: which way it faces out of the solid, how far
-// out from it the node's middle lies, in node sides, and the material it shows, as a palette
-// index, 0 where unknown. A node the plane misses is all solid or all open, and holds no plane.
+// out from it the node's middle lies, in node sides, the material it shows, as a palette index, 0
+// where unknown, and how rough it is: how far the ground finer than the node may stray from the
+// plane, in node sides, where known. A node the plane misses is all solid or all open, and holds
+// no plane.
 class Surface {
 public:
     // Distances are held in these parts of a side.
     static constexpr double scale = 0x1p24;
+    // Roughness is held as a step of a sixteenth of a doubling from `smoothest` sides, 0 for not
+    // known; none rougher than the last step.
+    static constexpr double smoothest = 0x1p-10;
+    static constexpr int roughness_steps = 16;
 
     [[nodiscard]] static constexpr Surface solid() noexcept {
         return Surface{std::numeric_limits<std::int32_t>::min(), 0, 0, 0};
@@ -40,27 +46,33 @@ public:
     [[nodiscard]] DVec3 normal() const noexcept;
     [[nodiscard]] double distance() const noexcept { return distance_ / scale; }
     [[nodiscard]] constexpr std::uint16_t material() const noexcept { return material_; }
+    [[nodiscard]] std::optional<double> roughness() const noexcept;
+    // The same with `roughness` in node sides, rounded to a step; a node it misses holds none.
+    [[nodiscard]] Surface with_roughness(std::optional<double> roughness) const noexcept;
 
     // The raw parts, for storing.
     [[nodiscard]] constexpr std::int32_t raw_distance() const noexcept { return distance_; }
     [[nodiscard]] constexpr std::uint16_t raw_u() const noexcept { return u_; }
     [[nodiscard]] constexpr std::uint16_t raw_v() const noexcept { return v_; }
-    // Fails on a node all solid or open whose normal or material isn't unset.
+    [[nodiscard]] constexpr std::uint8_t raw_roughness() const noexcept { return roughness_; }
+    // Fails on a node all solid or open whose normal, material or roughness isn't unset.
     [[nodiscard]] static Result<Surface> from_raw(std::int32_t distance, std::uint16_t u,
-                                                  std::uint16_t v, std::uint16_t material);
+                                                  std::uint16_t v, std::uint16_t material,
+                                                  std::uint8_t roughness = 0);
 
     friend constexpr bool operator==(const Surface&, const Surface&) noexcept = default;
 
 private:
     constexpr Surface(std::int32_t distance, std::uint16_t u, std::uint16_t v,
-                      std::uint16_t material) noexcept
-        : distance_{distance}, u_{u}, v_{v}, material_{material} {}
+                      std::uint16_t material, std::uint8_t roughness = 0) noexcept
+        : distance_{distance}, u_{u}, v_{v}, material_{material}, roughness_{roughness} {}
 
     std::int32_t distance_ = std::numeric_limits<std::int32_t>::max();
     // The normal folded onto an octahedron and flattened.
     std::uint16_t u_ = 0;
     std::uint16_t v_ = 0;
     std::uint16_t material_ = 0;
+    std::uint8_t roughness_ = 0;
 };
 
 // Two of the palette's first `blendable` entries showing together, the first over at least half
@@ -98,11 +110,14 @@ private:
 // value stands for all eight so they needn't be split, and how its values are stored.
 
 // Where the ground is and what it shows. A coarse node holds the plane through its eight, showing
-// the blend of what those crossed show, so it looks as they do from afar; eight merge where
-// one plane runs within `tolerance` finest nodes of theirs, so flat ground stays coarse.
+// the blend of what those crossed show, so it looks as they do from afar, as rough as the most
+// any of them strays from that plane; eight merge where one plane runs within `tolerance` finest
+// nodes of theirs, so flat ground stays coarse.
 struct Shape {
     using Value = Surface;
     static constexpr double tolerance = 0.25;
+    // 2 added roughness.
+    static constexpr std::uint8_t format = 2;
 
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
     // Of eight each `side` finest nodes across.
@@ -110,7 +125,8 @@ struct Shape {
                                                      double side) noexcept;
     [[nodiscard]] static std::uint64_t hash(const Value& value) noexcept;
     static void write(ByteWriter& out, const Value& value);
-    [[nodiscard]] static Result<Value> read(ByteReader& in);
+    // As written in `version` of the format.
+    [[nodiscard]] static Result<Value> read(ByteReader& in, std::uint8_t version = format);
 };
 
 // Values that are one thing or another, never between, 0 for none: a coarse node holds the most
@@ -119,6 +135,7 @@ struct Shape {
 template <std::unsigned_integral Integer>
 struct Discrete {
     using Value = Integer;
+    static constexpr std::uint8_t format = 1;
 
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept {
         Value best = 0;
@@ -149,7 +166,9 @@ struct Discrete {
     }
     [[nodiscard]] static std::uint64_t hash(Value value) noexcept { return value; }
     static void write(ByteWriter& out, Value value) { out.write(value); }
-    [[nodiscard]] static Result<Value> read(ByteReader& in) { return in.read<Value>(); }
+    [[nodiscard]] static Result<Value> read(ByteReader& in, std::uint8_t /*version*/ = format) {
+        return in.read<Value>();
+    }
 };
 
 // An index into the world's palette of materials, each a named mix of what it's made of (a loam
@@ -189,6 +208,7 @@ struct Stand {
 struct Woods {
     using Value = Stand;
     static constexpr int tolerance = 13;
+    static constexpr std::uint8_t format = 1;
 
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
     [[nodiscard]] static std::optional<Value> merged(const std::array<Value, 8>& children,
@@ -199,7 +219,7 @@ struct Woods {
     static void write(ByteWriter& out, const Value& value);
     // Fails on a stand with shares summing to neither none nor the whole, or a value with no ground
     // and woods.
-    [[nodiscard]] static Result<Value> read(ByteReader& in);
+    [[nodiscard]] static Result<Value> read(ByteReader& in, std::uint8_t version = format);
 };
 
 } // namespace hog::grid

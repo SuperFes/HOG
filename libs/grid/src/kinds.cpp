@@ -1,3 +1,4 @@
+#include <hog/core/portable_maths.hpp>
 #include <hog/grid/kinds.hpp>
 
 #include <algorithm>
@@ -59,6 +60,18 @@ Surface between(const std::array<Surface, 8>& children) noexcept {
     return Surface::plane(normal, -middle);
 }
 
+// A parent's plane in its `octant` child's sides, at the child's middle.
+double plane_in_child(const Surface& parent, std::size_t octant) noexcept {
+    return 2.0 * (parent.distance() + glm::dot(parent.normal(), offset(octant)));
+}
+
+// How far a crossing child's plane strays from its parent's over the child, in the child's sides.
+double apart(const Surface& parent, const Surface& child, std::size_t octant) noexcept {
+    const DVec3 tilt = glm::abs(parent.normal() - child.normal());
+    return std::abs(plane_in_child(parent, octant) - child.distance()) +
+           ((tilt.x + tilt.y + tilt.z) / 2.0);
+}
+
 } // namespace
 
 Surface Surface::plane(DVec3 normal, double distance, std::uint16_t material) noexcept {
@@ -92,14 +105,37 @@ DVec3 Surface::normal() const noexcept {
     return glm::normalize(DVec3{x, y, z});
 }
 
+std::optional<double> Surface::roughness() const noexcept {
+    if (roughness_ == 0) {
+        return std::nullopt;
+    }
+    return smoothest * maths::exp2(static_cast<double>(roughness_ - 1) / roughness_steps);
+}
+
+Surface Surface::with_roughness(std::optional<double> roughness) const noexcept {
+    if (!crosses()) {
+        return *this;
+    }
+    Surface rough = *this;
+    rough.roughness_ = 0;
+    if (roughness) {
+        const double steps = *roughness > smoothest
+                                 ? std::round(maths::log2(*roughness / smoothest) * roughness_steps)
+                                 : 0.0;
+        rough.roughness_ = static_cast<std::uint8_t>(1.0 + std::min(steps, 254.0));
+    }
+    return rough;
+}
+
 Result<Surface> Surface::from_raw(std::int32_t distance, std::uint16_t u, std::uint16_t v,
-                                  std::uint16_t material) {
+                                  std::uint16_t material, std::uint8_t roughness) {
     const bool uniform = distance == std::numeric_limits<std::int32_t>::min() ||
                          distance == std::numeric_limits<std::int32_t>::max();
-    if (uniform && (u != 0 || v != 0 || material != 0)) {
-        return make_error(ErrorCode::Parse, "a surface missing its node with a normal or material");
+    if (uniform && (u != 0 || v != 0 || material != 0 || roughness != 0)) {
+        return make_error(ErrorCode::Parse,
+                          "a surface missing its node with a normal, material or roughness");
     }
-    return Surface{distance, u, v, material};
+    return Surface{distance, u, v, material, roughness};
 }
 
 namespace {
@@ -211,7 +247,22 @@ Surface Shape::summary(const std::array<Value, 8>& children) noexcept {
     if (glm::dot(normals, normals) < 1e-12) {
         return between(children);
     }
-    return Surface::plane(glm::normalize(normals), distances / crossing, shown.entry());
+    const Surface parent =
+        Surface::plane(glm::normalize(normals), distances / crossing, shown.entry());
+    // As rough as the most any child strays from it, in its sides.
+    double most = 0.0;
+    for (std::size_t k = 0; k < 8; ++k) {
+        const Surface& child = children.at(k);
+        if (!child.crosses()) {
+            continue;
+        }
+        const std::optional<double> rough = child.roughness();
+        if (!rough) {
+            return parent.with_roughness(std::nullopt);
+        }
+        most = std::max(most, (apart(parent, child, k) + *rough) / 2.0);
+    }
+    return parent.with_roughness(most);
 }
 
 std::optional<Shape::Value> Shape::merged(const std::array<Value, 8>& children,
@@ -230,21 +281,15 @@ std::optional<Shape::Value> Shape::merged(const std::array<Value, 8>& children,
     const double slack = tolerance / side;
     for (std::size_t k = 0; k < 8; ++k) {
         const Surface& child = children.at(k);
-        // The parent's plane in the child's sides, at the child's middle.
-        const double here = 2.0 * (parent.distance() + glm::dot(normal, offset(k)));
+        const double here = plane_in_child(parent, k);
         if (child.is_open() && here < out - slack) {
             return std::nullopt;
         }
         if (child.is_solid() && here > -out + slack) {
             return std::nullopt;
         }
-        if (child.crosses()) {
-            const DVec3 tilt = glm::abs(normal - child.normal());
-            const double apart =
-                std::abs(here - child.distance()) + ((tilt.x + tilt.y + tilt.z) / 2.0);
-            if (apart > slack) {
-                return std::nullopt;
-            }
+        if (child.crosses() && apart(parent, child, k) > slack) {
+            return std::nullopt;
         }
     }
     return parent;
@@ -254,7 +299,8 @@ std::uint64_t Shape::hash(const Value& value) noexcept {
     const std::uint64_t place =
         (std::uint64_t{std::bit_cast<std::uint32_t>(value.raw_distance())} << 32U) |
         (std::uint64_t{value.raw_u()} << 16U) | value.raw_v();
-    return place ^ (value.material() * 0x9e37'79b9'7f4a'7c15ULL);
+    const std::uint64_t look = (std::uint64_t{value.raw_roughness()} << 16U) | value.material();
+    return place ^ (look * 0x9e37'79b9'7f4a'7c15ULL);
 }
 
 void Shape::write(ByteWriter& out, const Value& value) {
@@ -262,9 +308,10 @@ void Shape::write(ByteWriter& out, const Value& value) {
     out.write(value.raw_u());
     out.write(value.raw_v());
     out.write(value.material());
+    out.write(value.raw_roughness());
 }
 
-Result<Shape::Value> Shape::read(ByteReader& in) {
+Result<Shape::Value> Shape::read(ByteReader& in, std::uint8_t version) {
     const auto distance = in.read<std::uint32_t>();
     const auto u = in.read<std::uint16_t>();
     const auto v = in.read<std::uint16_t>();
@@ -272,7 +319,15 @@ Result<Shape::Value> Shape::read(ByteReader& in) {
     if (!distance || !u || !v || !material) {
         return make_error(ErrorCode::Parse, "a surface cut short");
     }
-    return Surface::from_raw(std::bit_cast<std::int32_t>(*distance), *u, *v, *material);
+    std::uint8_t roughness = 0;
+    if (version >= 2) {
+        const auto read = in.read<std::uint8_t>();
+        if (!read) {
+            return make_error(ErrorCode::Parse, "a surface cut short");
+        }
+        roughness = *read;
+    }
+    return Surface::from_raw(std::bit_cast<std::int32_t>(*distance), *u, *v, *material, roughness);
 }
 
 namespace {
@@ -381,7 +436,7 @@ void Woods::write(ByteWriter& out, const Value& value) {
     }
 }
 
-Result<Stand> Woods::read(ByteReader& in) {
+Result<Stand> Woods::read(ByteReader& in, std::uint8_t /*version*/) {
     const auto held = in.read<std::uint8_t>();
     if (!held) {
         return make_error(ErrorCode::Parse, "a stand cut short");

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -124,6 +125,88 @@ TEST_CASE("a blend holds two entries and a share, and stands alone where it can"
     tied.add(4);
     tied.add(3);
     CHECK(tied.entry() == Blend{.first = 3, .second = 4, .share = 0.5}.entry());
+}
+
+TEST_CASE("a surface keeps its roughness to a step, none where it isn't known", "[grid]") {
+    const DVec3 up{0.0, 0.0, 1.0};
+    const Surface plane = Surface::plane(up, 0.1);
+    CHECK_FALSE(plane.roughness());
+    const double step = std::exp2(1.0 / (2.0 * Surface::roughness_steps));
+    const double roughest = Surface::smoothest * std::exp2(254.0 / Surface::roughness_steps);
+    for (int n = 0; Surface::smoothest * std::pow(1.37, n) <= roughest; ++n) {
+        const double rough = Surface::smoothest * std::pow(1.37, n);
+        CAPTURE(rough);
+        const auto held = plane.with_roughness(rough).roughness();
+        REQUIRE(held);
+        CHECK(held.value() <= rough * step * (1.0 + 1e-12));
+        CHECK(held.value() >= rough / step / (1.0 + 1e-12));
+    }
+    CHECK(plane.with_roughness(0.0).roughness() == Surface::smoothest);
+    CHECK(plane.with_roughness(1e-9).roughness() == Surface::smoothest);
+    CHECK(plane.with_roughness(1e9).roughness() == Approx(roughest));
+    CHECK_FALSE(plane.with_roughness(0.3).with_roughness(std::nullopt).roughness());
+    // The plane itself is kept.
+    CHECK(plane.with_roughness(0.3).with_roughness(std::nullopt) == plane);
+    // A node all solid or open has none.
+    CHECK(Surface::solid().with_roughness(0.3) == Surface::solid());
+    CHECK(Surface::open().with_roughness(0.3) == Surface::open());
+    CHECK_FALSE(Surface::from_raw(Surface::solid().raw_distance(), 0, 0, 0, 5));
+}
+
+TEST_CASE("a coarse plane is as rough as the most its children stray from it", "[grid]") {
+    const DVec3 up{0.0, 0.0, 1.0};
+    const Surface open = Surface::open();
+    const auto at = [&](double distance, double rough) {
+        return Surface::plane(up, distance).with_roughness(rough);
+    };
+    // Flat through the lower four, each 0.2 of its side rough: half that of the parent's.
+    const Surface flat = Shape::summary(
+        {at(0.4, 0.2), at(0.4, 0.2), at(0.4, 0.2), at(0.4, 0.2), open, open, open, open});
+    REQUIRE(flat.roughness());
+    CHECK(flat.roughness().value() == Approx(0.1).epsilon(0.05));
+    // Two a tenth of their side higher than the other two: the parent's plane between them.
+    const Surface stepped = Shape::summary(
+        {at(0.4, 0.2), at(0.3, 0.2), at(0.4, 0.2), at(0.3, 0.2), open, open, open, open});
+    REQUIRE(stepped.roughness());
+    CHECK(stepped.roughness().value() == Approx((0.05 + 0.2) / 2.0).epsilon(0.05));
+    // Not known where any crossing child's isn't; those it doesn't cross don't count.
+    CHECK_FALSE(Shape::summary({at(0.4, 0.2), Surface::plane(up, 0.4), at(0.4, 0.2), at(0.4, 0.2),
+                                open, open, open, open})
+                    .roughness());
+    const auto merged = Shape::merged(
+        {at(0.4, 0.2), at(0.4, 0.2), at(0.4, 0.2), at(0.4, 0.2), open, open, open, open}, 1.0);
+    REQUIRE(merged);
+    CHECK(merged.value().roughness() == flat.roughness());
+
+    const Tree<Shape> tree = Tree<Shape>::build(levels, [&](int x, int y, int z) {
+        return Surface::plane(up, middle(x, y, z).z - 20.3).with_roughness(0.01 * (1 + (x % 3)));
+    });
+    const auto back = Tree<Shape>::decode(tree.encode());
+    REQUIRE(back);
+    CHECK(back->same_as(tree));
+    CHECK(tree.root().value.roughness());
+}
+
+TEST_CASE("a shape tree from before roughness reads with none", "[grid]") {
+    const Surface plane = Surface::plane(DVec3{0.0, 0.0, 1.0}, 0.1, 3);
+    hog::ByteWriter out;
+    out.write(std::uint8_t{1}); // the format
+    out.write(std::uint8_t{4}); // levels
+    out.write_varint(1);
+    out.write(std::uint8_t{0}); // a closed leaf
+    out.write(std::bit_cast<std::uint32_t>(plane.raw_distance()));
+    out.write(plane.raw_u());
+    out.write(plane.raw_v());
+    out.write(plane.material());
+    std::vector<std::byte> bytes = std::move(out).take();
+    const auto old = Tree<Shape>::decode(bytes);
+    REQUIRE(old);
+    CHECK(old->root().value == plane);
+    // As this format, it's cut short.
+    bytes[0] = std::byte{Shape::format};
+    CHECK_FALSE(Tree<Shape>::decode(bytes));
+    bytes[0] = std::byte{Shape::format + 1};
+    CHECK_FALSE(Tree<Shape>::decode(bytes));
 }
 
 TEST_CASE("a coarse plane shows the blend of what the planes under it show", "[grid]") {

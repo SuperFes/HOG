@@ -291,7 +291,7 @@ Result<Tree<Kind>> Tree<Kind>::decode(std::span<const std::byte> bytes) {
     if (!version || !levels || !count) {
         return make_error(ErrorCode::Parse, "a tree cut short");
     }
-    if (*version != format) {
+    if (*version == 0 || *version > format) {
         return make_error(ErrorCode::Unsupported, std::format("tree format {}", *version));
     }
     if (*count == 0 || *count > rest.remaining()) {
@@ -302,7 +302,7 @@ Result<Tree<Kind>> Tree<Kind>::decode(std::span<const std::byte> bytes) {
     std::vector<Decoded> decoded;
     decoded.reserve(*count);
     for (std::uint64_t n = 0; n < *count; ++n) {
-        auto node = tree.decode_node(rest, decoded);
+        auto node = tree.decode_node(rest, decoded, *version);
         if (!node) {
             return std::unexpected(std::move(node.error()));
         }
@@ -316,9 +316,10 @@ Result<Tree<Kind>> Tree<Kind>::decode(std::span<const std::byte> bytes) {
 }
 
 template <typename Kind>
-auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded) -> Result<Decoded> {
+auto Tree<Kind>::decode_node(ByteReader& in, std::span<const Decoded> decoded, std::uint8_t version)
+    -> Result<Decoded> {
     const auto flags = in.read<std::uint8_t>();
-    const auto value = Kind::read(in);
+    const auto value = Kind::read(in, version);
     if (!flags || !value) {
         return make_error(ErrorCode::Parse, "a tree node cut short");
     }

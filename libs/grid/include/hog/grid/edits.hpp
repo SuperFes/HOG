@@ -37,7 +37,8 @@ struct Edit {
 
 // Edits over the baked trees, oldest first.
 struct EditLog {
-    static constexpr std::uint8_t format = 1;
+    // 2 wrote shapes with their roughness; 1 still reads.
+    static constexpr std::uint8_t format = 2;
 
     std::vector<Edit> edits;
 

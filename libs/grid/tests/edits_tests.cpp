@@ -14,6 +14,7 @@ using hog::grid::Key;
 using hog::grid::Material;
 using hog::grid::Page;
 using hog::grid::Shape;
+using hog::grid::Surface;
 using hog::grid::Tree;
 
 namespace {
@@ -102,6 +103,23 @@ TEST_CASE("edit logs come back from their bytes", "[grid]") {
     const auto empty = EditLog::decode(EditLog{}.encode());
     REQUIRE(empty);
     CHECK(empty->edits.empty());
+}
+
+TEST_CASE("edit logs from before shapes held roughness still read", "[grid]") {
+    EditLog log;
+    const Surface plane = Surface::plane(hog::DVec3{0.0, 0.0, 1.0}, 0.2, 4);
+    log.edits.push_back(Edit{.id = 3,
+                             .left = {{.key = in_page(2, 2, 2),
+                                       .shape = plane,
+                                       .material = std::nullopt,
+                                       .water = std::nullopt}}});
+    // The shape's roughness is its last byte.
+    std::vector<std::byte> bytes = log.encode();
+    bytes.pop_back();
+    bytes[0] = std::byte{1};
+    const auto back = EditLog::decode(bytes);
+    REQUIRE(back);
+    CHECK(*back == log);
 }
 
 TEST_CASE("broken edit log bytes are refused", "[grid]") {

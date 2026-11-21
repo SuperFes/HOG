@@ -37,18 +37,20 @@ const std::optional<Held<Kind>>& held_of(const Page& page) {
 }
 
 template <typename Kind>
-Result<std::optional<typename Kind::Value>> read_value(ByteReader& in, bool present) {
+Result<std::optional<typename Kind::Value>> read_value(ByteReader& in, bool present,
+                                                       std::uint8_t version) {
     if (!present) {
         return std::nullopt;
     }
-    auto value = Kind::read(in);
+    auto value = Kind::read(in, version);
     if (!value) {
         return std::unexpected(std::move(value.error()));
     }
     return *value;
 }
 
-Result<Edit::Left> read_left(ByteReader& in) {
+// Its values as their kinds wrote them in `shapes` of the shape format.
+Result<Edit::Left> read_left(ByteReader& in, std::uint8_t shapes) {
     const auto depth = in.read<std::uint8_t>();
     const auto x = in.read_varint();
     const auto y = in.read_varint();
@@ -63,9 +65,9 @@ Result<Edit::Left> read_left(ByteReader& in) {
     if ((*kinds & ~(has_shape | has_material | has_water)) != 0) {
         return make_error(ErrorCode::Parse, std::format("an edit's kinds {}", *kinds));
     }
-    auto shape = read_value<Shape>(in, (*kinds & has_shape) != 0);
-    auto material = read_value<Material>(in, (*kinds & has_material) != 0);
-    auto water = read_value<Water>(in, (*kinds & has_water) != 0);
+    auto shape = read_value<Shape>(in, (*kinds & has_shape) != 0, shapes);
+    auto material = read_value<Material>(in, (*kinds & has_material) != 0, Material::format);
+    auto water = read_value<Water>(in, (*kinds & has_water) != 0, Water::format);
     if (!shape || !material || !water) {
         return make_error(ErrorCode::Parse, "an edit's values cut short");
     }
@@ -78,7 +80,7 @@ Result<Edit::Left> read_left(ByteReader& in) {
                       .water = *water};
 }
 
-Result<Edit> read_edit(ByteReader& in) {
+Result<Edit> read_edit(ByteReader& in, std::uint8_t shapes) {
     const auto id = in.read_varint();
     const auto author = in.read_varint();
     const auto time = in.read_signed();
@@ -94,7 +96,7 @@ Result<Edit> read_edit(ByteReader& in) {
     Edit edit{.id = *id, .author = *author, .time = *time, .generator = *generator, .left = {}};
     edit.left.reserve(*count);
     for (std::uint64_t n = 0; n < *count; ++n) {
-        auto left = read_left(in);
+        auto left = read_left(in, shapes);
         if (!left) {
             return std::unexpected(std::move(left.error()));
         }
@@ -165,7 +167,7 @@ Result<EditLog> EditLog::decode(std::span<const std::byte> bytes) {
     if (!version || !count) {
         return make_error(ErrorCode::Parse, "an edit log cut short");
     }
-    if (*version != format) {
+    if (*version == 0 || *version > format) {
         return make_error(ErrorCode::Unsupported, std::format("edit log format {}", *version));
     }
     if (*count > in.remaining()) {
@@ -174,7 +176,8 @@ Result<EditLog> EditLog::decode(std::span<const std::byte> bytes) {
     EditLog log;
     log.edits.reserve(*count);
     for (std::uint64_t n = 0; n < *count; ++n) {
-        auto edit = read_edit(in);
+        // Shapes gained their roughness in the second.
+        auto edit = read_edit(in, *version == 1 ? std::uint8_t{1} : Shape::format);
         if (!edit) {
             return std::unexpected(std::move(edit.error()));
         }
