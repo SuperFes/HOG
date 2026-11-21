@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <print>
 #include <set>
 #include <utility>
 #include <variant>
@@ -190,6 +191,40 @@ struct Agreement {
         }
     }
 };
+
+// For each node of `shape` split into eight, how many times rougher than those combined it is,
+// as a power of two; and how many crossed nodes have no roughness.
+int rough_over_combined(const hog::grid::Tree<hog::grid::Shape>& shape, std::vector<double>& into) {
+    int unknown = 0;
+    for (std::uint8_t depth = 0; depth < levels; ++depth) {
+        const std::uint32_t side = 1U << depth;
+        for (std::uint32_t code = 0; code < side * side * side; ++code) {
+            const std::uint32_t x = code % side;
+            const std::uint32_t y = (code / side) % side;
+            const std::uint32_t z = code / (side * side);
+            const auto here = shape.at(depth, x, y, z);
+            if (here.depth != depth || !here.value.crosses()) {
+                continue;
+            }
+            unknown += here.value.roughness() ? 0 : 1;
+            std::array<hog::grid::Surface, 8> children{};
+            bool split = true;
+            for (std::uint32_t k = 0; k < 8; ++k) {
+                const auto child =
+                    shape.at(static_cast<std::uint8_t>(depth + 1), (2 * x) + (k & 1U),
+                             (2 * y) + ((k >> 1U) & 1U), (2 * z) + ((k >> 2U) & 1U));
+                split = split && child.depth == depth + 1;
+                children.at(k) = child.value;
+            }
+            const auto combined = hog::grid::Shape::summary(children).roughness();
+            const auto rough = here.value.roughness();
+            if (split && combined && rough) {
+                into.push_back(std::log2(rough.value() / combined.value()));
+            }
+        }
+    }
+    return unknown;
+}
 
 } // namespace
 
@@ -528,6 +563,34 @@ TEST_CASE("a node reads the same however deep it's filled, and from whichever no
     same("water", deep.water, over.water, reach, 1, offset);
     same("woods", deep.woods, over.woods, reach, 1, offset);
     CHECK(compared > 100);
+}
+
+TEST_CASE("a node is as rough as the nodes under it combined or a little more", "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    std::vector<double> apart;
+    for (const bool land : {true, false}) {
+        const DVec3 up = spread_until(land, 20.0);
+        const DVec3 ground =
+            up * hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+        const Key node =
+            grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - levels - 4)).value();
+        const Filled filled = fill(world, grid, node, levels);
+        CHECK(rough_over_combined(filled.shape, apart) == 0);
+    }
+    REQUIRE(apart.size() > 50);
+    std::ranges::sort(apart);
+    const double median = apart[apart.size() / 2];
+    const double low = apart[apart.size() / 10];
+    const double high = apart[apart.size() * 9 / 10];
+    std::println("{} nodes: log2 rough over combined median {:.2f}, 10% {:.2f}, 90% {:.2f}",
+                 apart.size(), median, low, high);
+    // Its roughness bounds what's finer, so it holds what its children do and the detail between
+    // as the most it could be, not as it stands: no rougher than a few times theirs.
+    CHECK(low > -0.25);
+    CHECK(median > 0.0);
+    CHECK(median < 2.0);
+    CHECK(high < 3.0);
 }
 
 TEST_CASE("pieces filled apart graft into what's filled whole", "[globe][grid]") {

@@ -8,8 +8,9 @@ after, and strike it off.
 
 - **Refine by error, not size.** A node is drawn finer once it spans 16 pixels however flat it is.
   Refining where the ground strays from a coarse node's plane by more than a pixel or two would
-  keep flat ground (sea floor, beaches, plains) coarse at any distance. Needs each node's error
-  stored in the tree, so a store change: design it in `docs/world-tree.md` first.
+  keep flat ground (sea floor, beaches, plains) coarse at any distance. Each crossed node now
+  holds its roughness, a bound on that stray (about 2.6 times what its children show), unknown
+  in chunks made before it; the client doesn't read it yet.
 - **Skip blocks that can't hold a surface.** 58% of the blocks wanted for a view came out empty
   (3,681 of 6,314 on report `20261120-212931`) but cost a full sampling each.
 - **Don't re-mesh for detail a block can't show.** A block meshes again when any piece it reads

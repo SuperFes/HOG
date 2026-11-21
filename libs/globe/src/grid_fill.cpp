@@ -39,6 +39,7 @@ struct Probe {
     double ground = 0.0; // under it, metres from the centre
     double water = 0.0;  // over it at its highest in the year, likewise; 0 none
     WaterBody body;      // which that water is
+    double rest = 0.0;   // metres the ground's detail too fine for the node could move it
     // Its plane where the surface may cross it, else solid or open; none past what's filled.
     std::optional<grid::Surface> surface;
     bool splits = false; // the surface may cross it and finer nodes are filled under it
@@ -178,6 +179,7 @@ private:
             std::vector<std::size_t> crossing;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
                 Probe probe = probe_at(middles[n], read.distances[n], size, read.under[n]);
+                probe.rest = read.rests[n];
                 if (missed(probe, read.under[n])) {
                     probe.surface =
                         probe.distance < 0.0 ? grid::Surface::solid() : grid::Surface::open();
@@ -263,7 +265,16 @@ private:
             const DVec3 inside = middles[n] - (normal * (probe.distance + (size / 4.0)));
             const Material shown =
                 solid_at(glm::length(inside), cell_under(up_at(inside), level), size);
-            probe.surface = grid::Surface::plane(normal, probe.distance / size, palette_of(shown));
+            // As rough as the ground strays from it: its middle off the line through each pair
+            // of faces, and what's too fine for the read.
+            double bend = 0.0;
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                const double faces =
+                    (distances[first + (2 * axis)] + distances[first + (2 * axis) + 1]) / 2.0;
+                bend = std::max(bend, std::abs(faces - probe.distance));
+            }
+            probe.surface = grid::Surface::plane(normal, probe.distance / size, palette_of(shown))
+                                .with_roughness((bend + probe.rest) / size);
             if (probe.surface->is_open()) {
                 probe.material = Material::Air;
                 continue;
@@ -290,10 +301,12 @@ private:
         return sample.distance < 0.0 ? sample.material : Material::Air;
     }
 
-    // The distance at each point, between the columns about it, and the cell each lies over.
+    // The distance at each point, between the columns about it, the cell each lies over and how
+    // far the ground's detail too fine for them could move it.
     struct Read {
         std::vector<double> distances;
         std::vector<Cell> under;
+        std::vector<double> rests;
     };
     Read distances_at(const std::vector<DVec3>& points, int level, double lod) {
         std::vector<Between> between;
@@ -308,15 +321,19 @@ private:
         Read read;
         read.distances.reserve(points.size());
         read.under.reserve(points.size());
+        read.rests.reserve(points.size());
         for (std::size_t n = 0; n < points.size(); ++n) {
             const double radius = glm::length(points[n]);
             double distance = 0.0;
+            double rest = 0.0;
             for (std::size_t k = 0; k < 4; ++k) {
-                distance += between[n].weights.at(k) *
-                            columns_.at(slot(between[n].cells.at(k))).sample(radius).distance;
+                const Generator::Column& column = columns_.at(slot(between[n].cells.at(k)));
+                distance += between[n].weights.at(k) * column.sample(radius).distance;
+                rest += between[n].weights.at(k) * column.rest();
             }
             read.distances.push_back(distance);
             read.under.push_back(between[n].cells[0]);
+            read.rests.push_back(rest);
         }
         return read;
     }

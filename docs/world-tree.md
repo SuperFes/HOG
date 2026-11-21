@@ -232,6 +232,17 @@ Each step is its own commit with tests, and the world stays playable after each.
    fills in 0.43 s and a coarse column costs 26 µs, so coarse is no dearer than fine. Columns
    share every height of their cell, so bounds deciding air and solid would save few reads; what
    a node still lacks is its roughness, the spread of the detail finer than it.
+
+   Each crossed node now holds its roughness: a byte, in sixteenths of a doubling of node sides,
+   of how far the ground finer than it may stray from its plane (Shape trees and edit logs went
+   to format 2; format 1 reads with it unknown). The fill takes it as how far the node's middle
+   lies off the line through each pair of its faces, plus what the generator says the detail too
+   fine for the read could add: the fBm octaves left out (`fbm_rest`), the gullies left out, the
+   valleys' wander and wear, the bedforms where what was carried buries the bed. It's a bound, so
+   a node is as rough as its children combined or a little more (median 2.6 times on the test
+   world), and nearly every coarse read lies within it of the fine one. It costs the fill
+   nothing measurable (2 km in 0.40 s) and the shape trees 7% more bytes. Rivers' channels
+   narrower than the read, crags and rubble aren't yet in it.
 6. **Seeded layers.** Unique-scale leaves and the layers under them. Tests: a read from any depth
    agrees with one from the root; seams match across neighbours; layers steer by stored numbers.
 7. **Woods, rocks and materials from stored numbers.** No `Formed::at` behind them.
