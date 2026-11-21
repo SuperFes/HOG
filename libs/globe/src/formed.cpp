@@ -1417,8 +1417,26 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     if (glm::length(direction - (0.5 * (from + to))) > bound) {
         return std::nullopt;
     }
-    // Its floor falling evenly along its course.
+    // How far the whole course lies, and which way from its nearest; out of its reach the valley
+    // is the ground about it.
     const std::vector<DVec3>& line = course_of(point);
+    double nearest = 1e300;
+    DVec3 outward{0.0};
+    for (std::size_t k = 0; k + 1 < line.size(); ++k) {
+        const DVec3 along = line[k + 1] - line[k];
+        const double t = std::clamp(glm::dot(direction - line[k], along) /
+                                        std::max(glm::dot(along, along), 1e-300),
+                                    0.0, 1.0);
+        const DVec3 on = line[k] + (along * t);
+        if (const double away = glm::length(direction - on) * radius_; away < nearest) {
+            nearest = away;
+            outward = outward_from(direction, on);
+        }
+    }
+    if (nearest >= reach) {
+        return std::nullopt;
+    }
+    // Its floor falling evenly along its course.
     thread_local std::vector<double> runs;
     runs.assign(line.size(), 0.0);
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
@@ -1471,9 +1489,6 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
                                                  channel_toe(channel.belt, channel.width)) +
                                    1.0;
     double surely = 1e300;
-    // How far the whole course lies, and which way from its nearest.
-    double nearest = 1e300;
-    DVec3 outward{0.0};
     for (std::size_t k = 0; k + 1 < line.size(); ++k) {
         const DVec3 along = line[k + 1] - line[k];
         const double t = std::clamp(glm::dot(direction - line[k], along) /
@@ -1487,10 +1502,6 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
         lowest = std::min(lowest, rough[k]);
         least[k] = least_under(floor_here, walls, away, channel_reaches) - deepest;
         surely = std::min(surely, walls + (slope * channel.belt / 4.0));
-        if (away < nearest) {
-            nearest = away;
-            outward = outward_from(direction, on);
-        }
     }
     // The line's chord and arc differ by far less than this, so none is missed by their
     // difference.

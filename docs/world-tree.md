@@ -188,10 +188,12 @@ Each step is its own commit with tests, and the world stays playable after each.
       (roughness at the twisted point, valleys at the wandered one) is smooth over its coarse
       octaves too, so its coarse sum comes down the same way. Each fBm then costs a cell an
       octave or two rather than ten: most of the 19%.
-   6. *Valley lists.* Each cell's list cut from its parent's by `wall_bounds` over the cell:
-      a valley that can't stand within its rounding of the lowest anywhere in the cell leaves
-      the list for good. At most the 0.7 of 2.8 full reads a cell that neither reach nor lower
-      it, so less than the plan first thought; the course table with wander baked in comes after.
+   6. *Valley lists.* Not made: of the 2.8 full reads a cell made, the 0.7 that didn't reach it
+      added nothing, and now stop once the course's nearest lies out of reach, before the
+      stretch, worn walls and `wall_at`s, at every level and with the same bits. The rest a list
+      would drop are the cheap bound misses, and those that reach shape its rivers, floors and
+      fall even where they don't lower it, so a list cut by `wall_bounds` buys little more. The
+      course table with wander baked in comes after.
    7. *Gullies, settling, beaches, crags and lakes* made the same way.
 
    Tests: what's made agrees with `Formed::at` within a tolerance on the test world, over land,

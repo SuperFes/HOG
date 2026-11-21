@@ -46,7 +46,10 @@ after, and strike it off.
 - **Ground cells read again.** A band 3 bake reads 38.3M ground cells for 33.7M distinct ones:
   12% are read again after the kept cells (2^17) let them go, at about 85 µs a read. A bake could
   keep more; or fill regions in an order that keeps neighbours close in time.
-
+- ~~**Valleys out of reach read in full.**~~ A valley whose whole course lies out of its reach
+  now returns before its stretch, worn walls and `wall_at`s (0.7 of the 2.8 full reads a cell
+  made, adding nothing). Same bits; `formed ground cost` 1–3% faster, within the noise of a bake
+  running alongside.
 - **Seams over cube edges.** Weights there are weighed, not read between seed cells, so the
   ground can step by up to the reads' 8 cm along the cube's edges.
 - **Weighing forming's points.** `Smooth::weigh` walks its neighbours with a linear `find` and
