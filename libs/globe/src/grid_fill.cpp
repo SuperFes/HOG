@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -172,12 +173,12 @@ private:
             for (const grid::Key node : nodes) {
                 middles.push_back(grid_->centre(node));
             }
-            const std::vector<double> distances = distances_at(middles, level, lod);
+            const Read read = distances_at(middles, level, lod);
             std::vector<grid::Key> next;
             std::vector<std::size_t> crossing;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
-                Probe probe = probe_at(middles[n], distances[n], size, level);
-                if (missed(probe, middles[n], level)) {
+                Probe probe = probe_at(middles[n], read.distances[n], size, read.under[n]);
+                if (missed(probe, read.under[n])) {
                     probe.surface =
                         probe.distance < 0.0 ? grid::Surface::solid() : grid::Surface::open();
                 } else {
@@ -192,19 +193,18 @@ private:
                 probes_.emplace(grid::code(nodes[n]), probe);
             }
             if (!crossing.empty()) {
-                planes(nodes, middles, crossing, size, level, lod);
+                planes(nodes, middles, read.under, crossing, size, level, lod);
             }
             nodes = std::move(next);
         }
     }
 
     // What the generator gives at a node's middle `distance` out of the solid, but its surface.
-    [[nodiscard]] Probe probe_at(DVec3 middle, double distance, double size, int level) const {
+    [[nodiscard]] Probe probe_at(DVec3 middle, double distance, double size, Cell under) const {
         const double radius = glm::length(middle);
-        const Generator::Column& column = column_at(middle, level);
+        const Generator::Column& column = columns_.at(slot(under));
         return {.distance = distance,
-                .material =
-                    distance > clear * size ? Material::Air : solid_at(middle, radius, level, size),
+                .material = distance > clear * size ? Material::Air : solid_at(radius, under, size),
                 .size = size,
                 .radius = radius,
                 .ground = column.ground(),
@@ -215,7 +215,7 @@ private:
 
     // Whether no surface crosses the node: the ground's far from it, and in the solid, no cave
     // shown at its detail lies in it. One that may show finer is noted.
-    bool missed(Probe& probe, DVec3 middle, int level) const {
+    bool missed(Probe& probe, Cell under) const {
         const double reach = clear * probe.size;
         if (std::abs(probe.distance) <= reach) {
             return false;
@@ -223,7 +223,7 @@ private:
         if (probe.distance > 0.0) {
             return true;
         }
-        const Generator::Column& column = column_at(middle, level);
+        const Generator::Column& column = columns_.at(slot(under));
         if (!column.caves(probe.radius - reach, probe.radius + reach, reach).empty()) {
             return false;
         }
@@ -235,7 +235,8 @@ private:
     // The planes of the nodes the surface may cross: each one's normal the way the distance rises
     // across it.
     void planes(const std::vector<grid::Key>& nodes, const std::vector<DVec3>& middles,
-                const std::vector<std::size_t>& crossing, double size, int level, double lod) {
+                const std::vector<Cell>& under, const std::vector<std::size_t>& crossing,
+                double size, int level, double lod) {
         constexpr std::array<DVec3, 3> axes{DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0},
                                             DVec3{0.0, 0.0, 1.0}};
         const double step = size / 2.0;
@@ -247,7 +248,8 @@ private:
                 points.push_back(middles[n] - (axis * step));
             }
         }
-        const std::vector<double> distances = distances_at(points, level, lod);
+        const Read read = distances_at(points, level, lod);
+        const std::vector<double>& distances = read.distances;
         for (std::size_t f = 0; f < crossing.size(); ++f) {
             const std::size_t n = crossing[f];
             const std::size_t first = 6 * f;
@@ -259,7 +261,8 @@ private:
             const DVec3 normal = length > 0.0 ? rise / length : middles[n] / probe.radius;
             // It shows the solid just inside the surface, along its normal from the middle.
             const DVec3 inside = middles[n] - (normal * (probe.distance + (size / 4.0)));
-            const Material shown = solid_at(inside, glm::length(inside), level, size);
+            const Material shown =
+                solid_at(glm::length(inside), cell_under(up_at(inside), level), size);
             probe.surface = grid::Surface::plane(normal, probe.distance / size, palette_of(shown));
             if (probe.surface->is_open()) {
                 probe.material = Material::Air;
@@ -268,18 +271,18 @@ private:
             // Digging gives what most of it holds, as the nodes under it would sum up: the solid
             // at its middle and its faces' middles, with what it shows.
             std::array<grid::Material::Value, 8> held{palette_of(shown),
-                                                      palette_of(solid_in(middles[n], level))};
+                                                      palette_of(solid_in(middles[n], under[n]))};
             for (std::size_t k = 0; k < 6; ++k) {
-                held.at(2 + k) = palette_of(solid_in(points[first + k], level));
+                held.at(2 + k) = palette_of(solid_in(points[first + k], read.under[first + k]));
             }
             probe.material = static_cast<Material>(grid::Material::summary(held));
         }
     }
 
-    // The solid at a point as the nearest column made has it; air where it's open.
-    [[nodiscard]] Material solid_in(DVec3 point, int level) const {
+    // The solid at a point, `under` it, as that cell's column has it; air where it's open.
+    [[nodiscard]] Material solid_in(DVec3 point, Cell under) const {
         const double radius = glm::length(point);
-        const auto found = columns_.find(slot(cell_under(up_at(point), level)));
+        const auto found = columns_.find(slot(under));
         if (found == columns_.end()) {
             return Material::Air;
         }
@@ -287,8 +290,12 @@ private:
         return sample.distance < 0.0 ? sample.material : Material::Air;
     }
 
-    // The distance at each point, between the columns about it.
-    std::vector<double> distances_at(const std::vector<DVec3>& points, int level, double lod) {
+    // The distance at each point, between the columns about it, and the cell each lies over.
+    struct Read {
+        std::vector<double> distances;
+        std::vector<Cell> under;
+    };
+    Read distances_at(const std::vector<DVec3>& points, int level, double lod) {
         std::vector<Between> between;
         between.reserve(points.size());
         std::vector<Cell> wanted;
@@ -298,8 +305,9 @@ private:
             wanted.insert(wanted.end(), between.back().cells.begin(), between.back().cells.end());
         }
         make_columns(wanted, lod);
-        std::vector<double> distances;
-        distances.reserve(points.size());
+        Read read;
+        read.distances.reserve(points.size());
+        read.under.reserve(points.size());
         for (std::size_t n = 0; n < points.size(); ++n) {
             const double radius = glm::length(points[n]);
             double distance = 0.0;
@@ -307,15 +315,16 @@ private:
                 distance += between[n].weights.at(k) *
                             columns_.at(slot(between[n].cells.at(k))).sample(radius).distance;
             }
-            distances.push_back(distance);
+            read.distances.push_back(distance);
+            read.under.push_back(between[n].cells[0]);
         }
-        return distances;
+        return read;
     }
 
-    // The solid at or just under a point, as the nearest column made has it: where the column
-    // has the point open, the solid it reaches going down. Air only where it reaches none.
-    [[nodiscard]] Material solid_at(DVec3 point, double radius, int level, double size) const {
-        const auto found = columns_.find(slot(cell_under(up_at(point), level)));
+    // The solid at or just under `radius` in the column of the cell `under` it: where the column
+    // has it open, the solid it reaches going down. Air only where it reaches none.
+    [[nodiscard]] Material solid_at(double radius, Cell under, double size) const {
+        const auto found = columns_.find(slot(under));
         if (found == columns_.end()) {
             return Material::Air;
         }
@@ -324,11 +333,6 @@ private:
             sample = found->second.sample(radius - sample.distance - (size / 4.0));
         }
         return sample.distance < 0.0 ? sample.material : Material::Air;
-    }
-
-    // The column made nearest a point, among those about it.
-    [[nodiscard]] const Generator::Column& column_at(DVec3 point, int level) const {
-        return columns_.at(slot(cell_under(up_at(point), level)));
     }
 
     static Between around(DVec3 point, int level) {
@@ -346,17 +350,29 @@ private:
 
     static std::uint64_t slot(Cell cell) { return (index_of(cell) << 5U) | cell.level; }
 
-    void make_columns(std::vector<Cell>& wanted, double lod) {
-        std::erase_if(wanted, [&](Cell cell) { return columns_.contains(slot(cell)); });
-        std::ranges::sort(wanted, {}, slot);
-        const auto repeated = std::ranges::unique(wanted, {}, slot);
-        wanted.erase(repeated.begin(), repeated.end());
-        if (wanted.empty()) {
+    void make_columns(const std::vector<Cell>& wanted, double lod) {
+        std::vector<std::pair<std::uint64_t, Cell>> missing;
+        missing.reserve(wanted.size());
+        for (const Cell cell : wanted) {
+            if (const std::uint64_t at = slot(cell); !columns_.contains(at)) {
+                missing.emplace_back(at, cell);
+            }
+        }
+        std::ranges::sort(missing, {}, &std::pair<std::uint64_t, Cell>::first);
+        const auto repeated =
+            std::ranges::unique(missing, {}, &std::pair<std::uint64_t, Cell>::first);
+        missing.erase(repeated.begin(), repeated.end());
+        if (missing.empty()) {
             return;
         }
-        std::vector<Generator::Column> made = generator_->columns(wanted, lod, 1, false);
-        for (std::size_t n = 0; n < wanted.size(); ++n) {
-            columns_.emplace(slot(wanted[n]), made[n]);
+        std::vector<Cell> cells;
+        cells.reserve(missing.size());
+        for (const auto& [at, cell] : missing) {
+            cells.push_back(cell);
+        }
+        std::vector<Generator::Column> made = generator_->columns(cells, lod, 1, false);
+        for (std::size_t n = 0; n < missing.size(); ++n) {
+            columns_.emplace(missing[n].first, std::move(made[n]));
         }
     }
 

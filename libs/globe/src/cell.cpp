@@ -254,8 +254,16 @@ std::optional<Cell> next_to(Cell cell, int di, int dj) {
         const std::int64_t to = std::int64_t{at} + by;
         return to < 0 || to >= n;
     };
-    if (off(cell.i, di) && off(cell.j, dj)) {
+    const bool off_i = off(cell.i, di);
+    const bool off_j = off(cell.j, dj);
+    if (off_i && off_j) {
         return std::nullopt;
+    }
+    if (!off_i && !off_j) {
+        return Cell{.level = cell.level,
+                    .face = cell.face,
+                    .i = static_cast<std::uint32_t>(std::int64_t{cell.i} + di),
+                    .j = static_cast<std::uint32_t>(std::int64_t{cell.j} + dj)};
     }
     const Frame frame = frame_of(cell.face);
     Surface point = surface_of(cell);

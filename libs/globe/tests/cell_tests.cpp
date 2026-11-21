@@ -279,3 +279,27 @@ TEST_CASE("steps of many cells run straight on, over the cube's edges", "[globe]
         check_either_way_round(cell);
     }
 }
+
+TEST_CASE("a step within a face moves its indices by the step", "[globe][cell]") {
+    for (const int level : {2, 5}) {
+        const auto n = static_cast<int>(1U << level);
+        for (std::uint64_t index = 0; index < hog::globe::cells_at(level); index += 7) {
+            const Cell cell = hog::globe::cell_at_index(level, index);
+            for (const int di : {-2, -1, 0, 1, 2}) {
+                for (const int dj : {-2, -1, 0, 1, 2}) {
+                    const int i = static_cast<int>(cell.i) + di;
+                    const int j = static_cast<int>(cell.j) + dj;
+                    if (i < 0 || i >= n || j < 0 || j >= n) {
+                        continue;
+                    }
+                    const auto next = hog::globe::next_to(cell, di, dj);
+                    REQUIRE(next.has_value());
+                    CHECK(next.value().face == cell.face);
+                    CHECK(std::cmp_equal(next.value().i, i));
+                    CHECK(std::cmp_equal(next.value().j, j));
+                    CHECK(next == hog::globe::next_to(straight_on(cell, di, 0), 0, dj));
+                }
+            }
+        }
+    }
+}
