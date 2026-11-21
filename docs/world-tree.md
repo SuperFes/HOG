@@ -225,6 +225,13 @@ Each step is its own commit with tests, and the world stays playable after each.
 5. **Coarse summaries.** Bounds decide air and solid; planes, shares and roughness for detail
    finer than a node. Tests: a parent agrees with its children combined; a 2 km region fills in
    well under a second.
+
+   Measured first: a 2 km region filled in 1.07 s, 81% of it making columns, and a column from
+   64 m up cost 150 µs against 44 µs at the finest, 99% of it rockfall's walk, reckoning rubble
+   over rock cells finer than the column's own. Reckoned over the column's own cells, the region
+   fills in 0.43 s and a coarse column costs 26 µs, so coarse is no dearer than fine. Columns
+   share every height of their cell, so bounds deciding air and solid would save few reads; what
+   a node still lacks is its roughness, the spread of the detail finer than it.
 6. **Seeded layers.** Unique-scale leaves and the layers under them. Tests: a read from any depth
    agrees with one from the root; seams match across neighbours; layers steer by stored numbers.
 7. **Woods, rocks and materials from stored numbers.** No `Formed::at` behind them.

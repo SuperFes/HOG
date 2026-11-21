@@ -61,6 +61,11 @@ after, and strike it off.
   `exp`, exp scales by a power of two exactly and rounds by the shift trick, and a stretch's
   floor is read from its own stretch, not a binary search. Same bits; a formed read takes 8–9%
   fewer instructions at every detail (`formed ground cost`, 400k at 2.5 m from 430k).
+- ~~**Coarse columns' rubble.**~~ A coarse column reckoned its rubble over rock cells finer than
+  its own (18 m under 37 m cells on the test world), so rockfall's walk read the ground of four
+  times its cells: 99% of a column from 64 m up, 150 µs a column against 44 µs at the finest.
+  Rubble is now reckoned over the cells read at its detail; a 2 km region (6 levels, 32 m leaves)
+  fills in 0.43 s from 1.07 s, a coarse column 26 µs. What's left is mostly their ground.
 - **Valleys still dominate a read.** `carved` is 60–75% of `Formed::at` at every detail, nearly all
   `valley_wall`: of about 15 valleys asked a read, 4 pass the bound and 3.5 reach, and each scans
   its whole course (about 31 stretches) three times: nearest 17%, floors and walls 11%, `wall_at` on

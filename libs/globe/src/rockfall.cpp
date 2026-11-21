@@ -181,18 +181,6 @@ Fallen fallen_about(const Planet& planet, Cell cell, const GroundOf& ground_of) 
     return fallen;
 }
 
-// The level of the cells fallen rock is reckoned over at `lod`: the coarsest rock cells, or
-// the cells `lod` resolves where those are too fine to show, whose rock falls within them.
-int fall_level(const Planet& planet, double lod) noexcept {
-    const double side_at_root = std::sqrt(4.0 * std::numbers::pi / 6.0) * planet.body.radius;
-    int level = 0;
-    while (level < rock_level(planet) &&
-           side_at_root > std::ldexp(lod / std::numbers::sqrt2, level)) {
-        ++level;
-    }
-    return level;
-}
-
 double across(const std::array<double, 3>& sides) noexcept {
     return maths::hypot(sides[0], sides[1]);
 }
@@ -461,6 +449,10 @@ private:
 
 int rock_level(const Planet& planet) noexcept {
     return std::max(0, maths::ceil_log2(std::numbers::pi / 2.0 * planet.body.radius / rock_cell));
+}
+
+int fall_level(const Planet& planet, double lod) noexcept {
+    return std::min(rock_level(planet), cell_level(planet, lod));
 }
 
 double widest_rock(const Planet& planet) noexcept {

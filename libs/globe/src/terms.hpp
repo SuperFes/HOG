@@ -145,6 +145,10 @@ inline constexpr double rock_cell = 32.0;
 inline constexpr int rock_sizes = 4;
 // The level of the coarsest cells that keep a rock.
 [[nodiscard]] int rock_level(const Planet& planet) noexcept;
+// The level of the cells fallen rock is reckoned over at `lod`: the coarsest rock cells, or the
+// cells read at `lod` where those are too fine to show, whose rock falls within them, so a
+// coarse read walks the ground of its own cells.
+[[nodiscard]] int fall_level(const Planet& planet, double lod) noexcept;
 // No block is wider than this, metres: what the widest of those cells holds.
 [[nodiscard]] double widest_rock(const Planet& planet) noexcept;
 // The share of the ground about a coarsest cell that blocks of rock cover: what comes loose from
@@ -177,8 +181,7 @@ struct Fall {
     Rubble rubble;
 };
 [[nodiscard]] Fall fallen(const Context& context, DVec3 direction, double lod);
-// The same at the middle of each of `cells`; over cells `lod` resolves where they're coarser
-// than the rock cells, whose rock falls within them.
+// The same at the middle of each of `cells`, reckoned over `fall_level`'s cells.
 [[nodiscard]] std::vector<Fall> fallen(const Context& context, std::span<const Cell> cells,
                                        double lod);
 // The same at the middle of each of `cells`, all of one level, each rock made once.

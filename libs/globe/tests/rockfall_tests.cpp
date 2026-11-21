@@ -362,3 +362,17 @@ TEST_CASE("a coarse tile's cells hold the rock that falls within them", "[globe]
     }
     WARN("cells with rubble: " << covered);
 }
+
+TEST_CASE("rubble is reckoned over the cells read at its detail, or rock cells where finer",
+          "[globe][rockfall]") {
+    const Setup setup;
+    const hog::globe::Planet& planet = setup.generator.planet();
+    const int rocks = hog::globe::terms::rock_level(planet);
+    for (int level = 0; level <= rocks + 6; ++level) {
+        CAPTURE(level);
+        const double lod = hog::globe::terms::cell_lod(planet, level);
+        CHECK(hog::globe::terms::fall_level(planet, lod) == std::min(level, rocks));
+        // Between two levels' detail, the finer level's cells.
+        CHECK(hog::globe::terms::fall_level(planet, 1.5 * lod) == std::min(level, rocks));
+    }
+}
