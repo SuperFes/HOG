@@ -195,6 +195,16 @@ Each step is its own commit with tests, and the world stays playable after each.
       spends about a quarter of its time in noise and a fifth in valleys (`valley_wall`'s own
       loops over its course 16%, `wall_at` 2%, `Lowered` 2%), weighing down to 6%. At 40 m noise
       is nearer a tenth of a read, so the bake's coarse bands gain least.
+
+      What it can save is less than first thought. A Hermite between cells `w` apart holds an
+      octave to about 1.6% only where its wavelength is `4w` or more (25% at `2w`), so a cell
+      reading its parents' sums still adds three octaves and the faded one itself, and the read
+      between four parents costs about an octave. At 2.5 m that's about 60 octaves' worth of 116,
+      half the noise or an eighth of a fine bake; at 40 m a little; each kept cell carries some
+      fifteen sums with slopes (about 480 bytes); and each level's error rides on the last's,
+      which is what broke slopes across columns in part 4 until it read from seed cells. Cheaper
+      first, with the same bits: noise corners share their hash steps and octave frames come
+      from a table, an fBm 26% fewer cycles.
    6. *Valley lists.* Not made: of the 2.8 full reads a cell made, the 0.7 that didn't reach it
       added nothing, and now stop once the course's nearest lies out of reach, before the
       stretch, worn walls and `wall_at`s, at every level and with the same bits. The rest a list
