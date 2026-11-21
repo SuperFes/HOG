@@ -49,4 +49,7 @@ after, and strike it off.
 ## Look
 
 - **Water seam holes** in report `20261120-063135`: likely seam triangles wound the wrong way.
+- **Big flat triangles in shallow sea** in reports `20261120-235912`, `20261121-000207`,
+  `-000210`, `-000212` and `-000419`: sea floor shows through the water top as straight-edged
+  triangles tens of metres across, near the eye, in shallows a few metres deep. Not yet looked at.
 - **Rubble** wants per-cell values with hard edges.
