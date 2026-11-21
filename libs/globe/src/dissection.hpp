@@ -30,6 +30,8 @@ struct Dissected {
     // How far the bed about stands either side of its uncut height, by its gullies' floors and the
     // crests between, its gradient per metre: what's laid over it settles into that.
     Noise spread;
+    // Metres the gullies too narrow for the detail read would move it, at most, about.
+    double rest = 0.0;
 };
 
 // How high over its bed's mean what lies `thick` deep over it on the whole stands, settled into the

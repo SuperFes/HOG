@@ -152,6 +152,43 @@ TEST_CASE("gullies narrower than a sample is wide are left out", "[globe][dissec
     }
 }
 
+TEST_CASE("the gullies left out move the ground about as far as their rest says",
+          "[globe][dissection]") {
+    for (const double slope : {0.0, 0.15, 0.5}) {
+        for (const double lod : {2.0, 8.0, 24.0, 64.0}) {
+            CAPTURE(slope, lod);
+            int within = 0;
+            int count = 0;
+            double tightest = 0.0;
+            double rests = 0.0;
+            for (int east_at = 0; east_at < 400; ++east_at) {
+                const double east = east_at * 3.7;
+                const double north = std::fmod(east_at * 41.3, 600.0);
+                const Undissected ground = sloping(east, slope, 1.73);
+                const double fine = cut(east, north, ground, 0.0).top.value;
+                const Dissected coarse = cut(east, north, ground, lod);
+                CHECK(cut(east, north, ground, 0.0).rest == 0.0);
+                const double moved = std::abs(fine - coarse.top.value);
+                within += moved <= coarse.rest + (0.02 * lod) ? 1 : 0;
+                // Where it's more than the kept gullies' winding differs by, which it leaves out.
+                if (coarse.rest > 0.02 * lod) {
+                    tightest = std::max(tightest, moved / coarse.rest);
+                }
+                rests += coarse.rest;
+                ++count;
+            }
+            // Flat ground has none, nor detail fine enough to show every gully.
+            if (slope == 0.0 || lod < gullies.longest / 32.0) {
+                CHECK(rests == 0.0);
+                continue;
+            }
+            // Nearly everywhere within it, and somewhere near it.
+            CHECK(within >= count * 97 / 100);
+            CHECK(tightest > 0.2);
+        }
+    }
+}
+
 TEST_CASE("ice fills gullies, as deep as it lay, its crests standing out where it's thin",
           "[globe][dissection]") {
     SECTION("deep ice covers them, its top as it lay") {

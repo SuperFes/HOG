@@ -667,6 +667,37 @@ TEST_CASE("a formed planet's ground reads whole everywhere, round the poles too"
     }
 }
 
+TEST_CASE("formed ground read coarsely strays from it read finely about as far as its rest says",
+          "[globe][formed]") {
+    const Generator& generator = formed_generator();
+    const Formed& formed = *generator.shape().formed;
+    for (const double lod : {8.0, 32.0, 128.0}) {
+        CAPTURE(lod);
+        int count = 0;
+        int within = 0;
+        double moved_all = 0.0;
+        double rests = 0.0;
+        for (std::uint64_t n = 0; count < 300 && n < 20'000; ++n) {
+            const DVec3 direction = somewhere(n);
+            const Formed::Here fine = formed.at(direction, 0.0, false);
+            if (fine.top.value <= 0.0 || fine.lake || fine.river) {
+                continue;
+            }
+            const Formed::Here coarse = formed.at(direction, lod, false);
+            CHECK(fine.rest == 0.0);
+            const double moved = std::abs(fine.top.value - coarse.top.value);
+            within += moved <= coarse.rest + (0.05 * lod) ? 1 : 0;
+            moved_all += moved;
+            rests += coarse.rest;
+            ++count;
+        }
+        std::println("lod {}: {} of {} within, moved {:.2f} m, rest {:.2f} m on average", lod,
+                     within, count, moved_all / count, rests / count);
+        CHECK(within >= count * 9 / 10);
+        CHECK(moved_all > 0.1 * rests);
+    }
+}
+
 TEST_CASE("how finely a planet's land is formed is one of its knobs", "[globe][formed]") {
     Planet planet = formed_planet();
     CHECK(validate(planet).has_value());

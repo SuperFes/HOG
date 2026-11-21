@@ -292,6 +292,30 @@ Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed, B
     return sum;
 }
 
+double fbm_rest(const Octaves& octaves, double lod, Band band) noexcept {
+    // The same octaves and weights as fbm(), at no detail and at `lod`.
+    const auto count_at = [&](double at) {
+        const double shortest = std::max({2.0 * at, octaves.finest, 1e-9});
+        return (maths::log(octaves.wavelength / shortest) / std::numbers::ln2) + 1.0;
+    };
+    const double all = count_at(0.0);
+    const double kept = count_at(lod);
+    double rest = 0.0;
+    double wavelength = octaves.wavelength;
+    double amplitude = 1.0;
+    for (int octave = 0; octave < most_octaves && static_cast<double>(octave) < all &&
+                         wavelength > band.shorter_than;
+         ++octave) {
+        if (wavelength <= band.longest) {
+            const auto at = static_cast<double>(octave);
+            rest += amplitude * (std::min(1.0, all - at) - std::clamp(kept - at, 0.0, 1.0));
+        }
+        wavelength *= 0.5;
+        amplitude *= octaves.gain;
+    }
+    return rest;
+}
+
 Interval fbm_bounds(DVec3 middle, double within, const Octaves& octaves, double lod,
                     std::uint64_t seed, Band band) noexcept {
     // The same octaves, weights and turns as fbm().

@@ -66,6 +66,9 @@ public:
         double cut = 0.0;
         // Metres the rotted core of a block of rock stands out of the ground about it as a crag.
         double crag = 0.0;
+        // Metres the gullies, bumps and bedforms too fine for the detail read could move its top,
+        // at most, about.
+        double rest = 0.0;
         // Metres it stands over the floor of the valley it lies in, or the lake it drains to: how
         // far down the water under it lies.
         double above_floor = 1e30;
@@ -177,6 +180,8 @@ private:
         std::uint32_t stem = 0; // which river, as stem_of
         // Metres of its own alluvium a river left under it.
         double sheet = 0.0;
+        // Metres the valleys' wander and wear too fine for the detail read could move it, about.
+        double rest = 0.0;
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const;

@@ -1,6 +1,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/noise.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -100,6 +101,35 @@ TEST_CASE("coarser samples drop the short octaves smoothly", "[globe][noise]") {
     // And a tiny change of detail changes the value only a little: no pops.
     CHECK(std::abs(hog::globe::fbm(at, octaves, 10.0, 4).value -
                    hog::globe::fbm(at, octaves, 10.001, 4).value) < 1e-3);
+}
+
+TEST_CASE("what fbm leaves out at a detail moves it no further than its rest", "[globe][noise]") {
+    const hog::globe::Octaves octaves{.wavelength = 1000.0, .gain = 0.5, .finest = 3.0};
+    CHECK(hog::globe::fbm_rest(octaves, 0.0) == 0.0);
+    CHECK(hog::globe::fbm_rest(octaves, 1.0) == 0.0);
+    double last = 0.0;
+    for (const double lod : {2.0, 5.0, 20.0, 90.0, 400.0, 3000.0}) {
+        CAPTURE(lod);
+        const double rest = hog::globe::fbm_rest(octaves, lod);
+        CHECK(rest > last);
+        last = rest;
+        // Held a band at a time, it comes to the same.
+        CHECK(hog::globe::fbm_rest(octaves, lod, {.shorter_than = 100.0}) +
+                  hog::globe::fbm_rest(octaves, lod, {.longest = 100.0}) ==
+              Catch::Approx(rest));
+        double most = 0.0;
+        for (std::uint64_t k = 0; k < 2000; ++k) {
+            const DVec3 at = scattered(k) * 20.0;
+            const double moved = std::abs(hog::globe::fbm(at, octaves, 0.0, 4).value -
+                                          hog::globe::fbm(at, octaves, lod, 4).value);
+            most = std::max(most, moved / rest);
+        }
+        // Within the noise's own reach of the rest, and not far inside it.
+        CHECK(most < 1.1);
+        CHECK(most > 0.3);
+    }
+    // Past every octave, all of it.
+    CHECK(hog::globe::fbm_rest(octaves, 1e6) == Catch::Approx(2.0).margin(0.01));
 }
 
 TEST_CASE("the same seed gives the same noise, bit for bit", "[globe][noise]") {

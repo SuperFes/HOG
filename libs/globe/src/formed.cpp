@@ -47,14 +47,21 @@ constexpr double belt_fold = 600.0;
 constexpr double swell_share = 0.01;
 constexpr double platform_swell = 150.0;
 
+// How high bedforms stand in what lies `laid` deep on the whole over a bed spread `spread` either
+// side of its mean: as high as half of it, no higher than they stand on flats and a quarter of
+// the bed's spread.
+Noise bedforms_high(const Noise& laid, const Noise& spread) noexcept {
+    if (laid.value < 2.0 * (bedforms_stand + (0.25 * spread.value))) {
+        return {.value = 0.5 * laid.value, .gradient = laid.gradient * 0.5};
+    }
+    return {.value = bedforms_stand + (0.25 * spread.value), .gradient = spread.gradient * 0.25};
+}
+
 // The top of what lies `laid` deep on the whole over a bed spread `spread` either side of its
-// mean, over that mean: settled into the bed's hollows, standing in bedforms as high as half of
-// it, no higher than they stand on flats and a quarter of the bed's spread.
+// mean, over that mean: settled into the bed's hollows, standing in its bedforms.
 Noise laid_top(const Noise& laid, const Noise& spread, const Noise& bedforms) noexcept {
     const Settled level = settled(laid.value, spread.value);
-    const bool thin = laid.value < 2.0 * (bedforms_stand + (0.25 * spread.value));
-    const double high = thin ? 0.5 * laid.value : bedforms_stand + (0.25 * spread.value);
-    const DVec3 high_gradient = thin ? laid.gradient * 0.5 : spread.gradient * 0.25;
+    const auto [high, high_gradient] = bedforms_high(laid, spread);
     return {.value = level.level + (high * bedforms.value),
             .gradient = (laid.gradient * level.per_thick) + (spread.gradient * level.per_spread) +
                         (bedforms.gradient * high) + (high_gradient * bedforms.value)};
@@ -67,6 +74,13 @@ struct OnCube {
     double u = 0.0;
     double v = 0.0;
 };
+
+// How valleys' walls are worn, over forming's points `spacing` metres apart.
+Octaves worn_walls(double spacing, double voxel) noexcept {
+    return {.wavelength = spacing, .gain = 0.5, .finest = 8.0 * voxel};
+}
+// How much of the steepest its rock lets them stand a wall's wear takes, per unit of it.
+constexpr double wear_share = 0.45;
 
 constexpr double bankfull = 4.0;
 constexpr double seconds_a_year = 31'557'600.0;
@@ -1297,6 +1311,15 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
     carved.above_floor = hold.above;
     carved.above_floor_gradient = hold.gradient;
     carved.fall = blended_fall(ways, carved.top.value, fall_blend_);
+    // Wandering too finely to read moves the ground as far as it climbs over the way it moves;
+    // walls worn too finely stand steeper or gentler by their share over their height, as far as
+    // they're cut below the ground about.
+    const double moved = std::numbers::sqrt3 * wandering * fbm_rest(wander, lod);
+    const double cut_below =
+        std::max(0.0, std::min(smooth.value - carved.top.value, carved.above_floor));
+    carved.rest =
+        (glm::length(carved.top.gradient) / radius_ * moved) +
+        (wear_share * fbm_rest(worn_walls(sphere.spacing() * radius_, voxel_), lod) * cut_below);
     return carved;
 }
 
@@ -1456,16 +1479,14 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const auto [channel, next, sheet, sheet_to, least_water] = stretch_of(point, fall, lod);
     // Its walls stand less steep than their rock lets them in places, as each has been worn,
     // so where they meet another valley's the crest between runs ragged.
-    const Noise worn =
-        fbm(direction * radius_,
-            {.wavelength = sphere.spacing() * radius_, .gain = 0.5, .finest = 8.0 * voxel_}, lod,
-            hash_values(rock_seed_, 10, point));
+    const Noise worn = fbm(direction * radius_, worn_walls(sphere.spacing() * radius_, voxel_), lod,
+                           hash_values(rock_seed_, 10, point));
     constexpr double least_steep = 0.35;
-    const double steep_share = std::clamp(0.65 + (0.45 * worn.value), least_steep, 1.0);
+    const double steep_share = std::clamp(0.65 + (wear_share * worn.value), least_steep, 1.0);
     const double steepest_here = std::max(wall_[point], wall_[down]);
     const double slope = steepest_here * steep_share;
     const DVec3 slope_gradient = steep_share > least_steep && steep_share < 1.0
-                                     ? worn.gradient * (0.45 * steepest_here)
+                                     ? worn.gradient * (wear_share * steepest_here)
                                      : DVec3{0.0};
     const std::vector<double>& floors = course_floors_[point];
     const auto floor_at = [&](double run) {
@@ -1677,6 +1698,7 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
         gullies_, lod);
     // Its hollows were worn out of the bed as the gullies were; its spurs stand over it.
     dissected.cut -= raised;
+    dissected.rest += ground.rest + (standing * fbm_rest(rough, lod));
     dissected.cut_gradient -= tilt_wide + tilt_narrow;
     dissected.spread.value += standing;
     dissected.spread.gradient += standing_gradient;
@@ -1732,6 +1754,8 @@ void Formed::settle(DVec3 direction, const formation::Smooth::Weights& weights, 
     ground.top.gradient += drape.gradient - laid.gradient;
     if (over > 0.0) {
         ground.top.gradient += top.gradient + ground.cut_gradient;
+        // The bed's finer hollows lie buried; only the bedforms too fine to read stand out.
+        ground.rest = bedforms_high(settling, ground.spread).value * fbm_rest(forms, lod);
     }
 }
 
@@ -1876,6 +1900,7 @@ Formed::Here Formed::at(DVec3 direction, const formation::Smooth::Weights& weigh
     // Gullies cut down through what lies draped over the ground and into the rock under it, the
     // top of which is what's rotted; under ice, which nothing settled under, through all of it.
     here.cut = top.cut;
+    here.rest = top.rest;
     here.above_floor = under.above_floor;
     double cut = std::max(0.0, top.cut);
     const std::array all{&layers.loess,     &layers.sand, &layers.alluvium,

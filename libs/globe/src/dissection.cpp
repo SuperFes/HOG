@@ -192,6 +192,19 @@ Noise spread_about(DVec3 metres, DVec3 direction, const Undissected& ground, con
             .gradient = share.gradient * (falls * fade / 2.0)};
 }
 
+// How far the gullies too narrow for `lod` would move the ground, at most, about: each as deep as
+// the ground falls `falls` across its width, no deeper than `held`, moving it half that.
+double left_out(const Gullies& gullies, double lod, double falls, double held) noexcept {
+    double rest = 0.0;
+    for (int octave = 0; octave < gullies.octaves; ++octave) {
+        const double wavelength = std::ldexp(gullies.longest, -octave);
+        const double shown =
+            lod > 0.0 ? std::clamp((wavelength / (2.0 * lod)) - 1.0, 0.0, 1.0) : 1.0;
+        rest += 0.5 * std::min(falls * wavelength, held) * (1.0 - shown);
+    }
+    return rest;
+}
+
 // How the ground about pushes the gullies aside as they wind: how far here, and a way through
 // the pushed ground back to the ground's own, over the ground.
 struct Winding {
@@ -279,6 +292,8 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
     // How the way down changes, per metre, as the gullies cut so far turn it; the ground's own
     // turning is left untold.
     glm::dmat3 bending{0.0};
+    // The room the first gully not fully shown had, which holds all those finer.
+    double left_room = 2.0 * std::min(room, under_crest);
     for (int octave = 0; octave < gullies.octaves; ++octave) {
         const double wavelength = std::ldexp(gullies.longest, -octave);
         if (wavelength < 2.0 * lod) {
@@ -347,6 +362,7 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
         under_crest = depth * down;
         under_crest_gradient = (depth_gradient * down) + (down_gradient * depth);
         cut += depth / 2.0;
+        left_room = fade >= 1.0 ? 2.0 * std::min(room, under_crest) : left_room;
     }
 
     Dissected dissected{.top = {.value = height + ground.ice, .gradient = gradient},
@@ -354,6 +370,10 @@ Dissected dissect(DVec3 direction, double radius, const Undissected& ground, con
                         .cut = bed - height,
                         .cut_gradient = ground.top.gradient - gradient,
                         .spread = spread_about(metres, direction, ground, gullies, lod)};
+    const double slope = glm::length(fall);
+    dissected.rest = left_out(
+        gullies, lod, std::min(slope, std::max(0.0, ground.steepest - slope) * (1.0 - rounding)),
+        left_room);
     if (ground.ice > 0.0) {
         settle_ice(dissected, ground, bed, cut, {.value = height, .gradient = gradient});
     }

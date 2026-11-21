@@ -38,6 +38,10 @@ struct Band {
 [[nodiscard]] Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed,
                         Band band = {}) noexcept;
 
+// How far the octaves fbm() leaves out at `lod` could take its value from what it gives at no
+// detail, at most, in parts of the noise's own reach: what's finer than `lod` adds about this.
+[[nodiscard]] double fbm_rest(const Octaves& octaves, double lod, Band band = {}) noexcept;
+
 // The steepest an fbm of `octaves` can be anywhere, per unit, at any lod: how far its value can
 // change over a metre at most, so a value's distance from zero is at least the value over this.
 [[nodiscard]] double fbm_steepest(const Octaves& octaves) noexcept;
