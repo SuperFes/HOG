@@ -137,7 +137,7 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   shape: impostors to 1.5-3 km, thinning by rank into a canopy layer; in it, each tree's own
   crown (an ellipsoid at its hashed place, lit as its impostor's view average) to 6-12 km,
   then stand statistics (Poisson crowns: gaps, the hotspot, which kind and how high is met)
-  with world-tied grain spread as 1/sqrt(trees in a pixel). Mean difference 0.85/255 against
+  with world-tied grain spread as 1/sqrt(trees in a pixel). Mean difference 0.80/255 against
   10.65 for painted ground. Still:
   - cost: the canopy pass is 670 ms at 1080p on the 860M as written (34 ms statistics only).
     Far views need no frame-by-frame update (clouds neither): cache the far forest (panorama
@@ -152,7 +152,14 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   - near band idea (user): branches as painted billboards with leaves still as their own
     detail, or both at once per species; untested;
   - ridge treelines come from the shell over the canopy; judge silhouettes against the truth
-    on a frame looking along ridges.
+    on a frame looking along ridges;
+  - explicit crowns are coloured where the ray meets them (the impostor at that spot and the
+    pixel's mip), which brings back the terrain-following light bands: grazing views see lit
+    tops. The statistics past 12 km still use the whole-crown average and come out flatter;
+    sampling one mean height overshot (brighter); it wants the visible-part average over the
+    crown heights the rays meet;
+  - the statistics march shows faint contour streaks at 15-20 km (its step aliasing with the
+    ground); jitter the steps or step in the ground's own cells.
 - **Light from anywhere**: own visibility is baked over the whole sphere, so a city's lights
   under a forest, fires or lightning can light far trees from below as the sun does from
   above; the impostor's lighting needs those lights added as further terms.

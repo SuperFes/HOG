@@ -97,7 +97,7 @@ class StandTest(unittest.TestCase):
         top = 30.0
         crown = np.array([[self.HC, self.RH, self.RV, alpha]] + [[0, 1, 1, 0]] * 3, "f4")
         got = glsl(MEET, "stand_light(0.0, vec3(0.0, 1.0, 0.0), 0.02, vec4(1, 0, 0, 0), "
-                         "vec3(0.0, -1.0, 0.0))", 1,
+                         "vec3(0.0, -1.0, 0.0), vec2(0.0))", 1,
                    {"kind_crown": crown, "top": top, "crown_reach": 3.0})[0]
         # Crown sizes spread 0.8-1.2: the mean shadow grows by the mean of size squared.
         mean_sq = (1.2 ** 3 - 0.8 ** 3) / (3 * 0.4)
@@ -109,10 +109,22 @@ class StandTest(unittest.TestCase):
         u = {"kind_crown": crown, "top": 30.0, "crown_reach": 3.0}
         sun = "normalize(vec3(0.5, 1.0, 0.0))"
         apart = glsl(MEET, f"stand_light(0.0, {sun}, 0.02, vec4(1, 0, 0, 0), "
-                           "normalize(vec3(-0.5, 1.0, 0.0)))", 1, u)[0]
-        along = glsl(MEET, f"stand_light(0.0, {sun}, 0.02, vec4(1, 0, 0, 0), {sun})", 1, u)[0]
+                           "normalize(vec3(-0.5, 1.0, 0.0)), vec2(0.0))", 1, u)[0]
+        along = glsl(MEET, f"stand_light(0.0, {sun}, 0.02, vec4(1, 0, 0, 0), {sun}, vec2(0.0))", 1, u)[0]
         self.assertAlmostEqual(along, 1.0, delta=1e-4)
         self.assertLess(apart, 0.8)
+
+    def test_slopes_facing_the_light_let_more_through(self):
+        crown = np.array([[self.HC, self.RH, self.RV, 0.7]] + [[0, 1, 1, 0]] * 3, "f4")
+        u = {"kind_crown": crown, "top": 30.0, "crown_reach": 3.0}
+
+        def light(grad):
+            return glsl(MEET, "stand_light(0.0, normalize(vec3(1.0, 1.0, 0.0)), 0.02, "
+                              f"vec4(1, 0, 0, 0), vec3(0.0, -1.0, 0.0), vec2({grad}, 0.0))",
+                        1, u)[0]
+        # The ground falling toward the light (rise per metre negative along it) faces it.
+        self.assertGreater(light(-0.3), light(0.0))
+        self.assertGreater(light(0.0), light(0.3))
 
 
 class MipTest(unittest.TestCase):

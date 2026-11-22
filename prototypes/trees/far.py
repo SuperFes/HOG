@@ -239,6 +239,16 @@ float sky_open(vec3 p, ivec2 skip) {
     return s;
 }
 
+// The ground's rise per metre along x and z.
+vec2 ground_grad(vec2 xz) {
+    vec2 uv = (xz - origin) / extent;
+    float du = 1.0 / float(textureSize(height_tex, 0).x);
+    float texel = extent * du;
+    return vec2(texture(height_tex, uv + vec2(du, 0.0)).r - texture(height_tex, uv - vec2(du, 0.0)).r,
+                texture(height_tex, uv + vec2(0.0, du)).r - texture(height_tex, uv - vec2(0.0, du)).r)
+           / (2.0 * texel);
+}
+
 float drop_at(vec3 p) {
     vec2 d = p.xz - eye.xz;
     return dot(d, d) / (2.0 * earth_radius);
@@ -353,9 +363,17 @@ float met_area(float h0, vec3 l, float hc, float rh, float rv) {
 // `toward_eye` given (y > 0), the point is known to be seen from there: crowns the view
 // path would have met are known not to be there, and near the point the two paths share
 // them, which brightens what is seen looking down-sun (the hotspot).
-float stand_light(float h0, vec3 l, float lambda, vec4 mix_k, vec3 toward_eye) {
+//
+// On a slope (`grad`, the ground's rise per metre) the paths climb out of the canopy as
+// fast as they rise over the ground, so a slope facing the light lets more through than
+// one facing away; worked in a frame sheared to the slope.
+float stand_light(float h0, vec3 l, float lambda, vec4 mix_k, vec3 toward_eye, vec2 grad) {
     float top_h = top;
+    l = vec3(l.x, l.y - dot(grad, l.xz), l.z);
+    toward_eye = vec3(toward_eye.x, toward_eye.y - dot(grad, toward_eye.xz), toward_eye.z);
     if (l.y <= 0.02 || h0 >= top_h) return h0 >= top_h ? 1.0 : 0.0;
+    l = normalize(l);
+    toward_eye = normalize(toward_eye);
     float tau = 0.0;
     for (int k = 0; k < 4; ++k) {
         if (mix_k[k] <= 0.0) continue;
@@ -384,10 +402,11 @@ float stand_light(float h0, vec3 l, float lambda, vec4 mix_k, vec3 toward_eye) {
     return exp(-max(tau, 0.0));
 }
 
-float stand_sky(float h0, float lambda, vec4 mix_k) {
+float stand_sky(float h0, float lambda, vec4 mix_k, vec2 grad) {
     float s = 0.0;
     for (int i = 0; i < 15; ++i)
-        s += stand_light(h0, sky_dirs[i], lambda, mix_k, vec3(0.0, -1.0, 0.0)) * sky_weights[i];
+        s += stand_light(h0, sky_dirs[i], lambda, mix_k, vec3(0.0, -1.0, 0.0), grad)
+             * sky_weights[i];
     return s;
 }
 """
@@ -453,8 +472,10 @@ void main() {
         if (share > 0.0) {
             float lambda = dens / (cell * cell);
             vec4 mix_k = texture(kinds_tex, uv);
-            shade = mix(shade, stand_light(0.0, sun, lambda, mix_k, normalize(eye - v_pos)), share);
-            sky = mix(sky, stand_sky(0.0, lambda, mix_k), share);
+            vec2 grad = vec2(hx, hz) / (2.0 * texel);
+            shade = mix(shade, stand_light(0.0, sun, lambda, mix_k, normalize(eye - v_pos), grad),
+                        share);
+            sky = mix(sky, stand_sky(0.0, lambda, mix_k, grad), share);
         }
     }
     vec3 ambient = mix(ground_colour, sky_colour, n.y * 0.5 + 0.5);
@@ -631,6 +652,10 @@ uniform sampler2D shell_depth;
 uniform sampler2D crown_albedo;
 uniform sampler2D crown_normal;
 uniform sampler2D crown_sunvis;
+uniform sampler2D full_albedo;  // the impostor atlases, for crowns seen in part
+uniform sampler2D full_normal;
+uniform sampler2D full_sunvis;
+uniform float atlas_cell;       // texels across one baked view
 uniform float pixel_angle;  // radians a pixel spans
 uniform float grain;        // the stand's pixel-to-pixel spread, per 1/sqrt(trees in a pixel)
 uniform int views;
@@ -688,6 +713,47 @@ vec3 crown_seen(int k, float yaw, vec3 to_eye_w, float shade, float sky) {
             sk[s] = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y) * sa[s].a;
             acc += sk[s];
         }
+    float dbg = 0.0;
+    return light_views(sa, sn, ssv, sk, acc, te, shade, sky, dbg);
+}
+
+// A crown where the ray meets it (hit, world): the impostor's four nearest views at that
+// spot, at the mip a pixel there spans, lit as the impostor is. Rays grazing a stand see
+// only crown tops, lit, where one colour for the whole crown would paint them dark.
+vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 hit, vec3 rd, float dist,
+              float shade, float sky, float max_lod) {
+    kind = k;
+    centre = k_centre[k];
+    radius = k_radius[k];
+    sun = rot_y(sun_world, -yaw);
+    vec3 q = rot_y(hit - base, -yaw) / sc;
+    vec3 te = rot_y(-rd, -yaw);
+    float lod = clamp(log2(max(dist * pixel_angle * atlas_cell / (2.0 * radius * sc), 1e-3)),
+                      0.0, max_lod);
+    vec2 g = encode(te);
+    vec2 g0 = clamp(floor(g), vec2(0.0), vec2(float(views) - 1.0));
+    vec2 f = clamp(g - g0, 0.0, 1.0);
+    vec4 sa[4];
+    vec4 sn[4];
+    vec4 ssv[4];
+    float sk[4];
+    float acc = 0.0;
+    for (int j = 0; j < 2; ++j)
+        for (int i = 0; i < 2; ++i) {
+            int s = j * 2 + i;
+            vec2 gg = min(g0 + vec2(i, j), vec2(float(views) - 1.0));
+            vec3 d = decode(gg);
+            vec3 r, u;
+            basis(d, r, u);
+            vec2 st = vec2(dot(q - centre, r), dot(q - centre, u)) / radius * 0.5 + 0.5;
+            vec2 cell = (gg + clamp(st, 0.002, 0.998)) / float(views);
+            sa[s] = textureLod(full_albedo, ATLAS(cell), lod);
+            sn[s] = textureLod(full_normal, ATLAS(cell), lod);
+            ssv[s] = textureLod(full_sunvis, ATLAS(cell), lod);
+            sk[s] = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y) * sa[s].a;
+            acc += sk[s];
+        }
+    if (acc < 1e-4) return crown_seen(k, yaw, -rd, shade, sky);
     float dbg = 0.0;
     return light_views(sa, sn, ssv, sk, acc, te, shade, sky, dbg);
 }
@@ -752,9 +818,10 @@ void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float 
             float lambda = texture(density_tex, uv).r / (cell * cell);
             vec4 mix_k = texture(kinds_tex, uv);
             float h = hit.y - base.y;
-            float shade = stand_light(h, sun_world, lambda, mix_k, -rd);
-            float sky = stand_sky(h, lambda, mix_k);
-            vec3 cc3 = crown_seen(k, yaw, -rd, shade, sky);
+            vec2 grad = ground_grad(hit.xz);
+            float shade = stand_light(h, sun_world, lambda, mix_k, -rd, grad);
+            float sky = stand_sky(h, lambda, mix_k, grad);
+            vec3 cc3 = crown_at(k, yaw, sc, base, hit, rd, ta + t0, shade, sky, log2(atlas_cell));
             col += T * alpha * hazed(cc3, eye + rd * (ta + t0));
             T *= 1.0 - alpha;
         }
@@ -852,8 +919,9 @@ void main() {
         vec2 uv = (p.xz - origin) / extent;
         float lambda = texture(density_tex, uv).r / (cell * cell);
         vec4 mix_k = texture(kinds_tex, uv);
-        float shade = stand_light(hit_h, sun_world, lambda, mix_k, -rd);
-        float sky = stand_sky(hit_h, lambda, mix_k);
+        vec2 grad = ground_grad(p.xz);
+        float shade = stand_light(hit_h, sun_world, lambda, mix_k, -rd, grad);
+        float sky = stand_sky(hit_h, lambda, mix_k, grad);
         for (int k = 0; k < 4; ++k)
             if (hit_k[k] > 0.001) c += hit_k[k] * crown_colour(k, -rd, shade, sky);
         if (debug == 2) c = vec3(shade);
@@ -1061,6 +1129,9 @@ class Far:
                                 k_radius=np.array([kd.imp.radius for kd in kinds]),
                                 crown_albedo=7, crown_normal=8, crown_sunvis=9, own_shadow=True,
                                 ground_depth=10, shell_depth=11, grain=float(grain),
+                                full_albedo=3, full_normal=4, full_sunvis=6,
+                                atlas_cell=float(kinds[0].imp.albedo.shape[0]
+                                                 // kinds[0].imp.views),
                                 pixel_angle=2 * math.tan(math.radians(fov_deg) / 2)
                                 / (size[1] * supersample)))
         for unit, t in enumerate(self.crowns):
