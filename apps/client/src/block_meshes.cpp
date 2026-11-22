@@ -124,7 +124,7 @@ void BlockMeshes::want(const HeldPieces& held, DVec3 eye) {
             const PiecesSnapshot pieces{grid, std::move(entries)};
             Plan plan{.wanted = {}, .queued = {}, .bodies = std::move(bodies)};
             std::vector<std::pair<double, grid::Key>> to_mesh;
-            for (const Block& block : ground_blocks(pieces, eye, cells)) {
+            for (const Block& block : ground_blocks(pieces, *plan.bodies, eye, cells)) {
                 Drawing& drawing = plan.wanted[block.node];
                 drawing.look = std::make_shared<const Look>(
                     Look{.block = block, .reads = pieces.around(block.node)});

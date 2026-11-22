@@ -77,6 +77,10 @@ private:
 // Whether any water may be marked in the node, as the pieces held over it say.
 [[nodiscard]] bool may_hold_water(const PiecesSnapshot& pieces, grid::Key node);
 
+// Whether the top of the water marked in the node may pass through it, as high as it rises.
+[[nodiscard]] bool water_surface_in(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                                    grid::Key node);
+
 // The lake's or river's water `eye` lies in, or would at its highest in the year, as the held
 // pieces mark it there and its body has it; none in the sea, which is drawn as its own, or in none.
 [[nodiscard]] std::optional<globe::StandingWater> still_water_in(const HeldPieces& held, DVec3 eye);

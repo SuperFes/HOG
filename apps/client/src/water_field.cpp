@@ -187,6 +187,38 @@ bool may_hold_water(const PiecesSnapshot& pieces, grid::Key node) {
     return known && known->found.value != 0;
 }
 
+bool water_surface_in(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                      grid::Key node) {
+    const auto known = pieces.at<grid::Water>(node);
+    if (!known || known->found.value == 0) {
+        return false;
+    }
+    const auto found = bodies.bodies.find(known->found.value);
+    if (found == bodies.bodies.end()) {
+        return false;
+    }
+    const grid::Grid& grid = pieces.grid();
+    const DVec3 middle = grid.centre(node);
+    double low = 0.0;
+    double rise = 0.0;
+    if (const auto* sea = std::get_if<grid::Sea>(&found->second)) {
+        low = sea->level;
+    } else if (const auto* lake = std::get_if<grid::Lake>(&found->second)) {
+        low = lake->level;
+        rise = lake->season.rise;
+    } else if (const auto& river = std::get<grid::River>(found->second); river.course.size() >= 2) {
+        const grid::River::Along along = river.along(middle);
+        low = along.level;
+        rise = along.rise;
+    } else {
+        return false;
+    }
+    constexpr double half_diagonal = 0.866'025'403'784'438'6;
+    const double radius = glm::length(middle);
+    const double reach = half_diagonal * grid.size(node.depth);
+    return radius - reach <= low + rise && radius + reach >= low;
+}
+
 std::optional<globe::StandingWater> still_water_in(const HeldPieces& held, DVec3 eye) {
     const std::optional<grid::Key> node = held.grid().key_at(eye, held.grid().depth());
     const auto known = node ? held.at<grid::Water>(*node) : std::nullopt;

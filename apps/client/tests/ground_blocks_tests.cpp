@@ -2,7 +2,11 @@
 
 #include <hog/client/ground_blocks.hpp>
 #include <hog/grid/grid.hpp>
+#include <hog/grid/kinds.hpp>
+#include <hog/grid/piece.hpp>
+#include <hog/grid/tree.hpp>
 #include <hog/grid/view.hpp>
+#include <hog/grid/water_bodies.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -10,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -113,7 +118,8 @@ TEST_CASE("blocks cover the root, each beside blocks a level apart at most",
 TEST_CASE("the ground is drawn in the blocks it may cross", "[client][ground_blocks]") {
     const hog::sloped::Sloped sloped;
     const DVec3 eye = hog::sloped::on_ground + (hog::sloped::normal() * 5.0);
-    const std::vector<Block> blocks = hog::client::ground_blocks(sloped.pieces, eye, 3);
+    const std::vector<Block> blocks =
+        hog::client::ground_blocks(sloped.pieces, hog::grid::WaterBodies{}, eye, 3);
     REQUIRE(!blocks.empty());
     for (const Block& block : blocks) {
         CAPTURE(block.node.depth, block.node.x, block.node.y, block.node.z);
@@ -147,4 +153,41 @@ TEST_CASE("a node reads the pieces over it, in it and beside it", "[client][grou
     // Touching it from beside, to the finest node.
     CHECK(roots(node.beside(1, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}, node});
     CHECK(roots(node.beside(2, 0, 0).value_or(Key{})) == std::vector<Key>{Key{}});
+}
+
+TEST_CASE("the top of the sea is drawn in blocks far from any ground", "[client][ground_blocks]") {
+    // Only the sea marked, 400 m from the centre, every 16 m node under it its own; no ground.
+    const hog::grid::Grid grid{1000.0, 1.0};
+    constexpr double level = 400.0;
+    constexpr std::uint8_t levels = 6;
+    auto piece = std::make_shared<hog::grid::Piece>();
+    piece->generator = 1;
+    const DVec3 low = grid.low(Key{});
+    const double side = grid.size(levels);
+    piece->water = hog::grid::Tree<hog::grid::Water>::build(levels, [&](int x, int y, int z) {
+        const DVec3 middle = low + (DVec3{x + 0.5, y + 0.5, z + 0.5} * side);
+        return glm::length(middle) - (side * 0.87) < level ? hog::grid::Water::Value{1}
+                                                           : hog::grid::Water::Value{0};
+    });
+    const hog::client::PiecesSnapshot pieces{grid, {{Key{}, piece}}};
+    hog::grid::WaterBodies bodies;
+    bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
+    const DVec3 eye{level + 2.0, 0.0, 0.0};
+
+    const std::vector<Block> blocks = hog::client::ground_blocks(pieces, bodies, eye, 3);
+    REQUIRE(!blocks.empty());
+    for (const Block& block : blocks) {
+        CAPTURE(block.node.depth, block.node.x, block.node.y, block.node.z);
+        const double size = grid.size(block.node.depth);
+        CHECK(std::abs(glm::length(grid.centre(block.node)) - level) <= size * std::sqrt(3.0));
+    }
+    // One holds the sea's top under the eye.
+    CHECK(std::ranges::any_of(blocks, [&](const Block& block) {
+        const DVec3 under{level, 0.0, 0.0};
+        const DVec3 from = grid.low(block.node);
+        return glm::all(glm::lessThanEqual(from, under)) &&
+               glm::all(glm::lessThan(under, from + DVec3{grid.size(block.node.depth)}));
+    }));
+    // None without the bodies to say where the top is.
+    CHECK(hog::client::ground_blocks(pieces, hog::grid::WaterBodies{}, eye, 3).empty());
 }

@@ -1,4 +1,5 @@
 #include <hog/client/ground_blocks.hpp>
+#include <hog/client/water_field.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/grid/kinds.hpp>
 
@@ -185,8 +186,8 @@ std::vector<Block> balanced_blocks(const grid::Grid& grid, std::uint8_t cells,
     return blocks;
 }
 
-std::vector<Block> ground_blocks(const PiecesSnapshot& pieces, DVec3 eye, std::uint8_t cells,
-                                 const grid::View& view) {
+std::vector<Block> ground_blocks(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                                 DVec3 eye, std::uint8_t cells, const grid::View& view) {
     const grid::Grid& grid = pieces.grid();
     std::vector<Block> blocks = balanced_blocks(grid, cells, [&](grid::Key node) {
         if (const auto known = pieces.at<grid::Shape>(node); known && !known->found.open &&
@@ -197,7 +198,9 @@ std::vector<Block> ground_blocks(const PiecesSnapshot& pieces, DVec3 eye, std::u
         return view.coarse(grid, static_cast<std::uint8_t>(node.depth + cells),
                            grid.distance(node, eye));
     });
-    std::erase_if(blocks, [&](const Block& block) { return !may_cross(pieces, block.node); });
+    std::erase_if(blocks, [&](const Block& block) {
+        return !may_cross(pieces, block.node) && !water_surface_in(pieces, bodies, block.node);
+    });
     return blocks;
 }
 
