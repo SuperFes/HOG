@@ -287,9 +287,9 @@ Layered layer_at(Place place, float index, float column) {
     Layered layer;
     layer.cover = texel.r;
     layer.column = column;
-    // The billows fill about half of what the column covers, so where they're thickest they're
+    // The billows fill about half of what the layer covers, so where they're thickest they're
     // twice as dense as its water spread through it all.
-    layer.density = min(2.0 * depth_per_mm * water / (max(column, least_cover) * depth), densest);
+    layer.density = min(2.0 * depth_per_mm * water / (max(texel.r, least_cover) * depth), densest);
     return layer;
 }
 
@@ -345,12 +345,12 @@ float cloud_at(float3 at, Layered here, float footprint, bool worn, out float bi
                                 max(log2(footprint * shape_texels / sizes.shape), 0.0));
     billows = shape.r;
     // The billows are spread evenly, so about as much of the sky's covered as the column's cover
-    // says, and a full cover leaves no gaps. A layer covering less than the column shrinks them,
-    // so broken cloud billows up into domes and thins out where the layers hold less.
+    // says, and a full cover leaves no gaps. A layer covering less than the column keeps only
+    // their cores, so broken cloud billows up into domes; one covering nothing holds none.
     const float column = max(here.column, here.cover);
     const float profile = saturate(here.cover / max(column, least_cover));
-    float cloud =
-        saturate(remap(shape.r * profile, 1.0 - (column * overfill), 1.0, 0.0, 1.0));
+    float cloud = saturate(remap(shape.r, 1.0 - (column * overfill), 1.0, 0.0, 1.0));
+    cloud = profile > 0.0 ? saturate((cloud - (1.0 - profile)) / profile) : 0.0;
     // Broken cloud's worn by the cells, where it's thin.
     const float wearing = (shape.g * 0.625) + (shape.b * 0.25) + (shape.a * 0.125);
     cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - column), 1.0, 0.0, 1.0));
