@@ -1,0 +1,33 @@
+# A broad, open-grown oak: weak leader, wide crooked limbs, a low spreading crown.
+model = "sot"
+kind = "broadleaf"
+
+[targets]
+at = 30
+height = 13.0
+spread = 13.0
+nodes = 6000
+
+[growth]
+branch_angle = 55
+phyllotaxis = "alternate"
+apical = 0.51
+max_metamers = 2
+shade_weight = 0.18
+tropism = [-0.10, 0.02, 0.05]
+wobble = 0.12
+trunk_start = 1.8
+shed = 0.10
+voxel = 0.25
+shadow_b = 2.0
+shadow_depth = 5
+full_light = 2.0
+
+[foliage]
+leaf = "lobed"
+lobes = 4
+aspect = 0.32
+colour = [0.055, 0.115, 0.025]
+size = 0.11
+per_segment = 28
+spread = 0.3

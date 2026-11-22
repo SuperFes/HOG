@@ -1,0 +1,64 @@
+# A Norway spruce: one straight leader, dense tiers of limbs drooping from the trunk and
+# turning up at their tips, a narrow cone to the ground.
+model = "rules"
+kind = "conifer"
+full = 30
+
+[growth]
+shape = "conical"
+base_size = 0.06
+scale = 19.0
+scale_v = 2.0
+ratio = 0.008
+flare = 0.25
+
+[[growth.levels]]
+length = 1.0
+curve_res = 10
+curve_v = 6
+
+[[growth.levels]]
+length = 0.28
+length_v = 0.05
+curve_res = 6
+curve = 18
+curve_back = -30
+curve_v = 10
+down = 95
+down_v = 8
+rotate = 72
+rotate_v = 25
+branches = 150
+
+[[growth.levels]]
+length = 0.35
+length_v = 0.08
+curve_res = 3
+curve_v = 15
+down = 60
+down_v = 10
+rotate = 180
+rotate_v = 30
+branches = 14
+
+[[growth.levels]]
+length = 0.45
+length_v = 0.1
+curve_res = 2
+curve_v = 15
+down = 50
+down_v = 10
+rotate = 180
+branches = 6
+
+[foliage]
+side_shoots = 9
+texture = [1024, 2048]
+needle_length = 0.30
+density = 2200
+colour = [0.024, 0.055, 0.032]
+width = 0.42
+repeat = 0.8
+shoot_radius = 0.05
+droop = 28
+layers = 3

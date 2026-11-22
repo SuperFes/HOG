@@ -23,14 +23,17 @@ uniform mat4 light_proj;
 in vec3 in_pos;
 in vec3 in_normal;
 in vec3 in_colour;
+in vec2 in_uv;
 out vec3 v_pos;
 out vec3 v_normal;
 out vec3 v_colour;
+out vec2 v_uv;
 out vec4 v_light;
 void main() {
     v_pos = in_pos;
     v_normal = in_normal;
     v_colour = in_colour;
+    v_uv = in_uv;
     v_light = light_proj * vec4(in_pos, 1.0);
     gl_Position = view_proj * vec4(in_pos, 1.0);
 }
@@ -39,6 +42,9 @@ void main() {
 LIT_FS = """
 #version 330
 uniform sampler2DShadow shadow;
+uniform sampler2D albedo;
+uniform bool textured;
+uniform float cutoff;
 uniform vec3 sun;
 uniform vec3 sun_colour;
 uniform vec3 sky_colour;
@@ -49,6 +55,7 @@ uniform float exposure;
 in vec3 v_pos;
 in vec3 v_normal;
 in vec3 v_colour;
+in vec2 v_uv;
 in vec4 v_light;
 out vec4 f_colour;
 
@@ -64,24 +71,35 @@ float lit() {
 }
 
 void main() {
+    vec4 tex = textured ? texture(albedo, v_uv) : vec4(1.0);
+    float alpha = 1.0;
+    if (textured) {
+        // Sharpened alpha to coverage: crisp edges that still antialias under MSAA.
+        alpha = (tex.a - cutoff) / max(fwidth(tex.a), 1e-4) + 0.5;
+        if (alpha <= 0.0) discard;
+    }
     vec3 n = normalize(v_normal);
     vec3 to_eye = normalize(eye - v_pos);
     if (translucency > 0.0 && dot(n, to_eye) < 0.0) n = -n;
     float shade = lit();
     float facing = dot(n, sun);
-    float direct = max(facing, 0.0) + translucency * max(-facing, 0.0);
-    // Sky from above, bounce from the ground below.
+    // Light through a leaf: strongest looking toward the sun through it, tinted yellow-green.
+    float through = translucency * max(-facing, 0.0) * (0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
+    float direct = max(facing, 0.0);
     float up = n.y * 0.5 + 0.5;
     vec3 ambient = mix(ground_colour, sky_colour, up);
-    // A little occlusion low on the tree and toward its middle reads as depth.
-    float occl = clamp(0.55 + 0.45 * up, 0.0, 1.0);
-    vec3 c = v_colour * (sun_colour * direct * shade + ambient * occl);
-    // Filmic-ish tone curve, then display gamma.
-    // ACES fit (Narkowicz), then display gamma.
+    vec3 base = v_colour * tex.rgb;
+    vec3 c = base * (sun_colour * direct * shade + ambient)
+           + base * vec3(1.25, 1.35, 0.6) * sun_colour * through * shade;
+    // A faint sheen on waxy leaves toward the sun.
+    if (textured) {
+        vec3 h = normalize(sun + to_eye);
+        c += sun_colour * 0.04 * pow(max(dot(n, h), 0.0), 24.0) * shade;
+    }
     c *= exposure;
     c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
     c = pow(c, vec3(1.0 / 2.2));
-    f_colour = vec4(c, 1.0);
+    f_colour = vec4(c, clamp(alpha, 0.0, 1.0));
 }
 """
 
@@ -89,11 +107,17 @@ DEPTH_VS = """
 #version 330
 uniform mat4 light_proj;
 in vec3 in_pos;
-void main() { gl_Position = light_proj * vec4(in_pos, 1.0); }
+in vec2 in_uv;
+out vec2 v_uv;
+void main() { v_uv = in_uv; gl_Position = light_proj * vec4(in_pos, 1.0); }
 """
 DEPTH_FS = """
 #version 330
-void main() {}
+uniform sampler2D albedo;
+uniform bool textured;
+uniform float cutoff;
+in vec2 v_uv;
+void main() { if (textured && texture(albedo, v_uv).a < cutoff) discard; }
 """
 
 
@@ -142,25 +166,34 @@ def ground_disc(radius, colour=(0.075, 0.10, 0.045), segments=64):
     return p, n, c, i
 
 
+class Material:
+    def __init__(self, texture=None, translucency=0.0, cutoff=0.5):
+        self.texture = texture  # RGBA float array, linear
+        self.translucency = translucency
+        self.cutoff = cutoff
+
+
 class Scene:
     def __init__(self):
-        self.parts = []  # (mesh, translucency)
+        self.parts = []  # (positions, normals, colours, indices, uvs or None), Material
 
-    def add(self, mesh, translucency=0.0):
+    def add(self, mesh, material=None):
         if len(mesh[3]):
-            self.parts.append((mesh, translucency))
+            if len(mesh) == 4:
+                mesh = (*mesh, None)
+            self.parts.append((mesh, material or Material()))
 
     def bounds(self):
         lo = np.full(3, np.inf)
         hi = np.full(3, -np.inf)
-        for (p, *_), _t in self.parts:
+        for (p, *_), _m in self.parts:
             lo = np.minimum(lo, p.min(axis=0))
             hi = np.maximum(hi, p.max(axis=0))
         return lo, hi
 
 
 def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.35),
-           fit=None, samples=8, sky=(0.60, 0.70, 0.85)):
+           fit=None, samples=8, sky=(0.60, 0.70, 0.85), view=None):
     """An image of `scene` framed to its bounds (or `fit` = (lo, hi)), the ground under it."""
     ctx = context()
     lo, hi = fit if fit is not None else scene.bounds()
@@ -181,7 +214,13 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     target = np.array([centre[0], lo[1] + height / 2, centre[2]])
     eye = target + dist * np.array([math.sin(yr) * math.cos(pr), math.sin(pr),
                                     math.cos(yr) * math.cos(pr)])
-    view_proj = perspective(fov, aspect, dist * 0.05, dist * 4) @ look_at(eye, target)
+    if view is not None:
+        # A close look: (point looked at, metres from it).
+        target = np.asarray(view[0], np.float64)
+        dist = float(view[1])
+        eye = target + dist * np.array([math.sin(yr) * math.cos(pr), math.sin(pr),
+                                        math.cos(yr) * math.cos(pr)])
+    view_proj = perspective(fov, aspect, dist * 0.02, dist * 6) @ look_at(eye, target)
 
     sun = np.asarray(sun_dir, np.float64)
     sun /= np.linalg.norm(sun)
@@ -205,20 +244,45 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     lit_prog["exposure"].value = 1.0
     lit_prog["eye"].value = tuple(eye)
 
+    textures = {}
+
+    def texture_of(img):
+        key = id(img)
+        if key not in textures:
+            h, w = img.shape[:2]
+            data = np.ascontiguousarray(img[::-1].astype("f4"))
+            t = ctx.texture((w, h), 4, data.tobytes(), dtype="f4")
+            t.build_mipmaps()
+            t.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+            t.anisotropy = 8.0
+            textures[key] = t
+        return textures[key]
+
+    white = ctx.texture((1, 1), 4, np.ones(4, "f4").tobytes(), dtype="f4")
     vaos = []
-    for (p, n, c, i), translucency in full.parts:
-        vbo = ctx.buffer(np.hstack([p, n, c]).astype("f4").tobytes())
+    for (p, n, c, i, uv), mat in full.parts:
+        if uv is None:
+            uv = np.zeros((len(p), 2), "f4")
+        vbo = ctx.buffer(np.hstack([p, n, c, uv]).astype("f4").tobytes())
         ibo = ctx.buffer(i.astype("u4").tobytes())
-        lit = ctx.vertex_array(lit_prog, [(vbo, "3f 3f 3f", "in_pos", "in_normal", "in_colour")],
-                               ibo)
-        shade = ctx.vertex_array(depth_prog, [(vbo, "3f 12x 12x", "in_pos")], ibo)
-        vaos.append((lit, shade, translucency, (vbo, ibo)))
+        lit = ctx.vertex_array(lit_prog, [(vbo, "3f 3f 3f 2f", "in_pos", "in_normal",
+                                           "in_colour", "in_uv")], ibo)
+        shade = ctx.vertex_array(depth_prog, [(vbo, "3f 12x 12x 2f", "in_pos", "in_uv")], ibo)
+        tex = texture_of(mat.texture) if mat.texture is not None else None
+        vaos.append((lit, shade, mat, tex, (vbo, ibo)))
+
+    def bind(prog, mat, tex):
+        (tex or white).use(1)
+        prog["albedo"].value = 1
+        prog["textured"].value = tex is not None
+        prog["cutoff"].value = mat.cutoff
 
     shadow_fbo.use()
     shadow_fbo.clear(depth=1.0)
     ctx.enable(moderngl.DEPTH_TEST)
     ctx.disable(moderngl.CULL_FACE)
-    for _lit, shade, _t, _b in vaos:
+    for _lit, shade, mat, tex, _b in vaos:
+        bind(depth_prog, mat, tex)
         shade.render()
 
     colour = ctx.renderbuffer(size, components=4, samples=samples)
@@ -228,16 +292,25 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     fbo.clear(*sky, 1.0, depth=1.0)
     depth.use(0)
     lit_prog["shadow"].value = 0
-    for lit, _shade, translucency, _b in vaos:
-        lit_prog["translucency"].value = translucency
+    alpha_to_coverage = 0x809E
+    for lit, _shade, mat, tex, _b in vaos:
+        lit_prog["translucency"].value = mat.translucency
+        bind(lit_prog, mat, tex)
+        if tex is not None:
+            ctx.enable_direct(alpha_to_coverage)
         lit.render()
+        if tex is not None:
+            ctx.disable_direct(alpha_to_coverage)
 
     resolved = ctx.framebuffer(ctx.renderbuffer(size, components=4))
     ctx.copy_framebuffer(resolved, fbo)
     img = Image.frombytes("RGBA", size, resolved.read(components=4)).transpose(
         Image.Transpose.FLIP_TOP_BOTTOM).convert("RGB")
-    for lit, shade, _t, (vbo, ibo) in vaos:
+    for lit, shade, _m, _t, (vbo, ibo) in vaos:
         lit.release(), shade.release(), vbo.release(), ibo.release()
+    for t in textures.values():
+        t.release()
+    white.release()
     for r in (colour, zbuf, fbo, resolved, shadow_fbo, depth, depth_prog, lit_prog):
         r.release()
     return img

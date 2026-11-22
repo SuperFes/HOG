@@ -1,0 +1,65 @@
+# A larch: a loose airy cone, limbs reaching out level with hanging side shoots, the leader
+# often a little crooked.
+model = "rules"
+kind = "conifer"
+full = 30
+
+[growth]
+shape = "conical"
+base_size = 0.12
+scale = 20.0
+scale_v = 2.0
+ratio = 0.008
+flare = 0.25
+
+[[growth.levels]]
+length = 1.0
+curve_res = 10
+curve_v = 12
+
+[[growth.levels]]
+length = 0.32
+length_v = 0.08
+curve_res = 6
+curve = 10
+curve_back = -20
+curve_v = 20
+down = 80
+down_v = 12
+rotate = 137
+rotate_v = 30
+branches = 60
+
+[[growth.levels]]
+length = 0.45
+length_v = 0.10
+curve_res = 4
+curve = 20
+curve_v = 20
+down = 70
+down_v = 15
+rotate = 180
+rotate_v = 40
+branches = 10
+up = -4.0
+
+[[growth.levels]]
+length = 0.4
+length_v = 0.1
+curve_res = 2
+curve_v = 20
+down = 50
+down_v = 10
+rotate = 180
+branches = 6
+
+[foliage]
+tufts = true
+needle_length = 0.30
+density = 900
+colour = [0.07, 0.15, 0.045]
+width = 0.30
+repeat = 0.6
+shoot_radius = 0.04
+droop = 30
+layers = 3
