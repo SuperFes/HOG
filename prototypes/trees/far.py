@@ -121,11 +121,12 @@ def load_kinds(kinds=(("oak", 30), ("birch", 30), ("spruce", 30), ("beech", 30))
     out = []
     for name, age in kinds:
         path = f"{cache}/{name}_{age}_{views}_{cell}.npz"
-        if os.path.exists(path):
-            z = np.load(path)
+        z = np.load(path) if os.path.exists(path) else {}
+        if "moment" in z:
             imp = Impostor(z["centre"], float(z["radius"]), views, z["albedo"], z["normal"],
                            z["depth"])
             imp.sunvis = z["sunvis"]
+            imp.moment = z["moment"]
             out.append(match_area(Kind(name, imp, z["crown_centre"], z["crown_radii"],
                                        z["sigma"])))
             continue
@@ -136,7 +137,8 @@ def load_kinds(kinds=(("oak", 30), ("birch", 30), ("spruce", 30), ("beech", 30))
         print(f"{name}: crown at {c.round(1)}, radii {np.round(r, 1)}, "
               f"side coverage {cov:.2f}, density {sigma:.2f}/m", flush=True)
         np.savez(path, centre=imp.centre, radius=imp.radius, albedo=imp.albedo,
-                 normal=imp.normal, depth=imp.depth, sunvis=imp.sunvis, crown_centre=c,
+                 normal=imp.normal, depth=imp.depth, sunvis=imp.sunvis, moment=imp.moment,
+                 crown_centre=c,
                  crown_radii=r, sigma=sigma)
         out.append(match_area(Kind(name, imp, c, r, sigma)))
     return out
@@ -444,12 +446,12 @@ uniform vec3 meadow;
 uniform vec3 litter;
 uniform vec3 canopy_albedo[4];
 uniform bool depth_only;
-uniform int debug;  // 4: coverage only, trees white over black ground
+uniform int debug;  // 4: coverage only, trees white over black ground; 7: sun reaching, 8: sky open, grey
 in vec3 v_pos;
 out vec4 f_colour;
 """ + COMMON + CANOPY_LIB + """
 void main() {
-    if (depth_only || debug == 4) {
+    if (depth_only || debug == 4 || (debug >= 1 && debug <= 3)) {
         f_colour = vec4(0.0, 0.0, 0.0, depth_only ? 0.0 : 1.0);
         return;
     }
@@ -482,17 +484,27 @@ void main() {
             sky = mix(sky, stand_sky(0.0, lambda, mix_k, grad), share);
         }
     }
+    if (debug == 7 || debug == 8) {
+        f_colour = vec4(vec3(debug == 7 ? shade : sky), 1.0);
+        return;
+    }
     vec3 ambient = mix(ground_colour, sky_colour, n.y * 0.5 + 0.5);
-    vec3 c = base * (sun_colour * max(dot(n, sun), 0.0) * shade + ambient * sky);
+    // Under trees the ground is sunflecks and shade, each through the tone curve on its own:
+    // tone-mapping their mean comes out brighter than the ground looks.
+    vec3 dark = base * ambient * sky;
+    vec3 lit = dark + base * sun_colour * max(dot(n, sun), 0.0);
+    vec3 shown = tone_map(lit * exposure) * shade + tone_map(dark * exposure) * (1.0 - shade);
     if (mode == 1) {
+        vec3 c = base * (sun_colour * max(dot(n, sun), 0.0) * shade + ambient * sky);
         // The forest as paint: canopy colour over the ground by cover, lit as the ground.
         vec4 ks = texture(kinds_tex, uv);
         vec3 alb = canopy_albedo[0] * ks.x + canopy_albedo[1] * ks.y
                  + canopy_albedo[2] * ks.z + canopy_albedo[3] * ks.w;
         vec3 canopy = alb * (sun_colour * max(dot(n, sun), 0.0) + ambient);
         c = mix(c, canopy, clamp(dens * 1.2, 0.0, 1.0));
+        shown = tone_map(c * exposure);
     }
-    f_colour = vec4(hazed(tone_map(c * exposure), v_pos), 1.0);
+    f_colour = vec4(hazed(shown, v_pos), 1.0);
 }
 """
 
@@ -534,6 +546,7 @@ uniform sampler2D atlas_albedo;
 uniform sampler2D atlas_normal;
 uniform sampler2D atlas_depth;
 uniform sampler2D atlas_sunvis;
+uniform sampler2D atlas_moment;
 uniform int views;
 uniform int kinds;
 uniform vec3 k_centre[4];
@@ -558,6 +571,7 @@ float radius;
 vec3 sun;
 int kind;
 #define ATLAS(c) vec2(((c).x + float(kind)) / float(kinds), (c).y)
+#define FETCH(t, c) texture(t, c)
 """ + COMMON + IMPOSTOR_LIB + """
 void main() {
     kind = int(v_info.x);
@@ -575,6 +589,8 @@ void main() {
     vec4 sa[4];
     vec4 sn[4];
     vec4 ssv[4];
+    vec4 sm[4];
+    float syz[4];
     float sk[4];
     float acc_a = 0.0, wsum = 0.0;
     vec3 acc_hit = vec3(0.0);
@@ -584,7 +600,7 @@ void main() {
             vec2 gg = min(g0 + vec2(i, j), vec2(float(views) - 1.0));
             float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
             vec3 hit;
-            sample_view(gg, ro, rd, sa[s], sn[s], ssv[s], hit);
+            sample_view(gg, ro, rd, sa[s], sn[s], ssv[s], sm[s], syz[s], hit);
             sk[s] = w * sa[s].a;
             acc_a += sk[s];
             acc_hit += hit * sk[s];
@@ -617,10 +633,22 @@ void main() {
         return;
     }
     float shade = exp(-optical_depth(world, sun_world, own, 150.0));
+    if (debug == 7) {
+        f_colour = vec4(vec3(shade), 1.0);
+        return;
+    }
     float sky = sky_open(world, own);
+    if (debug == 8) {
+        f_colour = vec4(vec3(sky), 1.0);
+        return;
+    }
     float dbg = 0.0;
-    vec3 c = light_views(sa, sn, ssv, sk, acc_a, normalize(ro - hit_local), shade, sky, dbg);
-    if (debug > 0) c = vec3(dbg / max(acc_a, 1e-4));
+    vec3 c = light_views(sa, sn, ssv, sm, syz, sk, acc_a, normalize(ro - hit_local), shade, sky,
+                         dbg);
+    if (debug > 0) {
+        f_colour = vec4(vec3(dbg / max(acc_a, 1e-4)), 1.0);
+        return;
+    }
     f_colour = vec4(hazed(c, world), 1.0);
 }
 """
@@ -679,9 +707,13 @@ uniform sampler2D shell_depth;
 uniform sampler2D crown_albedo;
 uniform sampler2D crown_normal;
 uniform sampler2D crown_sunvis;
+uniform sampler2D crown_moment;
+uniform sampler2D crown_depth;
 uniform sampler2D full_albedo;  // the impostor atlases, for crowns seen in part
 uniform sampler2D full_normal;
 uniform sampler2D full_sunvis;
+uniform sampler2D full_moment;
+uniform sampler2D full_depth;
 uniform float atlas_cell;       // texels across one baked view
 uniform float pixel_angle;  // radians a pixel spans
 uniform float grain;        // the stand's pixel-to-pixel spread, per 1/sqrt(trees in a pixel)
@@ -702,10 +734,15 @@ vec3 centre;
 float radius;
 vec3 sun;
 int kind;
-#define atlas_albedo crown_albedo
-#define atlas_normal crown_normal
-#define atlas_sunvis crown_sunvis
-#define atlas_depth crown_albedo
+// Crowns seen in part read the impostor atlases at the mip their pixel spans: neighbouring
+// pixels see other trees, so the atlas's own derivatives mean nothing here.
+#define atlas_albedo full_albedo
+#define atlas_normal full_normal
+#define atlas_sunvis full_sunvis
+#define atlas_depth full_depth
+#define atlas_moment full_moment
+float atlas_lod;
+#define FETCH(t, c) textureLod(t, c, atlas_lod)
 #define ATLAS(c) vec2(((c).x + float(kind)) / float(kinds), (c).y)
 """ + COMMON + IMPOSTOR_LIB + CANOPY_LIB + """
 vec3 unproject(vec2 ndc, float depth) {
@@ -727,6 +764,8 @@ vec3 crown_seen(int k, float yaw, vec3 to_eye_w, float shade, float sky) {
     vec4 sa[4];
     vec4 sn[4];
     vec4 ssv[4];
+    vec4 sm[4];
+    float syz[4];
     float sk[4];
     float acc = 0.0;
     for (int j = 0; j < 2; ++j)
@@ -737,52 +776,67 @@ vec3 crown_seen(int k, float yaw, vec3 to_eye_w, float shade, float sky) {
             sa[s] = texture(crown_albedo, ATLAS(cell));
             sn[s] = texture(crown_normal, ATLAS(cell));
             ssv[s] = texture(crown_sunvis, ATLAS(cell));
+            sm[s] = texture(crown_moment, ATLAS(cell));
+            syz[s] = texture(crown_depth, ATLAS(cell)).g;
             sk[s] = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y) * sa[s].a;
             acc += sk[s];
         }
     float dbg = 0.0;
-    return light_views(sa, sn, ssv, sk, acc, te, shade, sky, dbg);
+    return light_views(sa, sn, ssv, sm, syz, sk, acc, te, shade, sky, dbg);
 }
 
-// A crown where the ray meets it (hit, world): the impostor's four nearest views at that
-// spot, at the mip a pixel there spans, lit as the impostor is. Rays grazing a stand see
-// only crown tops, lit, where one colour for the whole crown would paint them dark.
-vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 hit, vec3 rd, float dist,
-              float shade, float sky, float max_lod) {
+float g_dbg;  // the last crown_at's debug term
+
+// A crown that the ray rd meets at `entry` (world), as the impostor shows it: stepping into
+// the crown by each of the four nearest views' depth maps to the leaves seen there, read at
+// the mip a pixel spans, and lit as the impostor is with the stand's light where they are.
+// Rays grazing a stand see only crown tops, lit, where one colour for the whole crown would
+// paint them dark. The leaves seen sit deeper than the crown's outline, and more shaded.
+vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 entry, vec3 rd, float dist,
+              float max_lod) {
     kind = k;
     centre = k_centre[k];
     radius = k_radius[k];
     sun = rot_y(sun_world, -yaw);
-    vec3 q = rot_y(hit - base, -yaw) / sc;
-    vec3 te = rot_y(-rd, -yaw);
-    float lod = clamp(log2(max(dist * pixel_angle * atlas_cell / (2.0 * radius * sc), 1e-3)),
+    vec3 ro = rot_y(entry - base, -yaw) / sc;
+    vec3 rl = rot_y(rd, -yaw);
+    atlas_lod = clamp(log2(max(dist * pixel_angle * atlas_cell / (2.0 * radius * sc), 1e-3)),
                       0.0, max_lod);
-    vec2 g = encode(te);
+    vec2 g = encode(-rl);
     vec2 g0 = clamp(floor(g), vec2(0.0), vec2(float(views) - 1.0));
     vec2 f = clamp(g - g0, 0.0, 1.0);
     vec4 sa[4];
     vec4 sn[4];
     vec4 ssv[4];
+    vec4 sm[4];
+    float syz[4];
     float sk[4];
     float acc = 0.0;
+    vec3 acc_hit = vec3(0.0);
     for (int j = 0; j < 2; ++j)
         for (int i = 0; i < 2; ++i) {
             int s = j * 2 + i;
             vec2 gg = min(g0 + vec2(i, j), vec2(float(views) - 1.0));
-            vec3 d = decode(gg);
-            vec3 r, u;
-            basis(d, r, u);
-            vec2 st = vec2(dot(q - centre, r), dot(q - centre, u)) / radius * 0.5 + 0.5;
-            vec2 cell = (gg + clamp(st, 0.002, 0.998)) / float(views);
-            sa[s] = textureLod(full_albedo, ATLAS(cell), lod);
-            sn[s] = textureLod(full_normal, ATLAS(cell), lod);
-            ssv[s] = textureLod(full_sunvis, ATLAS(cell), lod);
+            vec3 hit;
+            sample_view(gg, ro, rl, sa[s], sn[s], ssv[s], sm[s], syz[s], hit);
             sk[s] = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y) * sa[s].a;
             acc += sk[s];
+            acc_hit += hit * sk[s];
         }
+    vec3 seen = acc > 1e-4 ? base + rot_y(acc_hit / acc * sc, yaw) : entry;
+    vec2 uv = (seen.xz - origin) / extent;
+    float lambda = texture(density_tex, uv).r / (cell * cell);
+    vec4 mix_k = texture(kinds_tex, uv);
+    vec2 grad = ground_grad(seen.xz);
+    float h = max(seen.y - base.y, 0.0);
+    float shade = stand_light(h, sun_world, lambda, mix_k, -rd, grad);
+    float sky = stand_sky(h, lambda, mix_k, grad);
+    g_dbg = debug == 7 ? shade : sky;
     if (acc < 1e-4) return crown_seen(k, yaw, -rd, shade, sky);
     float dbg = 0.0;
-    return light_views(sa, sn, ssv, sk, acc, te, shade, sky, dbg);
+    vec3 c = light_views(sa, sn, ssv, sm, syz, sk, acc, -rl, shade, sky, dbg);
+    if (debug >= 1 && debug <= 3) g_dbg = dbg / acc;
+    return c;
 }
 
 // The same over trees turned every way.
@@ -845,16 +899,10 @@ void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float 
                 T *= 1.0 - alpha;
                 continue;
             }
-            vec3 hit = a + d * t0;
-            vec2 uv = (hit.xz - origin) / extent;
-            float lambda = texture(density_tex, uv).r / (cell * cell);
-            vec4 mix_k = texture(kinds_tex, uv);
-            float h = hit.y - base.y;
-            vec2 grad = ground_grad(hit.xz);
-            float shade = stand_light(h, sun_world, lambda, mix_k, -rd, grad);
-            float sky = stand_sky(h, lambda, mix_k, grad);
-            vec3 cc3 = crown_at(k, yaw, sc, base, hit, rd, ta + t0, shade, sky, log2(atlas_cell));
-            col += T * alpha * hazed(cc3, eye + rd * (ta + t0));
+            vec3 cc3 = crown_at(k, yaw, sc, base, a + d * t0, rd, ta + t0, log2(atlas_cell));
+            if ((debug >= 1 && debug <= 3) || debug == 7 || debug == 8) cc3 = vec3(g_dbg);
+            else cc3 = hazed(cc3, eye + rd * (ta + t0));
+            col += T * alpha * cc3;
             T *= 1.0 - alpha;
         }
         if (T < 0.003 || i == i1) break;
@@ -976,6 +1024,8 @@ void main() {
         c *= 1.0 + grain * stand_noise(p, hit_t, rd, lambda);
         c = hazed(c, p);
         if (debug == 4) c = vec3(1.0);
+        if (debug == 7) c = vec3(shade);
+        if (debug == 8) c = vec3(sky);
     }
     float alpha = 1.0 - T_e * T;
     if (debug == 6) {
@@ -1001,7 +1051,7 @@ def crown_views(imp, weighted=True):
     cov = per_view(imp.albedo)[..., 3:4]
     w = cov.sum(axis=(1, 3))
     out = []
-    for img in (imp.albedo, imp.normal, imp.sunvis):
+    for img in (imp.albedo, imp.normal, imp.sunvis, imp.moment, imp.depth):
         if weighted:
             out.append((per_view(img) * cov).sum(axis=(1, 3)) / np.maximum(w, 1e-6))
         else:
@@ -1058,7 +1108,7 @@ class Far:
             t.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.atlases = []
         maps = [np.concatenate([getattr(kd.imp, n) for kd in kinds], axis=1)
-                for n in ("albedo", "normal", "depth", "sunvis")]
+                for n in ("albedo", "normal", "depth", "sunvis", "moment")]
         for k, levels in enumerate(coverage_mips(maps) if weighted_mips else
                                    [[m] for m in maps]):
             a = levels[0]
@@ -1090,7 +1140,7 @@ class Far:
         self.canopy_vao = ctx.vertex_array(self.canopy_prog, [(self.quad, "2f", "in_corner")])
         self.crowns = []
         views = [crown_views(kd.imp, weighted_mips) for kd in kinds]
-        for k in range(3):
+        for k in range(5):
             a = np.concatenate([v[k] for v in views], axis=1)
             t = ctx.texture((a.shape[1], a.shape[0]), 4, np.ascontiguousarray(a, "f4").tobytes(),
                             dtype="f4")
@@ -1196,8 +1246,10 @@ class Far:
         self.height.use(0)
         self.density.use(1)
         self.kind_tex.use(2)
-        for unit, t in enumerate(self.atlases):
-            t.use(3 + unit)
+        # Atlases: albedo, normal, depth, sunvis at 3-6, moment at 13; crown views
+        # albedo, normal, sunvis at 7-9, moment and depth at 14-15.
+        for unit, t in zip((3, 4, 5, 6, 13), self.atlases):
+            t.use(unit)
         gp, tp = self.ground_prog, self.tree_prog
         kc = np.array([[kd.crown_centre[1], kd.crown_radii[0], kd.crown_radii[1],
                         1 - _mean_transmittance(kd.sigma, 2 * kd.crown_radii[0])]
@@ -1213,15 +1265,17 @@ class Far:
                                 kinds=len(kinds),
                                 k_centre=np.array([kd.imp.centre for kd in kinds]),
                                 k_radius=np.array([kd.imp.radius for kd in kinds]),
-                                crown_albedo=7, crown_normal=8, crown_sunvis=9, own_shadow=True,
+                                crown_albedo=7, crown_normal=8, crown_sunvis=9,
+                                crown_moment=14, crown_depth=15, full_moment=13, full_depth=5,
+                                own_shadow=True,
                                 ground_depth=10, shell_depth=11, grain=float(grain),
                                 full_albedo=3, full_normal=4, full_sunvis=6,
                                 atlas_cell=float(kinds[0].imp.albedo.shape[0]
                                                  // kinds[0].imp.views),
                                 pixel_angle=2 * math.tan(math.radians(fov_deg) / 2)
                                 / (size[1] * supersample)))
-        for unit, t in enumerate(self.crowns):
-            t.use(7 + unit)
+        for unit, t in zip((7, 8, 9, 14, 15), self.crowns):
+            t.use(unit)
         self._uniforms(self.shell_prog, dict(common, height_tex=12))
         self.height_max.use(12)
         self._uniforms(tp, dict(common, sun_world=tuple(sun), views=kinds[0].imp.views,
@@ -1229,6 +1283,7 @@ class Far:
                                 k_centre=np.array([kd.imp.centre for kd in kinds]),
                                 k_radius=np.array([kd.imp.radius for kd in kinds]),
                                 atlas_albedo=3, atlas_normal=4, atlas_depth=5, atlas_sunvis=6,
+                                atlas_moment=13,
                                 own_shadow=True, depth_only=False, samples=4))
         tree_vao = inst = None
         w, h = size

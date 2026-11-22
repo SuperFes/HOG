@@ -86,7 +86,8 @@ void main() {
 
 # Shared by every impostor drawer. The host declares `views`, `centre`, `radius`, the atlas
 # samplers, `sun`, `sun_colour`, `sky_colour`, `ground_colour`, `exposure`, `own_shadow`,
-# `debug`, and ATLAS(cell), mapping a cell of one tree's atlas to texture coordinates.
+# `debug`, ATLAS(cell), mapping a cell of one tree's atlas to texture coordinates, and
+# FETCH(sampler, coords), how an atlas is read (by its own derivatives, or at a set mip).
 IMPOSTOR_LIB = """
 vec3 decode(vec2 g) {
     vec2 uv = (g + 0.5) / float(views) * 2.0 - 1.0;
@@ -111,7 +112,8 @@ void basis(vec3 d, out vec3 r, out vec3 u) {
 // One baked view's colour, normal, leafiness and own sun visibility where the ray from the
 // eye (ro, rd) meets the tree as that view saw it: stepping along the ray to the height its
 // depth map gives, so all views put each branch in the same place instead of ghosting it.
-void sample_view(vec2 g, vec3 ro, vec3 rd, out vec4 a, out vec4 n, out vec4 sv, out vec3 hit) {
+void sample_view(vec2 g, vec3 ro, vec3 rd, out vec4 a, out vec4 n, out vec4 sv, out vec4 m,
+                 out float yz, out vec3 hit) {
     vec3 d = decode(g);
     vec3 r, u;
     basis(d, r, u);
@@ -123,12 +125,14 @@ void sample_view(vec2 g, vec3 ro, vec3 rd, out vec4 a, out vec4 n, out vec4 sv, 
         hit = ro + rd * ((h - dot(ro - centre, d)) / across);
         vec2 st = vec2(dot(hit - centre, r), dot(hit - centre, u)) / radius * 0.5 + 0.5;
         cell = (g + clamp(st, 0.002, 0.998)) / float(views);
-        h = radius - texture(atlas_depth, ATLAS(cell)).r * 2.0 * radius;
+        h = radius - FETCH(atlas_depth, ATLAS(cell)).r * 2.0 * radius;
     }
     hit = ro + rd * ((h - dot(ro - centre, d)) / across);
-    a = texture(atlas_albedo, ATLAS(cell));
-    n = texture(atlas_normal, ATLAS(cell));
-    sv = texture(atlas_sunvis, ATLAS(cell));
+    a = FETCH(atlas_albedo, ATLAS(cell));
+    n = FETCH(atlas_normal, ATLAS(cell));
+    sv = FETCH(atlas_sunvis, ATLAS(cell));
+    m = FETCH(atlas_moment, ATLAS(cell));
+    yz = FETCH(atlas_depth, ATLAS(cell)).g;
 }
 
 vec3 tone(vec3 c) {
@@ -139,17 +143,43 @@ vec3 tone(vec3 c) {
 
 // The four blended views lit, in the tree's own frame: `shade` is the sunlight left after
 // whatever lies outside the tree, `sky` the share of the sky it leaves open.
-vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], float sk[4], float acc_a, vec3 to_eye,
-                 float shade, float sky, inout float dbg) {
+// Abramowitz & Stegun 7.1.26, within 1.5e-7.
+float erf_approx(float x) {
+    float t = 1.0 / (1.0 + 0.3275911 * abs(x));
+    float y = 1.0 - t * (0.254829592 + t * (-0.284496736 + t * (1.421413741
+              + t * (-1.453152027 + t * 1.061405429)))) * exp(-x * x);
+    return sign(x) * y;
+}
+
+// The mean of max(t, 0) for t with mean mu and spread sd, taken as normal.
+float clamped_mean(float mu, float sd) {
+    float z = mu / sd;
+    return mu * 0.5 * (1.0 + erf_approx(z * 0.70710678)) + sd * 0.39894228 * exp(-0.5 * z * z);
+}
+
+// A texel's leaves' mean sunlit share, max(n.l, 0), and lit-from-behind share, max(-n.l, 0),
+// from the mean normal and the mean of n n^T (xx, yy, xy, xz in m, and yz): both average
+// linearly, so any mip lights as the leaves under it do. Leaves facing many ways take the
+// second-order Legendre expansion (1/4 + t/2 + 5/16 P2(t)); leaves agreeing on a way, n.l as
+// a normal spread about its mean, exact for one leaf.
+vec2 leaf_light(vec3 mean_n, vec4 m, float yz, vec3 l) {
+    float zz = 1.0 - m.x - m.y;
+    float lml = m.x * l.x * l.x + m.y * l.y * l.y + zz * l.z * l.z
+              + 2.0 * (m.z * l.x * l.y + m.w * l.x * l.z + yz * l.y * l.z);
+    float mu = dot(mean_n, l);
+    float even = 0.25 + 0.15625 * (3.0 * lml - 1.0);
+    float sd = sqrt(max(lml - mu * mu, 1e-8));
+    float agree = clamp(length(mean_n), 0.0, 1.0);
+    float narrow = pow(agree, 8.0);
+    return vec2(mix(max(even + 0.5 * mu, 0.0), clamped_mean(mu, sd), narrow),
+                mix(max(even - 0.5 * mu, 0.0), clamped_mean(-mu, sd), narrow));
+}
+
+vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], vec4 sm[4], float syz[4], float sk[4],
+                 float acc_a, vec3 to_eye, float shade, float sky, inout float dbg) {
     float toward_sun = 0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0);
     // Each view is lit with its own normal and the lit colours blended: the views see
     // different leaves, so blending normals first would cancel them and lose the highlights.
-    // Leaves facing every way still face the viewer, as two-sided leaves are seen from their
-    // near side: averaged over such leaves, how much sun lands on their front and how much
-    // comes through from behind (a fit to the cosine-weighted hemisphere's average).
-    float cv = dot(to_eye, sun);
-    float spread_front = (1.0 + cv) * (2.0 + cv) / 9.0;
-    float spread_back = (1.0 - cv) * (2.0 - cv) / 9.0;
     vec3 c = vec3(0.0);
     for (int s = 0; s < 4; ++s) {
         vec3 base = sa[s].rgb;
@@ -157,10 +187,9 @@ vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], float sk[4], float acc_a, 
         // Shorter where a shrunk texel holds leaves facing many ways.
         float agree = clamp(length(mean_n), 0.0, 1.0);
         vec3 nrm = mean_n / max(length(mean_n), 1e-4);
-        float facing = dot(nrm, sun);
         float k = agree * agree;
-        float direct = mix(spread_front, max(facing, 0.0), k);
-        float back = mix(spread_back, max(-facing, 0.0), k);
+        vec2 lit = leaf_light(mean_n, sm[s], syz[s], sun);
+        float direct = lit.x, back = lit.y;
         float through = 0.55 * sn[s].a * back * toward_sun;
         float own = own_shadow ? clamp(dot(ssv[s], vec4(1.0, sun)), 0.0, 1.0) : 1.0;
         dbg += (debug == 1 ? direct : debug == 2 ? own * shade : debug == 3 ? through : direct * own * shade) * sk[s];
@@ -215,11 +244,13 @@ uniform sampler2D shadow_raw;
 uniform float light_span;     // metres the light's depth range covers
 uniform float leaf_density;   // how fast sunlight thins per metre inside the crown
 uniform sampler2D atlas_sunvis;  // the leaves' own sun visibility, if baked
+uniform sampler2D atlas_moment;  // mean n n^T of the leaves: xx, yy, xy, xz (yz in depth's g)
 uniform bool own_shadow;
 uniform int debug;            // 1 direct, 2 shadowing, 3 light through, as grey
 in vec3 v_pos;
 out vec4 f_colour;
 #define ATLAS(c) (c)
+#define FETCH(t, c) texture(t, c)
 """ + IMPOSTOR_LIB + """
 // Sunlight left after passing through the crown: the shadow map holds the first leaf toward
 // the sun, and past it light thins by leaf density, as through cloud, so leaves just behind
@@ -248,6 +279,8 @@ void main() {
     vec4 sa[4];
     vec4 sn[4];
     vec4 ssv[4];
+    vec4 sm[4];
+    float syz[4];
     float sk[4];
     float acc_a = 0.0;
     vec3 acc_hit = vec3(0.0);
@@ -261,7 +294,7 @@ void main() {
             vec2 gg = min(g0 + vec2(i, j), vec2(float(views) - 1.0));
             float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
             vec3 hit;
-            sample_view(gg, ro, rd, sa[s], sn[s], ssv[s], hit);
+            sample_view(gg, ro, rd, sa[s], sn[s], ssv[s], sm[s], syz[s], hit);
             sk[s] = w * sa[s].a;
             acc_a += sk[s];
             acc_hit += hit * sk[s];
@@ -284,7 +317,8 @@ void main() {
         return;
     }
     float dbg = 0.0;
-    vec3 c = light_views(sa, sn, ssv, sk, acc_a, normalize(eye - world), lit(world), 1.0, dbg);
+    vec3 c = light_views(sa, sn, ssv, sm, syz, sk, acc_a, normalize(eye - world), lit(world),
+                         1.0, dbg);
     if (debug > 0) {
         f_colour = vec4(vec3(dbg / max(acc_a, 1e-4)), alpha);
         return;
@@ -304,6 +338,7 @@ class Impostor:
         self.depth = depth  # R: 0 at the bounding sphere's near side, 1 at its far side
         self.leaf_density = 1.5  # sunlight's thinning per metre inside the crown
         self.sunvis = None  # c0 and c1 of the leaves' own sun visibility, if baked
+        self.moment = None  # mean n n^T of the leaves: xx, yy, xy, xz; yz rides in depth's G
 
 
 def _decode(i, j, views):
@@ -358,6 +393,8 @@ def bake(scene, views=12, cell=256, supersample=2):
     white = ctx.texture((1, 1), 4, np.ones(4, "f4").tobytes(), dtype="f4")
     size = views * cell
     atlas = [np.zeros((size, size, 4), np.float32) for _ in range(4)]
+    moment = np.zeros((size, size, 4), np.float32)
+    yz = np.zeros((size, size), np.float32)
     ctx.enable(moderngl.DEPTH_TEST)
     ctx.disable(moderngl.CULL_FACE)
     for j in range(views):
@@ -393,6 +430,14 @@ def bake(scene, views=12, cell=256, supersample=2):
                         big, big, 4)[..., 3].reshape(cell, supersample, cell, supersample)
                     w = alpha.sum(axis=(1, 3))[..., None]
                     out = (img * alpha[..., None]).sum(axis=(1, 3)) / np.maximum(w, 1e-6)
+                    if k == 1:
+                        n = img[..., :3] * 2 - 1
+                        nn = np.stack([n[..., 0] * n[..., 0], n[..., 1] * n[..., 1],
+                                       n[..., 0] * n[..., 1], n[..., 0] * n[..., 2],
+                                       n[..., 1] * n[..., 2]], -1)
+                        mom = (nn * alpha[..., None]).sum(axis=(1, 3)) / np.maximum(w, 1e-6)
+                        moment[j * cell:(j + 1) * cell, i * cell:(i + 1) * cell] = mom[..., :4]
+                        yz[j * cell:(j + 1) * cell, i * cell:(i + 1) * cell] = mom[..., 4]
                 # Atlas rows run bottom-up as GL textures do.
                 atlas[k][j * cell:(j + 1) * cell, i * cell:(i + 1) * cell] = out
     for vao, _m, tex, vbo, ibo in vaos:
@@ -408,8 +453,10 @@ def bake(scene, views=12, cell=256, supersample=2):
     # around it; far from any, the centre plane.
     atlas[2] = _dilate(atlas[2], filled, 1, steps=8)
     atlas[2][..., 0] = np.where(atlas[2][..., 0] > 0, atlas[2][..., 0], 0.5)
+    atlas[2][..., 1] = _dilate(yz[..., None], filled, 1)[..., 0]
     imp = Impostor(centre, radius, views, atlas[0], atlas[1], atlas[2])
     imp.sunvis = atlas[3] if getattr(scene, "sunvis", None) else None
+    imp.moment = _dilate(moment, filled, 4)
     return imp
 
 
@@ -470,7 +517,7 @@ class Drawer:
             ts = []
             sunvis = imp.sunvis if imp.sunvis is not None else np.ones_like(imp.albedo) * [
                 1, 0, 0, 0]
-            maps = (imp.albedo, imp.normal, imp.depth, sunvis)
+            maps = (imp.albedo, imp.normal, imp.depth, sunvis, imp.moment)
             for levels in coverage_mips(maps) if self.weighted_mips else [[m] for m in maps]:
                 h, w = levels[0].shape[:2]
                 t = ctx.texture((w, h), 4, np.ascontiguousarray(levels[0]).astype(
@@ -511,6 +558,9 @@ class Drawer:
                 ts[3].use(6)
                 p["atlas_sunvis"].value = 6
                 p["own_shadow"].value = imp.sunvis is not None
+            if "atlas_moment" in p:
+                ts[4].use(7)
+                p["atlas_moment"].value = 7
             p["views"].value = imp.views
             p["centre"].value = tuple(imp.centre)
             p["radius"].value = imp.radius

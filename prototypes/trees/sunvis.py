@@ -90,4 +90,17 @@ def sun_visibility(scene, n=32, size=2048, bias_m=0.15, blur_m=0.03):
     white.release(), tex.release(), fbo.release(), prog.release()
     basis = np.hstack([np.ones((n, 1)), dirs])
     fit = np.linalg.pinv(basis)  # (4, n)
-    return [(fit @ v).T.astype("f4") for v in vis]
+    return [in_range((fit @ v).T).astype("f4") for v in vis]
+
+
+def in_range(sh):
+    """Fits whose c0 + c1 . sun stays within 0-1 for every sun: c1 shrunk to fit. Those form
+    a convex set, so any average of them (a shrunk impostor texel, a whole crown) stays in it,
+    and the clamp a drawer would need never acts; clamping after averaging would brighten far
+    trees wherever the fit overshoots, as it does toward the sun."""
+    c0 = np.clip(sh[:, 0], 0.0, 1.0)
+    c1 = sh[:, 1:]
+    room = np.minimum(c0, 1.0 - c0)
+    size = np.linalg.norm(c1, axis=1)
+    c1 = c1 * np.minimum(1.0, room / np.maximum(size, 1e-9))[:, None]
+    return np.hstack([c0[:, None], c1])

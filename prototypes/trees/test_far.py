@@ -6,7 +6,7 @@ import numpy as np
 
 import far
 import terrain
-from impostor import coverage_mips
+from impostor import IMPOSTOR_LIB, coverage_mips
 from render import context
 
 
@@ -139,6 +139,46 @@ class MipTest(unittest.TestCase):
         (a0, a1), (_n0, n1) = coverage_mips([albedo, normal])
         np.testing.assert_allclose(a1[0, 0], [0.8, 0.0, 0.2, 0.3125], atol=1e-6)
         np.testing.assert_allclose(n1[0, 0, 1], 0.8, atol=1e-6)
+
+
+class LeafLightTest(unittest.TestCase):
+    LIB = IMPOSTOR_LIB[IMPOSTOR_LIB.index("// Abramowitz"):IMPOSTOR_LIB.index("vec3 light_views(")]
+
+    def share(self, normals, l):
+        m = normals.mean(0)
+        nn = normals.T @ normals / len(normals)
+        expr = (f"leaf_light(vec3({m[0]}, {m[1]}, {m[2]}), vec4({nn[0, 0]}, {nn[1, 1]}, "
+                f"{nn[0, 1]}, {nn[0, 2]}), {nn[1, 2]}, vec3({l[0]}, {l[1]}, {l[2]})).x")
+        return glsl(self.LIB, expr, 1)[0]
+
+    def test_shrunk_texel_lights_as_its_leaves(self):
+        rng = np.random.default_rng(4)
+        for spread in (0.3, 0.8, 2.0):
+            n = rng.normal(0, spread, (4000, 3)) + [0.2, 1.0, 0.1]
+            n /= np.linalg.norm(n, axis=1, keepdims=True)
+            for l in ([0.4, 0.8, 0.3], [0.9, 0.2, -0.3], [-0.5, 0.5, 0.7]):
+                l = np.array(l) / np.linalg.norm(l)
+                exact = np.maximum(n @ l, 0).mean()
+                self.assertAlmostEqual(self.share(n, l), exact, delta=0.03)
+
+    def test_single_leaf_takes_its_own_cosine(self):
+        n = np.tile([0.0, 0.6, 0.8], (8, 1))
+        l = np.array([0.0, 1.0, 0.0])
+        self.assertAlmostEqual(self.share(n, l), 0.6, delta=1e-4)
+
+
+class SunVisTest(unittest.TestCase):
+    def test_averaged_fits_never_need_clamping(self):
+        import sunvis
+        rng = np.random.default_rng(5)
+        sh = sunvis.in_range(rng.normal(0.5, 0.6, (500, 4)))
+        dirs = rng.normal(size=(200, 3))
+        dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
+        mixes = rng.dirichlet(np.ones(500) * 0.1, 50) @ sh
+        for s in (sh, mixes):
+            v = s[:, :1] + s[:, 1:] @ dirs.T
+            self.assertGreaterEqual(v.min(), -1e-6)
+            self.assertLessEqual(v.max(), 1 + 1e-6)
 
 
 class CrownTest(unittest.TestCase):
