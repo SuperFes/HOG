@@ -347,7 +347,9 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
         drawer.draw(view_proj, eye, False, {
             "light_proj": light_proj, "sun": tuple(sun), "sun_colour": (3.2, 2.95, 2.6),
             "sky_colour": (0.55, 0.70, 1.0), "ground_colour": (0.18, 0.20, 0.12),
-            "eye": tuple(eye), "exposure": 1.0}, shadow_tex=depth)
+            "eye": tuple(eye), "exposure": 1.0,
+            # About 0.6 m in the light's depth, so the crown's outer leaves shade each other.
+            "shadow_bias": 0.6 / (reach * 4)}, shadow_tex=depth)
         ctx.disable_direct(alpha_to_coverage)
         drawer.release()
 

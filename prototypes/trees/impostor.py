@@ -96,6 +96,7 @@ uniform vec3 eye;
 uniform float exposure;
 uniform bool shadow_pass;
 uniform float cutoff;
+uniform float shadow_bias;
 in vec3 v_pos;
 out vec4 f_colour;
 
@@ -140,7 +141,7 @@ float lit(vec3 world) {
     vec2 texel = 1.0 / vec2(textureSize(shadow, 0));
     for (int y = -2; y <= 2; ++y)
         for (int x = -2; x <= 2; ++x)
-            sum += texture(shadow, vec3(p.xy + vec2(x, y) * texel * 1.3, p.z - 0.02));
+            sum += texture(shadow, vec3(p.xy + vec2(x, y) * texel * 1.3, p.z - shadow_bias));
     return sum / 25.0;
 }
 
@@ -168,7 +169,10 @@ void main() {
     float coverage = acc_a.a / max(wsum, 1e-4);
     if (coverage < cutoff * 0.7) discard;
     vec3 base = acc_a.rgb / max(acc_a.a, 1e-4);
-    vec3 nrm = normalize(acc_n.rgb);
+    // The averaged normal is shorter where the leaves under this pixel face many ways.
+    vec3 mean_n = acc_n.rgb / max(acc_a.a, 1e-4);
+    float agree = clamp(length(mean_n), 0.0, 1.0);
+    vec3 nrm = mean_n / max(length(mean_n), 1e-4);
     float leafy = acc_n.a / max(acc_a.a, 1e-4);
     float depth01 = acc_z / max(acc_a.a, 1e-4);
     vec3 v = normalize(look);
@@ -183,10 +187,14 @@ void main() {
     float shade = lit(world);
     float facing = dot(nrm, sun);
     float translucency = 0.55 * leafy;
-    float through = translucency * max(-facing, 0.0)
+    // Leaves facing every way take light as a wrapped average, not as one surface: the less
+    // they agree, the more the response flattens toward it.
+    float k = agree * agree;
+    float direct = mix((facing * 0.5 + 0.5) * 0.5, max(facing, 0.0), k);
+    float back = mix((0.5 - facing * 0.5) * 0.5, max(-facing, 0.0), k);
+    float through = translucency * back
                   * (0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
-    float direct = max(facing, 0.0);
-    float upish = nrm.y * 0.5 + 0.5;
+    float upish = mix(0.5, nrm.y * 0.5 + 0.5, agree);
     vec3 ambient = mix(ground_colour, sky_colour, upish);
     vec3 c = base * (sun_colour * direct * shade + ambient)
            + base * vec3(1.25, 1.35, 0.6) * sun_colour * through * shade;
