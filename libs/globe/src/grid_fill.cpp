@@ -1,3 +1,4 @@
+#include "column_reads.hpp"
 #include "terms.hpp"
 
 #include <hog/core/assert.hpp>
@@ -215,7 +216,7 @@ private:
             for (std::size_t n = 0; n < nodes.size(); ++n) {
                 Probe probe = probe_at(middles[n], read.distances[n], size, read.under[n]);
                 probe.rest = read.rests[n];
-                if (missed(probe, read.under[n])) {
+                if (missed(probe, read.under[n], read.spreads[n])) {
                     probe.surface =
                         probe.distance < 0.0 ? grid::Surface::solid() : grid::Surface::open();
                 } else {
@@ -259,13 +260,14 @@ private:
                 .surface = std::nullopt};
     }
 
-    // Whether no surface crosses the node: the ground's far from it, and in the solid, no cave
-    // shown at its detail lies in it. One that may show finer is noted.
-    bool missed(Probe& probe, Cell under) const {
-        const double reach = clear * probe.size;
-        if (std::abs(probe.distance) <= reach) {
+    // Whether no surface crosses the node: the ground's far from it, past how far the columns it's
+    // read between stray, and in the solid, no cave shown at its detail lies in it. One that may
+    // show finer is noted.
+    bool missed(Probe& probe, Cell under, double spread) const {
+        if (!clear_of_surface({.distance = probe.distance, .spread = spread}, probe.size, clear)) {
             return false;
         }
+        const double reach = (clear * probe.size) + spread;
         if (probe.distance > 0.0) {
             return true;
         }
@@ -354,6 +356,8 @@ private:
         std::vector<double> distances;
         std::vector<Cell> under;
         std::vector<double> rests;
+        // How far the columns it's read between stray from it, as ColumnRead has it.
+        std::vector<double> spreads;
     };
     Read distances_at(const std::vector<DVec3>& points, std::uint8_t at) {
         const int level = read_level(at);
@@ -381,20 +385,23 @@ private:
         read.distances.reserve(points.size());
         read.under.reserve(points.size());
         read.rests.reserve(points.size());
+        read.spreads.reserve(points.size());
         for (std::size_t n = 0; n < points.size(); ++n) {
             const double radius = glm::length(points[n]);
-            double distance = 0.0;
             double rest = 0.0;
             double slope = 0.0;
             double ground = 0.0;
+            std::array<double, 4> each{};
             for (std::size_t k = 0; k < 4; ++k) {
                 const Generator::Column& column = columns_.at(slot(between[n].cells.at(k)));
                 const double weight = between[n].weights.at(k);
-                distance += weight * column.sample(radius).distance;
+                each.at(k) = column.sample(radius).distance;
                 rest += weight * column.rest();
                 slope += weight * column.slope();
                 ground += weight * column.ground();
             }
+            const ColumnRead columns = read_between(each, between[n].weights);
+            double distance = columns.distance;
             if (detail > 0.0) {
                 // Many nodes to a cell, the ground's taken smoothly between them, not in facets a
                 // cell across, and raised by the layers; raised, it comes nearer across its slope.
@@ -418,6 +425,7 @@ private:
             read.distances.push_back(distance);
             read.under.push_back(between[n].cells[0]);
             read.rests.push_back(rest);
+            read.spreads.push_back(columns.spread);
         }
         if (!unique.empty()) {
             own_reads(points, unique, shares, level_at(at), detail, read);
@@ -478,16 +486,18 @@ private:
         for (std::size_t f = 0; f < which.size(); ++f) {
             const std::size_t n = which[f];
             const double radius = glm::length(points[n]);
-            double distance = 0.0;
             double rest = 0.0;
+            std::array<double, 4> each{};
             for (std::size_t k = 0; k < 4; ++k) {
                 const Generator::Column& column = columns_.at(slot(between[f].cells.at(k)));
-                distance += between[f].weights.at(k) * column.sample(radius).distance;
+                each.at(k) = column.sample(radius).distance;
                 rest += between[f].weights.at(k) * column.rest();
             }
+            const ColumnRead columns = read_between(each, between[f].weights);
             const double share = shares[f];
-            read.distances[n] = ((1.0 - share) * read.distances[n]) + (share * distance);
+            read.distances[n] = ((1.0 - share) * read.distances[n]) + (share * columns.distance);
             read.rests[n] = ((1.0 - share) * read.rests[n]) + (share * rest);
+            read.spreads[n] = ((1.0 - share) * read.spreads[n]) + (share * columns.spread);
             read.under[n] = between[f].cells[0];
         }
     }

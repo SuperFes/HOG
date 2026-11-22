@@ -1,3 +1,4 @@
+#include "../src/column_reads.hpp"
 #include "../src/formed.hpp"
 #include "../src/terms.hpp"
 
@@ -518,6 +519,29 @@ TEST_CASE("a coarse leaf the surface misses has no ground through it at its own 
     UNSCOPED_INFO(crossed << " of " << missed << " leaves missed have ground through them");
     CHECK(missed > 50);
     CHECK(crossed == 0);
+}
+
+TEST_CASE("a node read between columns as far apart as it's from the surface isn't clear of it",
+          "[globe][grid]") {
+    constexpr double size = 100.0;
+    constexpr double margin = 1.3;
+    constexpr std::array<double, 4> even{0.25, 0.25, 0.25, 0.25};
+    // A cliff: one column's ground stands up through the node, the rest lie far under it.
+    const hog::globe::ColumnRead cliff =
+        hog::globe::read_between({-40.0, 600.0, 620.0, 640.0}, even);
+    CHECK(cliff.distance == Catch::Approx(455.0));
+    CHECK(cliff.spread == Catch::Approx(495.0));
+    CHECK_FALSE(hog::globe::clear_of_surface(cliff, size, margin));
+    // Gentle ground, as far off between columns that agree.
+    const hog::globe::ColumnRead gentle =
+        hog::globe::read_between({450.0, 455.0, 460.0, 455.0}, even);
+    CHECK(gentle.spread == Catch::Approx(5.0));
+    CHECK(hog::globe::clear_of_surface(gentle, size, margin));
+    // Taken by weight: a node over the cliff's foot reads mostly what lies under it.
+    const hog::globe::ColumnRead foot =
+        hog::globe::read_between({-40.0, 600.0, 620.0, 640.0}, {0.05, 0.45, 0.25, 0.25});
+    CHECK(foot.distance == Catch::Approx(583.0));
+    CHECK_FALSE(hog::globe::clear_of_surface(foot, size, margin));
 }
 
 TEST_CASE("open space under the sea is the sea's basin", "[globe][grid]") {
@@ -1225,6 +1249,34 @@ TEST_CASE("woods' share of filling a page", "[.bench][globe][grid]") {
                      << filled.shape.encode().size() << "); a sample "
                      << woods / static_cast<double>(samples) * 1e6 << " us, mean cover "
                      << sum / static_cast<double>(samples));
+    }
+}
+
+TEST_CASE("fill cost over land", "[.bench][globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    for (const std::uint8_t under : {std::uint8_t{3}, std::uint8_t{5}}) {
+        std::size_t nodes = 0;
+        double seconds = 0.0;
+        for (std::uint64_t n = 0; n < 64; ++n) {
+            const DVec3 up =
+                hog::globe::center(hog::globe::cell_at_index(5, (n * 2'654'435'761U) % 6'144U));
+            const double ground =
+                hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value_or(0.0);
+            for (std::uint8_t depth = 1; depth < grid.depth(); ++depth) {
+                const double side = grid.size(static_cast<std::uint8_t>(depth + under));
+                if (side > 2'000.0 || side < 20.0) {
+                    continue;
+                }
+                const Key key = grid.key_at(up * ground, depth).value();
+                const auto started = std::chrono::steady_clock::now();
+                const Filled filled = fill(world, grid, key, under);
+                seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started)
+                               .count();
+                nodes += filled.shape.nodes();
+            }
+        }
+        std::println("under {}: {} nodes in {:.2f} s", under, nodes, seconds);
     }
 }
 

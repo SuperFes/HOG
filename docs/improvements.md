@@ -73,6 +73,13 @@ after, and strike it off.
   ground against 0.03 m. Near channels, shores, crags and caves it now takes the generator's own
   reads: over a river with an 8 m base, 0.10 m off in 239 ms against 0.20 in 139 (plain 0.009 in
   355). Narrower margins, or a channel's own width rather than a base's, would cut the cost there.
+- **Nodes missed beside river channels.** A node is taken as missed only past its margin plus
+  how far the four columns it's read between stray (64 land spots, 5 levels: 1.5% more nodes,
+  17.8 s from 17.2 s). Left: on the 8–24 steepest small-world cells, 1–28 missed leaves still
+  have ground through them, all within about 250 m of a channel, where the column at a node's
+  middle sits up to 900 m off columns a few dozen metres away. Reading a level finer doesn't
+  catch it and costs 2.3×. Wants a channel's cut in `rest`, or the generator's own read near
+  channels above the base as layered fills take below it.
 - **Valleys still dominate a read.** `carved` is 60–75% of `Formed::at` at every detail, nearly all
   `valley_wall`: of about 15 valleys asked a read, 4 pass the bound and 3.5 reach, and each scans
   its whole course (about 31 stretches) three times: nearest 17%, floors and walls 11%, `wall_at` on
