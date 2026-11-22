@@ -58,6 +58,7 @@ uniform vec3 ground_colour;
 uniform vec3 eye;
 uniform float translucency;
 uniform float exposure;
+uniform int debug;  // 1 direct, 2 shadowing, 3 light through, as grey
 in vec3 v_pos;
 in vec3 v_normal;
 in vec3 v_colour;
@@ -125,6 +126,11 @@ void main() {
         vec3 h = normalize(sun + to_eye);
         c += sun_colour * 0.04 * pow(max(dot(n, h), 0.0), 24.0) * shade;
     }
+    if (debug > 0) {
+        float d = debug == 1 ? direct : debug == 2 ? shade : debug == 3 ? through : direct * shade;
+        f_colour = vec4(vec3(textured && relief <= 0.0 ? d : 0.0), clamp(alpha, 0.0, 1.0));
+        return;
+    }
     c *= exposure;
     c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
     c = pow(c, vec3(1.0 / 2.2));
@@ -146,7 +152,10 @@ uniform sampler2D albedo;
 uniform bool textured;
 uniform float cutoff;
 in vec2 v_uv;
-void main() { if (textured && texture(albedo, v_uv).a < cutoff) discard; }
+void main() {
+    // The true outline: a blurred mip's alpha falls under the cutoff and leaves stop casting.
+    if (textured && textureLod(albedo, v_uv, 0.0).a < cutoff) discard;
+}
 """
 
 
@@ -206,15 +215,16 @@ class Material:
 
 class Scene:
     def __init__(self):
-        self.parts = []  # (positions, normals, colours, indices, uvs or None), Material
+        # (positions, normals, colours, indices, uvs, autumn), Material; uvs and autumn may
+        # be None.
+        self.parts = []
+        self.lod = []  # per part: what distance thinning needs (foliage.thinning), or None
 
     def add(self, mesh, material=None):
         if len(mesh[3]):
-            if len(mesh) == 4:
-                mesh = (*mesh, None)
-            if len(mesh) == 5:
-                mesh = (*mesh, None)
-            self.parts.append((mesh, material or Material()))
+            mesh = tuple(mesh) + (None,) * (7 - len(mesh))
+            self.parts.append((mesh[:6], material or Material()))
+            self.lod.append(mesh[6])
 
     def bounds(self):
         lo = np.full(3, np.inf)
@@ -227,7 +237,7 @@ class Scene:
 
 def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.35),
            fit=None, samples=8, sky=(0.60, 0.70, 0.85), view=None, impostors=None,
-           fov_deg=30.0, ground=True):
+           fov_deg=30.0, ground=True, sun_colour=(3.2, 2.95, 2.6), debug=0, camera=None):
     """An image of `scene` framed to its bounds (or `fit` = (lo, hi)), the ground under it."""
     ctx = context()
     if fit is None and not scene.parts and impostors:
@@ -239,8 +249,9 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     radius = max(extent[0], extent[2]) * 0.75 + 1.0
     full = Scene()
     full.parts = list(scene.parts)
+    full.lod = list(scene.lod)
     if ground:
-        full.add(ground_disc(max(radius * 3, 60.0)))
+        full.add(ground_disc(5000.0 if camera is not None else max(radius * 3, 60.0)))
 
     w, h = size
     aspect = w / h
@@ -258,7 +269,12 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
         dist = float(view[1])
         eye = target + dist * np.array([math.sin(yr) * math.cos(pr), math.sin(pr),
                                         math.cos(yr) * math.cos(pr)])
-    view_proj = perspective(fov, aspect, dist * 0.02, dist * 6) @ look_at(eye, target)
+    near, far = dist * 0.02, dist * 6
+    if camera is not None:
+        # A camera placed outright: (eye, point looked at).
+        eye, target = (np.asarray(c, np.float64) for c in camera)
+        near, far = 0.3, 4000.0
+    view_proj = perspective(fov, aspect, near, far) @ look_at(eye, target)
 
     sun = np.asarray(sun_dir, np.float64)
     sun /= np.linalg.norm(sun)
@@ -276,10 +292,11 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     lit_prog["view_proj"].write(_gl(view_proj))
     lit_prog["light_proj"].write(_gl(light_proj))
     lit_prog["sun"].value = tuple(sun)
-    lit_prog["sun_colour"].value = (3.2, 2.95, 2.6)
+    lit_prog["sun_colour"].value = tuple(sun_colour)
     lit_prog["sky_colour"].value = (0.55, 0.70, 1.0)
     lit_prog["ground_colour"].value = (0.18, 0.20, 0.12)
     lit_prog["exposure"].value = 1.0
+    lit_prog["debug"].value = debug
     lit_prog["eye"].value = tuple(eye)
 
     textures = {}
@@ -365,11 +382,10 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     if drawer is not None:
         ctx.enable_direct(alpha_to_coverage)
         drawer.draw(view_proj, eye, False, {
-            "light_proj": light_proj, "sun": tuple(sun), "sun_colour": (3.2, 2.95, 2.6),
+            "light_proj": light_proj, "sun": tuple(sun), "sun_colour": tuple(sun_colour),
             "sky_colour": (0.55, 0.70, 1.0), "ground_colour": (0.18, 0.20, 0.12),
-            "eye": tuple(eye), "exposure": 1.0,
-            # About 0.6 m in the light's depth, so the crown's outer leaves shade each other.
-            "shadow_bias": 0.6 / (reach * 4)}, shadow_tex=depth)
+            "eye": tuple(eye), "exposure": 1.0, "debug": debug,
+            "light_span": reach * 4, "shadow_bias": 0.1 / (reach * 4)}, shadow_tex=depth)
         ctx.disable_direct(alpha_to_coverage)
         drawer.release()
 

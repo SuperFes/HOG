@@ -28,6 +28,10 @@ Sheets land in `out/`.
 | `textures.py` | leaves, needle sprays (branchlets, tufts, brushes), frond halves, drawn in code |
 | `foliage.py` | leaves on generated twiglets, crossed needle ribbons, frond strips; sky visibility |
 | `dress.py` | wood + foliage per species, and the foliage sheets |
+| `lod.py` | continuous thinning: pieces drop in rank order by pixel size, survivors grow to keep cover |
+| `sunvis.py` | each vertex's own visibility toward any light, fitted as 4 spherical-harmonic numbers |
+| `lod_sheet.py` | one tree at true size over distances: truth, mesh, thinned, impostors by view count |
+| `forest_sheet.py` | a 1080p field of trees, all full mesh vs all LOD, and a flick GIF between them |
 
 Self-organising species calibrate once (tens of seconds each); results cache in
 `out/calibrated.json`, keyed by the species' numbers.

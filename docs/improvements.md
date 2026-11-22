@@ -119,16 +119,27 @@ after, and strike it off.
 What the tree prototypes still lack, from their sheets in `prototypes/trees/out/`. Species are
 rule files in `prototypes/trees/species/`; a fix that's data belongs there, not in code.
 
-- **Leaves thinning with distance** (not started): each leaf drops past its own distance while
-  the rest grow to keep the crown's cover, thin twigs drop under a pixel wide, then a crossfade
-  into the impostor. The oak is 600k triangles and the willow 1.3M whole.
-- **Impostor views lined up by depth**: the four blended views don't meet, so thin trunks fade
-  out; one step along the baked depth would line them up. Cells are 256 px, soft at 40 m (still
-  mesh range). A season's colour is baked in; a turn mask and palette in the atlas would let one
-  bake cover autumn.
-- **Shadows by distance**: mesh casters near, impostor casters in far cascades refreshed every
-  few seconds, past them a march toward the sun through the woods field's canopy density (as
-  cloud shadows), and sky occlusion under woods baked once.
+- **Distance detail, what's left** (`lod.py`, `lod_sheet.py`, `forest_sheet.py`): thinning,
+  relit impostors lined up by depth, baked own-sun visibility and two-tone shading are in; a
+  1080p field of 34 trees is 3.2M triangles + 16 impostors against 20.8M, mean difference
+  4.5/255, and 6x6 impostor views do as well as 12x12 there. Still:
+  - full-mesh leaves vanish far off (5 cm birch leaves at 400 m read as bare twigs): the alpha
+    mips fall under the cutoff; mips need coverage kept per level (scale alpha per mip);
+  - thinned crowns at 100-180 m read lighter and yellower than the mesh: calming normals toward
+    the local mean tilts them sunward; calm toward a lit-share-preserving normal instead;
+  - the crossfade is an image blend here; in the engine a screen-door dither, per tree;
+  - impostors stay 5-10 levels brighter than the mesh with the sun off too, since the depth
+    step and the full-resolution cutoff in the bake; not yet traced;
+  - cells are 256 px and soft at 40 m, which is still mesh range; a season's colour is baked
+    in, where a turn mask and palette in the atlas would let one bake cover autumn.
+- **Light from anywhere**: own visibility is baked over the whole sphere, so a city's lights
+  under a forest, fires or lightning can light far trees from below as the sun does from
+  above; the impostor's lighting needs those lights added as further terms.
+- **Shadows by distance**: own shading of far trees comes from the baked visibility; the shadow
+  map then has to skip a tree's own crown (here 2 radii past the first hit, which also skips a
+  neighbour that close; a tree id in the map would not). Then impostor casters in far cascades
+  refreshed every few seconds, past them a march toward the sun through the woods field's canopy
+  density (as cloud shadows), and sky occlusion under woods baked once.
 - **Wind**: no sway yet. Trunk, limbs, twigs and leaf flutter in a hierarchy, driven by the gust
   field the grass uses; fronds bend along their strips.
 - **Falling leaves** as particles spawned from crown leaf positions at the drop rate; litter is a

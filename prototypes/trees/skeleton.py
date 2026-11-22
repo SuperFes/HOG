@@ -72,7 +72,8 @@ def _frame(t):
     return u, np.cross(t, u)
 
 
-def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, tile=0.6):
+def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, tile=0.6,
+              trunk_first=True):
     """Positions, normals, colours, indices and bark coordinates of the wood as tubes along
     each chain: u around the stem, v along it, both in `tile` metres, so bark keeps its size.
 
@@ -85,10 +86,21 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, 
         def sides_for(r):
             return 16 if r > 0.15 else 10 if r > 0.04 else 5 if r > 0.012 else 3
     P, N, C, I, UV = [], [], [], [], []
+    pivots, sizes, ranks = [], [], []
     count = 0
     rng = np.random.default_rng(7)
+    rank_rng = np.random.default_rng(11)
+    chain_of = {}
+    chain_rank = []
     base = np.array(colour)
     for run in sk.chains():
+        # A twig never outlasts the limb it grows from as distance thins the wood.
+        if run[0] in chain_of:
+            chain_rank.append(max(chain_rank[chain_of[run[0]]], rank_rng.random()))
+        else:
+            chain_rank.append(0.0 if trunk_first else rank_rng.random())
+        for n in run[1:] if len(run) > 1 and not sk.axis[run[1]] else run:
+            chain_of.setdefault(n, len(chain_rank) - 1)
         pts = np.array([sk.pos[n] for n in run])
         if len(pts) < 2:
             continue
@@ -122,6 +134,9 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, 
                 v = np.cross(tang[k], u)
             ring_n = np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * v
             P.append(pts[k] + ring_n * rad[k])
+            pivots.append(np.tile(pts[k], (sides + 1, 1)))
+            sizes.append(np.full(sides + 1, 2 * rad[k]))
+            ranks.append(np.full(sides + 1, chain_rank[-1]))
             N.append(ring_n)
             here = tint if colours is None else colours[run[k]] * (0.95 + 0.1 * rng.random())
             C.append(np.tile(here, (sides + 1, 1)))
@@ -138,6 +153,9 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, 
     if not P:
         z = np.zeros((0, 3), np.float32)
         return z, z, z, np.zeros((0, 3), np.uint32), np.zeros((0, 2), np.float32)
+    lod = {"kind": "wood", "pivot": np.concatenate(pivots).astype(np.float32),
+           "size": np.concatenate(sizes).astype(np.float32),
+           "rank": np.concatenate(ranks).astype(np.float32), "dims": 1}
     return (np.concatenate(P).astype(np.float32), np.concatenate(N).astype(np.float32),
             np.concatenate(C).astype(np.float32), np.concatenate(I).astype(np.uint32),
-            np.concatenate(UV).astype(np.float32))
+            np.concatenate(UV).astype(np.float32), None, lod)

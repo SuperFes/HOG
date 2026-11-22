@@ -36,7 +36,8 @@ def foliage_of(sp, sk, seed, season=0.0):
         mat = Material(tex, translucency=0.55, cutoff=0.5, turn_mask=mask)
         if made is not None:
             mesh, area, twiglets = made
-            return mesh, mat, area, tube_mesh(twiglets, colour=(0.13, 0.10, 0.08))
+            return mesh, mat, area, tube_mesh(twiglets, colour=(0.13, 0.10, 0.08),
+                                                   trunk_first=False)
     elif sp.kind == "conifer":
         tex = textures.needle_spray(colour=colour, needle_length=f.get("needle_length", 0.3),
                                     angle=f.get("angle", 55), density=f.get("density", 400),
@@ -86,7 +87,7 @@ def _weathered(wood, grime):
     moss = north * np.clip((2.5 + ragged * 2 - y) / 2.5, 0, 1) * grime
     out = c * (1 - 0.45 * grime * foot)[:, None]
     out = out * (1 - moss[:, None]) + out * np.array([0.55, 0.85, 0.35]) * moss[:, None]
-    return (p, n, out.astype("f4"), wood[3], wood[4])
+    return (p, n, out.astype("f4"), *wood[3:])
 
 
 def dressed(sp, seed, age, season=0.0):
@@ -113,8 +114,8 @@ def dressed(sp, seed, age, season=0.0):
     if len(area) and len(wood[0]):
         # The wood inside the crown sees little sky.
         vis = foliage.sky_visibility(wood[0].astype(float), area, cell=0.4, k=0.3)
-        wood = (wood[0], wood[1], (wood[2] * (0.3 + 0.7 * vis)[:, None]).astype("f4"), wood[3],
-                wood[4])
+        wood = (wood[0], wood[1], (wood[2] * (0.3 + 0.7 * vis)[:, None]).astype("f4"),
+                *wood[3:])
     scene = Scene()
     scene.add(wood, wood_mat)
     if twigs is not None:

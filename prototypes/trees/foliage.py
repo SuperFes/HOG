@@ -159,7 +159,10 @@ def leaves(sk, rng, per_segment=10, twig_radius=0.018, size=0.11, size_v=0.25, w
                      * (1 + 0.25 * (rng.random((k, 3)) - 0.5)))[:, None, :]
         A[fallen] = 0.0
     I = (np.arange(n)[:, None, None] * 6 + tri[None]).reshape(-1, 3)
-    mesh = _pack(P, N, C, UV, I) + (A.reshape(-1, 4).astype("f4"),)
+    pivot = np.repeat(P[:, 0:2].mean(1)[:, None, :], 6, 1)
+    lod = thinning("leaf", pivot.reshape(-1, 3), np.repeat(length, 6),
+                   np.repeat(np.random.default_rng(int(n)).random(n), 6), dims=2)
+    mesh = _pack(P, N, C, UV, I) + (A.reshape(-1, 4).astype("f4"), lod)
     twiglets = Skeleton()
     radii = []
     for j in range(m):
@@ -217,6 +220,7 @@ def sprays(sk, rng, shoot_radius=0.03, width=0.16, repeat=0.45, droop=25.0, laye
     chains = sk.chains()
     centre = _crown_centre(np.array(sk.pos))
     Ps, Ns, Cs, UVs, Is, bases = [], [], [], [], [], []
+    pivots, sizes, ribbon = [], [], []
     count = 0
     for run in chains:
         pts = np.array([sk.pos[n] for n in run])
@@ -275,6 +279,9 @@ def sprays(sk, rng, shoot_radius=0.03, width=0.16, repeat=0.45, droop=25.0, laye
                                    np.stack([i + 1, i + k, i + k + 1], 1)]) + count
             Ps.append(P), Ns.append(N), Cs.append(C), UVs.append(UV), Is.append(tris)
             bases.append(pts)
+            pivots.append(np.concatenate([pts, pts]))
+            sizes.append(np.tile(w * taper, 2))
+            ribbon.append(np.full(len(P), len(ribbon)))
             count += len(P)
     if not Ps:
         return None
@@ -282,8 +289,10 @@ def sprays(sk, rng, shoot_radius=0.03, width=0.16, repeat=0.45, droop=25.0, laye
     base = np.concatenate(bases)
     vis = sky_visibility(P, base, cell=0.4, k=0.35)
     C = C * (0.25 + 0.75 * vis)[:, None]
+    rank = np.random.default_rng(len(ribbon)).random(len(ribbon))[np.concatenate(ribbon)]
+    lod = thinning("spray", np.concatenate(pivots), np.concatenate(sizes), rank, dims=1)
     return (P.astype("f4"), N.astype("f4"), C.astype("f4"), np.concatenate(Is).astype("u4"),
-            UV.astype("f4")), base
+            UV.astype("f4"), None, lod), base
 
 
 # --- palm --------------------------------------------------------------------------------
@@ -337,6 +346,15 @@ def fronds(sk, rng, leaflet=0.85, fold=28.0, droop=0.35, across_steps=3,
     C = C * (0.35 + 0.65 * vis)[:, None]
     return (P.astype("f4"), N.astype("f4"), C.astype("f4"), np.concatenate(Is).astype("u4"),
             UV.astype("f4")), np.concatenate(bases)
+
+
+def thinning(kind, pivot, size, rank, dims):
+    """What distance thinning needs per vertex: the point its piece grows or shrinks about,
+    the piece's size in metres (leaf length, ribbon or twig width), its rank (pieces go in
+    rank order, highest first), and whether its area grows with size squared (2) or with
+    width only (1)."""
+    return {"kind": kind, "pivot": pivot.astype("f4"), "size": size.astype("f4"),
+            "rank": rank.astype("f4"), "dims": dims}
 
 
 def _pack(P, N, C, UV, I):

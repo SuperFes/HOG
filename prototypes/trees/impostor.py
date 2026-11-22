@@ -18,10 +18,12 @@ in vec3 in_normal;
 in vec3 in_colour;
 in vec2 in_uv;
 in vec4 in_autumn;
+in vec4 in_sunvis;
 out vec3 v_normal;
 out vec3 v_colour;
 out vec2 v_uv;
 out float v_depth;
+out vec4 v_sunvis;
 uniform vec3 near_point;
 uniform vec3 toward;
 uniform float span;
@@ -31,6 +33,7 @@ void main() {
     v_colour = mix(in_colour, in_autumn.rgb, in_autumn.a);
     v_uv = in_uv;
     v_depth = dot(near_point - in_pos, toward) / span;
+    v_sunvis = in_sunvis;
     gl_Position = view_proj * vec4(in_pos, 1.0);
 }
 """
@@ -46,18 +49,23 @@ in vec3 v_normal;
 in vec3 v_colour;
 in vec2 v_uv;
 in float v_depth;
+in vec4 v_sunvis;
 layout(location = 0) out vec4 o_albedo;
 layout(location = 1) out vec4 o_normal;
 layout(location = 2) out vec4 o_depth;
+layout(location = 3) out vec4 o_sunvis;
 void main() {
     vec4 tex = textured ? texture(albedo, v_uv) : vec4(1.0);
-    if (textured && tex.a < cutoff) discard;
+    // The leaf's true outline, not a blurred mip of it, so tiny leaves keep their coverage;
+    // the supersampling and the atlas mips do the averaging.
+    if (textured && textureLod(albedo, v_uv, 0.0).a < cutoff) discard;
     vec3 n = normalize(v_normal);
     // Two-sided leaves keep the side facing the baking camera.
     if (leafy > 0.0 && dot(n, toward) < 0.0) n = -n;
     o_albedo = vec4(v_colour * tex.rgb, 1.0);
     o_normal = vec4(n * 0.5 + 0.5, leafy);
     o_depth = vec4(v_depth, 0.0, 0.0, 1.0);
+    o_sunvis = v_sunvis;
 }
 """
 
@@ -81,7 +89,6 @@ DRAW_FS = """
 uniform sampler2D atlas_albedo;
 uniform sampler2D atlas_normal;
 uniform sampler2D atlas_depth;
-uniform sampler2DShadow shadow;
 uniform int views;
 uniform vec3 centre;
 uniform float radius;
@@ -97,6 +104,12 @@ uniform float exposure;
 uniform bool shadow_pass;
 uniform float cutoff;
 uniform float shadow_bias;
+uniform sampler2D shadow_raw;
+uniform float light_span;     // metres the light's depth range covers
+uniform float leaf_density;   // how fast sunlight thins per metre inside the crown
+uniform sampler2D atlas_sunvis;
+uniform bool own_shadow;
+uniform int debug;            // 1 direct, 2 shadowing, 3 light through, as grey      // the leaves' own sun visibility is baked in atlas_sunvis
 in vec3 v_pos;
 out vec4 f_colour;
 
@@ -120,63 +133,99 @@ void basis(vec3 d, out vec3 r, out vec3 u) {
     u = cross(d, r);
 }
 
-// One baked view's colour, normal, depth and leafiness at the world point on the card.
-void sample_view(vec2 g, vec3 p, out vec4 a, out vec4 n, out float z) {
+// One baked view's colour, normal, leafiness and own sun visibility where the ray from the
+// eye (ro, rd) meets the tree as that view saw it: stepping along the ray to the height its
+// depth map gives, so all views put each branch in the same place instead of ghosting it.
+void sample_view(vec2 g, vec3 ro, vec3 rd, out vec4 a, out vec4 n, out vec4 sv, out vec3 hit) {
     vec3 d = decode(g);
     vec3 r, u;
     basis(d, r, u);
-    vec2 st = vec2(dot(p - centre, r), dot(p - centre, u)) / radius * 0.5 + 0.5;
-    st = clamp(st, 0.002, 0.998);
-    vec2 cell = (g + st) / float(views);
+    float across = dot(rd, d);
+    across = abs(across) < 0.05 ? (across < 0.0 ? -0.05 : 0.05) : across;
+    float h = 0.0;  // height above the plane through the centre, toward the view
+    vec2 cell;
+    for (int it = 0; it < 3; ++it) {
+        hit = ro + rd * ((h - dot(ro - centre, d)) / across);
+        vec2 st = vec2(dot(hit - centre, r), dot(hit - centre, u)) / radius * 0.5 + 0.5;
+        cell = (g + clamp(st, 0.002, 0.998)) / float(views);
+        h = radius - texture(atlas_depth, cell).r * 2.0 * radius;
+    }
+    hit = ro + rd * ((h - dot(ro - centre, d)) / across);
     a = texture(atlas_albedo, cell);
     n = texture(atlas_normal, cell);
-    z = texture(atlas_depth, cell).r;
+    sv = texture(atlas_sunvis, cell);
 }
 
+// Sunlight left after passing through the crown: the shadow map holds the first leaf toward
+// the sun, and past it light thins by leaf density, as through cloud, so leaves just behind
+// the surface shade each other while the deep inside goes dark.
 float lit(vec3 world) {
     vec4 l = light_proj * vec4(world, 1.0);
     vec3 p = l.xyz / l.w * 0.5 + 0.5;
     if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0) return 1.0;
     float sum = 0.0;
-    vec2 texel = 1.0 / vec2(textureSize(shadow, 0));
+    vec2 texel = 1.0 / vec2(textureSize(shadow_raw, 0));
     for (int y = -2; y <= 2; ++y)
-        for (int x = -2; x <= 2; ++x)
-            sum += texture(shadow, vec3(p.xy + vec2(x, y) * texel * 1.3, p.z - shadow_bias));
+        for (int x = -2; x <= 2; ++x) {
+            float first = texture(shadow_raw, p.xy + vec2(x, y) * texel * 1.3).r;
+            // With the tree's own shading baked, only what lies beyond its crown shades it.
+            float skip = own_shadow ? 2.0 * radius : shadow_bias * light_span;
+            float inside = max((p.z - first) * light_span - skip, 0.0);
+            sum += exp(-leaf_density * inside);
+        }
     return sum / 25.0;
+}
+
+vec3 tone(vec3 c) {
+    c *= exposure;
+    c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+    return pow(c, vec3(1.0 / 2.2));
 }
 
 void main() {
     vec2 g = encode(normalize(look));
     vec2 g0 = clamp(floor(g), vec2(0.0), vec2(float(views) - 1.0));
     vec2 f = clamp(g - g0, 0.0, 1.0);
-    vec4 acc_a = vec4(0.0);
-    vec4 acc_n = vec4(0.0);
-    float acc_z = 0.0;
+    vec4 sa[4];
+    vec4 sn[4];
+    vec4 ssv[4];
+    float sk[4];
+    float acc_a = 0.0;
+    vec3 acc_hit = vec3(0.0);
+    // Shadow maps look along the light, parallel; the eye looks from a point.
+    vec3 ro = shadow_pass ? v_pos + look * radius * 4.0 : eye;
+    vec3 rd = shadow_pass ? -look : normalize(v_pos - eye);
     float wsum = 0.0;
     for (int j = 0; j < 2; ++j)
         for (int i = 0; i < 2; ++i) {
+            int s = j * 2 + i;
             vec2 gg = min(g0 + vec2(i, j), vec2(float(views) - 1.0));
             float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
-            vec4 a, n;
-            float z;
-            sample_view(gg, v_pos, a, n, z);
-            float k = w * a.a;
-            acc_a += vec4(a.rgb * k, k);
-            acc_n += vec4((n.rgb * 2.0 - 1.0) * k, n.a * k);
-            acc_z += z * k;
+            vec3 hit;
+            sample_view(gg, ro, rd, sa[s], sn[s], ssv[s], hit);
+            sk[s] = w * sa[s].a;
+            acc_a += sk[s];
+            acc_hit += hit * sk[s];
             wsum += w;
         }
-    float coverage = acc_a.a / max(wsum, 1e-4);
-    if (coverage < cutoff * 0.7) discard;
-    vec3 base = acc_a.rgb / max(acc_a.a, 1e-4);
-    // The averaged normal is shorter where the leaves under this pixel face many ways.
-    vec3 mean_n = acc_n.rgb / max(acc_a.a, 1e-4);
-    float agree = clamp(length(mean_n), 0.0, 1.0);
-    vec3 nrm = mean_n / max(length(mean_n), 1e-4);
-    float leafy = acc_n.a / max(acc_a.a, 1e-4);
-    float depth01 = acc_z / max(acc_a.a, 1e-4);
+    float coverage = acc_a / max(wsum, 1e-4);
+    // Magnified, edges are sharpened as alpha-tested leaves are; shrunk, a texel holds many
+    // leaves and gaps, and its coverage is drawn as it is, so the crown stays see-through.
+    float cell_texels = float(textureSize(atlas_albedo, 0).x) / float(views);
+    float texels = length(fwidth(v_pos)) / (2.0 * radius) * cell_texels;
+    float minified = clamp(log2(max(texels, 1e-4)), 0.0, 1.0);
+    float sharp = (coverage - cutoff * 0.7) / max(fwidth(coverage), 1e-4) + 0.5;
+    float alpha = clamp(mix(sharp, coverage, minified), 0.0, 1.0);
+    if (shadow_pass) {
+        // No coverage to blend in a depth map: dither it, and the filtered lookup evens it.
+        float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+        if (alpha <= h * 0.999) discard;
+    } else if (alpha <= 0.0) {
+        discard;
+    }
+
     vec3 v = normalize(look);
-    vec3 world = v_pos + v * radius - v * depth01 * 2.0 * radius;
+    vec3 world = acc_hit / max(acc_a, 1e-4);
     vec4 clip = view_proj * vec4(world, 1.0);
     gl_FragDepth = clip.z / clip.w * 0.5 + 0.5;
     if (shadow_pass) {
@@ -185,24 +234,48 @@ void main() {
     }
     vec3 to_eye = normalize(eye - world);
     float shade = lit(world);
-    float facing = dot(nrm, sun);
-    float translucency = 0.55 * leafy;
-    // Leaves facing every way take light as a wrapped average, not as one surface: the less
-    // they agree, the more the response flattens toward it.
-    float k = agree * agree;
-    float direct = mix((facing * 0.5 + 0.5) * 0.5, max(facing, 0.0), k);
-    float back = mix((0.5 - facing * 0.5) * 0.5, max(-facing, 0.0), k);
-    float through = translucency * back
-                  * (0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
-    float upish = mix(0.5, nrm.y * 0.5 + 0.5, agree);
-    vec3 ambient = mix(ground_colour, sky_colour, upish);
-    vec3 c = base * (sun_colour * direct * shade + ambient)
-           + base * vec3(1.25, 1.35, 0.6) * sun_colour * through * shade;
-    c *= exposure;
-    c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
-    c = pow(c, vec3(1.0 / 2.2));
-    f_colour = vec4(c, clamp((coverage - cutoff * 0.7) / max(fwidth(coverage), 1e-4) + 0.5,
-                             0.0, 1.0));
+    float toward_sun = 0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0);
+    // Each view is lit with its own normal and the lit colours blended: the views see
+    // different leaves, so blending normals first would cancel them and lose the highlights.
+    // Leaves facing every way still face the viewer, as two-sided leaves are seen from their
+    // near side: averaged over such leaves, how much sun lands on their front and how much
+    // comes through from behind (a fit to the cosine-weighted hemisphere's average).
+    float cv = dot(to_eye, sun);
+    float spread_front = (1.0 + cv) * (2.0 + cv) / 9.0;
+    float spread_back = (1.0 - cv) * (2.0 - cv) / 9.0;
+    vec3 c = vec3(0.0);
+    float dbg = 0.0;
+    for (int s = 0; s < 4; ++s) {
+        vec3 base = sa[s].rgb;
+        vec3 mean_n = sn[s].rgb * 2.0 - 1.0;
+        // Shorter where a shrunk texel holds leaves facing many ways.
+        float agree = clamp(length(mean_n), 0.0, 1.0);
+        vec3 nrm = mean_n / max(length(mean_n), 1e-4);
+        float facing = dot(nrm, sun);
+        float k = agree * agree;
+        float direct = mix(spread_front, max(facing, 0.0), k);
+        float back = mix(spread_back, max(-facing, 0.0), k);
+        float through = 0.55 * sn[s].a * back * toward_sun;
+        float own = own_shadow ? clamp(dot(ssv[s], vec4(1.0, sun)), 0.0, 1.0) : 1.0;
+        dbg += (debug == 1 ? direct : debug == 2 ? own * shade : debug == 3 ? through : direct * own * shade) * sk[s];
+        vec3 ambient = mix(ground_colour, sky_colour, mix(0.5, nrm.y * 0.5 + 0.5, agree));
+        vec3 h = normalize(sun + to_eye);
+        vec3 dark = base * ambient;
+        vec3 sunny = dark + base * sun_colour * direct
+                   + base * vec3(1.25, 1.35, 0.6) * sun_colour * through
+                   + sun_colour * 0.04 * pow(max(dot(nrm, h), 0.0), 24.0) * k;
+        // A texel stands for many leaves, a share of them in sun and the rest in shade; each
+        // kind goes through the tone curve on its own, as a pixel showing them would, since
+        // tone-mapping their average comes out brighter and flatter than the tree.
+        float share = own * shade;
+        c += (tone(sunny) * share + tone(dark) * (1.0 - share)) * sk[s];
+    }
+    c /= max(acc_a, 1e-4);
+    if (debug > 0) {
+        f_colour = vec4(vec3(dbg / max(acc_a, 1e-4)), alpha);
+        return;
+    }
+    f_colour = vec4(c, alpha);
 }
 """
 
@@ -215,6 +288,8 @@ class Impostor:
         self.albedo = albedo  # RGBA, linear colour, alpha coverage
         self.normal = normal  # RGB world normal packed 0-1, A leafiness
         self.depth = depth  # R: 0 at the bounding sphere's near side, 1 at its far side
+        self.leaf_density = 1.5  # sunlight's thinning per metre inside the crown
+        self.sunvis = None  # c0 and c1 of the leaves' own sun visibility, if baked
 
 
 def _decode(i, j, views):
@@ -242,18 +317,21 @@ def bake(scene, views=12, cell=256, supersample=2):
     radius = float(np.linalg.norm(hi - lo) / 2) * 1.02
     big = cell * supersample
     prog = ctx.program(vertex_shader=GBUFFER_VS, fragment_shader=GBUFFER_FS)
-    targets = [ctx.texture((big, big), 4, dtype="f4") for _ in range(3)]
+    targets = [ctx.texture((big, big), 4, dtype="f4") for _ in range(4)]
     zbuf = ctx.depth_renderbuffer((big, big))
     fbo = ctx.framebuffer(targets, zbuf)
     vaos = []
     texs = []
-    for (p, n, c, i, uv, autumn), mat in scene.parts:
+    sunvis = getattr(scene, "sunvis", None) or [None] * len(scene.parts)
+    for ((p, n, c, i, uv, autumn), mat), sv in zip(scene.parts, sunvis):
         uv = np.zeros((len(p), 2), "f4") if uv is None else uv
         autumn = np.zeros((len(p), 4), "f4") if autumn is None else autumn
-        vbo = ctx.buffer(np.hstack([p, n, c, uv, autumn]).astype("f4").tobytes())
+        # Without a baked answer, every point sees the whole sun.
+        sv = np.tile(np.array([1, 0, 0, 0], "f4"), (len(p), 1)) if sv is None else sv
+        vbo = ctx.buffer(np.hstack([p, n, c, uv, autumn, sv]).astype("f4").tobytes())
         ibo = ctx.buffer(i.astype("u4").tobytes())
-        vao = ctx.vertex_array(prog, [(vbo, "3f 3f 3f 2f 4f", "in_pos", "in_normal",
-                                       "in_colour", "in_uv", "in_autumn")], ibo)
+        vao = ctx.vertex_array(prog, [(vbo, "3f 3f 3f 2f 4f 4f", "in_pos", "in_normal",
+                                       "in_colour", "in_uv", "in_autumn", "in_sunvis")], ibo)
         tex = None
         if mat.texture is not None:
             h, w = mat.texture.shape[:2]
@@ -265,7 +343,7 @@ def bake(scene, views=12, cell=256, supersample=2):
         vaos.append((vao, mat, tex, vbo, ibo))
     white = ctx.texture((1, 1), 4, np.ones(4, "f4").tobytes(), dtype="f4")
     size = views * cell
-    atlas = [np.zeros((size, size, 4), np.float32) for _ in range(3)]
+    atlas = [np.zeros((size, size, 4), np.float32) for _ in range(4)]
     ctx.enable(moderngl.DEPTH_TEST)
     ctx.disable(moderngl.CULL_FACE)
     for j in range(views):
@@ -288,7 +366,7 @@ def bake(scene, views=12, cell=256, supersample=2):
                 prog["cutoff"].value = mat.cutoff
                 prog["leafy"].value = 1.0 if mat.translucency > 0 else 0.0
                 vao.render()
-            for k in range(3):
+            for k in range(4):
                 img = np.frombuffer(targets[k].read(), np.float32).reshape(big, big, 4)
                 img = img.reshape(cell, supersample, cell, supersample, 4)
                 if k == 0:
@@ -309,22 +387,29 @@ def bake(scene, views=12, cell=256, supersample=2):
         t.release()
     zbuf.release(), fbo.release(), prog.release()
     # Spread colour and normal into empty texels so filtering never pulls in black.
-    for k in (0, 1):
-        atlas[k] = _dilate(atlas[k], atlas[0][..., 3] > 0)
-    return Impostor(centre, radius, views, atlas[0], atlas[1], atlas[2])
+    filled = atlas[0][..., 3] > 0
+    for k, ch in ((0, 3), (1, 3), (3, 4)):
+        atlas[k] = _dilate(atlas[k], filled, ch)
+    # Depth spreads into the gaps too, so a ray stepping through one lands near the leaves
+    # around it; far from any, the centre plane.
+    atlas[2] = _dilate(atlas[2], filled, 1, steps=8)
+    atlas[2][..., 0] = np.where(atlas[2][..., 0] > 0, atlas[2][..., 0], 0.5)
+    imp = Impostor(centre, radius, views, atlas[0], atlas[1], atlas[2])
+    imp.sunvis = atlas[3] if getattr(scene, "sunvis", None) else None
+    return imp
 
 
-def _dilate(img, filled, steps=4):
+def _dilate(img, filled, ch=3, steps=4):
     out = img.copy()
     have = filled.copy()
     for _ in range(steps):
-        acc = np.zeros_like(out[..., :3])
+        acc = np.zeros_like(out[..., :ch])
         cnt = np.zeros(have.shape)
         for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            acc += np.roll(np.roll(out[..., :3] * have[..., None], dy, 0), dx, 1)
+            acc += np.roll(np.roll(out[..., :ch] * have[..., None], dy, 0), dx, 1)
             cnt += np.roll(np.roll(have, dy, 0), dx, 1)
         grow = (~have) & (cnt > 0)
-        out[grow, :3] = acc[grow] / cnt[grow, None]
+        out[grow, :ch] = acc[grow] / cnt[grow, None]
         have = have | grow
     return out
 
@@ -346,7 +431,9 @@ class Drawer:
         self.textures = []
         for imp in self.items:
             ts = []
-            for img in (imp.albedo, imp.normal, imp.depth):
+            sunvis = imp.sunvis if imp.sunvis is not None else np.tile(
+                np.array([1, 0, 0, 0], "f4"), (4, 4, 1))
+            for img in (imp.albedo, imp.normal, imp.depth, sunvis):
                 h, w = img.shape[:2]
                 t = ctx.texture((w, h), 4, np.ascontiguousarray(img).astype("f4").tobytes(),
                                 dtype="f4")
@@ -369,17 +456,26 @@ class Drawer:
                 else:
                     p[k].value = v
         if shadow_tex is not None:
-            shadow_tex.use(0)
-            p["shadow"].value = 0
+            raw = self.ctx.sampler(texture=shadow_tex, compare_func="",
+                                   filter=(moderngl.NEAREST, moderngl.NEAREST))
+            shadow_tex.use(4)
+            raw.use(4)
+            p["shadow_raw"].value = 4
         for imp, ts in zip(self.items, self.textures):
-            for unit, t in enumerate(ts):
+            for unit, t in enumerate(ts[:3]):
                 t.use(unit + 1)
             p["atlas_albedo"].value = 1
             p["atlas_normal"].value = 2
             p["atlas_depth"].value = 3
+            if "atlas_sunvis" in p:
+                ts[3].use(6)
+                p["atlas_sunvis"].value = 6
+                p["own_shadow"].value = imp.sunvis is not None
             p["views"].value = imp.views
             p["centre"].value = tuple(imp.centre)
             p["radius"].value = imp.radius
+            if "leaf_density" in p:
+                p["leaf_density"].value = imp.leaf_density
             look = np.asarray(look_from, float) - imp.centre if not shadow_pass else np.asarray(
                 look_from, float)
             look = look / np.linalg.norm(look)
@@ -393,6 +489,8 @@ class Drawer:
             p["right"].value = tuple(right)
             p["up"].value = tuple(up)
             self.vao.render()
+        if shadow_tex is not None:
+            raw.release()
 
     def release(self):
         if self.prog is None:
