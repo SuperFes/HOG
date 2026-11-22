@@ -160,6 +160,7 @@ uniform vec3 eye;
 uniform float earth_radius;
 uniform float haze_m;
 uniform vec3 sky_display;
+uniform bool unshadowed;  // trees and ground in full sun and sky, to judge cover apart
 """ + terrain.HASH_GLSL + """
 vec3 rot_y(vec3 p, float a) {
     float c = cos(a), s = sin(a);
@@ -187,6 +188,7 @@ bool tree_at(ivec2 c, out vec3 base, out int kind, out float scale, out float ya
 // one in cell `skip`. Cells are walked in order along the ray, column by column across its
 // major axis, so once the light is all but gone the walk stops.
 float optical_depth(vec3 p, vec3 d, ivec2 skip, float limit) {
+    if (unshadowed) return 0.0;
     float tmax = min(limit, (top + 40.0) / max(d.y, 0.05));
     bool xmajor = abs(d.x) >= abs(d.z);
     vec2 a = xmajor ? p.xz : p.zx;
@@ -368,6 +370,7 @@ float met_area(float h0, vec3 l, float hc, float rh, float rv) {
 // fast as they rise over the ground, so a slope facing the light lets more through than
 // one facing away; worked in a frame sheared to the slope.
 float stand_light(float h0, vec3 l, float lambda, vec4 mix_k, vec3 toward_eye, vec2 grad) {
+    if (unshadowed) return 1.0;
     float top_h = top;
     l = vec3(l.x, l.y - dot(grad, l.xz), l.z);
     toward_eye = vec3(toward_eye.x, toward_eye.y - dot(grad, toward_eye.xz), toward_eye.z);
@@ -441,12 +444,13 @@ uniform vec3 meadow;
 uniform vec3 litter;
 uniform vec3 canopy_albedo[4];
 uniform bool depth_only;
+uniform int debug;  // 4: coverage only, trees white over black ground
 in vec3 v_pos;
 out vec4 f_colour;
 """ + COMMON + CANOPY_LIB + """
 void main() {
-    if (depth_only) {
-        f_colour = vec4(0.0);
+    if (depth_only || debug == 4) {
+        f_colour = vec4(0.0, 0.0, 0.0, depth_only ? 0.0 : 1.0);
         return;
     }
     vec2 uv = (v_pos.xz - origin) / extent;
@@ -525,7 +529,7 @@ void main() {
 """
 
 TREE_FS = """
-#version 330
+#version 400
 uniform sampler2D atlas_albedo;
 uniform sampler2D atlas_normal;
 uniform sampler2D atlas_depth;
@@ -543,6 +547,7 @@ uniform mat4 view_proj;
 uniform bool own_shadow;
 uniform int debug;
 uniform bool depth_only;
+uniform int samples;  // per pixel, multisampled
 in vec3 v_pos;
 flat in vec4 v_base;
 flat in vec4 v_info;
@@ -597,12 +602,26 @@ void main() {
         return;
     }
     ivec2 own = ivec2(v_info.zw);
+    // Coverage as a sample mask drawn per tree and pixel: alpha to coverage gives every
+    // tree the same mask for the same alpha, so far trees overlapping in a pixel cover only
+    // as much as one of them; independent masks add up as leaves do.
+    uint hsh = pcg(uint(gl_FragCoord.x) + pcg(uint(gl_FragCoord.y) + cell_hash(own, 9u)));
+    int n = int(floor(alpha * float(samples) + float(hsh >> 8u) / 16777216.0));
+    int start = int(hsh % uint(samples));
+    int mask = 0;
+    for (int i = 0; i < n; ++i) mask |= 1 << ((start + i) % samples);
+    if (mask == 0) discard;
+    gl_SampleMask[0] = mask;
+    if (debug == 4) {
+        f_colour = vec4(1.0);
+        return;
+    }
     float shade = exp(-optical_depth(world, sun_world, own, 150.0));
     float sky = sky_open(world, own);
     float dbg = 0.0;
     vec3 c = light_views(sa, sn, ssv, sk, acc_a, normalize(ro - hit_local), shade, sky, dbg);
     if (debug > 0) c = vec3(dbg / max(acc_a, 1e-4));
-    f_colour = vec4(hazed(c, world), alpha);
+    f_colour = vec4(hazed(c, world), 1.0);
 }
 """
 
@@ -640,6 +659,14 @@ SHELL_FS = """
 #version 330
 out vec4 f_colour;
 void main() { f_colour = vec4(0.0); }
+"""
+
+DIST_FS = """
+#version 330
+uniform vec3 eye;
+in vec3 v_pos;
+out vec4 f_colour;
+void main() { f_colour = vec4(length(v_pos - eye), 0.0, 0.0, 1.0); }
 """
 
 # The forest as a stand of crowns placed at random by the density field: marched along each
@@ -813,6 +840,11 @@ void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float 
             float t0 = max((-qb - sq) / qa, 0.0), t1 = min((-qb + sq) / qa, tmax);
             if (t1 <= t0) continue;
             float alpha = 1.0 - exp(-crown_sigma[k] * (t1 - t0));
+            if (debug == 4) {
+                col += T * alpha;
+                T *= 1.0 - alpha;
+                continue;
+            }
             vec3 hit = a + d * t0;
             vec2 uv = (hit.xz - origin) / extent;
             float lambda = texture(density_tex, uv).r / (cell * cell);
@@ -862,17 +894,21 @@ void main() {
     vec3 entry = unproject(v_ndc, zs);
     vec3 rd = normalize(entry - eye);
     float t0 = length(entry - eye);
-    float t1 = zg < 1.0 ? length(unproject(v_ndc, zg) - eye) : t0 + 4000.0;
+    // With no ground behind, on until the far plane: a ray grazing one hill may still pass
+    // through the trees on a crest many kilometres on.
+    float t1 = zg < 1.0 ? length(unproject(v_ndc, zg) - eye) : 60000.0;
     if (t1 <= t0) discard;
     // Statistical crowns: their share of light stopped, and where and which they are.
     float T = 1.0;
-    float hit_h = 0.0, hit_t = 0.0;
+    float hit_h = 0.0, hit_h2 = 0.0, hit_t = 0.0;
     vec4 hit_k = vec4(0.0);
     // Explicit crowns, in front.
     vec3 col_e = vec3(0.0);
     float T_e = 1.0;
     float open_t = -1.0;  // where the ray last came into the canopy, while in it
     float t = t0;
+    int n_in = 0;
+    float min_h = 1e9;
     for (int i = 0; i < 400 && t < t1 && T * T_e > 0.003; ++i) {
         vec3 q = eye + rd * t;
         q.y += drop_at(q);  // back to the flat world the stand lives in
@@ -882,6 +918,7 @@ void main() {
         vec3 p = eye + rd * (t + 0.5 * ds);
         p.y += drop_at(p);
         vec2 uv = (p.xz - origin) / extent;
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) break;  // off the land
         float h = p.y - texture(height_tex, uv).r;
         bool inside = h < top + 2.0 && h > -2.0;
         if (inside && open_t < 0.0 && stat_share_at(t) < 1.0) open_t = t;
@@ -894,13 +931,16 @@ void main() {
             walk_crowns(a, b, open_t, rd, col_e, T_e);
             open_t = inside && !last ? t + ds : -1.0;
         }
+        min_h = min(min_h, h);
         if (h < top && h > 0.0) {
+            ++n_in;
             float lambda = texture(density_tex, uv).r / (cell * cell) * stat_share_at(t);
             vec4 r = stop_rate(h, rd, lambda, texture(kinds_tex, uv));
             float mu = r.x + r.y + r.z + r.w;
             if (mu > 0.0) {
                 float hit = T * (1.0 - exp(-mu * ds));
                 hit_h += hit * h;
+                hit_h2 += hit * h * h;
                 hit_t += hit * (t + 0.5 * ds);
                 hit_k += hit * r / mu;
                 T *= exp(-mu * ds);
@@ -920,16 +960,28 @@ void main() {
         float lambda = texture(density_tex, uv).r / (cell * cell);
         vec4 mix_k = texture(kinds_tex, uv);
         vec2 grad = ground_grad(p.xz);
-        float shade = stand_light(hit_h, sun_world, lambda, mix_k, -rd, grad);
-        float sky = stand_sky(hit_h, lambda, mix_k, grad);
+        // Light climbs faster than linearly with height in the stand, so lighting the mean
+        // height met comes out dark: average two heights spanning the spread met.
+        float spread = sqrt(max(hit_h2 / covered - hit_h * hit_h, 0.0));
+        float shade = 0.0, sky = 0.0;
+        for (int s = -1; s <= 1; s += 2) {
+            float hs = max(hit_h + float(s) * spread, 0.0);
+            shade += 0.5 * stand_light(hs, sun_world, lambda, mix_k, -rd, grad);
+            sky += 0.5 * stand_sky(hs, lambda, mix_k, grad);
+        }
         for (int k = 0; k < 4; ++k)
             if (hit_k[k] > 0.001) c += hit_k[k] * crown_colour(k, -rd, shade, sky);
         if (debug == 2) c = vec3(shade);
         if (debug == 3) c = vec3(sky);
         c *= 1.0 + grain * stand_noise(p, hit_t, rd, lambda);
         c = hazed(c, p);
+        if (debug == 4) c = vec3(1.0);
     }
     float alpha = 1.0 - T_e * T;
+    if (debug == 6) {
+        f_colour = vec4(1.0 - T, float(n_in) / 64.0, clamp(min_h / 64.0 + 0.5, 0.0, 1.0), 1.0);
+        return;
+    }
     if (alpha < 1e-4) discard;
     f_colour = vec4(col_e + T_e * c * covered, alpha);
 }
@@ -994,9 +1046,15 @@ class Far:
             return t
 
         self.height = tex(land.height, 1)
+        # The shell over the canopy is drawn on the coarser ground grid, whose triangles cut
+        # under the height grid's crests: lift it by the highest ground about each point.
+        pad = np.pad(land.height, 2, mode="edge")
+        n = land.height.shape[0]
+        hmax = np.max([pad[j:j + n, i:i + n] for j in range(5) for i in range(5)], axis=0)
+        self.height_max = tex(hmax, 1)
         self.density = tex(land.density, 1)
         self.kind_tex = tex(land.kinds, 4)
-        for t in (self.height, self.density, self.kind_tex):
+        for t in (self.height, self.height_max, self.density, self.kind_tex):
             t.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self.atlases = []
         maps = [np.concatenate([getattr(kd.imp, n) for kd in kinds], axis=1)
@@ -1038,6 +1096,33 @@ class Far:
                             dtype="f4")
             t.filter = (moderngl.NEAREST, moderngl.NEAREST)
             self.crowns.append(t)
+
+    def distances(self, eye, target, size=(1920, 1080), fov_deg=60.0):
+        """Per pixel (top row first), metres from the eye to the ground; 1e9 for sky."""
+        ctx = self.ctx
+        if not hasattr(self, "dist_prog"):
+            self.dist_prog = ctx.program(vertex_shader=GROUND_VS, fragment_shader=DIST_FS)
+            self.dist_vao = ctx.vertex_array(self.dist_prog, [(self.ground_vbo, "2f", "in_uv")],
+                                             self.ground_ibo)
+        w, h = size
+        proj = perspective(math.radians(fov_deg), w / h, 1.0, 60000.0)
+        vp = proj @ look_at(np.asarray(eye, float), np.asarray(target, float))
+        self.height.use(0)
+        self._uniforms(self.dist_prog, dict(view_proj=vp, eye=tuple(eye), height_tex=0,
+                                            origin=tuple(terrain.ORIGIN),
+                                            extent=terrain.EXTENT,
+                                            earth_radius=terrain.EARTH_RADIUS))
+        tex = ctx.texture((w, h), 1, dtype="f4")
+        z = ctx.depth_renderbuffer((w, h))
+        fbo = ctx.framebuffer(tex, z)
+        fbo.use()
+        fbo.clear(1e9, depth=1.0)
+        ctx.enable(moderngl.DEPTH_TEST)
+        self.dist_vao.render()
+        out = np.frombuffer(tex.read(), np.float32).reshape(h, w)[::-1].copy()
+        for r in (fbo, z, tex):
+            r.release()
+        return out
 
     def _uniforms(self, prog, values):
         for k, v in values.items():
@@ -1083,7 +1168,7 @@ class Far:
 
     def frame(self, eye, target, trees=None, size=(1920, 1080), fov_deg=60.0,
               sun=(0.45, 0.75, 0.35), mode=0, supersample=1, haze_m=25000.0, debug=0, chunks=8,
-              layer=None, stat=None, grain=0.0):
+              layer=None, stat=None, grain=0.0, unshadowed=False):
         """A view, `trees` (terrain.Land.trees arrays) drawn as impostors, with the canopy
         layer standing for the rest when `layer` = (near, far) is given: the share of trees
         it stands for rises from 0 at `near` to 1 at `far` ((0, 0): the layer is every tree).
@@ -1106,7 +1191,8 @@ class Far:
                       crown_sigma=np.array([kd.sigma for kd in kinds]), reach=reach, top=top,
                       sky_dirs=dirs, sky_weights=weights, eye=tuple(eye),
                       earth_radius=terrain.EARTH_RADIUS, haze_m=haze_m, sky_display=SKY,
-                      height_tex=0, density_tex=1, kinds_tex=2, debug=debug, **LIGHT)
+                      height_tex=0, density_tex=1, kinds_tex=2, debug=debug,
+                      unshadowed=unshadowed, **LIGHT)
         self.height.use(0)
         self.density.use(1)
         self.kind_tex.use(2)
@@ -1136,13 +1222,14 @@ class Far:
                                 / (size[1] * supersample)))
         for unit, t in enumerate(self.crowns):
             t.use(7 + unit)
-        self._uniforms(self.shell_prog, common)
+        self._uniforms(self.shell_prog, dict(common, height_tex=12))
+        self.height_max.use(12)
         self._uniforms(tp, dict(common, sun_world=tuple(sun), views=kinds[0].imp.views,
                                 kinds=len(kinds),
                                 k_centre=np.array([kd.imp.centre for kd in kinds]),
                                 k_radius=np.array([kd.imp.radius for kd in kinds]),
                                 atlas_albedo=3, atlas_normal=4, atlas_depth=5, atlas_sunvis=6,
-                                own_shadow=True, depth_only=False))
+                                own_shadow=True, depth_only=False, samples=4))
         tree_vao = inst = None
         w, h = size
         proj = perspective(math.radians(fov_deg), w / h, 1.0, 60000.0)
@@ -1201,9 +1288,7 @@ class Far:
                     mine = bins.get((tx * chunks + cx, ty * chunks + cy)) if tree_vao else None
                     if mine is not None:
                         inst.write(data[mine].tobytes())
-                        ctx.enable_direct(0x809E)  # alpha to coverage
                         tree_vao.render(instances=len(mine))
-                        ctx.disable_direct(0x809E)
                 ctx.copy_framebuffer(resolved, fbo)
                 if layer:
                     # Where the march stops (ground or a drawn tree) and where it starts.

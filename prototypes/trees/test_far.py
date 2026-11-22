@@ -53,6 +53,7 @@ class HashTest(unittest.TestCase):
 
 MEET = """
 uniform float top;
+uniform bool unshadowed;
 uniform vec3 sky_dirs[15];
 uniform float sky_weights[15];
 """ + far.CANOPY_LIB
