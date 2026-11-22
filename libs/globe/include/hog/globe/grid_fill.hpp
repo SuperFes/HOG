@@ -53,6 +53,15 @@ struct Filled {
     std::vector<Placed> placed;
 };
 
+// Where finer nodes are read from coarser ones with seeded layers: nodes narrower than `below`
+// metres are read between the columns of the finest nodes no narrower, with octaves of noise for
+// the detail finer than those, seeded by position, as strong as `strength` times what the columns
+// say that detail could move the ground; none where `below` is 0.
+struct Layered {
+    double below = 0.0;
+    double strength = 1.0;
+};
+
 // The trees over the node at `key`, `levels` deep under it, from the generator. Each node is
 // sampled at its middle with detail no finer than itself, and keeps what it's sampled as whether
 // it splits or not, so a node reads the same however deep it's filled and from whichever node
@@ -68,6 +77,6 @@ struct Filled {
 // rubble in the ground.
 // Precondition: key.depth + levels <= grid.depth().
 [[nodiscard]] Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
-                          std::uint8_t levels);
+                          std::uint8_t levels, Layered layered = {});
 
 } // namespace hog::globe

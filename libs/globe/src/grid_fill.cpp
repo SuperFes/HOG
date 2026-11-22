@@ -1,6 +1,7 @@
 #include "terms.hpp"
 
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/grid_fill.hpp>
 #include <hog/globe/habitat.hpp>
@@ -65,8 +66,12 @@ struct Between {
 
 class Filler {
 public:
-    Filler(const Generator& generator, const grid::Grid& grid, grid::Key key, std::uint8_t levels)
-        : generator_{&generator}, grid_{&grid}, key_{key}, levels_{levels} {
+    Filler(const Generator& generator, const grid::Grid& grid, grid::Key key, std::uint8_t levels,
+           Layered layered)
+        : generator_{&generator}, grid_{&grid}, key_{key}, levels_{levels}, layered_{layered},
+          base_{base_of(grid, layered)},
+          seed_{hash_values(generator.planet().body.seed,
+                            static_cast<std::uint64_t>(terms::Term::Layers))} {
         survey();
     }
 
@@ -119,7 +124,7 @@ public:
 
     // The finest columns made with a crag left out of their ground.
     [[nodiscard]] std::vector<const Generator::Column*> standing() const {
-        const int level = level_at(static_cast<std::uint8_t>(key_.depth + levels_));
+        const int level = read_level(static_cast<std::uint8_t>(key_.depth + levels_));
         std::vector<const Generator::Column*> found;
         for (const auto& [slot, column] : columns_) {
             if (std::cmp_equal(slot & 31U, level) && column.crag()) {
@@ -154,6 +159,43 @@ private:
         return std::max(generator_->layers().level - (grid_->depth() - at), 0);
     }
 
+    // The level of the cells whose columns nodes at depth `at` are read between: their own, or
+    // under the layers' base, the base's.
+    [[nodiscard]] int read_level(std::uint8_t at) const noexcept {
+        return level_at(std::min(at, base_));
+    }
+
+    // The deepest depth whose nodes are read from columns of their own size.
+    static std::uint8_t base_of(const grid::Grid& grid, Layered layered) noexcept {
+        std::uint8_t depth = grid.depth();
+        while (layered.below > 0.0 && depth > 0 && grid.size(depth) < layered.below) {
+            --depth;
+        }
+        return depth;
+    }
+
+    // The seeded layers: an octave for each size under the base's.
+    [[nodiscard]] Octaves layers() const noexcept {
+        return {.wavelength = grid_->size(base_), .gain = 0.5, .finest = 0.0};
+    }
+
+    // Metres the seeded layers raise the ground at `point`, read with detail `detail`, where the
+    // columns say detail finer than theirs could move it `rest`.
+    [[nodiscard]] double raised(DVec3 point, double rest, double detail) const noexcept {
+        if (rest <= 0.0) {
+            return 0.0;
+        }
+        const DVec3 at = up_at(point) * generator_->planet().body.radius;
+        return layered_.strength * rest * fbm(at, layers(), detail, seed_).value /
+               fbm_rest(layers(), grid_->size(base_));
+    }
+
+    // How far the layers finer than `detail` could move it, likewise.
+    [[nodiscard]] double left(double rest, double detail) const noexcept {
+        return layered_.strength * rest * fbm_rest(layers(), detail) /
+               fbm_rest(layers(), grid_->size(base_));
+    }
+
     [[nodiscard]] bool open(std::uint8_t depth, const Probe& here) const noexcept {
         return key_.depth + depth < grid_->depth() &&
                (std::abs(here.distance) < near * here.size || here.caves);
@@ -166,15 +208,14 @@ private:
         for (std::uint8_t depth = 0; depth <= levels_ && !nodes.empty(); ++depth) {
             const auto at = static_cast<std::uint8_t>(key_.depth + depth);
             const double size = grid_->size(at);
-            // Columns on cells about as wide as the nodes, detail no finer than them.
-            const int level = level_at(at);
+            // Columns on cells about as wide as the nodes, detail no finer than them; under the
+            // layers' base, the base's columns, and the layers at the nodes' own detail.
+            const int level = read_level(at);
             const double lod = terms::cell_lod(generator_->planet(), level);
-            std::vector<DVec3> middles;
-            middles.reserve(nodes.size());
-            for (const grid::Key node : nodes) {
-                middles.push_back(grid_->centre(node));
-            }
-            const Read read = distances_at(middles, level, lod);
+            const double detail =
+                at > base_ ? terms::cell_lod(generator_->planet(), level_at(at)) : 0.0;
+            const std::vector<DVec3> middles = middles_of(nodes);
+            const Read read = distances_at(middles, level, lod, detail);
             std::vector<grid::Key> next;
             std::vector<std::size_t> crossing;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
@@ -195,10 +236,19 @@ private:
                 probes_.emplace(grid::code(nodes[n]), probe);
             }
             if (!crossing.empty()) {
-                planes(nodes, middles, read.under, crossing, size, level, lod);
+                planes(nodes, middles, read.under, crossing, size, level, lod, detail);
             }
             nodes = std::move(next);
         }
+    }
+
+    [[nodiscard]] std::vector<DVec3> middles_of(const std::vector<grid::Key>& nodes) const {
+        std::vector<DVec3> middles;
+        middles.reserve(nodes.size());
+        for (const grid::Key node : nodes) {
+            middles.push_back(grid_->centre(node));
+        }
+        return middles;
     }
 
     // What the generator gives at a node's middle `distance` out of the solid, but its surface.
@@ -238,7 +288,7 @@ private:
     // across it.
     void planes(const std::vector<grid::Key>& nodes, const std::vector<DVec3>& middles,
                 const std::vector<Cell>& under, const std::vector<std::size_t>& crossing,
-                double size, int level, double lod) {
+                double size, int level, double lod, double detail) {
         constexpr std::array<DVec3, 3> axes{DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0},
                                             DVec3{0.0, 0.0, 1.0}};
         const double step = size / 2.0;
@@ -250,7 +300,7 @@ private:
                 points.push_back(middles[n] - (axis * step));
             }
         }
-        const Read read = distances_at(points, level, lod);
+        const Read read = distances_at(points, level, lod, detail);
         const std::vector<double>& distances = read.distances;
         for (std::size_t f = 0; f < crossing.size(); ++f) {
             const std::size_t n = crossing[f];
@@ -302,20 +352,27 @@ private:
     }
 
     // The distance at each point, between the columns about it, the cell each lies over and how
-    // far the ground's detail too fine for them could move it.
+    // far the ground's detail too fine for them could move it. With `detail`, the seeded layers
+    // down to it raise the ground, and what's finer is the layers'.
     struct Read {
         std::vector<double> distances;
         std::vector<Cell> under;
         std::vector<double> rests;
     };
-    Read distances_at(const std::vector<DVec3>& points, int level, double lod) {
+    Read distances_at(const std::vector<DVec3>& points, int level, double lod, double detail) {
         std::vector<Between> between;
         between.reserve(points.size());
+        std::vector<Smoothly> smoothly;
         std::vector<Cell> wanted;
-        wanted.reserve(points.size() * 4);
+        wanted.reserve(points.size() * (detail > 0.0 ? 20 : 4));
         for (const DVec3 point : points) {
             between.push_back(around(point, level));
             wanted.insert(wanted.end(), between.back().cells.begin(), between.back().cells.end());
+            if (detail > 0.0) {
+                smoothly.push_back(smoothly_between(point, level));
+                wanted.insert(wanted.end(), smoothly.back().cells.begin(),
+                              smoothly.back().cells.end());
+            }
         }
         make_columns(wanted, lod);
         Read read;
@@ -326,10 +383,27 @@ private:
             const double radius = glm::length(points[n]);
             double distance = 0.0;
             double rest = 0.0;
+            double slope = 0.0;
+            double ground = 0.0;
             for (std::size_t k = 0; k < 4; ++k) {
                 const Generator::Column& column = columns_.at(slot(between[n].cells.at(k)));
-                distance += between[n].weights.at(k) * column.sample(radius).distance;
-                rest += between[n].weights.at(k) * column.rest();
+                const double weight = between[n].weights.at(k);
+                distance += weight * column.sample(radius).distance;
+                rest += weight * column.rest();
+                slope += weight * column.slope();
+                ground += weight * column.ground();
+            }
+            if (detail > 0.0) {
+                // Many nodes to a cell, the ground's taken smoothly between them, not in facets a
+                // cell across, and raised by the layers; raised, it comes nearer across its slope.
+                double smooth = 0.0;
+                for (std::size_t k = 0; k < 16; ++k) {
+                    smooth += smoothly[n].weights.at(k) *
+                              columns_.at(slot(smoothly[n].cells.at(k))).ground();
+                }
+                distance -= (smooth - ground + raised(points[n], rest, detail)) /
+                            std::sqrt(1.0 + (slope * slope));
+                rest = left(rest, detail);
             }
             read.distances.push_back(distance);
             read.under.push_back(between[n].cells[0]);
@@ -365,6 +439,38 @@ private:
                 .weights = {(1.0 - wi) * (1.0 - wj), wi * (1.0 - wj), (1.0 - wi) * wj, wi * wj}};
     }
 
+    // The sixteen cells about a point, four along each way, and how much each counts in a
+    // Catmull-Rom spline through their columns: smooth across the cells, through each middle.
+    struct Smoothly {
+        std::array<Cell, 16> cells;
+        std::array<double, 16> weights{};
+    };
+    static Smoothly smoothly_between(DVec3 point, int level) {
+        const CellPlace place = place_under(up_at(point), level);
+        const auto spline = [](double t) {
+            const double t2 = t * t;
+            const double t3 = t2 * t;
+            return std::array{(-t3 + (2.0 * t2) - t) / 2.0, ((3.0 * t3) - (5.0 * t2) + 2.0) / 2.0,
+                              ((-3.0 * t3) + (4.0 * t2) + t) / 2.0, (t3 - t2) / 2.0};
+        };
+        const int first_i = place.i < 0.0 ? -2 : -1;
+        const int first_j = place.j < 0.0 ? -2 : -1;
+        const auto along_i = spline(place.i < 0.0 ? 1.0 + place.i : place.i);
+        const auto along_j = spline(place.j < 0.0 ? 1.0 + place.j : place.j);
+        Smoothly found;
+        for (std::size_t b = 0; b < 4; ++b) {
+            for (std::size_t a = 0; a < 4; ++a) {
+                const int di = first_i + static_cast<int>(a);
+                const int dj = first_j + static_cast<int>(b);
+                found.cells.at((4 * b) + a) =
+                    next_to(place.cell, di, dj)
+                        .value_or(next_to(place.cell, di, 0).value_or(place.cell));
+                found.weights.at((4 * b) + a) = along_i.at(a) * along_j.at(b);
+            }
+        }
+        return found;
+    }
+
     static std::uint64_t slot(Cell cell) { return (index_of(cell) << 5U) | cell.level; }
 
     void make_columns(const std::vector<Cell>& wanted, double lod) {
@@ -397,6 +503,9 @@ private:
     const grid::Grid* grid_;
     grid::Key key_;
     std::uint8_t levels_;
+    Layered layered_;
+    std::uint8_t base_; // as base_of
+    std::uint64_t seed_;
     std::unordered_map<std::uint64_t, Probe> probes_;
     std::unordered_map<std::uint64_t, Generator::Column> columns_;
 };
@@ -407,10 +516,10 @@ grid::Grid grid_of(const Generator& generator) {
     return {generator.layers().ceiling(), generator.layers().thickness};
 }
 
-Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key,
-            std::uint8_t levels) {
+Filled fill(const Generator& generator, const grid::Grid& grid, grid::Key key, std::uint8_t levels,
+            Layered layered) {
     HOG_ASSERT(key.depth + levels <= grid.depth(), "filled no deeper than the grid's finest");
-    const Filler filler{generator, grid, key, levels};
+    const Filler filler{generator, grid, key, levels, layered};
     auto shape = grid::Tree<grid::Shape>::grow(
         levels, [&](std::uint8_t depth, std::uint32_t x, std::uint32_t y, std::uint32_t z) {
             return filler.shape(depth, x, y, z);

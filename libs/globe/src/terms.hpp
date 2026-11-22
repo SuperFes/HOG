@@ -36,6 +36,7 @@ enum class Term : std::uint8_t {
     Basement = 18,
     Beach = 19,
     Bedding = 20,
+    Layers = 21,
 };
 
 struct Context {

@@ -245,6 +245,24 @@ Each step is its own commit with tests, and the world stays playable after each.
    narrower than the read, crags and rubble aren't yet in it.
 6. **Seeded layers.** Unique-scale leaves and the layers under them. Tests: a read from any depth
    agrees with one from the root; seams match across neighbours; layers steer by stored numbers.
+   1. *Layered fills.* Done, off unless asked (`Layered::below`): nodes narrower than a base size
+      are read from the base's columns, smoothly between the four by four about them
+      (Catmull-Rom, so many nodes to a cell show no facets), raised by an fBm octave for each size
+      under the base, seeded by position, as strong as the columns' rest. Nothing chains, so a
+      node reads the same from any node over it and neighbours meet. Measured on the test world, a
+      32 m land node down to 0.5 m: 50 ms against 194 ms, shape 10–13 KB against 45 KB (layered
+      nodes merge where the generator's finest columns, read a cell apart, didn't). Off the
+      generator's finest ground, the median point lies 0.03 m away filled as now, 0.27–0.36 m
+      from bases of 4 to 16 m, and the layers don't bring it nearer: they're texture of about the
+      right size, not the generator's own detail. On the sea floor, where there's little finer
+      detail, a 4 m base lies 5 mm off.
+   2. *What stays unique.* Caves narrower than the base, channels, shores and crags don't show
+      in layered nodes yet; where they reach, the generator should go on finer, blended over a
+      margin so the switch leaves no seam.
+   3. *Gullies and steering.* Johansen's filter for gullies, steered by slope; layers by the
+      processes' numbers (wear, bedforms, standing) rather than one rest.
+   4. *Not stored.* Layered nodes made where they're read, the client layering under held
+      leaves.
 7. **Woods, rocks and materials from stored numbers.** No `Formed::at` behind them.
 8. **Edits as shapes** over generated nodes; a remake may drop them.
 9. **Remove** `Formed::at` as a play path, `Generator::columns`, tiles, pages and their stores;

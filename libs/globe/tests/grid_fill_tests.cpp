@@ -50,11 +50,12 @@ DVec3 spread_until(bool land, double under = 0.0) {
 
 // How far a point lies out of the solid as the filled shape has it, in metres: by the plane of
 // the leaf over it, or a node's side either way where the leaf is all solid or all open.
-double held(const hog::grid::Grid& grid, Key key, const Filled& filled, DVec3 point) {
-    const Key foot = grid.key_at(point, static_cast<std::uint8_t>(key.depth + levels)).value();
-    const auto down = [&](std::uint32_t at, std::uint32_t from) { return at - (from << levels); };
+double held(const hog::grid::Grid& grid, Key key, const Filled& filled, DVec3 point,
+            std::uint8_t deep = levels) {
+    const Key foot = grid.key_at(point, static_cast<std::uint8_t>(key.depth + deep)).value();
+    const auto down = [&](std::uint32_t at, std::uint32_t from) { return at - (from << deep); };
     const auto leaf =
-        filled.shape.at(levels, down(foot.x, key.x), down(foot.y, key.y), down(foot.z, key.z));
+        filled.shape.at(deep, down(foot.x, key.x), down(foot.y, key.y), down(foot.z, key.z));
     const Key over = foot.ancestor(static_cast<std::uint8_t>(key.depth + leaf.depth));
     const double side = grid.size(over.depth);
     if (!leaf.value.crosses()) {
@@ -224,6 +225,48 @@ int rough_over_combined(const hog::grid::Tree<hog::grid::Shape>& shape, std::vec
         }
     }
     return unknown;
+}
+
+// Each crossed node of `shape` `depth` deep, by where it lies among that depth's.
+template <typename Visit>
+void each_crossed(const hog::grid::Tree<hog::grid::Shape>& shape, std::uint8_t depth,
+                  const Visit& visit) {
+    const std::uint32_t side = 1U << depth;
+    for (std::uint32_t code = 0; code < side * side * side; ++code) {
+        const std::uint32_t x = code % side;
+        const std::uint32_t y = (code / side) % side;
+        const std::uint32_t z = code / (side * side);
+        const auto here = shape.at(depth, x, y, z);
+        if (here.depth == depth && here.value.crosses()) {
+            visit(x, y, z, here.value);
+        }
+    }
+}
+
+// How many nodes of `part` down to `reach` its root's `within` deep under `whole`'s at `offset`
+// among that depth's, and how many of those differ, where both hold them.
+std::pair<int, int> unlike_nodes(const hog::grid::Tree<hog::grid::Shape>& part,
+                                 const hog::grid::Tree<hog::grid::Shape>& whole, std::uint8_t reach,
+                                 std::uint8_t within, std::array<std::uint32_t, 3> offset) {
+    int compared = 0;
+    int unlike = 0;
+    for (std::uint8_t depth = 0; depth <= reach; ++depth) {
+        const std::uint32_t side = 1U << depth;
+        const auto at = static_cast<std::uint8_t>(within + depth);
+        for (std::uint32_t code = 0; code < side * side * side; ++code) {
+            const std::uint32_t x = code % side;
+            const std::uint32_t y = (code / side) % side;
+            const std::uint32_t z = code / (side * side);
+            const auto here = part.at(depth, x, y, z);
+            const auto there = whole.at(at, (offset[0] << depth) + x, (offset[1] << depth) + y,
+                                        (offset[2] << depth) + z);
+            if (here.depth == depth && there.depth == at) {
+                ++compared;
+                unlike += here.value == there.value ? 0 : 1;
+            }
+        }
+    }
+    return {compared, unlike};
 }
 
 } // namespace
@@ -591,6 +634,104 @@ TEST_CASE("a node is as rough as the nodes under it combined or a little more", 
     CHECK(median > 0.0);
     CHECK(median < 2.0);
     CHECK(high < 3.0);
+}
+
+TEST_CASE("under the layers' base a node reads the same filled from any node over it",
+          "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const DVec3 ground =
+        up * hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    // The finest three depths filled are layered.
+    const auto foot = static_cast<std::uint8_t>(grid.depth() - 1);
+    const hog::globe::Layered layered{.below = grid.size(static_cast<std::uint8_t>(foot - 2))};
+    const Key over = grid.key_at(ground, static_cast<std::uint8_t>(foot - levels)).value();
+    const Filled whole = fill(world, grid, over, levels, layered);
+    // Two children beside each other read alike filled on their own, so they meet as filled
+    // whole.
+    int compared = 0;
+    for (const std::uint32_t octant : {0U, 1U}) {
+        const Key child = over.child(octant);
+        const Filled part =
+            fill(world, grid, child, static_cast<std::uint8_t>(levels - 1), layered);
+        const auto [count, unlike] =
+            unlike_nodes(part.shape, whole.shape, static_cast<std::uint8_t>(levels - 1), 1,
+                         {child.x & 1U, child.y & 1U, child.z & 1U});
+        CHECK(unlike == 0);
+        compared += count;
+    }
+    CHECK(compared > 100);
+}
+
+TEST_CASE(
+    "seeded layers stray from their base no further than its roughness and as strong as asked",
+    "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const DVec3 up = spread_until(true);
+    const DVec3 ground =
+        up * hog::globe::ground_below(world, up, hog::globe::voxel_lod(world)).value();
+    const Key key =
+        grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - levels - 2)).value();
+    // Read from nodes two deep under the filled one.
+    constexpr std::uint8_t base = 2;
+    const double below = grid.size(static_cast<std::uint8_t>(key.depth + base));
+    const auto with = [&](double strength) {
+        return fill(world, grid, key, levels, {.below = below, .strength = strength});
+    };
+    const Filled none = with(0.0);
+    constexpr double strength = 1.0;
+    const Filled once = with(strength);
+    const Filled twice = with(2.0 * strength);
+    int compared = 0;
+    int further = 0;
+    int unlike = 0;
+    double moved = 0.0;
+    for (std::uint8_t depth = base + 1; depth <= levels; ++depth) {
+        const double size = grid.size(static_cast<std::uint8_t>(key.depth + depth));
+        each_crossed(
+            once.shape, depth,
+            [&](std::uint32_t x, std::uint32_t y, std::uint32_t z, const hog::grid::Surface& one) {
+                const auto two = twice.shape.at(depth, x, y, z);
+                if (two.depth != depth || !two.value.crosses()) {
+                    return;
+                }
+                // Its base, split over it so its own, and alike in each.
+                const auto shift = static_cast<std::uint32_t>(depth - base);
+                const auto from =
+                    once.shape.at(base, x >> shift, y >> shift, z >> shift).value.roughness();
+                REQUIRE(from);
+                const double rough =
+                    from.value() * grid.size(static_cast<std::uint8_t>(key.depth + base));
+                // What the layers add, once more; and without them, by the plane of the leaf over
+                // it within the tolerance it merged by.
+                const double added = (two.value.distance() - one.distance()) * size;
+                const auto flat = none.shape.at(depth, x, y, z);
+                const auto apart = static_cast<std::uint32_t>(depth - flat.depth);
+                const auto within = [&](std::uint32_t at, std::uint32_t leaf) {
+                    return ((static_cast<double>(at) + 0.5) / static_cast<double>(1U << apart)) -
+                           (static_cast<double>(leaf) + 0.5);
+                };
+                const std::uint32_t lx = x >> apart;
+                const std::uint32_t ly = y >> apart;
+                const std::uint32_t lz = z >> apart;
+                if (flat.value.crosses()) {
+                    const DVec3 offset{within(x, lx), within(y, ly), within(z, lz)};
+                    const double bare =
+                        (flat.value.distance() + glm::dot(flat.value.normal(), offset)) *
+                        grid.size(static_cast<std::uint8_t>(key.depth + flat.depth));
+                    unlike += std::abs((one.distance() * size) - bare - added) > 0.3 ? 1 : 0;
+                }
+                further += std::abs(added) > 1.25 * strength * rough ? 1 : 0;
+                moved += std::abs(added);
+                ++compared;
+            });
+    }
+    REQUIRE(compared > 100);
+    CHECK(moved > 0.0);
+    CHECK(further * 50 < compared);
+    CHECK(unlike * 20 < compared);
 }
 
 TEST_CASE("pieces filled apart graft into what's filled whole", "[globe][grid]") {
@@ -1006,5 +1147,75 @@ TEST_CASE("woods' share of filling a page", "[.bench][globe][grid]") {
                      << filled.shape.encode().size() << "); a sample "
                      << woods / static_cast<double>(samples) * 1e6 << " us, mean cover "
                      << sum / static_cast<double>(samples));
+    }
+}
+
+TEST_CASE("layered fills against the generator's own", "[.bench][globe][grid]") {
+    const auto& world = hog::testing::small_world();
+    const hog::grid::Grid grid = grid_of(world);
+    const auto timed = [](const auto& made) {
+        const auto started = std::chrono::steady_clock::now();
+        Filled filled = made();
+        return std::pair{
+            std::move(filled),
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()};
+    };
+    const auto median = [](std::vector<double> values) {
+        std::ranges::sort(values);
+        return values.empty() ? 0.0 : values[values.size() / 2];
+    };
+    for (const bool land : {true, false}) {
+        const DVec3 up = spread_until(land, 20.0);
+        const double lod = hog::globe::voxel_lod(world);
+        const DVec3 ground = up * hog::globe::ground_below(world, up, lod).value();
+        constexpr std::uint8_t deep = 6;
+        const Key key = grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - deep)).value();
+        const double side = grid.size(key.depth);
+        // Points on the ground as the generator has it at its finest, across the node.
+        const DVec3 axis = std::abs(up.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+        const DVec3 east = glm::normalize(glm::cross(axis, up));
+        const DVec3 north = glm::cross(up, east);
+        std::vector<DVec3> points;
+        for (int a = -6; a <= 6; ++a) {
+            for (int b = -6; b <= 6; ++b) {
+                const DVec3 way = glm::normalize(
+                    grid.centre(key) +
+                    (((east * static_cast<double>(a)) + (north * static_cast<double>(b))) * side /
+                     14.0));
+                const auto found = hog::globe::ground_below(world, way, lod);
+                if (found && grid.key_at(way * *found, key.depth) == key) {
+                    points.push_back(way * *found);
+                }
+            }
+        }
+        const auto [plain, plain_time] = timed([&] { return fill(world, grid, key, deep); });
+        for (const std::uint8_t base : {std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{3}}) {
+            const double below = grid.size(static_cast<std::uint8_t>(key.depth + base));
+            const auto [flat, flat_time] = timed(
+                [&] { return fill(world, grid, key, deep, {.below = below, .strength = 0.0}); });
+            const auto [layered, layered_time] =
+                timed([&] { return fill(world, grid, key, deep, {.below = below}); });
+            std::vector<double> own;
+            std::vector<double> bare;
+            std::vector<double> seeded;
+            std::vector<double> added;
+            for (const DVec3 point : points) {
+                const double p = held(grid, key, plain, point, deep);
+                const double f = held(grid, key, flat, point, deep);
+                const double l = held(grid, key, layered, point, deep);
+                own.push_back(std::abs(p));
+                bare.push_back(std::abs(f));
+                seeded.push_back(std::abs(l));
+                added.push_back(std::abs(l - f));
+            }
+            std::println(
+                "{} points; {} base {:.1f} m: plain {:.0f} ms, layered {:.0f} ms ({:.0f} bare); "
+                "off the generator's finest, median plain {:.3f} m, bare {:.3f}, "
+                "layered {:.3f}; layers add {:.3f}; shape bytes {} {} {}",
+                points.size(), land ? "land" : "sea", below, plain_time * 1e3, layered_time * 1e3,
+                flat_time * 1e3, median(own), median(bare), median(seeded), median(added),
+                plain.shape.encode().size(), flat.shape.encode().size(),
+                layered.shape.encode().size());
+        }
     }
 }
