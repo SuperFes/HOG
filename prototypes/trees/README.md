@@ -32,6 +32,10 @@ Sheets land in `out/`.
 | `sunvis.py` | each vertex's own visibility toward any light, fitted as 4 spherical-harmonic numbers |
 | `lod_sheet.py` | one tree at true size over distances: truth, mesh, thinned, impostors by view count |
 | `forest_sheet.py` | a 1080p field of trees, all full mesh vs all LOD, and a flick GIF between them |
+| `terrain.py` | 24 km of hills, forest density and kind fields, trees hashed one per 7 m cell |
+| `far.py` | far forest: impostor truth with traced crown shadows; canopy layer of explicit crowns and stand statistics |
+| `far_sheet.py` | from a summit to 20 km at 1080p: truth vs painted, layer, hybrid, crowns, with flick GIFs |
+| `test_far.py` | `.venv/bin/python -m unittest test_far`: hash, stand maths, mips, crown fit |
 
 Self-organising species calibrate once (tens of seconds each); results cache in
 `out/calibrated.json`, keyed by the species' numbers.
