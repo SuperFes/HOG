@@ -113,3 +113,41 @@ after, and strike it off.
 - **Rubble** wants per-cell values with hard edges.
 - **Ground textures at 2.5 m** want smoothing and averaging across cells, and their own rules
   on cliff sides. The shapes hold up at that detail; only the texturing lets them down.
+
+## Trees (prototypes/trees)
+
+What the tree prototypes still lack, from their sheets in `prototypes/trees/out/`. Species are
+rule files in `prototypes/trees/species/`; a fix that's data belongs there, not in code.
+
+- **Leaves thinning with distance** (not started): each leaf drops past its own distance while
+  the rest grow to keep the crown's cover, thin twigs drop under a pixel wide, then a crossfade
+  into the impostor. The oak is 600k triangles and the willow 1.3M whole.
+- **Impostor views lined up by depth**: the four blended views don't meet, so thin trunks fade
+  out; one step along the baked depth would line them up. Cells are 256 px, soft at 40 m (still
+  mesh range). A season's colour is baked in; a turn mask and palette in the atlas would let one
+  bake cover autumn.
+- **Shadows by distance**: mesh casters near, impostor casters in far cascades refreshed every
+  few seconds, past them a march toward the sun through the woods field's canopy density (as
+  cloud shadows), and sky occlusion under woods baked once.
+- **Wind**: no sway yet. Trunk, limbs, twigs and leaf flutter in a hierarchy, driven by the gust
+  field the grass uses; fronds bend along their strips.
+- **Falling leaves** as particles spawned from crown leaf positions at the drop rate; litter is a
+  solid, too saturated carpet that should decay and drift.
+- **Spruce up close** looks papery: sprays too large and solid. Finer needles, smaller cards,
+  more layers near.
+- **Pine needles up close** are flat star cards; needle-bundle strips within a few metres.
+- **Narrow-leaved species sparse from afar** (willow, eucalyptus): lanceolate leaves cover little,
+  so the crown reads bare at 30 m. More leaves per twiglet, or cover kept by the thinning above.
+- **Trunks too thin for their age** on self-organising species (oak at 30 years): the pipe model
+  alone sets girth; a basal-area rule by age would. Oak's calibration hits the vigour bound (5).
+- **Bark by age**: furrows stretch where a thin stem wraps the tile once; young oaks should be
+  smooth and furrow with age. Relief is shading only: trunk silhouettes, root flare and branch
+  collars (limb tubes just intersect) want geometry near.
+- **Oak autumn** stops at yellow; it should go russet. Palettes progress too slowly past the
+  first colour.
+- **Leaf undersides** paler and matte, per-species wax sheen; flowers, catkins, cones, coconuts.
+- **Beech and larch**: beech's crown is thin and open where it should be dense, larch's sprays
+  too thin to read whole.
+- **Into the engine**: growth to `libs/flora` in C++ with golden tests (same seed, same tree on
+  every platform), the species files read as they are, then the persistent plant store
+  (`docs/woods.md` step 5) and profiling every LOD step on the 860M.
