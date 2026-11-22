@@ -209,20 +209,25 @@ class Scene:
 
 
 def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.35),
-           fit=None, samples=8, sky=(0.60, 0.70, 0.85), view=None):
+           fit=None, samples=8, sky=(0.60, 0.70, 0.85), view=None, impostors=None,
+           fov_deg=30.0, ground=True):
     """An image of `scene` framed to its bounds (or `fit` = (lo, hi)), the ground under it."""
     ctx = context()
+    if fit is None and not scene.parts and impostors:
+        fit = (min(i.centre - i.radius for i in impostors), max(i.centre + i.radius
+                                                                 for i in impostors))
     lo, hi = fit if fit is not None else scene.bounds()
     centre = (lo + hi) / 2
     extent = hi - lo
     radius = max(extent[0], extent[2]) * 0.75 + 1.0
     full = Scene()
     full.parts = list(scene.parts)
-    full.add(ground_disc(radius * 3))
+    if ground:
+        full.add(ground_disc(max(radius * 3, 60.0)))
 
     w, h = size
     aspect = w / h
-    fov = math.radians(30)
+    fov = math.radians(fov_deg)
     height = extent[1]
     span = max(height / 2 * 1.08, max(extent[0], extent[2]) / 2 / aspect * 1.08, 0.5)
     dist = span / math.tan(fov / 2) + max(extent[0], extent[2]) / 2
@@ -315,6 +320,11 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     for _lit, shade, mat, tex, _b in vaos:
         bind(depth_prog, mat, tex)
         shade.render()
+    drawer = None
+    if impostors:
+        from impostor import Drawer
+        drawer = Drawer(impostors)
+        drawer.draw(light_proj, sun, True, {"light_proj": light_proj})
 
     colour = ctx.renderbuffer(size, components=4, samples=samples)
     zbuf = ctx.depth_renderbuffer(size, samples=samples)
@@ -332,6 +342,14 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
         lit.render()
         if tex[0] is not None:
             ctx.disable_direct(alpha_to_coverage)
+    if drawer is not None:
+        ctx.enable_direct(alpha_to_coverage)
+        drawer.draw(view_proj, eye, False, {
+            "light_proj": light_proj, "sun": tuple(sun), "sun_colour": (3.2, 2.95, 2.6),
+            "sky_colour": (0.55, 0.70, 1.0), "ground_colour": (0.18, 0.20, 0.12),
+            "eye": tuple(eye), "exposure": 1.0}, shadow_tex=depth)
+        ctx.disable_direct(alpha_to_coverage)
+        drawer.release()
 
     resolved = ctx.framebuffer(ctx.renderbuffer(size, components=4))
     ctx.copy_framebuffer(resolved, fbo)
