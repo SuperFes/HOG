@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -31,9 +32,9 @@ using hog::grid::Key;
 namespace {
 
 // 1 m nodes 11 deep: a piece of 64 m whose low corner lies 64 m below the planet's centre on x,
-// its finest nodes marked with `body` wherever their middles lie under `level` and short of `shore`
-// metres along y; the root's piece round it holds no water, the finer piece's place in it left open
-// for it.
+// its finest nodes marked with `body` wherever their middles lie less than `over` metres over
+// `level` and short of `shore` metres along y; the root's piece round it holds no water, the finer
+// piece's place in it left open for it.
 constexpr Key piece_root{.depth = 5, .x = 15, .y = 16, .z = 16};
 constexpr std::uint8_t top_levels = 5;
 constexpr std::uint8_t piece_levels = 6;
@@ -51,10 +52,12 @@ std::shared_ptr<const hog::grid::Piece> water_piece(Key root,
 
 struct Water {
     hog::grid::Grid grid{1000.0, 1.0};
+
+    double over = 2.0;
     hog::client::PiecesSnapshot pieces;
 
-    explicit Water(hog::grid::Water::Value body)
-        : pieces{grid, {{Key{}, top()}, {piece_root, piece(piece_root, body)}}} {}
+    explicit Water(hog::grid::Water::Value body, double reach = 2.0)
+        : over{reach}, pieces{grid, {{Key{}, top()}, {piece_root, piece(piece_root, body)}}} {}
 
     [[nodiscard]] static std::shared_ptr<const hog::grid::Piece> top() {
         using Leaf = hog::grid::Tree<hog::grid::Water>::Leaf;
@@ -81,7 +84,7 @@ struct Water {
         return water_piece(
             root, hog::grid::Tree<hog::grid::Water>::build(piece_levels, [&](int x, int y, int z) {
                 const DVec3 middle = low + (DVec3{x + 0.5, y + 0.5, z + 0.5} * side);
-                return glm::length(middle) < level + 2.0 && middle.y < shore
+                return glm::length(middle) < level + over && middle.y < shore
                            ? body
                            : hog::grid::Water::Value{0};
             }));
@@ -197,6 +200,27 @@ TEST_CASE("blocks of water meet finer ones on the sea's surface", "[client][wate
         }
     }
     CHECK(triangles > 0);
+}
+
+TEST_CASE("cells coarser than the water's marks still find its surface", "[client][water_field]") {
+    // Marked as the server marks them: some of a node under the level, so a coarse cell's corner
+    // over the water lies in nodes wholly over it.
+    const Water water{1, std::numbers::sqrt3 / 2.0};
+    hog::grid::WaterBodies bodies;
+    bodies.bodies.emplace(1U, hog::grid::Sea{.level = level});
+    constexpr double cell = 8.0;
+    const hog::terrain::BlockMesh mesh = meshed(water, bodies, {.node = piece_root, .cells = 3});
+    REQUIRE_FALSE(mesh.indices.empty());
+    int inland = 0;
+    for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
+        const DVec3 at = placed(mesh, vertex);
+        CHECK(std::abs(glm::length(at) - level) < 1e-4);
+        // The water ends only at the shore, not across the open water short of it.
+        if ((vertex.corner & hog::client::shore_corner) != 0 && at.y < shore - cell) {
+            ++inland;
+        }
+    }
+    CHECK(inland == 0);
 }
 
 TEST_CASE("only a node marked somewhere may hold water", "[client][water_field]") {

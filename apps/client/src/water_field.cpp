@@ -130,18 +130,27 @@ Crossed WaterField::crossing(I64Vec3 low, I64Vec3 high) {
     const std::optional<Wet> to = wet(high);
     const DVec3 a = at(low);
     const DVec3 b = at(high);
-    if (!from || !to) {
-        // The water ends here, at its wet end.
+    // A dry end over the wet one's level is air over the water, dry only for lying in nodes wholly
+    // over it; the water ends where a dry end is under its level, at the ground.
+    bool ends = !from && !to;
+    if (from && !to) {
+        ends = glm::length(b) <= from->level;
+    } else if (!from && to) {
+        ends = glm::length(a) <= to->level;
+    }
+    if (ends) {
         const DVec3 end = from ? a : b;
         return {
             .at = end, .normal = Vec3{glm::normalize(end)}, .materials = {}, .share = water_ends};
     }
-    const double over_a = glm::length(a) - from->level;
-    const double over_b = glm::length(b) - to->level;
-    const double t = from->level == to->level ? meets_sphere(a, b, from->level)
-                                              : std::clamp(over_a / (over_a - over_b), 0.0, 1.0);
+    const Wet& wet_a = from ? *from : *to;
+    const Wet& wet_b = to ? *to : *from;
+    const double over_a = glm::length(a) - wet_a.level;
+    const double over_b = glm::length(b) - wet_b.level;
+    const double t = wet_a.level == wet_b.level ? meets_sphere(a, b, wet_a.level)
+                                                : std::clamp(over_a / (over_a - over_b), 0.0, 1.0);
     const DVec3 crossed = a + ((b - a) * t);
-    const Wet& under = over_a < 0.0 ? *from : *to;
+    const Wet& under = over_a < 0.0 ? wet_a : wet_b;
     return {.at = crossed,
             .normal = Vec3{glm::normalize(crossed)},
             .materials = {static_cast<std::uint16_t>(globe::rise_of(under.rise) |
