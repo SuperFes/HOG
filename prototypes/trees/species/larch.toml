@@ -63,3 +63,13 @@ repeat = 0.6
 shoot_radius = 0.04
 droop = 30
 layers = 3
+
+[bark]
+# Reddish-brown plates split by dark fissures.
+kind = "plated"
+plates = 55
+stretch = [1.0, 1.8]
+colour = [0.26, 0.13, 0.08]
+crack = [0.05, 0.03, 0.025]
+tile = 0.45
+relief = 0.012

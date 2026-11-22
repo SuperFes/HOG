@@ -72,17 +72,19 @@ def _frame(t):
     return u, np.cross(t, u)
 
 
-def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None):
-    """Positions, normals, colours and indices of the wood as tubes along each chain.
+def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None, tile=0.6):
+    """Positions, normals, colours, indices and bark coordinates of the wood as tubes along
+    each chain: u around the stem, v along it, both in `tile` metres, so bark keeps its size.
 
     Rings follow parallel-transported frames so tubes don't twist; a branch's first ring sits
-    at its parent node, sunk into the parent's tube, and takes its own radius."""
+    at its parent node, sunk into the parent's tube, and takes its own radius. Each ring has a
+    seam vertex twice, so the bark wraps without smearing."""
     if sk.radius is None:
         sk.pipe_radii()
     if sides_for is None:
         def sides_for(r):
-            return 12 if r > 0.15 else 8 if r > 0.04 else 5 if r > 0.012 else 3
-    P, N, C, I = [], [], [], []
+            return 16 if r > 0.15 else 10 if r > 0.04 else 5 if r > 0.012 else 3
+    P, N, C, I, UV = [], [], [], [], []
     count = 0
     rng = np.random.default_rng(7)
     base = np.array(colour)
@@ -105,10 +107,12 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None):
         tang = np.where(lens > 1e-9, tang / np.maximum(lens, 1e-9), np.array([0.0, 1.0, 0.0]))
         u, v = _frame(tang[0])
         tint = base * (0.85 + 0.3 * rng.random())
-        if getattr(sk, "colour", None) is not None:
-            tint = sk.colour[run[min(1, len(run) - 1)]] * (0.9 + 0.2 * rng.random())
-        ang = np.linspace(0, 2 * np.pi, sides, endpoint=False)
-        rings = []
+        colours = getattr(sk, "colour", None)
+        # Bark wraps a whole number of times around, as near its true size as that allows.
+        wraps = max(1, int(round(2 * np.pi * rad[1] / tile)))
+        along = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+        offset = rng.random()
+        ang = np.linspace(0, 2 * np.pi, sides + 1)
         for k in range(len(pts)):
             if k > 0:
                 # Parallel transport u along the curve.
@@ -117,21 +121,23 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None):
                 u = u / nu if nu > 1e-9 else _frame(tang[k])[0]
                 v = np.cross(tang[k], u)
             ring_n = np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * v
-            rings.append(ring_n)
             P.append(pts[k] + ring_n * rad[k])
             N.append(ring_n)
-            C.append(np.tile(tint, (sides, 1)))
+            here = tint if colours is None else colours[run[k]] * (0.95 + 0.1 * rng.random())
+            C.append(np.tile(here, (sides + 1, 1)))
+            UV.append(np.stack([ang / (2 * np.pi) * wraps,
+                                np.full(sides + 1, along[k] / tile + offset)], 1))
+        ring = sides + 1
         k = np.arange(len(pts) - 1)[:, None]
-        s = np.arange(sides)[None, :]
-        a = count + k * sides + s
-        b = a + sides
-        a1 = count + k * sides + (s + 1) % sides
-        b1 = a1 + sides
-        I.append(np.stack([a, b, b1], -1).reshape(-1, 3))
-        I.append(np.stack([a, b1, a1], -1).reshape(-1, 3))
-        count += len(pts) * sides
+        sidx = np.arange(sides)[None, :]
+        a = count + k * ring + sidx
+        b = a + ring
+        I.append(np.stack([a, b, b + 1], -1).reshape(-1, 3))
+        I.append(np.stack([a, b + 1, a + 1], -1).reshape(-1, 3))
+        count += len(pts) * ring
     if not P:
         z = np.zeros((0, 3), np.float32)
-        return z, z, z, np.zeros((0, 3), np.uint32)
+        return z, z, z, np.zeros((0, 3), np.uint32), np.zeros((0, 2), np.float32)
     return (np.concatenate(P).astype(np.float32), np.concatenate(N).astype(np.float32),
-            np.concatenate(C).astype(np.float32), np.concatenate(I).astype(np.uint32))
+            np.concatenate(C).astype(np.float32), np.concatenate(I).astype(np.uint32),
+            np.concatenate(UV).astype(np.float32))

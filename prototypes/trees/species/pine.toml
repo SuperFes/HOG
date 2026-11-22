@@ -31,3 +31,16 @@ repeat = 0.5
 needle_years = 3
 droop = 15
 layers = 3
+
+[bark]
+# Plates with papery flakes, tinted by the stem: grey and thick low, thin orange high up.
+kind = "plated"
+plates = 70
+stretch = [1.0, 2.0]
+flaky = 1.0
+colour = [0.40, 0.38, 0.36]
+crack = [0.10, 0.09, 0.08]
+tile = 0.5
+relief = 0.014
+tint_by_stem = true
+tint_gain = 2.4

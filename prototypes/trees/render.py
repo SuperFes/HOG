@@ -50,6 +50,7 @@ uniform sampler2D turn_mask;
 uniform bool textured;
 uniform bool masked;
 uniform float cutoff;
+uniform float relief;  // bark: metres of height the texture's alpha spans; 0 for foliage
 uniform vec3 sun;
 uniform vec3 sun_colour;
 uniform vec3 sky_colour;
@@ -79,12 +80,27 @@ float lit() {
 void main() {
     vec4 tex = textured ? texture(albedo, v_uv) : vec4(1.0);
     float alpha = 1.0;
-    if (textured) {
+    vec3 n0 = normalize(v_normal);
+    float cavity = 1.0;
+    if (textured && relief > 0.0) {
+        // Bark relief from the height in alpha, by surface gradients (no tangents needed).
+        vec3 dpdx = dFdx(v_pos);
+        vec3 dpdy = dFdy(v_pos);
+        float h = tex.a * relief;
+        float dhx = dFdx(h);
+        float dhy = dFdy(h);
+        vec3 r1 = cross(dpdy, n0);
+        vec3 r2 = cross(n0, dpdx);
+        float det = dot(dpdx, r1);
+        vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+        n0 = normalize(abs(det) * n0 - grad);
+        cavity = mix(0.45, 1.0, smoothstep(0.0, 0.8, tex.a));
+    } else if (textured) {
         // Sharpened alpha to coverage: crisp edges that still antialias under MSAA.
         alpha = (tex.a - cutoff) / max(fwidth(tex.a), 1e-4) + 0.5;
         if (alpha <= 0.0) discard;
     }
-    vec3 n = normalize(v_normal);
+    vec3 n = n0;
     vec3 to_eye = normalize(eye - v_pos);
     if (translucency > 0.0 && dot(n, to_eye) < 0.0) n = -n;
     float shade = lit();
@@ -101,7 +117,7 @@ void main() {
         float m = texture(turn_mask, v_uv).r;
         turn = smoothstep(m - 0.08, m + 0.08, turn * 1.16 - 0.08);
     }
-    vec3 base = mix(v_colour, v_autumn.rgb, turn) * tex.rgb;
+    vec3 base = mix(v_colour, v_autumn.rgb, turn) * tex.rgb * cavity;
     vec3 c = base * (sun_colour * direct * shade + ambient)
            + base * vec3(1.25, 1.35, 0.6) * sun_colour * through * shade;
     // A faint sheen on waxy leaves toward the sun.
@@ -180,9 +196,10 @@ def ground_disc(radius, colour=(0.075, 0.10, 0.045), segments=64):
 
 
 class Material:
-    def __init__(self, texture=None, translucency=0.0, cutoff=0.5, turn_mask=None):
+    def __init__(self, texture=None, translucency=0.0, cutoff=0.5, turn_mask=None, relief=0.0):
         self.texture = texture  # RGBA float array, linear
         self.turn_mask = turn_mask  # where on the leaf autumn reaches first: 0 first, 1 last
+        self.relief = relief  # bark: metres of height in the texture's alpha
         self.translucency = translucency
         self.cutoff = cutoff
 
@@ -308,6 +325,8 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
         prog["albedo"].value = 1
         prog["textured"].value = tex is not None
         prog["cutoff"].value = mat.cutoff
+        if "relief" in prog:
+            prog["relief"].value = mat.relief
         if "masked" in prog:
             (mask or white).use(2)
             prog["turn_mask"].value = 2
@@ -337,10 +356,11 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     for lit, _shade, mat, tex, _b in vaos:
         lit_prog["translucency"].value = mat.translucency
         bind(lit_prog, mat, tex)
-        if tex[0] is not None:
+        coverage = tex[0] is not None and mat.relief <= 0
+        if coverage:
             ctx.enable_direct(alpha_to_coverage)
         lit.render()
-        if tex[0] is not None:
+        if coverage:
             ctx.disable_direct(alpha_to_coverage)
     if drawer is not None:
         ctx.enable_direct(alpha_to_coverage)

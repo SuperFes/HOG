@@ -22,6 +22,7 @@ class Species:
     params: object
     full: int = 30
     foliage: dict = dataclasses.field(default_factory=dict)
+    bark: dict = dataclasses.field(default_factory=dict)
 
     def grow(self, seed, ages):
         """Skeletons of one tree at each of `ages` years."""
@@ -61,7 +62,7 @@ def load(name, calibrated=True):
     else:
         params = palm.Params(**_fields(palm.Params, growth))
     return Species(name, model, data["kind"], params, data.get("full", 30),
-                   data.get("foliage", {}))
+                   data.get("foliage", {}), data.get("bark", {}))
 
 
 def names():

@@ -62,3 +62,13 @@ repeat = 0.8
 shoot_radius = 0.05
 droop = 28
 layers = 3
+
+[bark]
+# Thin red-brown to grey scales.
+kind = "plated"
+plates = 140
+stretch = [1.0, 1.3]
+colour = [0.20, 0.13, 0.09]
+crack = [0.06, 0.045, 0.035]
+tile = 0.35
+relief = 0.006

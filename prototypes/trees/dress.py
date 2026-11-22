@@ -7,6 +7,7 @@ import time
 
 import numpy as np
 
+import bark
 import foliage
 import species
 import textures
@@ -60,22 +61,62 @@ def foliage_of(sp, sk, seed, season=0.0):
     return mesh, mat, area, None
 
 
+_bark_cache = {}
+
+
+def bark_of(sp):
+    """A species' bark texture, its tile in metres and its relief, made once."""
+    if not sp.bark:
+        return None
+    if sp.name not in _bark_cache:
+        tex, tile = bark.make(sp.bark)
+        _bark_cache[sp.name] = (tex, tile, sp.bark.get("relief", 0.01))
+    return _bark_cache[sp.name]
+
+
+def _weathered(wood, grime):
+    """Grime splashed dark around the foot of the stem, and moss climbing its shaded north
+    side, thinning with height; both broken up so they never band."""
+    p, n, c = wood[0], wood[1], wood[2]
+    rng = np.random.default_rng(3)
+    y = p[:, 1].astype(float)
+    ragged = 0.35 * np.sin(p[:, 0] * 7.1 + p[:, 2] * 5.3) + 0.25 * np.sin(p[:, 0] * 17 - y * 3)
+    foot = np.clip((0.9 + ragged - y) / 0.9, 0, 1)
+    north = np.clip(-n[:, 2] * 0.8 + 0.2, 0, 1)
+    moss = north * np.clip((2.5 + ragged * 2 - y) / 2.5, 0, 1) * grime
+    out = c * (1 - 0.45 * grime * foot)[:, None]
+    out = out * (1 - moss[:, None]) + out * np.array([0.55, 0.85, 0.35]) * moss[:, None]
+    return (p, n, out.astype("f4"), wood[3], wood[4])
+
+
 def dressed(sp, seed, age, season=0.0):
     sk = sp.grow(seed, {age})[age]
-    bark = sp.foliage.get("bark")
-    if bark is not None and getattr(sk, "colour", None) is None:
-        # Bark by thickness: the species' bark on trunk and limbs, darker on the twigs.
-        twig = np.array(sp.foliage.get("bark_twig", (0.10, 0.07, 0.06)))
-        t = np.clip((sk.radius - 0.012) / 0.05, 0, 1)[:, None]
-        sk.colour = twig[None] * (1 - t) + np.array(bark)[None] * t
-    wood = tube_mesh(sk, colour=(0.13, 0.10, 0.08))
+    made = bark_of(sp)
+    if made is None:
+        wood = tube_mesh(sk, colour=(0.13, 0.10, 0.08))
+        wood_mat = None
+    else:
+        tex, tile, relief = made
+        if sp.bark.get("tint_by_stem") and getattr(sk, "colour", None) is not None:
+            # The texture carries the plates; the stem's own colour (orange high on a pine,
+            # grey low down) tints it.
+            sk.colour = sk.colour * sp.bark.get("tint_gain", 2.5)
+        else:
+            # The bark as drawn on trunk and limbs, the twigs their own darker shade of it.
+            twig = np.array(sp.bark.get("twig", (0.6, 0.5, 0.45)))
+            t = np.clip((sk.radius - 0.012) / 0.05, 0, 1)[:, None]
+            sk.colour = twig[None] * (1 - t) + np.ones(3)[None] * t
+        wood = tube_mesh(sk, colour=(1.0, 1.0, 1.0), tile=tile)
+        wood_mat = Material(tex, cutoff=-1.0, relief=relief)
+        wood = _weathered(wood, sp.bark.get("grime", 0.5))
     leaf_mesh, mat, area, twigs = foliage_of(sp, sk, seed, season)
     if len(area) and len(wood[0]):
         # The wood inside the crown sees little sky.
         vis = foliage.sky_visibility(wood[0].astype(float), area, cell=0.4, k=0.3)
-        wood = (wood[0], wood[1], (wood[2] * (0.3 + 0.7 * vis)[:, None]).astype("f4"), wood[3])
+        wood = (wood[0], wood[1], (wood[2] * (0.3 + 0.7 * vis)[:, None]).astype("f4"), wood[3],
+                wood[4])
     scene = Scene()
-    scene.add(wood)
+    scene.add(wood, wood_mat)
     if twigs is not None:
         scene.add(twigs)
     if leaf_mesh is not None:

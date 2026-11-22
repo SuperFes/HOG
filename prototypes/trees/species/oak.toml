@@ -22,6 +22,8 @@ voxel = 0.25
 shadow_b = 2.0
 shadow_depth = 5
 full_light = 2.0
+tip_radius = 0.005
+pipe_exponent = 2.25
 
 [foliage]
 leaf = "lobed"
@@ -35,3 +37,13 @@ spread = 0.3
 leaf_turn = "edges"
 turn_from = { sun = 0.10, edge = 0.08 }
 autumn = [[0.20, 0.17, 0.03], [0.30, 0.12, 0.03], [0.17, 0.08, 0.03]]
+
+[bark]
+# Thick, dark, deeply furrowed, broken across into blocks.
+kind = "furrowed"
+ridges = 7
+blocks = 3.0
+colour = [0.11, 0.095, 0.08]
+deep = [0.03, 0.026, 0.022]
+tile = 0.45
+relief = 0.025

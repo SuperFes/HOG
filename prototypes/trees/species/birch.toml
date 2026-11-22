@@ -54,8 +54,6 @@ branches = 8
 up = -6.0
 
 [foliage]
-bark = [0.62, 0.61, 0.57]
-bark_twig = [0.12, 0.06, 0.05]
 leaf = "ovate"
 serrate = 0.12
 aspect = 0.36
@@ -68,3 +66,10 @@ droop = 0.3
 leaf_turn = "veins"
 turn_from = { top = 0.14, exposed = 0.05 }
 autumn = [[0.45, 0.33, 0.02], [0.50, 0.28, 0.03], [0.20, 0.12, 0.05]]
+
+[bark]
+# Chalk white, dark lenticels, peeling strips over orange-tan; dark rough patches.
+kind = "birch"
+tile = 0.6
+relief = 0.004
+twig = [0.20, 0.10, 0.08]

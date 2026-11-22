@@ -1,0 +1,70 @@
+# A rainbow eucalyptus: tall straight trunk shedding bark in patches of green, blue, purple
+# and orange; a high open crown of hanging blue-green leaves.
+model = "rules"
+kind = "broadleaf"
+full = 30
+
+[growth]
+shape = "tend_flame"
+base_size = 0.45
+scale = 24.0
+scale_v = 2.5
+ratio = 0.012
+flare = 0.35
+
+[[growth.levels]]
+length = 1.0
+curve_res = 10
+curve_v = 8
+splits = 0.08
+split_angle = 15
+
+[[growth.levels]]
+length = 0.32
+length_v = 0.08
+curve_res = 6
+curve = -10
+curve_back = 25
+curve_v = 25
+down = 45
+down_v = 12
+rotate = 137
+branches = 22
+
+[[growth.levels]]
+length = 0.5
+length_v = 0.1
+curve_res = 4
+curve = 25
+curve_v = 25
+down = 45
+down_v = 10
+rotate = 137
+branches = 10
+up = -4.0
+
+[[growth.levels]]
+length = 0.45
+length_v = 0.1
+curve_res = 2
+curve_v = 15
+down = 40
+down_v = 10
+rotate = 180
+branches = 6
+up = -6.0
+
+[foliage]
+leaf = "lanceolate"
+aspect = 0.12
+colour = [0.05, 0.10, 0.07]
+size = 0.16
+per_segment = 44
+spread = 0.2
+droop = 0.7
+
+[bark]
+kind = "rainbow"
+tile = 0.7
+relief = 0.004
+twig = [0.35, 0.30, 0.25]
