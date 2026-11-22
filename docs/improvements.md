@@ -132,34 +132,44 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
     step and the full-resolution cutoff in the bake; not yet traced;
   - cells are 256 px and soft at 40 m, which is still mesh range; a season's colour is baked
     in, where a turn mask and palette in the atlas would let one bake cover autumn.
-- **Far forest** (`terrain.py`, `far.py`, `far_sheet.py`): from a summit over 24 km of hills
-  and 5.2M hashed trees, the truth draws every tree as its impostor (52 s a frame). Agreed
+- **Far forest** (`terrain.py`, `far.py`, `far_sheet.py`, `far_cache.py`): 24 km of hills and
+  5.2M hashed trees; the truth draws every tree as its relit impostor (~52 s a frame). Agreed
   shape: impostors to 1.5-3 km, thinning by rank into a canopy layer; in it, each tree's own
-  crown (an ellipsoid at its hashed place, lit as its impostor's view average) to 6-12 km,
-  then stand statistics (Poisson crowns: gaps, the hotspot, which kind and how high is met)
-  with world-tied grain spread as 1/sqrt(trees in a pixel). Mean difference 0.80/255 against
-  10.65 for painted ground. Still:
-  - cost: the canopy pass is 670 ms at 1080p on the 860M as written (34 ms statistics only).
-    Far views need no frame-by-frame update (clouds neither): cache the far forest (panorama
-    or reprojected frames) every few seconds or when the eye or sun moves enough; turn the
-    stand's light, sky and meeting rates into small tables; the explicit crowns may be splats;
-  - a shrunk impostor texel lights about 5 levels brighter than its leaves (oak 1-2 km); plain
-    mips hid it by averaging in empty texels (no normal, no sun). Bake per texel the leaves'
-    facing times visibility as a function of the light (SH, like the sun visibility), so a
-    shrunk texel's lighting is exact; it should also settle the 5-10 level offset above;
-  - the ground's sunflecks and the trees' shadows on each other past 3 km are statistics,
-    where the truth traces them; check low suns, backlight and slopes facing away;
-  - near band idea (user): branches as painted billboards with leaves still as their own
-    detail, or both at once per species; untested;
-  - ridge treelines come from the shell over the canopy; judge silhouettes against the truth
-    on a frame looking along ridges;
-  - explicit crowns are coloured where the ray meets them (the impostor at that spot and the
-    pixel's mip), which brings back the terrain-following light bands: grazing views see lit
-    tops. The statistics past 12 km still use the whole-crown average and come out flatter;
-    sampling one mean height overshot (brighter); it wants the visible-part average over the
-    crown heights the rays meet;
-  - the statistics march shows faint contour streaks at 15-20 km (its step aliasing with the
+  crown (an ellipsoid at its hashed place, coloured by stepping into its impostor by depth)
+  to 6-12 km, then stand statistics (Poisson crowns: gaps, the hotspot, kind and height met)
+  with world-tied grain spread as 1/sqrt(trees in a pixel). Judged from seven places (summit,
+  hillside, aerial, level horizon, low sun ahead, down-sun, no shadows): mean difference
+  0.5-0.8/255 everywhere but aerial 2.4 (grain over a frame of forest; blurred 0.9-1.6), and
+  most distance bands within +-1 level. Found on the way, fixed:
+  - alpha to coverage gives overlapping semi-transparent quads one shared sample mask, so
+    two far trees in a pixel covered only as much as one: the truth under-covered far forest
+    by a third past 12 km. Far impostors (and minified cards) must draw coverage as their
+    own hashed sample mask; any shader writing gl_SampleMask must write it on every path;
+  - shrunk impostor texels were lit from a guessed spread of leaf facings, ~10% bright and
+    mip-dependent; each texel now keeps the mean of n n^T, and the clamped cosine comes from
+    it (rms 0.002-0.011 against the leaves themselves at any texel size);
+  - sun visibility fits are kept within 0-1, so averages never need clamping;
+  - the canopy march gave up 4 km past the shell with no ground behind (missing far crests)
+    and ran on over clamped textures past the land's edge.
+  Still:
+  - cost: the canopy pass is ~0.7 s at 1080p on the 860M as written (34 ms statistics only).
+    `far_cache.py`: a far view (past 3 km) reprojected by its depth holds within ~1 level
+    (blurred) for 200 m of eye travel; reused as it is, only ~10 m. So refresh it every
+    ~100-200 m or few seconds (sun drift), reproject between; tables for the stand's light,
+    sky and meeting rates would cut the refresh itself;
+  - down-sun past 12 km the statistics come out ~4 levels bright (2 at 3-12 km); shade, sky
+    and cover all match there, so it is in how the stand's colour is put together;
+  - aerial 3-6 km ~1.4 bright;
+  - the statistics march shows faint contour streaks at 15-20 km (step aliasing with the
     ground); jitter the steps or step in the ground's own cells.
+- **Branch cards** (`cards.py`, `card_sheet.py`): the user's idea, as flat polygons: per
+  branch cluster three crossed planes facing the ways its leaves face most, each leaf on the
+  plane it lies most nearly parallel to, baked with per-texel normals; limbs stay mesh. An
+  oak is ~9k triangles as 1 m cards against 135k thinned at 60 m; error (blurred) 9.5-12 at
+  60-480 m, as good as thinning or better and under the impostor's 10-19. Still: crowns come
+  out 7-12 levels bright, more see-through: a card holds only the leaves seen along its
+  normal, and leaves hidden behind each other there would separate seen obliquely; bake
+  each card in two depth layers or grow its coverage. Too coarse at 30 m (14 against 4).
 - **Light from anywhere**: own visibility is baked over the whole sphere, so a city's lights
   under a forest, fires or lightning can light far trees from below as the sun does from
   above; the impostor's lighting needs those lights added as further terms.

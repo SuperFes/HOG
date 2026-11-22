@@ -34,8 +34,12 @@ Sheets land in `out/`.
 | `forest_sheet.py` | a 1080p field of trees, all full mesh vs all LOD, and a flick GIF between them |
 | `terrain.py` | 24 km of hills, forest density and kind fields, trees hashed one per 7 m cell |
 | `far.py` | far forest: impostor truth with traced crown shadows; canopy layer of explicit crowns and stand statistics |
-| `far_sheet.py` | from a summit to 20 km at 1080p: truth vs painted, layer, hybrid, crowns, with flick GIFs |
-| `test_far.py` | `.venv/bin/python -m unittest test_far`: hash, stand maths, mips, crown fit |
+| `far_sheet.py` | seven views to 20 km at 1080p: truth vs painted, layer, hybrid, crowns, by distance band |
+| `far_cache.py` | how far the eye may move before a cached far view shows, reprojected or reused |
+| `test_far.py` | `.venv/bin/python -m unittest test_far`: hash, stand maths, mips, leaf lighting, crown fit |
+| `cards.py` | branch cards: crossed planes per leaf cluster, leaves on the plane they lie along |
+| `card_sheet.py` | one tree at true size: mesh, thinned, cards, impostor against the truth |
+| `test_cards.py` | `.venv/bin/python -m unittest test_cards`: every leaf on one card parallel to it |
 
 Self-organising species calibrate once (tens of seconds each); results cache in
 `out/calibrated.json`, keyed by the species' numbers.
