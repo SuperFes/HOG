@@ -90,6 +90,12 @@ after, and strike it off.
   ground can step by up to the reads' 8 cm along the cube's edges.
 - **Weighing forming's points.** `Smooth::weigh` walks its neighbours with a linear `find` and
   an `atan2` for each point it passes; comparing cosines would skip most of the `atan2`s.
+- **Woods read their own ground.** Each woods node reads the ground cell at its own detail
+  (`globe::woods`), which the shape's columns don't share: a 2 km region (6 levels) spends 70 ms
+  of 418 on woods, against 5 ms on the shape, 3 on materials and 1 on rocks and crags;
+  `climate_at` is about 2 µs of that a node. Most of the rest (about 340 ms) is making the
+  columns. Woods read from stored ground numbers (strata, height over the valley floor, bare
+  rock) would cost about what materials do.
 
 ## Server and tooling
 
