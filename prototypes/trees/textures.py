@@ -35,7 +35,7 @@ def _noise(shape, rng, scale):
 
 
 def leaf(shape="ovate", size=512, colour=(0.06, 0.13, 0.025), seed=1, serrate=0.0, lobes=0,
-         aspect=0.5):
+         aspect=0.5, turn="edges", mask=False):
     """One leaf: stalk at v=0, tip at v=1, u across. `aspect` is half-width over length."""
     rng = np.random.default_rng(seed)
     u, v = _grid(size, size)
@@ -72,7 +72,24 @@ def leaf(shape="ovate", size=512, colour=(0.06, 0.13, 0.025), seed=1, serrate=0.
     rgb = base[None, None, :] * shade[..., None]
     rgb = rgb * (1 + 0.8 * midrib[..., None] + 0.25 * veins[..., None])
     rgb = np.where((v <= stalk)[..., None], base * 0.9 + np.array([0.04, 0.02, 0.0]), rgb)
-    return np.dstack([np.clip(rgb, 0, 1), np.clip(alpha, 0, 1)])
+    img = np.dstack([np.clip(rgb, 0, 1), np.clip(alpha, 0, 1)])
+    if not mask:
+        return img
+    # Where autumn reaches first (0) and last (1): in from the edges, down from the tip, or
+    # between the veins with the veins green longest. Noise keeps the front ragged.
+    edge_in = np.clip((half - reach) / np.maximum(half, 1e-3), 0, 1) ** 0.7
+    if turn == "tip":
+        m = np.clip(1.0 - t, 0, 1) * 0.8 + edge_in * 0.2
+    elif turn == "veins":
+        vein_near = np.maximum(np.exp(-(across / 0.08) ** 2),
+                               1 - np.abs(np.sin((t * 9 - across * 1.5) * math.pi)))
+        m = vein_near ** 2 * 0.85 + edge_in * 0.15
+    elif turn == "even":
+        m = np.full_like(t, 0.5)
+    else:
+        m = edge_in
+    m = np.clip(m * 0.85 + 0.3 * (_noise(u.shape, rng, 40) - 0.5), 0, 1)
+    return img, m
 
 
 def needle_spray(size=(256, 1024), colour=(0.025, 0.06, 0.03), seed=1, needle_length=0.35,

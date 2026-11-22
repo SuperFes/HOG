@@ -1,34 +1,70 @@
-# A birch: slender leader, steep narrow crown, fine twigs hanging at their tips.
-model = "sot"
+# A birch: one slender leader, a narrow oval crown of fine ascending limbs whose twigs hang.
+model = "rules"
 kind = "broadleaf"
-
-[targets]
-at = 30
-height = 16.0
-spread = 6.5
-nodes = 5000
+full = 30
 
 [growth]
-branch_angle = 35
-phyllotaxis = "alternate"
-apical = 0.57
-max_metamers = 2
-shade_weight = 0.25
-tropism = [-0.18, -0.04, 0.08, 0.14]
-wobble = 0.05
-trunk_start = 2.5
-shed = 0.12
-voxel = 0.25
-shadow_b = 2.0
-shadow_depth = 5
-full_light = 2.0
+shape = "tend_flame"
+base_size = 0.22
+scale = 16.0
+scale_v = 1.5
+ratio = 0.009
+flare = 0.2
+
+[[growth.levels]]
+length = 1.0
+curve_res = 10
+curve_v = 10
+
+[[growth.levels]]
+length = 0.30
+length_v = 0.06
+curve_res = 6
+curve = -12
+curve_back = 25
+curve_v = 25
+down = 40
+down_v = 10
+rotate = 137
+rotate_v = 20
+branches = 40
+
+[[growth.levels]]
+length = 0.55
+length_v = 0.1
+curve_res = 5
+curve = 30
+curve_v = 25
+down = 45
+down_v = 12
+rotate = 137
+branches = 14
+up = -3.0
+
+[[growth.levels]]
+length = 0.5
+length_v = 0.1
+curve_res = 3
+curve = 20
+curve_v = 20
+down = 40
+down_v = 10
+rotate = 137
+branches = 8
+up = -6.0
 
 [foliage]
+bark = [0.62, 0.61, 0.57]
+bark_twig = [0.12, 0.06, 0.05]
 leaf = "ovate"
 serrate = 0.12
 aspect = 0.36
 colour = [0.075, 0.15, 0.03]
-size = 0.06
-per_segment = 16
-spread = 0.18
+size = 0.07
+per_segment = 42
+spread = 0.16
 droop = 0.3
+# Clear gold, then fading tan.
+leaf_turn = "veins"
+turn_from = { top = 0.14, exposed = 0.05 }
+autumn = [[0.45, 0.33, 0.02], [0.50, 0.28, 0.03], [0.20, 0.12, 0.05]]

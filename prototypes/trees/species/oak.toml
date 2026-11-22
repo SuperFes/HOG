@@ -31,3 +31,7 @@ colour = [0.055, 0.115, 0.025]
 size = 0.11
 per_segment = 28
 spread = 0.3
+# Yellow-green to russet to brown; oaks turn late and hold dead leaves long.
+leaf_turn = "edges"
+turn_from = { sun = 0.10, edge = 0.08 }
+autumn = [[0.20, 0.17, 0.03], [0.30, 0.12, 0.03], [0.17, 0.08, 0.03]]

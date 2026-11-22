@@ -24,16 +24,19 @@ in vec3 in_pos;
 in vec3 in_normal;
 in vec3 in_colour;
 in vec2 in_uv;
+in vec4 in_autumn;
 out vec3 v_pos;
 out vec3 v_normal;
 out vec3 v_colour;
 out vec2 v_uv;
+out vec4 v_autumn;
 out vec4 v_light;
 void main() {
     v_pos = in_pos;
     v_normal = in_normal;
     v_colour = in_colour;
     v_uv = in_uv;
+    v_autumn = in_autumn;
     v_light = light_proj * vec4(in_pos, 1.0);
     gl_Position = view_proj * vec4(in_pos, 1.0);
 }
@@ -43,7 +46,9 @@ LIT_FS = """
 #version 330
 uniform sampler2DShadow shadow;
 uniform sampler2D albedo;
+uniform sampler2D turn_mask;
 uniform bool textured;
+uniform bool masked;
 uniform float cutoff;
 uniform vec3 sun;
 uniform vec3 sun_colour;
@@ -56,6 +61,7 @@ in vec3 v_pos;
 in vec3 v_normal;
 in vec3 v_colour;
 in vec2 v_uv;
+in vec4 v_autumn;
 in vec4 v_light;
 out vec4 f_colour;
 
@@ -88,7 +94,14 @@ void main() {
     float direct = max(facing, 0.0);
     float up = n.y * 0.5 + 0.5;
     vec3 ambient = mix(ground_colour, sky_colour, up);
-    vec3 base = v_colour * tex.rgb;
+    // Autumn: where on the leaf it turns first comes from the mask (edges, tip, between the
+    // veins), how far it has turned from the leaf's own share.
+    float turn = v_autumn.a;
+    if (masked) {
+        float m = texture(turn_mask, v_uv).r;
+        turn = smoothstep(m - 0.08, m + 0.08, turn * 1.16 - 0.08);
+    }
+    vec3 base = mix(v_colour, v_autumn.rgb, turn) * tex.rgb;
     vec3 c = base * (sun_colour * direct * shade + ambient)
            + base * vec3(1.25, 1.35, 0.6) * sun_colour * through * shade;
     // A faint sheen on waxy leaves toward the sun.
@@ -167,8 +180,9 @@ def ground_disc(radius, colour=(0.075, 0.10, 0.045), segments=64):
 
 
 class Material:
-    def __init__(self, texture=None, translucency=0.0, cutoff=0.5):
+    def __init__(self, texture=None, translucency=0.0, cutoff=0.5, turn_mask=None):
         self.texture = texture  # RGBA float array, linear
+        self.turn_mask = turn_mask  # where on the leaf autumn reaches first: 0 first, 1 last
         self.translucency = translucency
         self.cutoff = cutoff
 
@@ -180,6 +194,8 @@ class Scene:
     def add(self, mesh, material=None):
         if len(mesh[3]):
             if len(mesh) == 4:
+                mesh = (*mesh, None)
+            if len(mesh) == 5:
                 mesh = (*mesh, None)
             self.parts.append((mesh, material or Material()))
 
@@ -258,24 +274,39 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
             textures[key] = t
         return textures[key]
 
+    masks = {}
     white = ctx.texture((1, 1), 4, np.ones(4, "f4").tobytes(), dtype="f4")
     vaos = []
-    for (p, n, c, i, uv), mat in full.parts:
+    for (p, n, c, i, uv, autumn), mat in full.parts:
         if uv is None:
             uv = np.zeros((len(p), 2), "f4")
-        vbo = ctx.buffer(np.hstack([p, n, c, uv]).astype("f4").tobytes())
+        if autumn is None:
+            autumn = np.zeros((len(p), 4), "f4")
+        vbo = ctx.buffer(np.hstack([p, n, c, uv, autumn]).astype("f4").tobytes())
         ibo = ctx.buffer(i.astype("u4").tobytes())
-        lit = ctx.vertex_array(lit_prog, [(vbo, "3f 3f 3f 2f", "in_pos", "in_normal",
-                                           "in_colour", "in_uv")], ibo)
-        shade = ctx.vertex_array(depth_prog, [(vbo, "3f 12x 12x 2f", "in_pos", "in_uv")], ibo)
+        lit = ctx.vertex_array(lit_prog, [(vbo, "3f 3f 3f 2f 4f", "in_pos", "in_normal",
+                                           "in_colour", "in_uv", "in_autumn")], ibo)
+        shade = ctx.vertex_array(depth_prog, [(vbo, "3f 12x 12x 2f 16x", "in_pos", "in_uv")],
+                                 ibo)
         tex = texture_of(mat.texture) if mat.texture is not None else None
-        vaos.append((lit, shade, mat, tex, (vbo, ibo)))
+        mask = None
+        if mat.turn_mask is not None:
+            m = mat.turn_mask
+            if id(m) not in masks:
+                masks[id(m)] = np.dstack([m, m, m, np.ones_like(m)]).astype("f4")
+            mask = texture_of(masks[id(m)])
+        vaos.append((lit, shade, mat, (tex, mask), (vbo, ibo)))
 
-    def bind(prog, mat, tex):
+    def bind(prog, mat, texs):
+        tex, mask = texs
         (tex or white).use(1)
         prog["albedo"].value = 1
         prog["textured"].value = tex is not None
         prog["cutoff"].value = mat.cutoff
+        if "masked" in prog:
+            (mask or white).use(2)
+            prog["turn_mask"].value = 2
+            prog["masked"].value = mask is not None
 
     shadow_fbo.use()
     shadow_fbo.clear(depth=1.0)
@@ -296,10 +327,10 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     for lit, _shade, mat, tex, _b in vaos:
         lit_prog["translucency"].value = mat.translucency
         bind(lit_prog, mat, tex)
-        if tex is not None:
+        if tex[0] is not None:
             ctx.enable_direct(alpha_to_coverage)
         lit.render()
-        if tex is not None:
+        if tex[0] is not None:
             ctx.disable_direct(alpha_to_coverage)
 
     resolved = ctx.framebuffer(ctx.renderbuffer(size, components=4))

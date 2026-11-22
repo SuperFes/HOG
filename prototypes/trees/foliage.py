@@ -66,7 +66,8 @@ def _segments(sk, max_radius):
 
 def leaves(sk, rng, per_segment=10, twig_radius=0.018, size=0.11, size_v=0.25, width=0.6,
            spread=0.22, tint=(1.0, 1.0, 1.0), tint_v=0.12, fold=0.18, droop=0.0,
-           normal_bend=0.45, per_twiglet=7):
+           normal_bend=0.45, per_twiglet=7, season=0.0, autumn=None, base_colour=None,
+           turn_from=None, sun=(0.45, 0.75, 0.35)):
     """Single leaves `size` metres long on twiglets too fine for the skeleton: each fine
     segment sprouts twiglets about `spread` metres long, each holding `per_twiglet` leaves
     alternately along it and a cluster at its tip. Returns the leaf mesh, points standing for
@@ -122,10 +123,43 @@ def leaves(sk, rng, per_segment=10, twig_radius=0.018, size=0.11, size_v=0.25, w
     UV = np.tile(np.array(uvs, float), (n, 1, 1))
     vis = sky_visibility(base, base)
     jitter = 1 + tint_v * (rng.random((n, 3)) * 2 - 1) * np.array([1.0, 0.7, 1.4])
-    shade = (0.22 + 0.78 * vis)[:, None] * jitter * np.array(tint)
-    C = np.repeat(shade[:, None, :], 6, 1)
+    green = np.tile(np.array(tint, float), (n, 1))
+    fallen = np.zeros(n, bool)
+    turned = np.zeros(n)
+    autumn_tint = green
+    if season > 0 and autumn is not None and base_colour is not None:
+        lead = _turn_lead(base, centre, vis, turn_from or {"exposed": 0.12}, np.array(sun))
+        autumn_tint, turned, fallen = _autumn(rng, n, lead, season, autumn,
+                                              np.array(base_colour))
+    light = (0.22 + 0.78 * vis)[:, None] * jitter
+    C = np.repeat((light * green)[:, None, :], 6, 1)
+    A = np.repeat(np.concatenate([light * autumn_tint, turned[:, None]], 1)[:, None, :], 6, 1)
     tri = np.array([(0, 4, 2), (4, 5, 2), (4, 1, 5), (1, 3, 5)])
+    if fallen.any():
+        # Fallen leaves lie on the ground under the crown, carried a little downwind.
+        k = int(fallen.sum())
+        drift = np.array([0.4, 0.0, 0.15])
+        spot = base[fallen] * np.array([1.0, 0.0, 1.0]) * (1.0 + 0.25 * rng.random((k, 1)))
+        spot = spot + drift * rng.random((k, 1)) * 1.5 + rng.normal(size=(k, 3)) * 0.4
+        spot[:, 1] = 0.01 + rng.random(k) * 0.02
+        ang = rng.random(k) * 2 * np.pi
+        lway = np.stack([np.cos(ang), np.zeros(k), np.sin(ang)], 1)
+        lacross = np.stack([-np.sin(ang), np.zeros(k), np.cos(ang)], 1)
+        ll = length[fallen]
+        lh = half[fallen]
+        lp = np.stack([spot - lacross * lh[:, None], spot + lacross * lh[:, None],
+                       spot + lway * ll[:, None] - lacross * lh[:, None],
+                       spot + lway * ll[:, None] + lacross * lh[:, None],
+                       spot + UP * 0.01, spot + lway * ll[:, None] + UP * 0.01], 1)
+        P[fallen] = lp
+        N[fallen] = UP
+        # Lying leaves brown and dull as they dry.
+        dry = np.array(autumn[-1]) / np.maximum(np.array(base_colour), 1e-3)
+        C[fallen] = (dry * (0.25 + 0.3 * rng.random((k, 1)))
+                     * (1 + 0.25 * (rng.random((k, 3)) - 0.5)))[:, None, :]
+        A[fallen] = 0.0
     I = (np.arange(n)[:, None, None] * 6 + tri[None]).reshape(-1, 3)
+    mesh = _pack(P, N, C, UV, I) + (A.reshape(-1, 4).astype("f4"),)
     twiglets = Skeleton()
     radii = []
     for j in range(m):
@@ -134,13 +168,49 @@ def leaves(sk, rng, per_segment=10, twig_radius=0.018, size=0.11, size_v=0.25, w
         twiglets.add(start[j] + tdir[j] * tlen[j], r1)
         radii += [0.003, 0.0022, 0.0012]
     twiglets.radius = np.array(radii)
-    return _pack(P, N, C, UV, I), base, twiglets
+    return mesh, base, twiglets
+
+
+def _turn_lead(base, centre, vis, weights, sun):
+    """How much earlier than its own moment each leaf turns, by where it sits: `exposed` to
+    the sky, high in the crown (`top`), on the sun's side (`sun`), out at the crown's edge
+    (`edge`), or deep inside it (`inside`)."""
+    rel = base - centre
+    height = (base[:, 1] - base[:, 1].min()) / max(np.ptp(base[:, 1]), 1e-3)
+    flat = rel * np.array([1.0, 0.0, 1.0])
+    reach = np.linalg.norm(rel, axis=1)
+    edge = reach / max(np.percentile(reach, 98), 1e-3)
+    sun_flat = sun * np.array([1.0, 0.0, 1.0])
+    sun_flat = sun_flat / max(np.linalg.norm(sun_flat), 1e-6)
+    sunny = np.clip(_unit(flat) @ sun_flat, 0, 1) * np.clip(edge, 0, 1)
+    return (weights.get("exposed", 0.0) * vis + weights.get("top", 0.0) * height
+            + weights.get("sun", 0.0) * sunny + weights.get("edge", 0.0) * np.clip(edge, 0, 1)
+            + weights.get("inside", 0.0) * (1 - np.clip(edge, 0, 1)))
+
+
+def _autumn(rng, n, lead, season, palette, base):
+    """Each leaf's autumn tint, how far it has turned (0-1) and whether it has fallen at
+    `season` (0 summer, 1 bare): from its own moment, brought forward by `lead`, it turns
+    through `palette` and falls after."""
+    own = rng.random(n)
+    start = 0.16 + 0.42 * own - lead
+    progress = np.clip((season - start) / 0.3, 0.0, None)
+    turned = np.clip(progress / 0.7, 0.0, 1.0)
+    stage = np.clip(progress - 0.5, 0.0, len(palette) - 1.0001)
+    k = np.floor(stage).astype(int)
+    k = np.minimum(k, len(palette) - 2)
+    f = np.clip(stage - k, 0, 1)[:, None]
+    pal = np.array(palette, float)
+    target = pal[k] * (1 - f) + pal[k + 1] * f
+    falls = start + 0.34 + 0.12 * rng.random(n)
+    return target / np.maximum(base, 1e-3), turned, season > falls
 
 
 # --- conifer -----------------------------------------------------------------------------
 
 def sprays(sk, rng, shoot_radius=0.03, width=0.16, repeat=0.45, droop=25.0, layers=2,
-           tint=(1.0, 1.0, 1.0), tint_v=0.1, tips_only=0.0, normal_bend=0.5, star=False):
+           tint=(1.0, 1.0, 1.0), tint_v=0.1, tips_only=0.0, normal_bend=0.5, star=False,
+           needle_years=0):
     """Needle sprays: crossed ribbons `width` metres across along every chain of fine shoots,
     the texture repeating every `repeat` metres; `tips_only` keeps just that many metres at
     each shoot's tip (a pine's brushes)."""
@@ -152,6 +222,9 @@ def sprays(sk, rng, shoot_radius=0.03, width=0.16, repeat=0.45, droop=25.0, laye
         pts = np.array([sk.pos[n] for n in run])
         rad = np.array([sk.radius[n] for n in run])
         keep = rad < shoot_radius
+        if needle_years and getattr(sk, "grown", None) is not None:
+            # Needles only on the last few years' growth.
+            keep = np.array([sk.year - sk.grown[n] < needle_years for n in run])
         if keep.sum() < 2:
             continue
         first = int(np.argmax(keep))

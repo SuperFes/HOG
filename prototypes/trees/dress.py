@@ -17,18 +17,22 @@ SUN = np.array([0.45, 0.75, 0.35])
 SUN_YAW = math.degrees(math.atan2(SUN[0], SUN[2]))
 
 
-def foliage_of(sp, sk, seed):
+def foliage_of(sp, sk, seed, season=0.0):
     """(mesh, material) of a species' foliage on `sk`, and points standing for its area."""
     f = sp.foliage
     rng = np.random.default_rng(seed + 1000)
     colour = tuple(f.get("colour", (0.06, 0.12, 0.03)))
     if sp.kind == "broadleaf":
-        tex = textures.leaf(f.get("leaf", "ovate"), colour=colour, lobes=f.get("lobes", 0),
-                            serrate=f.get("serrate", 0.0), aspect=f.get("aspect", 0.4))
+        tex, mask = textures.leaf(f.get("leaf", "ovate"), colour=colour,
+                                  lobes=f.get("lobes", 0), serrate=f.get("serrate", 0.0),
+                                  aspect=f.get("aspect", 0.4), turn=f.get("leaf_turn", "edges"),
+                                  mask=True)
         made = foliage.leaves(sk, rng, per_segment=f.get("per_segment", 10),
                               size=f.get("size", 0.1), width=f.get("aspect", 0.4) * 2.2,
-                              spread=f.get("spread", 0.2), droop=f.get("droop", 0.0))
-        mat = Material(tex, translucency=0.55, cutoff=0.5)
+                              spread=f.get("spread", 0.2), droop=f.get("droop", 0.0),
+                              season=season, autumn=f.get("autumn"), base_colour=colour,
+                              turn_from=f.get("turn_from"), sun=tuple(SUN))
+        mat = Material(tex, translucency=0.55, cutoff=0.5, turn_mask=mask)
         if made is not None:
             mesh, area, twiglets = made
             return mesh, mat, area, tube_mesh(twiglets, colour=(0.13, 0.10, 0.08))
@@ -42,7 +46,8 @@ def foliage_of(sp, sk, seed):
         made = foliage.sprays(sk, rng, shoot_radius=f.get("shoot_radius", 0.03),
                               width=f.get("width", 0.16), droop=f.get("droop", 25),
                               layers=f.get("layers", 2), tips_only=f.get("tips_only", 0.0),
-                              repeat=f.get("repeat", 0.45), star=f.get("star", False))
+                              repeat=f.get("repeat", 0.45), star=f.get("star", False),
+                              needle_years=f.get("needle_years", 0))
         mat = Material(tex, translucency=0.25, cutoff=0.45)
     else:
         tex = textures.frond_half(colour=colour, leaflets=f.get("leaflets", 70),
@@ -55,10 +60,16 @@ def foliage_of(sp, sk, seed):
     return mesh, mat, area, None
 
 
-def dressed(sp, seed, age):
+def dressed(sp, seed, age, season=0.0):
     sk = sp.grow(seed, {age})[age]
+    bark = sp.foliage.get("bark")
+    if bark is not None and getattr(sk, "colour", None) is None:
+        # Bark by thickness: the species' bark on trunk and limbs, darker on the twigs.
+        twig = np.array(sp.foliage.get("bark_twig", (0.10, 0.07, 0.06)))
+        t = np.clip((sk.radius - 0.012) / 0.05, 0, 1)[:, None]
+        sk.colour = twig[None] * (1 - t) + np.array(bark)[None] * t
     wood = tube_mesh(sk, colour=(0.13, 0.10, 0.08))
-    leaf_mesh, mat, area, twigs = foliage_of(sp, sk, seed)
+    leaf_mesh, mat, area, twigs = foliage_of(sp, sk, seed, season)
     if len(area) and len(wood[0]):
         # The wood inside the crown sees little sky.
         vis = foliage.sky_visibility(wood[0].astype(float), area, cell=0.4, k=0.3)

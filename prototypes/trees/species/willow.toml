@@ -31,3 +31,6 @@ size = 0.11
 per_segment = 18
 spread = 0.12
 droop = 0.8
+leaf_turn = "tip"
+turn_from = { inside = 0.10 }
+autumn = [[0.30, 0.30, 0.04], [0.38, 0.30, 0.05], [0.18, 0.14, 0.06]]

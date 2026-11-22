@@ -1,65 +1,33 @@
-# A Scots pine: tall bare trunk, a high flattened crown of few crooked limbs that rise.
-model = "rules"
+# A Scots pine: tiers of crooked limbs from yearly whorls, the lower ones shed as the crown
+# rises, needles in clouds at the limbs' ends, orange bark up the trunk, a crown that
+# flattens as the leader slows.
+model = "pine"
 kind = "conifer"
-full = 30
 
 [growth]
-shape = "tend_flame"
-base_size = 0.55
-scale = 18.0
-scale_v = 2.5
-ratio = 0.010
-flare = 0.3
-
-[[growth.levels]]
-length = 1.0
-curve_res = 10
-curve_v = 14
-
-[[growth.levels]]
-length = 0.40
-length_v = 0.10
-curve_res = 6
-curve = -20
-curve_v = 35
-down = 80
-down_v = 12
-rotate = 137
-rotate_v = 30
-branches = 34
-up = 2.0
-
-[[growth.levels]]
-length = 0.45
-length_v = 0.10
-curve_res = 4
-curve_v = 30
-down = 55
-down_v = 12
-rotate = 137
-branches = 7
-up = 2.5
-
-[[growth.levels]]
-length = 0.45
-length_v = 0.1
-curve_res = 2
-curve_v = 20
-down = 45
-down_v = 10
-rotate = 137
-branches = 3
+leader = 0.6
+leader_old = 0.12
+slowing = 30.0
+whorl = 5
+limb_angle = 68
+limb_rate = 0.38
+limb_rise = 0.25
+side_shoots = 2
+side_life = 7
+twig_shoots = 2
+twig_life = 4
+crooked = 0.2
+crown_share = 0.45
 
 [foliage]
-needle_length = 0.42
-density = 700
-angle = 35
+needle_length = 0.48
+density = 1100
+angle = 30
 brush_tip = 0.25
 star = true
 colour = [0.03, 0.07, 0.035]
-width = 0.22
+width = 0.20
 repeat = 0.5
-shoot_radius = 0.04
-tips_only = 0.7
+needle_years = 3
 droop = 15
 layers = 3

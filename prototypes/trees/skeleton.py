@@ -105,6 +105,8 @@ def tube_mesh(sk, colour=(0.16, 0.12, 0.09), min_radius=0.0015, sides_for=None):
         tang = np.where(lens > 1e-9, tang / np.maximum(lens, 1e-9), np.array([0.0, 1.0, 0.0]))
         u, v = _frame(tang[0])
         tint = base * (0.85 + 0.3 * rng.random())
+        if getattr(sk, "colour", None) is not None:
+            tint = sk.colour[run[min(1, len(run) - 1)]] * (0.9 + 0.2 * rng.random())
         ang = np.linspace(0, 2 * np.pi, sides, endpoint=False)
         rings = []
         for k in range(len(pts)):
