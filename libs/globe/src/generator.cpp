@@ -612,6 +612,15 @@ double coarser(const Generator& generator, double lod) {
     return std::max(1.0, lod / voxel_lod(generator));
 }
 
+Climate climate_at(const Generator& generator, DVec3 direction) {
+    constexpr double kelvin = 273.15;
+    const Formed::Climate formed =
+        generator.shape().formed->climate_at(glm::normalize(direction), 0.0);
+    return {.kelvin = formed.temperature + kelvin,
+            .rain = formed.rain,
+            .liquid = generator.derived().liquid};
+}
+
 std::optional<DVec3> land_near(const Generator& generator, DVec3 direction, double within) {
     const std::optional<double> sea = generator.sea_level();
     const DVec3 up = glm::normalize(direction);

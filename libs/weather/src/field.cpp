@@ -16,9 +16,12 @@ constexpr double air_molar_mass = 0.028'96;
 constexpr double heat_capacity = 3.5 * gas_constant / air_molar_mass;
 // Still air in the troposphere cools at about this share of the dry rate.
 constexpr double moist_share = 0.65;
-// Relative humidity of the air a column starts with: over the sea it's fed, over land it isn't.
+// Relative humidity of the air a column starts with: over the sea it's fed; over land it's as wet
+// as the rain that falls there, from desert air to nearly the sea's.
 constexpr double sea_humidity = 0.8;
-constexpr double land_humidity = 0.5;
+constexpr double desert_humidity = 0.2;
+// Metres of rain a year that leave land air halfway from the desert's humidity to the sea's.
+constexpr double half_wet_rain = 0.5;
 // Metres over which the water vapour a column holds thins by e: it comes from the surface and is
 // mixed upward only so far, so it thins faster than the air does.
 constexpr double vapour_scale_height = 2'000.0;
@@ -78,10 +81,17 @@ double air_density(double temperature, double pressure) {
     return pressure * air_molar_mass / (gas_constant * temperature);
 }
 
-void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
+double starting_humidity(bool over_sea, double rain) {
+    if (over_sea) {
+        return sea_humidity;
+    }
+    const double wet = std::max(rain, 0.0);
+    return desert_humidity + ((sea_humidity - desert_humidity) * wet / (wet + half_wet_rain));
+}
+
+void set_air(Field& field, const globe::Planet& planet, std::size_t column, double humidity) {
     const Grid& grid = field.grid;
     const auto surface = static_cast<double>(field.surface[column]);
-    const double humidity = field.over_sea[column] != 0 ? sea_humidity : land_humidity;
     const double held_below = saturation_ratio(surface, planet.system.air.pressure);
     for (int layer = 0; layer < grid.layers; ++layer) {
         const double height = grid.radius_of(layer) - planet.body.radius;
@@ -151,7 +161,8 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
                 grid.radius_of(layer) < field.ground[column] ? 1 : 0;
         }
         field.surface[column] = static_cast<float>(globe::temperature_at(planet, latitude_of(up)));
-        set_air(field, planet, column);
+        set_air(field, planet, column,
+                starting_humidity(wet, globe::climate_at(generator, up).rain));
     }
     return field;
 }

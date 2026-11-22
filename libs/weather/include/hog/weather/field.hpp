@@ -67,12 +67,16 @@ struct Field {
 // the lapse rate.
 [[nodiscard]] double air_temperature(const globe::Planet& planet, double surface, double height);
 
-// Sets a column's air still, cooling with height from its surface's temperature, with the share
-// of the vapour it could hold that its ground leaves it.
-void set_air(Field& field, const globe::Planet& planet, std::size_t column);
+// The share of the vapour it could hold that a column's air starts with: the sea's over the sea,
+// and over land more the more rain falls there a year, in metres.
+[[nodiscard]] double starting_humidity(bool over_sea, double rain);
 
-// Still air over a surface at the climate's temperature, holding a share of the vapour it could:
-// more over the sea than the land. The weather is what it settles into.
+// Sets a column's air still, cooling with height from its surface's temperature, holding
+// `humidity` of the vapour it could.
+void set_air(Field& field, const globe::Planet& planet, std::size_t column, double humidity);
+
+// Still air over a surface at the climate's temperature, holding a share of the vapour it
+// could: the sea's over the sea, the land's by its rain. The weather is what it settles into.
 [[nodiscard]] Field start_field(const globe::Generator& generator, int level, int layers);
 
 // Joules a square metre of a column's surface holds per kelvin: the sea's mixed layer is deep, the

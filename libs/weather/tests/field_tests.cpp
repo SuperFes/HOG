@@ -25,10 +25,30 @@ Planet earth() {
     return planet;
 }
 
-const Field& earth_field() {
+const Generator& earth_generator() {
     static const Generator generator{earth()};
-    static const Field field = hog::weather::start_field(generator, level, layers);
+    return generator;
+}
+
+const Field& earth_field() {
+    static const Field field = hog::weather::start_field(earth_generator(), level, layers);
     return field;
+}
+
+// The share of the vapour it could hold that the air in a cell holds.
+double humidity_in(const Field& field, const Planet& planet, std::size_t column, int layer) {
+    const auto& air = field.at(column, layer);
+    const double height = field.grid.radius_of(layer) - planet.body.radius;
+    const auto temperature = static_cast<double>(air.temperature);
+    const double pressure = hog::weather::pressure_at(
+        planet, temperature + (hog::weather::lapse_rate(planet) * height), height);
+    return static_cast<double>(air.vapour) / hog::weather::saturation_ratio(temperature, pressure);
+}
+
+double rain_over(std::size_t column) {
+    return hog::globe::climate_at(earth_generator(),
+                                  hog::globe::center(hog::globe::cell_at_index(level, column)))
+        .rain;
 }
 
 // The column nearest a latitude, in degrees, on the prime meridian.
@@ -100,13 +120,49 @@ TEST_CASE("the start holds less water than saturates, and none that the sea's hu
             const bool over_sea = field.over_sea[column] != 0;
             // Never wetter than the column's humidity of what the air could hold there, and
             // thinner than that aloft, where the sea's water hasn't been mixed up to.
-            REQUIRE(static_cast<double>(air.vapour) <=
-                    ((over_sea ? 0.8 : 0.5) * saturated) * (1.0 + 1e-4));
+            const double humidity = hog::weather::starting_humidity(over_sea, rain_over(column));
+            REQUIRE(static_cast<double>(air.vapour) <= (humidity * saturated) * (1.0 + 1e-4));
             (over_sea ? sea : land) = true;
         }
     }
     CHECK(sea);
     CHECK(land);
+}
+
+TEST_CASE("land air starts as wet as the rain that falls there, the sea's wetter still",
+          "[weather][field]") {
+    using hog::weather::starting_humidity;
+    CHECK(starting_humidity(false, 0.0) == Approx(0.2));
+    CHECK(starting_humidity(false, -1.0) == Approx(0.2));
+    CHECK(starting_humidity(false, 0.5) == Approx(0.5));
+    CHECK(starting_humidity(false, 0.1) < starting_humidity(false, 1.0));
+    CHECK(starting_humidity(false, 1.0) < starting_humidity(false, 3.0));
+    CHECK(starting_humidity(false, 100.0) < starting_humidity(true, 0.0));
+    CHECK(starting_humidity(true, 0.0) == Approx(0.8));
+}
+
+TEST_CASE("the start's air is wetter over rainy land than dry land", "[weather][field]") {
+    const Field& field = earth_field();
+    const Planet planet = earth();
+    // The land columns open at the same layer, the driest and the wettest of them.
+    constexpr int layer = 3;
+    std::size_t driest = field.grid.columns();
+    std::size_t wettest = field.grid.columns();
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        if (field.over_sea[column] != 0 || field.solid(column, layer)) {
+            continue;
+        }
+        if (driest == field.grid.columns() || rain_over(column) < rain_over(driest)) {
+            driest = column;
+        }
+        if (wettest == field.grid.columns() || rain_over(column) > rain_over(wettest)) {
+            wettest = column;
+        }
+    }
+    REQUIRE(driest < field.grid.columns());
+    REQUIRE(rain_over(wettest) > 2.0 * rain_over(driest));
+    CHECK(humidity_in(field, planet, wettest, layer) >
+          humidity_in(field, planet, driest, layer) + 0.1);
 }
 
 TEST_CASE("the start's water thins with height faster than the air does", "[weather][field]") {

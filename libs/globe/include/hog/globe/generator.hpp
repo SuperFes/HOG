@@ -5,6 +5,7 @@
 #include <hog/globe/layers.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/weathering.hpp>
 
 #include <algorithm>
 #include <array>
@@ -313,6 +314,10 @@ private:
 // the centre, found by walking down the distance field; none if the column is open to the floor.
 [[nodiscard]] std::optional<double> ground_below(const Generator& generator, DVec3 direction,
                                                  double lod);
+
+// The formed world's yearly mean at `direction`, reduced to the sea's level, and the rain falling
+// there in a year.
+[[nodiscard]] Climate climate_at(const Generator& generator, DVec3 direction);
 
 // The direction nearest `direction` whose ground stands over the sea, sought on rings a
 // kilometre apart out to `within` metres; `direction` itself on a world without a sea; none if
