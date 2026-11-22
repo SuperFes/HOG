@@ -62,6 +62,8 @@ struct GroundConfig {
     // Whether the server fills what players wait on itself, on threads of its own; without,
     // another process does, as `hog-bake --serve`.
     bool generate = true;
+    // Metres under which nodes are filled from coarser ones with seeded layers; 0 none.
+    double layered_below = 0.0;
 };
 
 struct ServerConfig {
@@ -122,6 +124,7 @@ struct ServerConfig {
 //     [ground]                   # optional
 //     store = "../var/store"     # the chunk store; without it, one gone when the server stops
 //     generate = true            # fill it here; false when hog-bake --serve does
+//     layered_below = 0.0        # metres: finer nodes filled from seeded layers; 0 none
 //
 //     [net]                      # optional
 //     port = 7675                # for players, on every address

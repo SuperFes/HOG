@@ -138,18 +138,20 @@ struct Server::PieceStreaming {
         auto pieces = std::make_unique<PieceStreaming>(std::move(*opened), std::move(*table),
                                                        std::move(*read), generator);
         if (config.generate) {
-            pieces->start_generating(generator);
+            pieces->start_generating(generator, config.layered_below);
         }
         return pieces;
     }
 
     // Fills what players wait on, on threads of its own, all but a couple of the machine's.
-    void start_generating(const globe::Generator& generator) {
-        generator_thread = std::thread{[this, &generator] {
+    void start_generating(const globe::Generator& generator, double layered_below) {
+        generator_thread = std::thread{[this, &generator, layered_below] {
             // The pool takes the thread that makes it as one of its own.
             const unsigned cores = std::max(std::thread::hardware_concurrency(), 3U);
             jobs::JobSystem jobs{cores - 2};
-            baked::Generating generating{generator, store, wants, jobs};
+            baked::ChunkFiller::Options options;
+            options.layered.below = layered_below;
+            baked::Generating generating{generator, store, wants, jobs, options};
             generating.run(stop_generating, [](const Error& error) {
                 log::warn(server_log, "couldn't fill grid chunks: {}", error);
             });

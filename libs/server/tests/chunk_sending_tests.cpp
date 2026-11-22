@@ -102,7 +102,7 @@ hog::protocol::DonePiece done_of(Key node, std::uint8_t depth, bool whole) {
 void fill_telling(const hog::globe::Generator& generator, hog::baked::ChunkStore& store,
                   ChunkSending& sending, Key node, std::uint8_t depth, bool tell) {
     hog::jobs::JobSystem jobs{2};
-    hog::baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    hog::baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
     filler.want(node, depth);
     while (!filler.idle()) {
         auto written = filler.pump(true);
@@ -187,7 +187,7 @@ TEST_CASE("what the store holds only part of goes as it is and the rest once it'
     // Filled under it, what's new goes, and nothing it was sent before.
     {
         hog::jobs::JobSystem jobs{2};
-        hog::baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+        hog::baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
         filler.want(node, 12);
         while (!filler.idle()) {
             auto written = filler.pump(true);

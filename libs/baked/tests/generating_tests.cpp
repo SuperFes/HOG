@@ -74,7 +74,7 @@ TEST_CASE("what the wants table asks for is filled into the store and logged as 
     auto wants = WantsTable::open(directory.path());
     REQUIRE(wants.has_value());
     hog::jobs::JobSystem jobs{2};
-    Generating generating{generator, store, *wants, jobs, {.fill_levels = 3}};
+    Generating generating{generator, store, *wants, jobs, {.fill_levels = 3, .layered = {}}};
 
     const Key node = ground_key(generator, {0.2, 0.7, -0.68}, 9);
     const std::vector<WantsTable::Want> wanted{{.node = node, .depth = 12, .rank = {}}};
@@ -105,7 +105,7 @@ TEST_CASE("a want taken out of the table is never answered", "[baked][generating
     auto wants = WantsTable::open(directory.path());
     REQUIRE(wants.has_value());
     hog::jobs::JobSystem jobs{1};
-    Generating generating{generator, store, *wants, jobs, {.fill_levels = 3}};
+    Generating generating{generator, store, *wants, jobs, {.fill_levels = 3, .layered = {}}};
 
     const Key kept = ground_key(generator, {0.2, 0.7, -0.68}, 9);
     const Key dropped = ground_key(generator, {-0.6, 0.1, 0.79}, 9);

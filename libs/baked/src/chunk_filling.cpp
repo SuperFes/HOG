@@ -17,9 +17,10 @@
 namespace hog::baked {
 
 globe::Filled fill_region(const globe::Generator& generator, const grid::Grid& grid,
-                          const Bands& bands, Region region) {
+                          const Bands& bands, Region region, globe::Layered layered) {
     return globe::fill(generator, grid, region.root,
-                       static_cast<std::uint8_t>(bands.foot(region.band) - region.root.depth));
+                       static_cast<std::uint8_t>(bands.foot(region.band) - region.root.depth),
+                       layered);
 }
 
 Result<void> write_regions(ChunkStore& store, std::span<const Region> regions,
@@ -53,7 +54,7 @@ struct ChunkFiller::Impl {
     Impl(const globe::Generator& from, ChunkStore& into, jobs::JobSystem& on, Options given)
         : generator(&from), store(&into), jobs(&on), grid(globe::grid_of(from)),
           regions(into.bands(), std::max<std::uint8_t>(given.fill_levels, 1)),
-          writer([this] { write_on(); }) {}
+          layered(given.layered), writer([this] { write_on(); }) {}
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
     Impl(Impl&&) = delete;
@@ -72,6 +73,7 @@ struct ChunkFiller::Impl {
     jobs::JobSystem* jobs;
     grid::Grid grid;
     Regions regions;
+    globe::Layered layered;
 
     mutable std::mutex lock;
     std::vector<std::pair<Asked, Rank>> asked; // guarded by lock
@@ -164,10 +166,10 @@ struct ChunkFiller::Impl {
             const Region region = queued.begin()->second;
             queued.erase(queued.begin());
             queued_regions.erase(region);
-            filling.emplace(region,
-                            std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, region] {
-                                return fill_region(*generator, grid, regions.bands(), region);
-                            }));
+            filling.emplace(
+                region, std::make_unique<jobs::Async<globe::Filled>>(*jobs, [this, region] {
+                    return fill_region(*generator, grid, regions.bands(), region, layered);
+                }));
         }
     }
 

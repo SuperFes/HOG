@@ -43,7 +43,7 @@ inline baked::ChunkStore chunk_scratch(const globe::Generator& generator) {
 inline void fill_chunks(const globe::Generator& generator, baked::ChunkStore& store, grid::Key node,
                         std::uint8_t depth) {
     jobs::JobSystem jobs{2};
-    baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    baked::ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
     filler.want(node, depth);
     while (!filler.idle()) {
         REQUIRE(filler.pump(true).has_value());

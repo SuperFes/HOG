@@ -83,7 +83,8 @@ private:
 
 // The generator's trees over the region, down to its band's foot.
 [[nodiscard]] globe::Filled fill_region(const globe::Generator& generator, const grid::Grid& grid,
-                                        const Bands& bands, Region region);
+                                        const Bands& bands, Region region,
+                                        globe::Layered layered = {});
 
 // Holds each of `regions` as filled, in one batch.
 [[nodiscard]] Result<void> write_regions(ChunkStore& store, std::span<const Region> regions,
@@ -104,6 +105,8 @@ public:
     struct Options {
         // How many levels one fill takes at most.
         std::uint8_t fill_levels = 6;
+        // Where finer nodes are filled from coarser ones with seeded layers.
+        globe::Layered layered;
     };
 
     // A node asked for down to a depth.

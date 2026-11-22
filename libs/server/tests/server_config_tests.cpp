@@ -101,6 +101,7 @@ start = 2030-06-01T12:00:00+02:00
 [ground]
 store = "../var/store"
 generate = false
+layered_below = 4.5
 )",
                                             base());
     REQUIRE(config);
@@ -134,6 +135,7 @@ generate = false
           hog::to_game_time(std::chrono::sys_days{std::chrono::year{2030} / 6 / 1} + 10h));
     CHECK(config->ground.store == (base() / "../var/store").lexically_normal());
     CHECK_FALSE(config->ground.generate);
+    CHECK(config->ground.layered_below == 4.5);
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -201,6 +203,7 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[ground]\nstore = 3\n"), ErrorCode::InvalidArgument},
         {with("[ground]\nscratch = true\n"), ErrorCode::InvalidArgument},
         {with("[ground]\ngenerate = 1\n"), ErrorCode::InvalidArgument},
+        {with("[ground]\nlayered_below = -1.0\n"), ErrorCode::InvalidArgument},
         {with("[pages]\nstore = \"p\"\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);

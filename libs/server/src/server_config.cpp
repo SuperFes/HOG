@@ -297,7 +297,7 @@ private:
 
 [[nodiscard]] Result<void> parse_ground(const Table& ground, const std::filesystem::path& base,
                                         GroundConfig& config) {
-    if (auto known = ground.only({"store", "generate"}); !known) {
+    if (auto known = ground.only({"store", "generate", "layered_below"}); !known) {
         return known;
     }
     const auto store = ground.string("store");
@@ -312,6 +312,14 @@ private:
         return std::unexpected(generate.error());
     }
     config.generate = generate->value_or(config.generate);
+    const auto layered = ground.number("layered_below");
+    if (!layered) {
+        return std::unexpected(layered.error());
+    }
+    config.layered_below = layered->value_or(config.layered_below);
+    if (config.layered_below < 0.0) {
+        return invalid("ground.layered_below must not be negative");
+    }
     return {};
 }
 

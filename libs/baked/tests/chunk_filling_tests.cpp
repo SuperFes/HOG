@@ -122,7 +122,7 @@ TEST_CASE("an ask is filled down to its depth, each region as the generator fill
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
     ChunkStore store = scratch(generator);
     hog::jobs::JobSystem jobs{2};
-    ChunkFiller filler{generator, store, jobs, {.fill_levels = 4}};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 4, .layered = {}}};
     const Bands& bands = store.bands();
     const Regions regions{bands, 4};
 
@@ -162,13 +162,43 @@ TEST_CASE("an ask is filled down to its depth, each region as the generator fill
     }
 }
 
+TEST_CASE("a filler asked to layer fills each region layered", "[baked][chunk-filling]") {
+    const hog::globe::Generator& generator = hog::testing::small_world();
+    const hog::grid::Grid grid = hog::globe::grid_of(generator);
+    ChunkStore store = scratch(generator);
+    hog::jobs::JobSystem jobs{2};
+    const hog::globe::Layered layered{.below =
+                                          grid.size(static_cast<std::uint8_t>(grid.depth() - 2))};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 4, .layered = layered}};
+    const Bands& bands = store.bands();
+
+    const hog::DVec3 place = on_ground(generator, 0.0);
+    const Key node = grid.key_at(place, static_cast<std::uint8_t>(grid.depth() - 4)).value();
+    filler.want(node, grid.depth());
+    const std::vector<Region> written = settle(filler);
+    REQUIRE_FALSE(written.empty());
+    auto snapshot = store.read();
+    REQUIRE(snapshot.has_value());
+    bool unlike = false;
+    for (const Region& region : written) {
+        const auto shape = snapshot->piece<hog::grid::Shape>(region.root, bands.foot(region.band));
+        REQUIRE(shape.has_value());
+        CHECK(shape.value().tree.same_as(
+            hog::baked::fill_region(generator, grid, bands, region, layered).shape));
+        unlike = unlike || !shape.value().tree.same_as(
+                               hog::baked::fill_region(generator, grid, bands, region).shape);
+    }
+    // Layered under its base, so not as filled plain.
+    CHECK(unlike);
+}
+
 TEST_CASE("asking deeper fills only the bands under, never again those over",
           "[baked][chunk-filling]") {
     const hog::globe::Generator& generator = hog::testing::small_world();
     const hog::grid::Grid grid = hog::globe::grid_of(generator);
     ChunkStore store = scratch(generator);
     hog::jobs::JobSystem jobs{2};
-    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
     const Bands& bands = store.bands();
 
     const Key node =
@@ -228,7 +258,7 @@ TEST_CASE("fills start by rank, a later round first, a region taking its highest
     ChunkStore store = scratch(generator);
     // One worker, so two fills at a time.
     hog::jobs::JobSystem jobs{1};
-    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
     const Bands& bands = store.bands();
     const Regions regions{bands, 3};
     const std::uint8_t last = bands.count() - 1;
@@ -266,7 +296,7 @@ TEST_CASE("asks forgotten leave their fills not yet started unstarted", "[baked]
     ChunkStore store = scratch(generator);
     // One worker, so two fills at a time.
     hog::jobs::JobSystem jobs{1};
-    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3}};
+    ChunkFiller filler{generator, store, jobs, {.fill_levels = 3, .layered = {}}};
     const Bands& bands = store.bands();
     const Regions regions{bands, 3};
     const std::uint8_t last = bands.count() - 1;
