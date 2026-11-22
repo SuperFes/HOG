@@ -40,6 +40,10 @@ struct BlockView {
     VkImageView environment = VK_NULL_HANDLE;
 };
 
+// Whether any of a ball `reach` metres about `middle`, as it truly lies, is in the view as drawn,
+// bent.
+[[nodiscard]] bool in_view(const BlockView& view, double aspect, DVec3 middle, double reach);
+
 // The most a cutaway can be, in metres.
 inline constexpr double block_cutaway_most = 200.0;
 // The share of it, from the eye, where ground isn't drawn; the rest is left for what's drawn at

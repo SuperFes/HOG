@@ -6,6 +6,7 @@
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/streamed_image.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -512,4 +514,29 @@ TEST_CASE("a mesh placed faded takes the pixels the one it replaces gives up", "
     CHECK(tally(20.0 + (hog::render::fade_seconds / 2.0)).blue < whole.red);
     CHECK(tally(20.0 + hog::render::fade_seconds).blue == 0);
     CHECK(!blocks->fading());
+}
+
+TEST_CASE("ground far ahead on a small planet is in view looking up, as it's drawn",
+          "[render][blocks]") {
+    // 70 m over the sea of a planet 11.5 km round, where truly the ground 5 km off lies some 13
+    // degrees under level, but drawn bent onto the faked sphere, barely under it.
+    constexpr double radius = 11'500.0;
+    const WorldPosition eye{DVec3{0.0, 0.0, radius + 70.0}};
+    const double turned = 5'000.0 / radius;
+    const DVec3 ahead = radius * DVec3{std::sin(turned), 0.0, std::cos(turned)};
+    const auto looking = [&](double pitch) {
+        return BlockView{.camera = {.eye = eye,
+                                    .forward = {std::cos(pitch), 0.0, std::sin(pitch)},
+                                    .up = {-std::sin(pitch), 0.0, std::cos(pitch)},
+                                    .vertical_fov = 1.0},
+                         .bend = hog::terrain::bend_from(eye, radius, 0.0)};
+    };
+    constexpr double degree = 0.017'453'292'519'943'295;
+    // The view's bottom 8.6 degrees over level.
+    CHECK(hog::render::in_view(looking(20.0 * degree), 1.0, ahead, 10.0));
+    // Its bottom 31 degrees over level, far over it.
+    CHECK_FALSE(hog::render::in_view(looking(60.0 * degree), 1.0, ahead, 10.0));
+    // Behind the eye.
+    const DVec3 behind{-ahead.x, ahead.y, ahead.z};
+    CHECK_FALSE(hog::render::in_view(looking(0.0), 1.0, behind, 10.0));
 }

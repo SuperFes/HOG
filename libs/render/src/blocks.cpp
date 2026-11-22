@@ -382,17 +382,22 @@ void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const Bl
 }
 
 bool Blocks::seen(const BlockView& view, double aspect, const Placed& placed) {
-    const DVec3 middle = placed.origin.metres() + placed.middle;
+    return in_view(view, aspect, placed.origin.metres() + placed.middle, placed.radius);
+}
+
+bool in_view(const BlockView& view, double aspect, DVec3 middle, double reach) {
     const Camera& camera = view.camera;
-    const DVec3 to = middle - camera.eye.metres();
-    if (terrain::folds_over(view.bend, middle, placed.radius) ||
-        terrain::behind_horizon(view.bend, to, placed.radius)) {
+    const DVec3 truly = middle - camera.eye.metres();
+    if (terrain::folds_over(view.bend, middle, reach) ||
+        terrain::behind_horizon(view.bend, truly, reach)) {
         return false;
     }
-    // The ball about the mesh against the view's four sides and what's behind it; generously, as
-    // the bend draws far ground lower than it lies.
+    // Where it's drawn: on a small planet the bend raises far ground well over where it lies, so
+    // looking up, ground truly under the view's bottom still shows. Generously, as bending
+    // stretches the ball a little.
+    const DVec3 to = terrain::bent(view.bend, truly);
     const double away = glm::length(to);
-    const double radius = placed.radius + (0.1 * away);
+    const double radius = reach + (0.1 * away);
     const DVec3 forward = glm::normalize(camera.forward);
     const DVec3 right = glm::normalize(glm::cross(forward, camera.up));
     const DVec3 up = glm::cross(right, forward);
