@@ -92,6 +92,8 @@ struct Wall {
     DVec3 cut_gradient{0.0};
     // Metres of the river's own alluvium under its floor, uncut.
     double sheet = 0.0;
+    // Metres out of where its channel may wind; negative inside.
+    double channel_away = 1e30;
 };
 [[nodiscard]] Wall wall_at(const Valley& valley, DVec3 direction, double radius) noexcept;
 

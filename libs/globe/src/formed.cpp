@@ -1279,6 +1279,7 @@ Formed::Carved Formed::carved(DVec3 direction, const formation::Smooth::Weights&
         }
         // Its floor holds the gullies back as far as it reaches.
         if (reaching > 0.0) {
+            carved.channel_away = std::min(carved.channel_away, wall.channel_away);
             floors.push_back({.ground = fade(wall.standing),
                               .above = (wall.standing - wall.floor) / reaching,
                               .gradient = wall.standing_gradient / reaching});
@@ -1597,6 +1598,7 @@ std::optional<Wall> Formed::valley_wall(std::uint32_t point, DVec3 direction, do
     const double past = std::clamp((nearest - half) / half, 0.0, 1.0);
     wall.reaching = 1.0 - (past * past * (3.0 - (2.0 * past)));
     wall.reaching_gradient = outward * (-6.0 * past * (1.0 - past) / half);
+    wall.channel_away = nearest - channel_reaches;
     return wall;
 }
 
@@ -1713,7 +1715,8 @@ Formed::Surface Formed::surface(DVec3 direction, const formation::Smooth::Weight
                 .settled = 1.0,
                 .bedforms = Noise{},
                 .sheet = ground.sheet,
-                .above_floor = above_floor};
+                .above_floor = above_floor,
+                .channel_away = ground.channel_away};
     // Ice fills the gullies itself, what it carried lying under it.
     if (dissected.ice <= 0.0) {
         settle(direction, weights, lod, cut);
@@ -1902,6 +1905,7 @@ Formed::Here Formed::at(DVec3 direction, const formation::Smooth::Weights& weigh
     here.cut = top.cut;
     here.rest = top.rest;
     here.above_floor = under.above_floor;
+    here.channel_away = under.channel_away;
     double cut = std::max(0.0, top.cut);
     const std::array all{&layers.loess,     &layers.sand, &layers.alluvium,
                          &layers.lake_beds, &layers.till, &layers.lava};

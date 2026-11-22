@@ -74,9 +74,10 @@ struct Ground {
     // of the year from the March equinox.
     double water_rise = 0.0;
     double water_peak = 0.0;
-    DVec3 rise{0.0};           // which way it climbs and how steeply, metres up per metre along
-    double above_floor = 1e30; // metres over the floor its valley drains along
-    double rest = 0.0;         // metres detail too fine for its own could move it, about
+    DVec3 rise{0.0};            // which way it climbs and how steeply, metres up per metre along
+    double above_floor = 1e30;  // metres over the floor its valley drains along
+    double channel_away = 1e30; // metres out of where a river's channel may wind
+    double rest = 0.0;          // metres detail too fine for its own could move it, about
     // The rock at its top: metres a year of it coming loose in blocks, metres a year it breaks up
     // where bare and the ground wears down, the years it has had, how well it stands, 0 to 1, and
     // the share standing bare.

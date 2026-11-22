@@ -208,14 +208,8 @@ private:
         for (std::uint8_t depth = 0; depth <= levels_ && !nodes.empty(); ++depth) {
             const auto at = static_cast<std::uint8_t>(key_.depth + depth);
             const double size = grid_->size(at);
-            // Columns on cells about as wide as the nodes, detail no finer than them; under the
-            // layers' base, the base's columns, and the layers at the nodes' own detail.
-            const int level = read_level(at);
-            const double lod = terms::cell_lod(generator_->planet(), level);
-            const double detail =
-                at > base_ ? terms::cell_lod(generator_->planet(), level_at(at)) : 0.0;
             const std::vector<DVec3> middles = middles_of(nodes);
-            const Read read = distances_at(middles, level, lod, detail);
+            const Read read = distances_at(middles, at);
             std::vector<grid::Key> next;
             std::vector<std::size_t> crossing;
             for (std::size_t n = 0; n < nodes.size(); ++n) {
@@ -236,7 +230,7 @@ private:
                 probes_.emplace(grid::code(nodes[n]), probe);
             }
             if (!crossing.empty()) {
-                planes(nodes, middles, read.under, crossing, size, level, lod, detail);
+                planes(nodes, middles, read.under, crossing, at);
             }
             nodes = std::move(next);
         }
@@ -288,9 +282,10 @@ private:
     // across it.
     void planes(const std::vector<grid::Key>& nodes, const std::vector<DVec3>& middles,
                 const std::vector<Cell>& under, const std::vector<std::size_t>& crossing,
-                double size, int level, double lod, double detail) {
+                std::uint8_t at) {
         constexpr std::array<DVec3, 3> axes{DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.0},
                                             DVec3{0.0, 0.0, 1.0}};
+        const double size = grid_->size(at);
         const double step = size / 2.0;
         std::vector<DVec3> points;
         points.reserve(crossing.size() * 6);
@@ -300,7 +295,7 @@ private:
                 points.push_back(middles[n] - (axis * step));
             }
         }
-        const Read read = distances_at(points, level, lod, detail);
+        const Read read = distances_at(points, at);
         const std::vector<double>& distances = read.distances;
         for (std::size_t f = 0; f < crossing.size(); ++f) {
             const std::size_t n = crossing[f];
@@ -314,7 +309,7 @@ private:
             // It shows the solid just inside the surface, along its normal from the middle.
             const DVec3 inside = middles[n] - (normal * (probe.distance + (size / 4.0)));
             const Material shown =
-                solid_at(glm::length(inside), cell_under(up_at(inside), level), size);
+                solid_at(glm::length(inside), cell_under(up_at(inside), under[n].level), size);
             // As rough as the ground strays from it: its middle off the line through each pair
             // of faces, and what's too fine for the read.
             double bend = 0.0;
@@ -351,15 +346,22 @@ private:
         return sample.distance < 0.0 ? sample.material : Material::Air;
     }
 
-    // The distance at each point, between the columns about it, the cell each lies over and how
-    // far the ground's detail too fine for them could move it. With `detail`, the seeded layers
-    // down to it raise the ground, and what's finer is the layers'.
+    // The distance at each point read for nodes at depth `at`, between the columns about it, the
+    // cell each lies over and how far the ground's detail too fine for them could move it. Under
+    // the layers' base, the seeded layers down to the nodes' detail raise the ground, and what's
+    // finer is the layers'; where features too narrow for the base reach, the generator's own.
     struct Read {
         std::vector<double> distances;
         std::vector<Cell> under;
         std::vector<double> rests;
     };
-    Read distances_at(const std::vector<DVec3>& points, int level, double lod, double detail) {
+    Read distances_at(const std::vector<DVec3>& points, std::uint8_t at) {
+        const int level = read_level(at);
+        const double lod = terms::cell_lod(generator_->planet(), level);
+        const double detail =
+            at > base_ ? terms::cell_lod(generator_->planet(), level_at(at)) : 0.0;
+        std::vector<std::size_t> unique;
+        std::vector<double> shares;
         std::vector<Between> between;
         between.reserve(points.size());
         std::vector<Smoothly> smoothly;
@@ -404,12 +406,90 @@ private:
                 distance -= (smooth - ground + raised(points[n], rest, detail)) /
                             std::sqrt(1.0 + (slope * slope));
                 rest = left(rest, detail);
+                if (layered_.unique) {
+                    if (const double share =
+                            unique_share(between[n], radius, clear * grid_->size(at));
+                        share > 0.0) {
+                        unique.push_back(n);
+                        shares.push_back(share);
+                    }
+                }
             }
             read.distances.push_back(distance);
             read.under.push_back(between[n].cells[0]);
             read.rests.push_back(rest);
         }
+        if (!unique.empty()) {
+            own_reads(points, unique, shares, level_at(at), detail, read);
+        }
         return read;
+    }
+
+    // How much of the generator's own read a point under the layers' base takes, `radius` from
+    // the centre between the base columns `about` it: all where a cave may lie within `reach`,
+    // else as much as those columns ask.
+    [[nodiscard]] double unique_share(const Between& about, double radius, double reach) const {
+        if (columns_.at(slot(about.cells[0]))
+                .caves_may_lie(radius - reach, radius + reach, reach)) {
+            return 1.0;
+        }
+        double share = 0.0;
+        for (std::size_t k = 0; k < 4; ++k) {
+            share += about.weights.at(k) * unique_in(columns_.at(slot(about.cells.at(k))));
+        }
+        return share;
+    }
+
+    // How much of the generator's own read a base column asks for: all where a crag stands or a
+    // cave may open near its ground, where a river's channel may wind or open water meets its
+    // ground, fading out a base's size past them.
+    [[nodiscard]] double unique_in(const Generator::Column& column) const {
+        const double margin = grid_->size(base_);
+        const double ground = column.ground();
+        if (column.crag() || column.caves_may_lie(ground - margin, ground + margin, margin)) {
+            return 1.0;
+        }
+        const auto fading = [margin](double away) {
+            const double out = std::clamp(away / margin, 0.0, 1.0);
+            return 1.0 - (out * out * (3.0 - (2.0 * out)));
+        };
+        double share = fading(column.channel_away());
+        if (column.water() > 0.0) {
+            const double off =
+                std::max({column.water() - ground, ground - highest_water(column), 0.0});
+            share = std::max(share, fading(off));
+        }
+        return share;
+    }
+
+    // The generator's own reads at `level`, with detail `lod`, at the points `which`, each taken
+    // by its share over what's read.
+    void own_reads(const std::vector<DVec3>& points, const std::vector<std::size_t>& which,
+                   const std::vector<double>& shares, int level, double lod, Read& read) {
+        std::vector<Between> between;
+        between.reserve(which.size());
+        std::vector<Cell> wanted;
+        wanted.reserve(which.size() * 4);
+        for (const std::size_t n : which) {
+            between.push_back(around(points[n], level));
+            wanted.insert(wanted.end(), between.back().cells.begin(), between.back().cells.end());
+        }
+        make_columns(wanted, lod);
+        for (std::size_t f = 0; f < which.size(); ++f) {
+            const std::size_t n = which[f];
+            const double radius = glm::length(points[n]);
+            double distance = 0.0;
+            double rest = 0.0;
+            for (std::size_t k = 0; k < 4; ++k) {
+                const Generator::Column& column = columns_.at(slot(between[f].cells.at(k)));
+                distance += between[f].weights.at(k) * column.sample(radius).distance;
+                rest += between[f].weights.at(k) * column.rest();
+            }
+            const double share = shares[f];
+            read.distances[n] = ((1.0 - share) * read.distances[n]) + (share * distance);
+            read.rests[n] = ((1.0 - share) * read.rests[n]) + (share * rest);
+            read.under[n] = between[f].cells[0];
+        }
     }
 
     // The solid at or just under `radius` in the column of the cell `under` it: where the column

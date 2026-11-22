@@ -378,6 +378,7 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     }
     column.slope_ = slope;
     column.rest_ = made.rest;
+    column.channel_away_ = made.channel_away;
     column.crag_ = made.crag;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
@@ -775,6 +776,7 @@ Ground formed_ground(const Context& context, DVec3 direction, double lod) {
     }
     made.rise = tangential(here.top.gradient, direction);
     made.above_floor = here.above_floor;
+    made.channel_away = here.channel_away;
     made.rest = here.rest;
     made.loosening = here.weathering.loosening;
     made.weathering = here.weathering.rate;

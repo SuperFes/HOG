@@ -1,4 +1,5 @@
 #include "../src/formed.hpp"
+#include "../src/terms.hpp"
 
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
@@ -94,6 +95,7 @@ bool holds(const Filled& filled, hog::grid::Water::Value body) {
 struct Crossing {
     int wet = 0;
     int own = 0;
+    int out_of_channel = 0; // wet, but further than its channel may wind
     std::optional<DVec3> deepest;
 };
 
@@ -115,6 +117,7 @@ Crossing cross(const hog::globe::Formed& formed, std::uint32_t point, double lod
             }
             ++crossing.wet;
             crossing.own += read.river->stem == formed.stem_of(point) ? 1 : 0;
+            crossing.out_of_channel += read.channel_away > 0.0 ? 1 : 0;
             if (const double standing = read.river->level - read.top.value; standing > deepest) {
                 deepest = standing;
                 crossing.deepest = here;
@@ -122,6 +125,24 @@ Crossing cross(const hog::globe::Formed& formed, std::uint32_t point, double lod
         }
     }
     return crossing;
+}
+
+// The points of the `count` rivers carrying the most water, running neither from nor into a lake.
+std::vector<std::uint32_t> largest_rivers(const hog::globe::Formed& formed, std::size_t count) {
+    const hog::formation::World& world = formed.world();
+    std::vector<std::uint32_t> largest;
+    for (std::uint32_t point = 0; point < world.sphere.size(); ++point) {
+        const std::uint32_t down = world.rivers.receiver[point];
+        if (down != point && world.lakes.lake[point] == hog::formation::Lakes::none &&
+            world.lakes.lake[down] == hog::formation::Lakes::none) {
+            largest.push_back(point);
+        }
+    }
+    std::ranges::sort(largest, [&](std::uint32_t a, std::uint32_t b) {
+        return world.lakes.discharge[a] > world.lakes.discharge[b];
+    });
+    largest.resize(std::min(largest.size(), count));
+    return largest;
 }
 
 // How much of what two palette entries show differs, from 0 alike to 1 nothing shared.
@@ -678,7 +699,8 @@ TEST_CASE(
     constexpr std::uint8_t base = 2;
     const double below = grid.size(static_cast<std::uint8_t>(key.depth + base));
     const auto with = [&](double strength) {
-        return fill(world, grid, key, levels, {.below = below, .strength = strength});
+        return fill(world, grid, key, levels,
+                    {.below = below, .strength = strength, .unique = false});
     };
     const Filled none = with(0.0);
     constexpr double strength = 1.0;
@@ -732,6 +754,73 @@ TEST_CASE(
     CHECK(moved > 0.0);
     CHECK(further * 50 < compared);
     CHECK(unlike * 20 < compared);
+}
+
+TEST_CASE("where a river's channel may wind a layered fill reads as the generator's own",
+          "[globe][grid]") {
+    const hog::globe::Generator& world = hog::testing::small_world_sized_rivers();
+    const hog::grid::Grid grid = grid_of(world);
+    const double radius = world.planet().body.radius;
+    const double lod = hog::globe::voxel_lod(world);
+    const hog::globe::Formed& formed = *world.shape().formed;
+    // The finest two depths filled are layered.
+    const auto base = static_cast<std::uint8_t>(grid.depth() - 2);
+    const hog::globe::Layered layered{.below = grid.size(base)};
+    const double base_lod =
+        hog::globe::terms::cell_lod(world.planet(), world.layers().level - (grid.depth() - base));
+    int rivers = 0;
+    int inside = 0;
+    int blended = 0;
+    for (const std::uint32_t point : largest_rivers(formed, 20)) {
+        const std::optional<DVec3> deepest = cross(formed, point, lod, radius).deepest;
+        if (!deepest) {
+            continue;
+        }
+        const hog::globe::Generator::Column column = world.column(*deepest, lod);
+        if (column.water() <= column.ground()) {
+            continue;
+        }
+        ++rivers;
+        const Key key = grid.key_at(*deepest * column.ground(),
+                                    static_cast<std::uint8_t>(grid.depth() - levels))
+                            .value();
+        const Filled plain = fill(world, grid, key, levels);
+        const Filled whole = fill(world, grid, key, levels, layered);
+        // Well inside it, every base column about a node asks for all of the generator's own.
+        for (auto depth = static_cast<std::uint8_t>(levels - 1); depth <= levels; ++depth) {
+            each_crossed(whole.shape, depth,
+                         [&](std::uint32_t x, std::uint32_t y, std::uint32_t z,
+                             const hog::grid::Surface& one) {
+                             const Key node{.depth = static_cast<std::uint8_t>(key.depth + depth),
+                                            .x = (key.x << depth) + x,
+                                            .y = (key.y << depth) + y,
+                                            .z = (key.z << depth) + z};
+                             const DVec3 up = glm::normalize(grid.centre(node));
+                             if (world.column(up, base_lod).channel_away() > -3.0 * layered.below) {
+                                 return;
+                             }
+                             const auto own = plain.shape.at(depth, x, y, z);
+                             if (own.depth == depth) {
+                                 ++inside;
+                                 CHECK(own.value == one);
+                             }
+                         });
+        }
+        // Blended over its edge, a node reads the same from the node over it.
+        for (const std::uint32_t octant : {0U, 1U}) {
+            const Key child = key.child(octant);
+            const Filled part =
+                fill(world, grid, child, static_cast<std::uint8_t>(levels - 1), layered);
+            const auto [count, unlike] =
+                unlike_nodes(part.shape, whole.shape, static_cast<std::uint8_t>(levels - 1), 1,
+                             {child.x & 1U, child.y & 1U, child.z & 1U});
+            CHECK(unlike == 0);
+            blended += count;
+        }
+    }
+    CHECK(rivers >= 2);
+    CHECK(inside > 100);
+    CHECK(blended > 100);
 }
 
 TEST_CASE("pieces filled apart graft into what's filled whole", "[globe][grid]") {
@@ -824,23 +913,11 @@ TEST_CASE("the largest rivers are their own bodies where their water stands", "[
     const hog::globe::Formed& formed = *world.shape().formed;
 
     // The rivers carrying the most water, crossed between the points they run between: where water
-    // stands, it's the river's own, but where a bigger one's runs beside it.
-    const hog::formation::World& formed_world = formed.world();
-    std::vector<std::uint32_t> largest;
-    for (std::uint32_t point = 0; point < formed_world.sphere.size(); ++point) {
-        const std::uint32_t down = formed_world.rivers.receiver[point];
-        if (down != point && formed_world.lakes.lake[point] == hog::formation::Lakes::none &&
-            formed_world.lakes.lake[down] == hog::formation::Lakes::none) {
-            largest.push_back(point);
-        }
-    }
-    std::ranges::sort(largest, [&](std::uint32_t a, std::uint32_t b) {
-        return formed_world.lakes.discharge[a] > formed_world.lakes.discharge[b];
-    });
-    largest.resize(std::min<std::size_t>(largest.size(), 20));
+    // stands, it's the river's own, but where a bigger one's runs beside it, and it stands where
+    // its channel may wind.
     int crossed = 0;
     int deep = 0;
-    for (const std::uint32_t point : largest) {
+    for (const std::uint32_t point : largest_rivers(formed, 20)) {
         CAPTURE(point);
         const Crossing crossing = cross(formed, point, lod, radius);
         const std::optional<DVec3> deepest = crossing.deepest;
@@ -849,6 +926,7 @@ TEST_CASE("the largest rivers are their own bodies where their water stands", "[
         }
         ++crossed;
         CHECK(2 * crossing.own >= crossing.wet);
+        CHECK(crossing.out_of_channel == 0);
         const hog::globe::Generator::Column column = world.column(*deepest, lod);
         if (column.water() > column.ground()) {
             ++deep;
@@ -1164,9 +1242,17 @@ TEST_CASE("layered fills against the generator's own", "[.bench][globe][grid]") 
         std::ranges::sort(values);
         return values.empty() ? 0.0 : values[values.size() / 2];
     };
-    for (const bool land : {true, false}) {
-        const DVec3 up = spread_until(land, 20.0);
-        const double lod = hog::globe::voxel_lod(world);
+    const double lod = hog::globe::voxel_lod(world);
+    const hog::globe::Formed& formed = *world.shape().formed;
+    std::vector<std::pair<const char*, DVec3>> spots{{"land", spread_until(true, 20.0)},
+                                                     {"sea", spread_until(false, 20.0)}};
+    for (const std::uint32_t point : largest_rivers(formed, 20)) {
+        if (const auto deepest = cross(formed, point, lod, world.planet().body.radius).deepest) {
+            spots.emplace_back("river", *deepest);
+            break;
+        }
+    }
+    for (const auto& [spot, up] : spots) {
         const DVec3 ground = up * hog::globe::ground_below(world, up, lod).value();
         constexpr std::uint8_t deep = 6;
         const Key key = grid.key_at(ground, static_cast<std::uint8_t>(grid.depth() - deep)).value();
@@ -1191,14 +1277,21 @@ TEST_CASE("layered fills against the generator's own", "[.bench][globe][grid]") 
         const auto [plain, plain_time] = timed([&] { return fill(world, grid, key, deep); });
         for (const std::uint8_t base : {std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{3}}) {
             const double below = grid.size(static_cast<std::uint8_t>(key.depth + base));
-            const auto [flat, flat_time] = timed(
-                [&] { return fill(world, grid, key, deep, {.below = below, .strength = 0.0}); });
-            const auto [layered, layered_time] =
+            const auto [flat, flat_time] = timed([&] {
+                return fill(world, grid, key, deep,
+                            {.below = below, .strength = 0.0, .unique = false});
+            });
+            const auto [layered, layered_time] = timed([&] {
+                return fill(world, grid, key, deep,
+                            {.below = below, .strength = 1.0, .unique = false});
+            });
+            const auto [kept, kept_time] =
                 timed([&] { return fill(world, grid, key, deep, {.below = below}); });
             std::vector<double> own;
             std::vector<double> bare;
             std::vector<double> seeded;
             std::vector<double> added;
+            std::vector<double> keeping;
             for (const DVec3 point : points) {
                 const double p = held(grid, key, plain, point, deep);
                 const double f = held(grid, key, flat, point, deep);
@@ -1207,15 +1300,16 @@ TEST_CASE("layered fills against the generator's own", "[.bench][globe][grid]") 
                 bare.push_back(std::abs(f));
                 seeded.push_back(std::abs(l));
                 added.push_back(std::abs(l - f));
+                keeping.push_back(std::abs(held(grid, key, kept, point, deep)));
             }
             std::println(
-                "{} points; {} base {:.1f} m: plain {:.0f} ms, layered {:.0f} ms ({:.0f} bare); "
-                "off the generator's finest, median plain {:.3f} m, bare {:.3f}, "
-                "layered {:.3f}; layers add {:.3f}; shape bytes {} {} {}",
-                points.size(), land ? "land" : "sea", below, plain_time * 1e3, layered_time * 1e3,
-                flat_time * 1e3, median(own), median(bare), median(seeded), median(added),
-                plain.shape.encode().size(), flat.shape.encode().size(),
-                layered.shape.encode().size());
+                "{} points; {} base {:.1f} m: plain {:.0f} ms, layered {:.0f} ms ({:.0f} bare), "
+                "unique kept {:.0f} ms; off the generator's finest, median plain {:.3f} m, bare "
+                "{:.3f}, layered {:.3f}, kept {:.3f}; layers add {:.3f}; shape bytes {} {} {} {}",
+                points.size(), spot, below, plain_time * 1e3, layered_time * 1e3, flat_time * 1e3,
+                kept_time * 1e3, median(own), median(bare), median(seeded), median(keeping),
+                median(added), plain.shape.encode().size(), flat.shape.encode().size(),
+                layered.shape.encode().size(), kept.shape.encode().size());
         }
     }
 }

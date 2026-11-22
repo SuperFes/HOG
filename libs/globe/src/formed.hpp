@@ -72,6 +72,8 @@ public:
         // Metres it stands over the floor of the valley it lies in, or the lake it drains to: how
         // far down the water under it lies.
         double above_floor = 1e30;
+        // Metres out of where a river's channel may wind; negative inside.
+        double channel_away = 1e30;
         // Where a crag stands that was left out of the ground as asked: the block whose core it
         // is, metres it rotted in from its joints, metres from the centre the rock's top lies at
         // under it, and metres its core stands over that.
@@ -182,6 +184,8 @@ private:
         double sheet = 0.0;
         // Metres the valleys' wander and wear too fine for the detail read could move it, about.
         double rest = 0.0;
+        // Metres out of where the channel of any valley reaching it may wind; negative inside.
+        double channel_away = 1e30;
     };
     [[nodiscard]] Carved carved(DVec3 direction, const formation::Smooth::Weights& weights,
                                 double lod) const;
@@ -234,6 +238,7 @@ private:
         double sheet = 0.0; // as carved
         // Metres it stands over the floor of the valley it lies in, or the lake it drains to.
         double above_floor = 1e30;
+        double channel_away = 1e30; // as carved
     };
     [[nodiscard]] Surface surface(DVec3 direction, const formation::Smooth::Weights& weights,
                                   double lod) const;

@@ -70,8 +70,9 @@ after, and strike it off.
 - **Layered fine bands.** A fill can read nodes under a base size from the base's columns plus
   seeded layers (`Layered`, off): a 32 m land node down to 0.5 m fills in 50 ms against 194 ms
   with a quarter of the shape bytes, but strays 0.27 m (median) from the generator's finest
-  ground against 0.03 m, and loses caves, channels and shores narrower than the base until they
-  go on finer (world tree step 6.2).
+  ground against 0.03 m. Near channels, shores, crags and caves it now takes the generator's own
+  reads: over a river with an 8 m base, 0.10 m off in 239 ms against 0.20 in 139 (plain 0.009 in
+  355). Narrower margins, or a channel's own width rather than a base's, would cut the cost there.
 - **Valleys still dominate a read.** `carved` is 60–75% of `Formed::at` at every detail, nearly all
   `valley_wall`: of about 15 valleys asked a read, 4 pass the bound and 3.5 reach, and each scans
   its whole course (about 31 stretches) three times: nearest 17%, floors and walls 11%, `wall_at` on

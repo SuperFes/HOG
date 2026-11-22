@@ -256,9 +256,17 @@ Each step is its own commit with tests, and the world stays playable after each.
       from bases of 4 to 16 m, and the layers don't bring it nearer: they're texture of about the
       right size, not the generator's own detail. On the sea floor, where there's little finer
       detail, a 4 m base lies 5 mm off.
-   2. *What stays unique.* Caves narrower than the base, channels, shores and crags don't show
-      in layered nodes yet; where they reach, the generator should go on finer, blended over a
-      margin so the switch leaves no seam.
+   2. *What stays unique.* Done (`Layered::unique`, on with the layers): each base column asks
+      for the generator's own read where a crag stands or a cave may open within a base's size of
+      its ground, and fading out over a base's size past where a river's channel may wind (a
+      column's `channel_away`, carried up from the valleys' reads) or open water meets its
+      ground. A node takes that share between the four base columns about it, all where a cave may
+      lie within its reach, so the switch is smooth across a base cell and still reads alike from
+      any node over it. Measured on the test world, a 32 m node over a river down to 0.5 m: off
+      the generator's finest, median 0.18, 0.10 and 0.03 m from bases of 16, 8 and 4 m against
+      0.43, 0.20 and 0.05 layered alone and 0.009 plain, in 266, 239 and 319 ms against 160, 139
+      and 145 layered and 355 plain. Land and sea floor away from them fill as before. The margins
+      are a base's size whatever the feature, a first guess.
    3. *Gullies and steering.* Johansen's filter for gullies, steered by slope; layers by the
       processes' numbers (wear, bedforms, standing) rather than one rest.
    4. *Not stored.* Layered nodes made where they're read, the client layering under held

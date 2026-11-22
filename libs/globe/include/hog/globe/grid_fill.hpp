@@ -56,10 +56,13 @@ struct Filled {
 // Where finer nodes are read from coarser ones with seeded layers: nodes narrower than `below`
 // metres are read between the columns of the finest nodes no narrower, with octaves of noise for
 // the detail finer than those, seeded by position, as strong as `strength` times what the columns
-// say that detail could move the ground; none where `below` is 0.
+// say that detail could move the ground; none where `below` is 0. With `unique`, where a river's
+// channel, a shore, a crag or a cave too narrow for those columns reaches, the generator's own
+// reads, blended in over a column's width.
 struct Layered {
     double below = 0.0;
     double strength = 1.0;
+    bool unique = true;
 };
 
 // The trees over the node at `key`, `levels` deep under it, from the generator. Each node is

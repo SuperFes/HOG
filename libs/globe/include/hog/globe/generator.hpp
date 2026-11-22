@@ -180,6 +180,8 @@ public:
         [[nodiscard]] double slope() const noexcept { return slope_; }
         // Metres the ground's detail too fine for the column's could move it, at most, about.
         [[nodiscard]] double rest() const noexcept { return rest_; }
+        // Metres out of where a river's channel may wind; negative inside.
+        [[nodiscard]] double channel_away() const noexcept { return channel_away_; }
         // The unit direction it runs down.
         [[nodiscard]] DVec3 direction() const noexcept { return direction_; }
         // The crag left out of its ground, made without `placed`, where one stands.
@@ -228,6 +230,7 @@ public:
         double water_peak_ = 0.0;
         double slope_ = 0.0; // across the ground, at the radius
         double rest_ = 0.0;
+        double channel_away_ = 1e30;
         std::optional<CragStanding> crag_;
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
