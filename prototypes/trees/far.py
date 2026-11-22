@@ -574,6 +574,7 @@ int kind;
 #define FETCH(t, c) texture(t, c)
 """ + COMMON + IMPOSTOR_LIB + """
 void main() {
+    gl_SampleMask[0] = -1;  // a mask written on any path is undefined on the rest
     kind = int(v_info.x);
     float sc = v_info.y;
     float yaw = v_base.w;

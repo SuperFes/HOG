@@ -43,10 +43,13 @@ void main() {
 """
 
 LIT_FS = """
-#version 330
+#version 400
 uniform sampler2DShadow shadow;
 uniform sampler2D albedo;
 uniform sampler2D turn_mask;
+uniform sampler2D normal_map;  // cards: per-texel normal, leafiness in alpha
+uniform bool normal_mapped;
+uniform int samples;  // per pixel, multisampled
 uniform bool textured;
 uniform bool masked;
 uniform float cutoff;
@@ -67,6 +70,12 @@ in vec4 v_autumn;
 in vec4 v_light;
 out vec4 f_colour;
 
+uint pcg(uint v) {
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
 float lit() {
     vec3 p = v_light.xyz / v_light.w * 0.5 + 0.5;
     if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0) return 1.0;
@@ -79,9 +88,16 @@ float lit() {
 }
 
 void main() {
+    gl_SampleMask[0] = -1;  // a mask written on any path is undefined on the rest
     vec4 tex = textured ? texture(albedo, v_uv) : vec4(1.0);
     float alpha = 1.0;
     vec3 n0 = normalize(v_normal);
+    float leafy = 1.0;
+    if (normal_mapped) {
+        vec4 nm = texture(normal_map, v_uv);
+        n0 = normalize(nm.rgb * 2.0 - 1.0);
+        leafy = nm.a;
+    }
     float cavity = 1.0;
     if (textured && relief > 0.0) {
         // Bark relief from the height in alpha, by surface gradients (no tangents needed).
@@ -99,6 +115,26 @@ void main() {
     } else if (textured) {
         // Sharpened alpha to coverage: crisp edges that still antialias under MSAA.
         alpha = (tex.a - cutoff) / max(fwidth(tex.a), 1e-4) + 0.5;
+        if (normal_mapped) {
+            // A card's texel shrunk to under a pixel holds leaves and gaps: draw its coverage
+            // as it is, or the leaves fall under the cutoff and vanish.
+            vec2 texels = fwidth(v_uv) * vec2(textureSize(albedo, 0));
+            float minified = clamp(log2(max(max(texels.x, texels.y), 1e-4)), 0.0, 1.0);
+            alpha = mix(alpha, tex.a, minified);
+            // Coverage as a mask drawn per card and pixel: alpha to coverage gives every card
+            // the same mask for the same alpha, so overlapping cards would cover only as
+            // much as one.
+            uint h = pcg(uint(gl_FragCoord.x) + pcg(uint(gl_FragCoord.y)
+                                                    + pcg(uint(gl_PrimitiveID / 2) + 7u)));
+            int n = int(floor(clamp(alpha, 0.0, 1.0) * float(samples)
+                              + float(h >> 8u) / 16777216.0));
+            int start = int(h % uint(samples));
+            int mask = 0;
+            for (int i = 0; i < n; ++i) mask |= 1 << ((start + i) % samples);
+            if (mask == 0) discard;
+            gl_SampleMask[0] = mask;
+            alpha = 1.0;
+        }
         if (alpha <= 0.0) discard;
     }
     vec3 n = n0;
@@ -107,7 +143,7 @@ void main() {
     float shade = lit();
     float facing = dot(n, sun);
     // Light through a leaf: strongest looking toward the sun through it, tinted yellow-green.
-    float through = translucency * max(-facing, 0.0) * (0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
+    float through = translucency * leafy * max(-facing, 0.0) * (0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
     float direct = max(facing, 0.0);
     float up = n.y * 0.5 + 0.5;
     vec3 ambient = mix(ground_colour, sky_colour, up);
@@ -211,6 +247,8 @@ class Material:
         self.relief = relief  # bark: metres of height in the texture's alpha
         self.translucency = translucency
         self.cutoff = cutoff
+        self.normal_map = None  # cards: RGBA float array, normal packed 0-1, leafiness
+        self.levels = None  # [albedo levels, normal levels] made ahead, if plain mips won't do
 
 
 class Scene:
@@ -298,16 +336,19 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     lit_prog["exposure"].value = 1.0
     lit_prog["debug"].value = debug
     lit_prog["eye"].value = tuple(eye)
+    lit_prog["samples"].value = samples
 
     textures = {}
 
-    def texture_of(img):
+    def texture_of(img, levels=None):
         key = id(img)
         if key not in textures:
             h, w = img.shape[:2]
             data = np.ascontiguousarray(img[::-1].astype("f4"))
             t = ctx.texture((w, h), 4, data.tobytes(), dtype="f4")
             t.build_mipmaps()
+            for lvl, m in enumerate((levels or [])[1:], 1):
+                t.write(np.ascontiguousarray(m[::-1].astype("f4")).tobytes(), level=lvl)
             t.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
             t.anisotropy = 8.0
             textures[key] = t
@@ -327,17 +368,22 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
                                            "in_colour", "in_uv", "in_autumn")], ibo)
         shade = ctx.vertex_array(depth_prog, [(vbo, "3f 12x 12x 2f 16x", "in_pos", "in_uv")],
                                  ibo)
-        tex = texture_of(mat.texture) if mat.texture is not None else None
+        levels = getattr(mat, "levels", None)
+        tex = (texture_of(mat.texture, levels and levels[0]) if mat.texture is not None
+               else None)
+        nmap = None
+        if getattr(mat, "normal_map", None) is not None:
+            nmap = texture_of(mat.normal_map, levels and levels[1])
         mask = None
         if mat.turn_mask is not None:
             m = mat.turn_mask
             if id(m) not in masks:
                 masks[id(m)] = np.dstack([m, m, m, np.ones_like(m)]).astype("f4")
             mask = texture_of(masks[id(m)])
-        vaos.append((lit, shade, mat, (tex, mask), (vbo, ibo)))
+        vaos.append((lit, shade, mat, (tex, mask, nmap), (vbo, ibo)))
 
     def bind(prog, mat, texs):
-        tex, mask = texs
+        tex, mask, nmap = texs
         (tex or white).use(1)
         prog["albedo"].value = 1
         prog["textured"].value = tex is not None
@@ -348,6 +394,10 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
             (mask or white).use(2)
             prog["turn_mask"].value = 2
             prog["masked"].value = mask is not None
+        if "normal_mapped" in prog:
+            (nmap or white).use(3)
+            prog["normal_map"].value = 3
+            prog["normal_mapped"].value = nmap is not None
 
     shadow_fbo.use()
     shadow_fbo.clear(depth=1.0)
@@ -373,7 +423,7 @@ def render(scene, size=(512, 640), yaw=35.0, pitch=8.0, sun_dir=(0.45, 0.75, 0.3
     for lit, _shade, mat, tex, _b in vaos:
         lit_prog["translucency"].value = mat.translucency
         bind(lit_prog, mat, tex)
-        coverage = tex[0] is not None and mat.relief <= 0
+        coverage = tex[0] is not None and mat.relief <= 0 and tex[2] is None
         if coverage:
             ctx.enable_direct(alpha_to_coverage)
         lit.render()
