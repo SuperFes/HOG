@@ -268,15 +268,16 @@ Cell wandering_cell_at(float3 direction, float radius) {
     return cell_at(place.direction, place.from);
 }
 
-// The cloud at a height in the air's layers: how much of the sky it covers, and per metre how much
-// light it takes where it's as thick as it gets.
+// The cloud at a height in the air's layers: how much of the sky it covers, how much the column
+// through all of them covers, and per metre how much light it takes where it's as thick as it gets.
 struct Layered {
     float cover;
+    float column;
     float density;
 };
 
-// Of the layer `index`, its cover and density at the place.
-Layered layer_at(Place place, float index) {
+// Of the layer `index`, its cover and density at the place, under a column covering `column`.
+Layered layer_at(Place place, float index, float column) {
     const float2 texel = lerp(layers_before.SampleLevel(float4(place.from.before, index), 0.0).rg,
                               layers_after.SampleLevel(float4(place.from.after, index), 0.0).rg,
                               push.radii.z);
@@ -285,9 +286,10 @@ Layered layer_at(Place place, float index) {
     const float water = texel.g * texel.g * 16.0;
     Layered layer;
     layer.cover = texel.r;
-    // The billows fill about half of what it covers, so where they're thickest they're twice as
-    // dense as its water spread through it all.
-    layer.density = min(2.0 * depth_per_mm * water / (max(texel.r, least_cover) * depth), densest);
+    layer.column = column;
+    // The billows fill about half of what the column covers, so where they're thickest they're
+    // twice as dense as its water spread through it all.
+    layer.density = min(2.0 * depth_per_mm * water / (max(column, least_cover) * depth), densest);
     return layer;
 }
 
@@ -298,6 +300,7 @@ Layered layered_at(Place place, float height) {
     const float count = air_layers.x;
     Layered none;
     none.cover = 0.0;
+    none.column = 0.0;
     none.density = 0.0;
     if (count < 1.0) {
         return none;
@@ -312,10 +315,14 @@ Layered layered_at(Place place, float height) {
     }
     const float between = clamp(up - 0.5, 0.0, count - 1.0);
     const float lower = floor(between);
-    const Layered below = layer_at(place, lower);
-    const Layered above = layer_at(place, min(lower + 1.0, count - 1.0));
+    // The column's cover, all the layers' together, as the weather map has it.
+    const float column = lerp(weather_before.SampleLevel(place.from.before, 0.0).r,
+                              weather_after.SampleLevel(place.from.after, 0.0).r, push.radii.z);
+    const Layered below = layer_at(place, lower, column);
+    const Layered above = layer_at(place, min(lower + 1.0, count - 1.0), column);
     Layered layered;
     layered.cover = lerp(below.cover, above.cover, between - lower);
+    layered.column = column;
     layered.density = lerp(below.density, above.density, between - lower);
     return layered;
 }
@@ -337,20 +344,23 @@ float cloud_at(float3 at, Layered here, float footprint, bool worn, out float bi
     const float4 shape = flowed(shape_noise, at, flow, sizes.shape,
                                 max(log2(footprint * shape_texels / sizes.shape), 0.0));
     billows = shape.r;
-    // The billows are spread evenly, so about as much of the sky's covered as the cover says, and a
-    // full cover leaves no gaps. Each layer covering less than the one under it, broken cloud
-    // billows up into domes.
-    float cloud = saturate(remap(shape.r, 1.0 - (here.cover * overfill), 1.0, 0.0, 1.0));
+    // The billows are spread evenly, so about as much of the sky's covered as the column's cover
+    // says, and a full cover leaves no gaps. A layer covering less than the column shrinks them,
+    // so broken cloud billows up into domes and thins out where the layers hold less.
+    const float column = max(here.column, here.cover);
+    const float profile = saturate(here.cover / max(column, least_cover));
+    float cloud =
+        saturate(remap(shape.r * profile, 1.0 - (column * overfill), 1.0, 0.0, 1.0));
     // Broken cloud's worn by the cells, where it's thin.
     const float wearing = (shape.g * 0.625) + (shape.b * 0.25) + (shape.a * 0.125);
-    cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - here.cover), 1.0, 0.0, 1.0));
+    cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - column), 1.0, 0.0, 1.0));
     if (worn && cloud > 0.0) {
         const float detail = flowed(detail_noise, at, flow, sizes.detail,
                                     max(log2(footprint * detail_texels / sizes.detail), 0.0))
                                  .a;
         // Billowing; less so the more of the sky's covered, so a full cover keeps no gaps.
-        cloud = saturate(
-            remap(cloud, (1.0 - detail) * 0.3 * (1.0 - (0.8 * here.cover)), 1.0, 0.0, 1.0));
+        cloud =
+            saturate(remap(cloud, (1.0 - detail) * 0.3 * (1.0 - (0.8 * column)), 1.0, 0.0, 1.0));
     }
     return cloud;
 }
@@ -422,6 +432,7 @@ float rain_beneath(float cover, float presence) {
 float raining_from(float3 direction, Cell cell, float footprint) {
     Layered column;
     column.cover = cell.cover;
+    column.column = cell.cover;
     column.density = 0.0;
     float cloud = 0.0;
     for (uint at = 1; at <= rain_from; ++at) {
@@ -597,6 +608,7 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
                 const float blend = saturate((middle - lower_middle) / (upper_middle - lower_middle));
                 Layered lit;
                 lit.cover = lerp(lower.cover, upper.cover, blend);
+                lit.column = lerp(lower.column, upper.column, blend);
                 lit.density = lerp(lower.density, upper.density, blend);
                 towards_sun +=
                     cloud_at(lit_at, lit, footprint, false, unused) * lit.density * (after - before);
