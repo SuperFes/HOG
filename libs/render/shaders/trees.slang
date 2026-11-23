@@ -43,7 +43,6 @@ struct Frame {
 struct Template {
     float4 corners[6];
     float4 uvs[3];
-    uint4 indices[3];
     float4 colour_range;
 };
 
@@ -216,11 +215,12 @@ float3 rotated(float4 q, float3 v) {
 }
 
 [shader("vertex")]
-Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
-    // Leaves are drawn a tree at a time, the tree from the push.
+Surface vertex_leaf(uint index : SV_VertexID) {
+    // Leaves are drawn a tree at a time, the tree from the push, each leaf's corners indexed.
     const Tree tree = tree_of(0u);
+    const uint leaf = index / 6u;
+    const uint corner = index % 6u;
     const uint at = leaf * 10u;
-    const uint corner = leaf_shape.indices[index / 4u][index % 4u];
     const float3 base = dequantized(uint2(records[at], records[at + 1u]));
     const float length = from_half(records[at + 1u] >> 16u);
     const float4 rotation = quaternion(records[at + 2u]);

@@ -76,8 +76,22 @@ public:
     // The trees drawn from now on, in place of those shown before.
     void show(std::vector<TreeDraw> trees);
 
-    // Records drawing those shown within reach and in view into the colour and depth images being
-    // rendered to, of `extent`. The frame's last submit must have finished.
+    // What's drawn of the trees, each recorded on its own so it can be timed on its own.
+    enum class Stage : std::uint8_t {
+        Whole,  // the nearest trees' meshes
+        Leaves, // and their leaves
+        Cards,
+        Impostors,
+    };
+
+    // Readies drawing those shown within reach and in view into images of `extent`: which trees
+    // are drawn how, and what the frame's stages read of them. The frame's last submit must have
+    // finished.
+    [[nodiscard]] Result<> prepare(VkExtent2D extent, const TreeView& view, std::uint32_t frame);
+    // Records drawing a stage of what was readied for the frame into the colour and depth images
+    // being rendered to.
+    void draw(VkCommandBuffer commands, Stage stage, const TreeView& view, std::uint32_t frame);
+    // Readies the frame and records every stage, nearest first.
     [[nodiscard]] Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const TreeView& view,
                                 std::uint32_t frame);
 
@@ -134,6 +148,7 @@ private:
     struct Species {
         float colour_range = 1.0F;
         Buffer leaf_shape;
+        Buffer leaf_indices; // of the most leaves a variant has
         std::vector<std::optional<Image>> textures;
         std::vector<Variant> variants;
     };
@@ -166,9 +181,13 @@ private:
     // Into placed_, the trees in mesh reach and in view, as drawn.
     void place(VkExtent2D extent, const TreeView& view);
     void draw_meshes(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
-    // The trees drawn as cards, a draw for each variant's level, their trees written for the frame.
-    [[nodiscard]] Result<> draw_cards(VkCommandBuffer commands, const TreeView& view,
-                                      std::uint32_t frame);
+    // Of placed_, those drawn as cards in carded_, by variant and level, and their trees written
+    // for the frame.
+    [[nodiscard]] Result<> write_cards(std::uint32_t frame);
+    // The level of cards a tree placed past the whole draws: its own, or its variant's last.
+    [[nodiscard]] static std::size_t card_level(const Placed& placed);
+    // A draw for each variant's level of cards.
+    void draw_cards(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
     void draw_part(VkCommandBuffer commands, const Species& species, const Variant& variant,
                    const Part& part, std::uint32_t count, const Placed* tree, std::uint32_t first,
                    std::uint32_t trees);
@@ -189,6 +208,8 @@ private:
     std::vector<Buffer> frames_;
     std::vector<Species> species_;
     std::vector<Placed> placed_;
+    std::vector<const Placed*> carded_;
+    bool ready_ = false; // whether the frame's stages have what they draw
     std::vector<TreeDraw> shown_;
     bool shown_changed_ = false;
     WorldPosition origin_;

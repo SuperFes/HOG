@@ -16,6 +16,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <format>
 #include <numbers>
@@ -327,6 +328,32 @@ void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, c
         });
 }
 
+void Scene::add_trees(render::RenderGraph& graph, const render::Frame& frame,
+                      const render::TreeView& view, std::span<const render::GraphUse> through_air,
+                      const render::GraphTargets& drawn) {
+    using Stage = render::Trees::Stage;
+    static constexpr std::array<std::pair<Stage, std::string_view>, 4> stages{{
+        {Stage::Whole, "trees"},
+        {Stage::Leaves, "tree leaves"},
+        {Stage::Cards, "tree cards"},
+        {Stage::Impostors, "tree impostors"},
+    }};
+    const std::vector<render::GraphUse> uses{through_air.begin(), through_air.end()};
+    for (const auto& [stage, name] : stages) {
+        graph.add({.name = name, .uses = uses, .targets = drawn},
+                  [this, extent = frame.extent, slot = frame.slot, view,
+                   stage](VkCommandBuffer commands) {
+                      if (stage == Stage::Whole) {
+                          if (Result<> prepared = trees_->prepare(extent, view, slot); !prepared) {
+                              return prepared;
+                          }
+                      }
+                      trees_->draw(commands, stage, view, slot);
+                      return Result<>{};
+                  });
+    }
+}
+
 bool Scene::settled() const {
     // Where the eye was against the water is only known once a frame's finished, so the frame
     // after the eye goes in or out of it is the first drawn as it should be.
@@ -543,14 +570,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                           cloudy ? std::optional{clouds_view()} : std::nullopt);
     add_ground(graph, frame, shot, sea, through_air, drawn);
     if (trees_shown_) {
-        graph.add(
-            {.name = "trees", .uses = through_air, .targets = drawn},
-            [&](VkCommandBuffer commands) {
-                return trees_->draw(
-                    commands, frame.extent,
-                    {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
-                    frame.slot);
-            });
+        add_trees(graph, frame,
+                  {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
+                  through_air, drawn);
     }
     if (!shot.others.empty()) {
         graph.add({.name = "others", .uses = through_air, .targets = drawn},

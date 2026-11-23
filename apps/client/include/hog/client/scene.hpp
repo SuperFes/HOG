@@ -200,6 +200,10 @@ private:
     void add_ground(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                     const render::OceanView& sea, std::span<const render::GraphUse> through_air,
                     const render::GraphTargets& drawn);
+    // Adds the passes drawing the trees, a pass for each stage of them, nearest first.
+    void add_trees(render::RenderGraph& graph, const render::Frame& frame,
+                   const render::TreeView& view, std::span<const render::GraphUse> through_air,
+                   const render::GraphTargets& drawn);
 
     // What's out of the water all round the eye, for its surface seen from under it: a probe for
     // each frame in flight.
