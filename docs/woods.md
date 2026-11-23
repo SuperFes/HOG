@@ -78,4 +78,6 @@ What a tree there lives with, read from the formed world at the ground's own hei
    change with fire and felling. Done (`grid::Woods`): on the ground through each node, held no
    finer than 16 m, even woods merged coarse; stored, sent and held like the other trees.
 5. After the tree lab: single trees hash-pinned on the field at the finest nodes, each kind's
-   species chosen within it, standing on the ground surface from the pages.
+   species chosen within it, standing on the ground surface from the pages. The trees come baked
+   from the lab as `.flora` files ([flora assets](flora-assets.md)): seeds at ages per species,
+   each with its thinning meshes, leaves, branch cards and impostor.
