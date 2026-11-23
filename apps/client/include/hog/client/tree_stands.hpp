@@ -5,6 +5,7 @@
 #include <hog/flora/placement.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
+#include <hog/grid/water_bodies.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -33,10 +34,15 @@ struct StandingTree {
     flora::Planted tree;
 };
 
+// Whether the water a point's basin holds covers it at its highest in the year.
+[[nodiscard]] bool under_water(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                               DVec3 point);
+
 // The trees standing in a node of the woods' finest depth: those planted on its spots whose
 // ground lies within it, each spot's line running down the planet's up through the node's middle,
-// so ground in two nodes, one over the other, is planted once.
-[[nodiscard]] std::vector<StandingTree> trees_in(const PiecesSnapshot& pieces, grid::Key node,
+// so ground in two nodes, one over the other, is planted once; none under water.
+[[nodiscard]] std::vector<StandingTree> trees_in(const PiecesSnapshot& pieces,
+                                                 const grid::WaterBodies& bodies, grid::Key node,
                                                  std::uint64_t seed,
                                                  const flora::Planting& planting);
 

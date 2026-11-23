@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace hog::client {
 namespace {
@@ -86,6 +88,35 @@ std::optional<GroundHit> ground_along(const PiecesSnapshot& pieces, DVec3 from, 
     return std::nullopt;
 }
 
+bool under_water(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies, DVec3 point) {
+    const auto node = pieces.grid().key_at(point, pieces.grid().depth());
+    const auto known = node ? pieces.at<grid::Water>(*node) : std::nullopt;
+    if (!known || known->found.value == 0) {
+        return false;
+    }
+    const auto found = bodies.bodies.find(known->found.value);
+    if (found == bodies.bodies.end()) {
+        return false;
+    }
+    const double highest = std::visit(
+        [&](const auto& body) {
+            using Body = std::decay_t<decltype(body)>;
+            if constexpr (std::is_same_v<Body, grid::Sea>) {
+                return body.level;
+            } else if constexpr (std::is_same_v<Body, grid::Lake>) {
+                return body.level + body.season.rise;
+            } else {
+                if (body.course.size() < 2) {
+                    return 0.0;
+                }
+                const grid::River::Along along = body.along(point);
+                return along.level + along.rise;
+            }
+        },
+        found->second);
+    return glm::length(point) < highest;
+}
+
 std::uint8_t woods_depth(const grid::Grid& grid) noexcept {
     std::uint8_t depth = grid.depth();
     while (depth > 0 && grid.size(depth) < grid::Woods::finest) {
@@ -94,7 +125,8 @@ std::uint8_t woods_depth(const grid::Grid& grid) noexcept {
     return depth;
 }
 
-std::vector<StandingTree> trees_in(const PiecesSnapshot& pieces, grid::Key node, std::uint64_t seed,
+std::vector<StandingTree> trees_in(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                                   grid::Key node, std::uint64_t seed,
                                    const flora::Planting& planting) {
     const auto known = pieces.at<grid::Woods>(node);
     if (!known || !known->found.value.ground) {
@@ -125,7 +157,8 @@ std::vector<StandingTree> trees_in(const PiecesSnapshot& pieces, grid::Key node,
         const double within = side * 1e-9;
         const auto ground =
             ground_along(pieces, spot.at + (up * (top - within)), spot.at + (up * bottom));
-        if (ground && glm::dot(ground->normal, up) >= steepest_stand) {
+        if (ground && glm::dot(ground->normal, up) >= steepest_stand &&
+            !under_water(pieces, bodies, ground->at)) {
             out.push_back({.at = ground->at, .tree = *tree});
         }
     }

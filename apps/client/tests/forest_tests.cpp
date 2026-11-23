@@ -59,7 +59,7 @@ TEST_CASE("woods nodes near the eye are those the ground crosses, nearest first"
                                .x = (piece_root.x * 4) + x,
                                .y = (piece_root.y * 4) + y,
                                .z = (piece_root.z * 4) + z};
-                if (!hog::client::trees_in(ground.pieces, node, 9U, planting()).empty()) {
+                if (!hog::client::trees_in(ground.pieces, {}, node, 9U, planting()).empty()) {
                     ++with_trees;
                     CHECK(std::ranges::find(all, node) != all.end());
                 }
@@ -84,7 +84,7 @@ TEST_CASE("the forest plants on the jobs, and again only when something changed"
     REQUIRE(first.has_value());
     CHECK(first.value().eye == eye);
     const Grove direct = hog::client::plant_around(
-        hog::client::PiecesSnapshot{grid, held.entries()}, eye, 600.0, 9U, planting());
+        hog::client::PiecesSnapshot{grid, held.entries()}, {}, eye, 600.0, 9U, planting());
     REQUIRE(first.value().trees.size() == direct.trees.size());
     CHECK(!direct.trees.empty());
     CHECK(!forest.collect().has_value());

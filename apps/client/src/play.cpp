@@ -7,6 +7,7 @@
 #include <hog/client/drawn.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
+#include <hog/client/forest.hpp>
 #include <hog/client/frame_times.hpp>
 #include <hog/client/globe_view.hpp>
 #include <hog/client/held_pieces.hpp>
@@ -26,6 +27,8 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
+#include <hog/flora/asset.hpp>
+#include <hog/flora/placement.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
@@ -563,6 +566,7 @@ private:
 const log::Category connection_log{"connection"};
 const log::Category player_log{"player"};
 const log::Category clouds_log{"clouds"};
+const log::Category trees_log{"trees"};
 
 // The connection to a server, if there's one to connect to, telling what becomes of it: after
 // logging in for a connect token, when asked to.
@@ -1067,6 +1071,10 @@ struct StreamedGround {
         return std::chrono::duration<double>(MonotonicClock::now() - started).count();
     }
     bool blocks_shown = false; // any drawn from the pieces yet
+    // The trees planted round the eye, where any species are drawn, and whether pieces came since
+    // they were last planted.
+    std::unique_ptr<client::Forest> forest;
+    bool trees_came = false;
 };
 
 // The lake's or river's water the eye may be in, as the ground held round it draws it.
@@ -1151,6 +1159,7 @@ void take_decoded(Connection& connection, StreamedGround& ground) {
             log::warn(connection_log, "can't hold a chunk: {}", held.error());
         } else {
             ground.pieces_came = true;
+            ground.trees_came = true;
             ground.asked_came = true;
         }
     }
@@ -1167,6 +1176,49 @@ void take_decoded(Connection& connection, StreamedGround& ground) {
         ground.looking.erase({looked.node, looked.depth});
         ground.asked_came = true;
     }
+}
+
+// Where the tree lab's species are kept, how many variants of each are drawn, and how far round
+// the eye trees are planted and drawn.
+constexpr std::string_view flora_directory = "var/flora";
+constexpr std::uint32_t tree_variants = 4;
+constexpr double tree_reach = 300.0;
+
+// The species in var/flora drawn by the scene, and the forest planting them round the eye; none
+// where there are none.
+std::unique_ptr<client::Forest> load_trees(client::Scene& scene, const StreamedGround& ground,
+                                           jobs::JobSystem& jobs) {
+    std::error_code error;
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry :
+         std::filesystem::directory_iterator{std::filesystem::path{flora_directory}, error}) {
+        if (entry.path().extension() == ".flora") {
+            files.push_back(entry.path());
+        }
+    }
+    std::ranges::sort(files);
+    flora::Planting planting;
+    for (const std::filesystem::path& file : files) {
+        auto loaded = flora::load_species(file);
+        if (!loaded) {
+            log::warn(trees_log, "can't read the trees in {}: {}", file.string(), loaded.error());
+            continue;
+        }
+        if (auto added = scene.add_species(loaded->species, tree_variants); !added) {
+            log::warn(trees_log, "can't draw the trees in {}: {}", file.string(), added.error());
+            continue;
+        }
+        planting.species.push_back(
+            flora::planting_of(std::span{&loaded->species, 1}, tree_variants).species.front());
+        log::info(trees_log, "{}, {} variants", loaded->species.name,
+                  planting.species.back().variants);
+    }
+    if (planting.species.empty()) {
+        log::info(trees_log, "none in {}", flora_directory);
+        return nullptr;
+    }
+    return std::make_unique<client::Forest>(ground.grid, jobs, std::move(planting),
+                                            ground.planet.body.seed, tree_reach);
 }
 
 // Takes in the pieces the server sent, and draws them as seen from `eye` once what was last
@@ -1214,6 +1266,18 @@ void take_pieces(Connection& connection, StreamedGround& ground, client::Scene& 
     if (client::GroundChanges changes = ground.block_meshes.collect(); !changes.empty()) {
         scene.show_ground(std::move(changes));
         ground.blocks_shown = true;
+    }
+    if (ground.forest) {
+        ground.forest->want(ground.pieces, eye, ground.trees_came);
+        ground.trees_came = false;
+        if (std::optional<client::Grove> grove = ground.forest->collect()) {
+            std::vector<render::TreeDraw> trees;
+            trees.reserve(grove->trees.size());
+            for (const client::StandingTree& tree : grove->trees) {
+                trees.push_back({.foot = WorldPosition{tree.at}, .tree = tree.tree});
+            }
+            scene.show_trees(std::move(trees));
+        }
     }
 }
 
@@ -1545,6 +1609,8 @@ int show_streamed_world(const client::Options& options, render::Device& device,
         kept = std::move(*cache);
     }
     ground.intake = std::make_unique<client::ChunkIntake>(jobs, std::move(kept));
+    startup("loading trees");
+    ground.forest = load_trees(*scene, ground, jobs);
     startup("ready");
     const Result<void> flown = fly_streamed(*scene, clock, ground, flight, *connection, options,
                                             device, presenter, window, recent);

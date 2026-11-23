@@ -8,6 +8,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/flora/asset.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/world.hpp>
@@ -29,6 +30,7 @@
 #include <hog/render/presenter.hpp>
 #include <hog/render/render_graph.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/trees.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/render/weather_maps.hpp>
 #include <hog/sim/calendar.hpp>
@@ -136,6 +138,17 @@ public:
         ground_covered_ = covered;
         ground_meshing_ = meshing;
     }
+    // A species the tree lab bakes, its first `most_variants` drawn; numbered in the order added.
+    // The species' bytes may go once it returns.
+    Result<> add_species(const flora::Species& species, std::uint32_t most_variants) {
+        return trees_->add(species, most_variants);
+    }
+    // The trees drawn from now on, in place of any shown before.
+    void show_trees(std::vector<render::TreeDraw> trees) { trees_shown_ = std::move(trees); }
+    // How many trees, triangles and leaves the last frame drew.
+    [[nodiscard]] const render::Trees::Drawn& trees_drawn() const noexcept {
+        return trees_->drawn();
+    }
     // The ground's inside drawn round the eye, in place of any shown before; none takes it away.
     void show_cutaway(std::shared_ptr<const terrain::BlockMesh> shell);
 
@@ -187,6 +200,8 @@ private:
     std::vector<waves::Train> wave_trains_;
     render::TransientImages transients_;
     render::Capsules others_;
+    std::optional<render::Trees> trees_;
+    std::vector<render::TreeDraw> trees_shown_;
     std::optional<render::Billboard> companion_;
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;

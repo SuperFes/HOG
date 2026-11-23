@@ -25,8 +25,9 @@ struct Grove {
     DVec3 eye{0.0};
     std::vector<StandingTree> trees;
 };
-[[nodiscard]] Grove plant_around(const PiecesSnapshot& pieces, DVec3 eye, double reach,
-                                 std::uint64_t seed, const flora::Planting& planting);
+[[nodiscard]] Grove plant_around(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies,
+                                 DVec3 eye, double reach, std::uint64_t seed,
+                                 const flora::Planting& planting);
 
 // The trees round the eye, planted on the jobs so a frame never waits on it.
 class Forest {

@@ -33,8 +33,9 @@ struct Ground {
     [[nodiscard]] double above(DVec3 point) const { return glm::dot(point - on, normal); }
 };
 
-// The piece, its ground facing `slope`, its woods all of the one kind at `cover`.
-inline std::shared_ptr<const grid::Piece> piece_of(DVec3 slope, double cover) {
+// The piece, its ground facing `slope`, its woods all of the one kind at `cover`; with `wet`, all
+// of it the basin of the sea, body 1.
+inline std::shared_ptr<const grid::Piece> piece_of(DVec3 slope, double cover, bool wet = false) {
     const DVec3 normal = glm::normalize(slope);
     const auto above = [&](DVec3 point) { return glm::dot(point - on, normal); };
     const grid::Grid grid{reach, 1.0};
@@ -54,6 +55,9 @@ inline std::shared_ptr<const grid::Piece> piece_of(DVec3 slope, double cover) {
         }
         return grid::Stand::of(cover, {0.0, 1.0, 0.0, 0.0, 0.0, 0.0});
     });
+    if (wet) {
+        piece->water = grid::Tree<grid::Water>(2, 1U, false);
+    }
     return piece;
 }
 
@@ -73,11 +77,11 @@ inline std::shared_ptr<const grid::Piece> root_of(DVec3 slope) {
     return piece;
 }
 
-inline Ground ground_of(DVec3 slope, double cover) {
+inline Ground ground_of(DVec3 slope, double cover, bool wet = false) {
     return {.normal = glm::normalize(slope),
-            .pieces =
-                PiecesSnapshot{grid::Grid{reach, 1.0},
-                               {{Key{}, root_of(slope)}, {piece_root, piece_of(slope, cover)}}}};
+            .pieces = PiecesSnapshot{
+                grid::Grid{reach, 1.0},
+                {{Key{}, root_of(slope)}, {piece_root, piece_of(slope, cover, wet)}}}};
 }
 
 } // namespace hog::planted

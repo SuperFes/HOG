@@ -9,6 +9,7 @@
 #include <hog/grid/kinds.hpp>
 #include <hog/grid/piece.hpp>
 #include <hog/grid/tree.hpp>
+#include <hog/grid/water_bodies.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -35,7 +36,8 @@ hog::flora::Planting planting() {
             .spacing = 7.0};
 }
 
-std::vector<std::pair<Key, StandingTree>> every_tree(const Ground& ground) {
+std::vector<std::pair<Key, StandingTree>> every_tree(const Ground& ground,
+                                                     const hog::grid::WaterBodies& bodies = {}) {
     const std::uint8_t depth = hog::client::woods_depth(ground.pieces.grid());
     std::vector<std::pair<Key, StandingTree>> out;
     for (std::uint32_t z = 0; z < 4; ++z) {
@@ -46,7 +48,7 @@ std::vector<std::pair<Key, StandingTree>> every_tree(const Ground& ground) {
                                .y = (piece_root.y * 4) + y,
                                .z = (piece_root.z * 4) + z};
                 for (const StandingTree& tree :
-                     hog::client::trees_in(ground.pieces, node, 9U, planting())) {
+                     hog::client::trees_in(ground.pieces, bodies, node, 9U, planting())) {
                     out.emplace_back(node, tree);
                 }
             }
@@ -128,4 +130,20 @@ TEST_CASE("thinner woods keep some of the same trees", "[client][tree_stands]") 
 TEST_CASE("no tree stands on ground too steep", "[client][tree_stands]") {
     CHECK(every_tree(ground_of({1.0, 0.0, 0.6}, 1.0)).empty());
     CHECK_FALSE(every_tree(ground_of({0.5, 0.0, 1.0}, 1.0)).empty());
+}
+
+TEST_CASE("no tree stands under water", "[client][tree_stands]") {
+    const Ground ground = ground_of({0.1, 0.05, 1.0}, 1.0, true);
+    const double level = glm::length(on);
+    const hog::grid::WaterBodies sea{.bodies = {{1U, hog::grid::Sea{.level = level}}}};
+    const auto dry = every_tree(ground);
+    const auto shore = every_tree(ground, sea);
+    CHECK(!shore.empty());
+    CHECK(shore.size() < dry.size());
+    for (const auto& [node, tree] : shore) {
+        CHECK(glm::length(tree.at) >= level);
+    }
+    CHECK(hog::client::under_water(ground.pieces, sea, on - (glm::normalize(on) * 1.0)));
+    CHECK_FALSE(hog::client::under_water(ground.pieces, sea, on + (glm::normalize(on) * 1.0)));
+    CHECK_FALSE(hog::client::under_water(ground.pieces, {}, on - (glm::normalize(on) * 1.0)));
 }

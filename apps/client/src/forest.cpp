@@ -35,11 +35,11 @@ std::vector<grid::Key> woods_nodes_near(const PiecesSnapshot& pieces, DVec3 eye,
     return out;
 }
 
-Grove plant_around(const PiecesSnapshot& pieces, DVec3 eye, double reach, std::uint64_t seed,
-                   const flora::Planting& planting) {
+Grove plant_around(const PiecesSnapshot& pieces, const grid::WaterBodies& bodies, DVec3 eye,
+                   double reach, std::uint64_t seed, const flora::Planting& planting) {
     Grove grove{.eye = eye, .trees = {}};
     for (const grid::Key node : woods_nodes_near(pieces, eye, reach)) {
-        const auto trees = trees_in(pieces, node, seed, planting);
+        const auto trees = trees_in(pieces, bodies, node, seed, planting);
         grove.trees.insert(grove.trees.end(), trees.begin(), trees.end());
     }
     return grove;
@@ -66,10 +66,10 @@ void Forest::want(const HeldPieces& held, DVec3 eye, bool pieces_came) {
     stale_ = false;
     planted_at_ = eye;
     planting_job_ = std::make_unique<jobs::Async<Grove>>(
-        *jobs_, [grid = grid_, entries = held.entries(), eye, reach = reach_, seed = seed_,
-                 planting = planting_] mutable {
+        *jobs_, [grid = grid_, entries = held.entries(), bodies = held.shared_bodies(), eye,
+                 reach = reach_, seed = seed_, planting = planting_] mutable {
             const PiecesSnapshot pieces{grid, std::move(entries)};
-            return plant_around(pieces, eye, reach, seed, *planting);
+            return plant_around(pieces, *bodies, eye, reach, seed, *planting);
         });
 }
 

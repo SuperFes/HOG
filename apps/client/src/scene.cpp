@@ -148,6 +148,10 @@ Result<Scene> Scene::create(render::Device& device, const globe::Planet& planet,
     if (!timer) {
         return failed("time the GPU", timer.error());
     }
+    auto trees = render::Trees::create(device, colour_format, depth_format, frames);
+    if (!trees) {
+        return failed("draw the trees", trees.error());
+    }
     std::vector<render::EnvironmentProbe> probes;
     for (std::uint32_t slot = 0; slot < frames; ++slot) {
         auto probe = render::EnvironmentProbe::create(device, colour_format, depth_format);
@@ -172,6 +176,7 @@ Result<Scene> Scene::create(render::Device& device, const globe::Planet& planet,
                 std::move(companion),
                 frames};
     scene.probes_ = std::move(probes);
+    scene.trees_ = std::move(trees).value();
     return scene;
 }
 
@@ -537,6 +542,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     probing_ = take_probe(graph, frame, shot, sky, through_air,
                           cloudy ? std::optional{clouds_view()} : std::nullopt);
     add_ground(graph, frame, shot, sea, through_air, drawn);
+    if (!trees_shown_.empty()) {
+        graph.add(
+            {.name = "trees", .uses = through_air, .targets = drawn},
+            [&](VkCommandBuffer commands) {
+                return trees_->draw(
+                    commands, frame.extent,
+                    {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
+                    trees_shown_, frame.slot);
+            });
+    }
     if (!shot.others.empty()) {
         graph.add({.name = "others", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {

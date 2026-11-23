@@ -64,6 +64,7 @@ add_library(hog_render
     src/sky.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
+    src/trees.cpp
     src/vma.cpp
     src/vulkan.cpp
     src/weather_maps.cpp)
@@ -81,7 +82,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::flora hog::jobs hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang)
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang shaders/trees.slang)
 
 # A test device, for tests here and elsewhere that draw.
 add_library(hog_render_testing INTERFACE)
@@ -122,10 +123,13 @@ hog_add_tests(hog_render
     tests/shader_watch_tests.cpp
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp
+    tests/trees_tests.cpp
     tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::flora hog::planet)
     hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/bend_probe.slang tests/shaders/cube_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/foam_probe.slang tests/shaders/gusts_probe.slang tests/shaders/layer.slang tests/shaders/optics_probe.slang tests/shaders/projection_probe.slang tests/shaders/shore_probe.slang tests/shaders/volume_probe.slang tests/shaders/water_probe.slang tests/shaders/waves_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
+    # The tree lab's test species, as the flora reader's tests have it.
+    target_include_directories(hog_render_tests PRIVATE "${PROJECT_SOURCE_DIR}/libs/flora/tests")
 endif()
