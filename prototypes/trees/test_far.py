@@ -166,6 +166,14 @@ class LeafLightTest(unittest.TestCase):
         l = np.array([0.0, 1.0, 0.0])
         self.assertAlmostEqual(self.share(n, l), 0.6, delta=1e-4)
 
+    def test_highlight_spreads_with_the_leaves(self):
+        def hl(nh, agree):
+            return glsl(self.LIB, f"highlight({nh}, {agree}, 24.0)", 1)[0]
+        self.assertAlmostEqual(hl(0.9, 1.0), 0.9 ** 24, delta=1e-5)
+        # Leaves facing many ways: dimmer at the peak, wider off it.
+        self.assertLess(hl(1.0, 0.5), 0.2)
+        self.assertGreater(hl(0.7, 0.5), hl(0.7, 1.0))
+
 
 class SunVisTest(unittest.TestCase):
     def test_averaged_fits_never_need_clamping(self):

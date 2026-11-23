@@ -175,6 +175,13 @@ vec2 leaf_light(vec3 mean_n, vec4 m, float yz, vec3 l) {
                 mix(max(even - 0.5 * mu, 0.0), clamped_mean(-mu, sd), narrow));
 }
 
+// A highlight of sharpness s averaged over a texel's leaves: their spread of facings (from
+// how far the mean normal falls short of unit length) widens and dims it (Toksvig).
+float highlight(float nh, float agree, float s) {
+    float ft = agree / max(agree + s * (1.0 - agree), 1e-4);
+    return pow(max(nh, 0.0), ft * s) * (1.0 + ft * s) / (1.0 + s);
+}
+
 vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], vec4 sm[4], float syz[4], float sk[4],
                  float acc_a, vec3 to_eye, float shade, float sky, inout float dbg) {
     float toward_sun = 0.4 + 0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0);
@@ -187,7 +194,6 @@ vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], vec4 sm[4], float syz[4], 
         // Shorter where a shrunk texel holds leaves facing many ways.
         float agree = clamp(length(mean_n), 0.0, 1.0);
         vec3 nrm = mean_n / max(length(mean_n), 1e-4);
-        float k = agree * agree;
         vec2 lit = leaf_light(mean_n, sm[s], syz[s], sun);
         float direct = lit.x, back = lit.y;
         float through = 0.55 * sn[s].a * back * toward_sun;
@@ -198,7 +204,7 @@ vec3 light_views(vec4 sa[4], vec4 sn[4], vec4 ssv[4], vec4 sm[4], float syz[4], 
         vec3 dark = base * ambient;
         vec3 sunny = dark + base * sun_colour * direct
                    + base * vec3(1.25, 1.35, 0.6) * sun_colour * through
-                   + sun_colour * 0.04 * pow(max(dot(nrm, h), 0.0), 24.0) * k;
+                   + sun_colour * 0.04 * highlight(dot(nrm, h), agree, 24.0);
         // A texel stands for many leaves, a share of them in sun and the rest in shade; each
         // kind goes through the tone curve on its own, as a pixel showing them would, since
         // tone-mapping their average comes out brighter and flatter than the tree.

@@ -135,12 +135,12 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
 - **Far forest** (`terrain.py`, `far.py`, `far_sheet.py`, `far_cache.py`): 24 km of hills and
   5.2M hashed trees; the truth draws every tree as its relit impostor (~52 s a frame). Agreed
   shape: impostors to 1.5-3 km, thinning by rank into a canopy layer; in it, each tree's own
-  crown (an ellipsoid at its hashed place, coloured by stepping into its impostor by depth)
-  to 6-12 km, then stand statistics (Poisson crowns: gaps, the hotspot, kind and height met)
+  crown (its impostor traced where it stands, shaded through its actual neighbours)
+  to 12-20 km, then stand statistics (Poisson crowns: gaps, the hotspot, kind and height met)
   with world-tied grain spread as 1/sqrt(trees in a pixel). Judged from seven places (summit,
   hillside, aerial, level horizon, low sun ahead, down-sun, no shadows): mean difference
-  0.5-0.8/255 everywhere but aerial 2.4 (grain over a frame of forest; blurred 0.9-1.6), and
-  most distance bands within +-1 level. Found on the way, fixed:
+  0.4-0.6/255 everywhere but aerial 1.7 (grain over a frame of forest; blurred 0.6-0.8), and
+  every distance band within +-0.6 level. Found on the way, fixed:
   - alpha to coverage gives overlapping semi-transparent quads one shared sample mask, so
     two far trees in a pixel covered only as much as one: the truth under-covered far forest
     by a third past 12 km. Far impostors (and minified cards) must draw coverage as their
@@ -151,17 +151,25 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   - sun visibility fits are kept within 0-1, so averages never need clamping;
   - the canopy march gave up 4 km past the shell with no ground behind (missing far crests)
     and ran on over clamped textures past the land's edge.
-  Still:
-  - cost: the canopy pass is ~0.7 s at 1080p on the 860M as written (34 ms statistics only).
-    `far_cache.py`: a far view (past 3 km) reprojected by its depth holds within ~1 level
-    (blurred) for 200 m of eye travel; reused as it is, only ~10 m. So refresh it every
-    ~100-200 m or few seconds (sun drift), reproject between; tables for the stand's light,
-    sky and meeting rates would cut the refresh itself;
-  - down-sun past 12 km the statistics come out ~4 levels bright (2 at 3-12 km); shade, sky
-    and cover all match there, so it is in how the stand's colour is put together;
-  - aerial 3-6 km ~1.4 bright;
-  - the statistics march shows faint contour streaks at 15-20 km (step aliasing with the
-    ground); jitter the steps or step in the ground's own cells.
+  - the explicit crowns traced each tree as a fitted ellipsoid, weighting its sparse sunny
+    edges like its dense core: every term read 6-16% bright past 3 km. Each tree is now
+    traced as its impostor would be drawn (the eye-facing square, the impostor's own
+    coverage), and shaded by walking the sun through its known neighbours as drawn trees
+    are; statistics take over at 12-20 km. Every band of every view now within 0.8 (blurred)
+    and +-0.6 bias.
+  Still (enhancements, not visible in play):
+  - cost: the canopy pass is ~7-10 s at 2x supersampled 1080p on the 860M (traced squares
+    meet ~6x more trees than ellipsoids did; neighbour walks per tree). Cached far views
+    make that a background refresh: `far_cache.py` holds within ~1 level (blurred) for
+    200 m of eye travel reprojected (reused as it is, only ~10 m), so refresh every
+    ~100-200 m or few seconds (sun drift). Tables for the stand's light, sky and meeting
+    rates, a coarser trace resolution, or skipping squares by coarse coverage would cut it;
+  - statistics past 12 km read ~3.5 levels bright looking down-sun: a crown's colour is lit
+    from its whole-view average, and the tone curve's shoulder makes that brighter than
+    lit leaves averaged; the stand model's shade is also a few % bright from above. Needs a
+    spread-aware tone (second moment of the lit colour) before statistics move nearer;
+  - LOD changes should fade (impostor to crown to statistics already blend by rank and
+    share; keep every new hand-over a fade, never a switch).
 - **Branch cards** (`cards.py`, `card_sheet.py`): the user's idea, as flat polygons: per
   branch cluster three crossed planes facing the ways its leaves face most, each leaf on the
   plane it lies most nearly parallel to, baked with per-texel normals; limbs stay mesh. An

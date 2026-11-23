@@ -716,6 +716,7 @@ uniform sampler2D full_sunvis;
 uniform sampler2D full_moment;
 uniform sampler2D full_depth;
 uniform float atlas_cell;       // texels across one baked view
+uniform float quad_reach;  // farthest an impostor's square reaches across from its tree
 uniform float pixel_angle;  // radians a pixel spans
 uniform float grain;        // the stand's pixel-to-pixel spread, per 1/sqrt(trees in a pixel)
 uniform int views;
@@ -793,8 +794,12 @@ float g_dbg;  // the last crown_at's debug term
 // the mip a pixel spans, and lit as the impostor is with the stand's light where they are.
 // Rays grazing a stand see only crown tops, lit, where one colour for the whole crown would
 // paint them dark. The leaves seen sit deeper than the crown's outline, and more shaded.
-vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 entry, vec3 rd, float dist,
-              float max_lod) {
+// The four views nearest the ray rd where it meets crown k (turned by yaw, scaled by sc,
+// standing at base) at `entry`, stepped in by each view's depth and read at the mip a pixel
+// spans; returns their coverage, and where the leaves seen are.
+float crown_views_at(int k, float yaw, float sc, vec3 base, vec3 entry, vec3 rd, float dist,
+                     float max_lod, out vec4 sa[4], out vec4 sn[4], out vec4 ssv[4],
+                     out vec4 sm[4], out float syz[4], out float sk[4], out vec3 seen) {
     kind = k;
     centre = k_centre[k];
     radius = k_radius[k];
@@ -806,12 +811,6 @@ vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 entry, vec3 rd, float 
     vec2 g = encode(-rl);
     vec2 g0 = clamp(floor(g), vec2(0.0), vec2(float(views) - 1.0));
     vec2 f = clamp(g - g0, 0.0, 1.0);
-    vec4 sa[4];
-    vec4 sn[4];
-    vec4 ssv[4];
-    vec4 sm[4];
-    float syz[4];
-    float sk[4];
     float acc = 0.0;
     vec3 acc_hit = vec3(0.0);
     for (int j = 0; j < 2; ++j)
@@ -824,18 +823,32 @@ vec3 crown_at(int k, float yaw, float sc, vec3 base, vec3 entry, vec3 rd, float 
             acc += sk[s];
             acc_hit += hit * sk[s];
         }
-    vec3 seen = acc > 1e-4 ? base + rot_y(acc_hit / acc * sc, yaw) : entry;
+    seen = acc > 1e-6 ? base + rot_y(acc_hit / acc * sc, yaw) : entry;
+    return acc;
+}
+
+// A crown as the impostor drawn there shows it, lit with the stand's light where the leaves
+// seen are; `cover` is the share of the ray it stops.
+vec3 crown_at(int k, ivec2 own, float yaw, float sc, vec3 base, vec3 entry, vec3 rd,
+              float dist, float max_lod, out float cover) {
+    vec4 sa[4], sn[4], ssv[4], sm[4];
+    float syz[4], sk[4];
+    vec3 seen;
+    float acc = crown_views_at(k, yaw, sc, base, entry, rd, dist, max_lod, sa, sn, ssv, sm, syz,
+                               sk, seen);
+    cover = acc;
+    if (acc < 0.002) return vec3(0.0);
     vec2 uv = (seen.xz - origin) / extent;
     float lambda = texture(density_tex, uv).r / (cell * cell);
     vec4 mix_k = texture(kinds_tex, uv);
     vec2 grad = ground_grad(seen.xz);
     float h = max(seen.y - base.y, 0.0);
-    float shade = stand_light(h, sun_world, lambda, mix_k, -rd, grad);
+    // Its neighbours are known, so the sun through them is walked as for drawn trees.
+    float shade = exp(-optical_depth(seen, sun_world, own, 150.0));
     float sky = stand_sky(h, lambda, mix_k, grad);
     g_dbg = debug == 7 ? shade : sky;
-    if (acc < 1e-4) return crown_seen(k, yaw, -rd, shade, sky);
     float dbg = 0.0;
-    vec3 c = light_views(sa, sn, ssv, sm, syz, sk, acc, -rl, shade, sky, dbg);
+    vec3 c = light_views(sa, sn, ssv, sm, syz, sk, acc, -rot_y(rd, -yaw), shade, sky, dbg);
     if (debug >= 1 && debug <= 3) g_dbg = dbg / acc;
     return c;
 }
@@ -847,10 +860,11 @@ vec3 crown_colour(int k, vec3 to_eye_w, float shade, float sky) {
     return c * 0.25;
 }
 
-// Each tree's crown met between flat-world points a and b (a at eye distance ta), as an
-// ellipsoid of leaves at the tree's own place, kind, size and turn, composited front to
-// back: the stand's grain and edges, where single trees still show. Trees drawn as
-// impostors, and those the statistics stand for, are left out.
+// Each tree met between flat-world points a and b (a at eye distance ta), as its impostor
+// would be drawn there (the square through its crown facing the eye, with the impostor's
+// own coverage, so dense cores and sparse sunny edges weigh as they do drawn), composited
+// front to back: the stand's grain and edges, where single trees still show. Trees drawn
+// as impostors, and those the statistics stand for, are left out.
 void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float T) {
     vec3 d = normalize(b - a);
     float tmax = length(b - a);
@@ -859,7 +873,8 @@ void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float 
     vec2 dir = xmajor ? d.xz : d.zx;
     vec2 o = xmajor ? origin : origin.yx;
     vec2 b2 = a2 + dir * tmax;
-    float spread = reach + 0.71 * cell;
+    // The square each tree's impostor is drawn on reaches out further across than up.
+    float spread = quad_reach * (1.0 + abs(d.y)) + 0.71 * cell;
     float slope = abs(dir.x) > 1e-6 ? dir.y / dir.x : 0.0;
     int step = dir.x >= 0.0 ? 1 : -1;
     int i0 = int(floor((a2.x - float(step) * spread - o.x) / cell));
@@ -885,24 +900,26 @@ void walk_crowns(vec3 a, vec3 b, float ta, vec3 rd, inout vec3 col, inout float 
             float rank = unit_hash(c, 6u);
             float dist = ta + tc * tmax;
             if (rank >= layer_share_at(dist) || rank < stat_share_at(dist)) continue;
-            vec3 r = vec3(crown_r[k].x, crown_r[k].y, crown_r[k].x) * sc;
-            vec3 q = (a - base - rot_y(crown_c[k], yaw) * sc) / r;
-            vec3 dd = d / r;
-            float qa = dot(dd, dd), qb = dot(q, dd), qc = dot(q, q) - 1.0;
-            float disc = qb * qb - qa * qc;
-            if (disc <= 0.0) continue;
-            float sq = sqrt(disc);
-            float t0 = max((-qb - sq) / qa, 0.0), t1 = min((-qb + sq) / qa, tmax);
-            if (t1 <= t0) continue;
-            float alpha = 1.0 - exp(-crown_sigma[k] * (t1 - t0));
+            vec3 centre_w = base + rot_y(k_centre[k], yaw) * sc;
+            vec3 look = normalize(eye - centre_w);
+            float across = dot(d, look);
+            if (abs(across) < 1e-4) continue;
+            float s = dot(centre_w - a, look) / across;
+            if (s < 0.0 || s >= tmax) continue;
+            vec3 off = a + d * s - centre_w;
+            vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), look));
+            float r = k_radius[k] * sc;
+            if (abs(dot(off, right)) > r || abs(dot(off, cross(look, right))) > r) continue;
+            float alpha;
+            vec3 cc3 = crown_at(k, c, yaw, sc, base, a + d * s, rd, ta + s, log2(atlas_cell), alpha);
+            if (alpha < 0.002) continue;
             if (debug == 4) {
                 col += T * alpha;
                 T *= 1.0 - alpha;
                 continue;
             }
-            vec3 cc3 = crown_at(k, yaw, sc, base, a + d * t0, rd, ta + t0, log2(atlas_cell));
             if ((debug >= 1 && debug <= 3) || debug == 7 || debug == 8) cc3 = vec3(g_dbg);
-            else cc3 = hazed(cc3, eye + rd * (ta + t0));
+            else cc3 = hazed(cc3, eye + rd * (ta + s));
             col += T * alpha * cc3;
             T *= 1.0 - alpha;
         }
@@ -1269,6 +1286,7 @@ class Far:
                                 crown_albedo=7, crown_normal=8, crown_sunvis=9,
                                 crown_moment=14, crown_depth=15, full_moment=13, full_depth=5,
                                 own_shadow=True,
+                                quad_reach=max(kd.imp.radius + float(np.hypot(kd.imp.centre[0], kd.imp.centre[2])) for kd in kinds) * 1.2,
                                 ground_depth=10, shell_depth=11, grain=float(grain),
                                 full_albedo=3, full_normal=4, full_sunvis=6,
                                 atlas_cell=float(kinds[0].imp.albedo.shape[0]

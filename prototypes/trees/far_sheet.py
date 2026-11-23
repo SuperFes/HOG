@@ -118,7 +118,7 @@ CANDIDATES = {
     # Impostors to 1.5-3 km, then the layer: as statistics only, or with each tree's own
     # crown out to 6-12 km and grain in the statistics past it.
     "hybrid": hybrid(1500, 3000),
-    "crowns": hybrid(1500, 3000, (6000, 12000), grain=1.0),
+    "crowns": hybrid(1500, 3000, (12000, 20000), grain=1.0),
 }
 
 
