@@ -157,3 +157,31 @@ TEST_CASE("what a spot plants never changes", "[flora][placement]") {
     }
     CHECK(seen == 0x558d40150852e8aeU);
 }
+
+TEST_CASE("species plant as their kind, with the variants asked for", "[flora][placement]") {
+    CHECK(hog::flora::kind_of("spruce") == Kind::Needleleaf);
+    CHECK(hog::flora::kind_of("oak") == Kind::Deciduous);
+    CHECK(hog::flora::kind_of("coconut") == Kind::Palm);
+    CHECK_FALSE(hog::flora::kind_of("fixture").has_value());
+    std::vector<hog::flora::Species> species(3);
+    species[0].name = "spruce";
+    species[1].name = "fixture";
+    species[2].name = "oak";
+    for (hog::flora::Species& one : species) {
+        one.variants.resize(6);
+        one.variants[0].impostor = hog::flora::ImpostorPart{};
+        one.variants[1].impostor = hog::flora::ImpostorPart{};
+    }
+    const Planting planting = hog::flora::planting_of(species, 4);
+    REQUIRE(planting.species.size() == 3);
+    CHECK(planting.species[0].kind == Kind::Needleleaf);
+    CHECK(planting.species[0].variants == 4);
+    CHECK(planting.species[0].impostors == 2);
+    CHECK(planting.species[1].variants == 0);
+    for (const Spot& spot : many(2000)) {
+        const auto tree = hog::flora::plant(spot, woods_of(1.0, {0.5, 0.5, 0, 0, 0, 0}), planting);
+        REQUIRE(tree.has_value());
+        CHECK(tree.value().species != 1);
+        CHECK(tree.value().variant < 4);
+    }
+}

@@ -5,14 +5,22 @@
 #include <hog/core/math.hpp>
 #include <hog/grid/grid.hpp>
 #include <hog/grid/key.hpp>
+#include <hog/grid/kinds.hpp>
 #include <hog/grid/view.hpp>
 #include <hog/grid/water_bodies.hpp>
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace hog::client {
+
+// What's held over a node where it's the same all through: open where nothing's held, else solid
+// or open where the leaf over it holds no plane or one that misses it; none where the ground may
+// cross it.
+[[nodiscard]] std::optional<grid::Surface> uniform_ground(const PiecesSnapshot& pieces,
+                                                          grid::Key node);
 
 // Blocks over all of the grid's root, `cells` levels of cells each: from the root down, each
 // node split where `split` says, then where a block beside it is more than a level finer, so

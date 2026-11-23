@@ -178,6 +178,11 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   out 7-12 levels bright, more see-through: a card holds only the leaves seen along its
   normal, and leaves hidden behind each other there would separate seen obliquely; bake
   each card in two depth layers or grow its coverage. Too coarse at 30 m (14 against 4).
+- **Fewer vertices in the baked trees** (`export.py`, `var/flora/`): 4 species x 8 variants
+  export to 1.6 GB; birch is ~42 MB a variant, mostly a 1.6M-vertex twig mesh, and 307k
+  leaves. Merge or drop the finest twigs (they're under a pixel past a few metres), weld
+  shared vertices, and block-compress textures (BC7 colour, BC5 normals; ~4x on 257 MB of
+  card atlases and impostors per species).
 - **Light from anywhere**: own visibility is baked over the whole sphere, so a city's lights
   under a forest, fires or lightning can light far trees from below as the sun does from
   above; the impostor's lighting needs those lights added as further terms.

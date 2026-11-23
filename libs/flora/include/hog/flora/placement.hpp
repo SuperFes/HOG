@@ -1,10 +1,13 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/flora/asset.hpp>
 #include <hog/flora/woods.hpp>
 
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace hog::flora {
@@ -42,6 +45,13 @@ struct Planting {
     std::vector<Species> species;
     double spacing = 7.0; // metres between spots
 };
+
+// The kind a species the tree lab grows belongs to, by its name; none for one it doesn't know.
+[[nodiscard]] std::optional<Kind> kind_of(std::string_view species) noexcept;
+
+// Planting from species as loaded, in their order, with no more than `most_variants` of each;
+// a species of no known kind, or without variants, is never planted.
+[[nodiscard]] Planting planting_of(std::span<const Species> species, std::uint32_t most_variants);
 
 // Who stands at a spot, if anyone: chosen by the cover, then a kind by its share, then a species of
 // that kind (or of the nearest kind that has any), a variant, and the tree's own turn, size, lean,

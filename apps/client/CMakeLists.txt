@@ -14,6 +14,7 @@ add_library(hog_client
     src/cutaway.cpp
     src/daylight.cpp
     src/flight.cpp
+    src/forest.cpp
     src/forecast.cpp
     src/frame_times.cpp
     src/globe_view.cpp
@@ -57,6 +58,7 @@ hog_add_tests(hog_client
     tests/daylight_tests.cpp
     tests/cutaway_tests.cpp
     tests/flight_tests.cpp
+    tests/forest_tests.cpp
     tests/forecast_tests.cpp
     tests/frame_times_tests.cpp
     tests/glacier_lab_tests.cpp

@@ -1,3 +1,5 @@
+#include "planted_ground.hpp"
+
 #include <hog/client/held_pieces.hpp>
 #include <hog/client/tree_stands.hpp>
 #include <hog/flora/placement.hpp>
@@ -21,46 +23,12 @@
 #include <vector>
 
 using hog::DVec3;
-using hog::client::PiecesSnapshot;
 using hog::client::StandingTree;
 using hog::grid::Key;
 
 namespace {
 
-// 1 m nodes 12 deep; a piece 64 m across, 1 km out along z, its ground a plane through `on`.
-constexpr double reach = 2048.0;
-constexpr Key piece_root{.depth = 6, .x = 32, .y = 32, .z = 47};
-constexpr DVec3 on{32.0, 32.0, 990.0};
-
-struct Ground {
-    DVec3 normal;
-    PiecesSnapshot pieces;
-
-    [[nodiscard]] double above(DVec3 point) const { return glm::dot(point - on, normal); }
-};
-
-Ground ground_of(DVec3 slope, double cover) {
-    const DVec3 normal = glm::normalize(slope);
-    const auto above = [&](DVec3 point) { return glm::dot(point - on, normal); };
-    const hog::grid::Grid grid{reach, 1.0};
-    const DVec3 low = grid.low(piece_root);
-    auto piece = std::make_shared<hog::grid::Piece>();
-    piece->root = piece_root;
-    piece->generator = 1;
-    piece->shape = hog::grid::Tree<hog::grid::Shape>::build(6, [&](int x, int y, int z) {
-        const DVec3 middle = low + DVec3{x + 0.5, y + 0.5, z + 0.5};
-        return hog::grid::Surface::plane(normal, above(middle),
-                                         static_cast<std::uint16_t>(hog::globe::Material::Granite));
-    });
-    piece->woods = hog::grid::Tree<hog::grid::Woods>::build(2, [&](int x, int y, int z) {
-        const DVec3 middle = low + (DVec3{x + 0.5, y + 0.5, z + 0.5} * 16.0);
-        if (std::abs(above(middle)) > 8.0 * std::numbers::sqrt3) {
-            return hog::grid::Stand{};
-        }
-        return hog::grid::Stand::of(cover, {0.0, 1.0, 0.0, 0.0, 0.0, 0.0});
-    });
-    return {.normal = normal, .pieces = PiecesSnapshot{grid, {{piece_root, piece}}}};
-}
+using namespace hog::planted;
 
 hog::flora::Planting planting() {
     return {.species = {{.kind = hog::flora::Kind::Deciduous, .variants = 8, .impostors = 4}},
@@ -121,7 +89,7 @@ TEST_CASE("lines in the air, rising out of the ground or leaving what's held mee
                     .has_value());
     CHECK_FALSE(hog::client::ground_along(ground.pieces, DVec3{20, 20, 965}, DVec3{20, 20, 1020})
                     .has_value());
-    CHECK_FALSE(hog::client::ground_along(ground.pieces, DVec3{20, 20, 1100}, DVec3{20, 20, 965})
+    CHECK_FALSE(hog::client::ground_along(ground.pieces, DVec3{20, 20, 2100}, DVec3{20, 20, 965})
                     .has_value());
 }
 
