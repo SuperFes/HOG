@@ -183,6 +183,26 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   leaves. Merge or drop the finest twigs (they're under a pixel past a few metres), weld
   shared vertices, and block-compress textures (BC7 colour, BC5 normals; ~4x on 257 MB of
   card atlases and impostors per species).
+- **Trees in the client, cost** (`libs/render/src/trees.cpp`): on the 860M at 1600x900 a
+  wooded hillside's 33 mesh trees within 40 m took 43 ms (1.8M triangles, 2.8M leaves), 14 ms
+  at coarseness 3 (twigs then swell into stubs up close); its 20k impostors to 1 km take
+  ~22 ms, each square at the front of its tree with a conservative depth so early depth can
+  cull. Still:
+  - impostors: three depth steps and four views (28 fetches) a pixel; one step and fewer
+    views past a few hundred metres, or a far canopy tier sooner;
+  - branch cards ("leaf sheets", `cards.py`) between ~25 m and impostor range; meshes only
+    up close; the coarseness knob drops pieces sooner meanwhile;
+  - occlusion: in woods most trees past the first rows are hidden; a Hi-Z test of each
+    tree's bounds against last frame's depth could draw hidden ones as impostors or not at all;
+  - impostors are alpha-tested at 0.5: minified crowns lose their see-through gaps;
+  - instance the near meshes too (one draw per variant and level), not one draw per tree.
+- **Clouds' cost**: the cloud march is a large share of the frame on the 860M; profile it
+  against the trees and look for cheaper steps (coarser march past a distance, temporal
+  reuse) to free room.
+- **Wind data baked with the trees**: compute each branch's stiffness from its wood's
+  strength and girth when exporting, and store per piece how far and how fast it sways
+  with wind speed (its level in the branch hierarchy, natural frequency, bend per m/s), so
+  the client only evaluates the stored response against the gust field.
 - **Light from anywhere**: own visibility is baked over the whole sphere, so a city's lights
   under a forest, fires or lightning can light far trees from below as the sun does from
   above; the impostor's lighting needs those lights added as further terms.

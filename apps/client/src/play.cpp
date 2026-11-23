@@ -1178,12 +1178,14 @@ void take_decoded(Connection& connection, StreamedGround& ground) {
     }
 }
 
-// Where the tree lab's species are kept, how many variants of each are drawn, how far round the
-// eye trees are drawn as meshes and then as impostors, and planted, a little further so they're
-// there as the eye moves before they're planted anew.
+// Where the tree lab's species are kept, how many variants of each are drawn, how much sooner
+// than the lab chose their pieces drop out, how far round the eye trees are drawn as meshes and
+// then as impostors, and planted, a little further so they're there as the eye moves before
+// they're planted anew.
 constexpr std::string_view flora_directory = "var/flora";
 constexpr std::uint32_t tree_variants = 4;
-constexpr double tree_near = 120.0;
+constexpr double tree_coarseness = 1.5;
+constexpr double tree_near = 40.0;
 constexpr double tree_far = 1000.0;
 constexpr double tree_reach = tree_far * 1.25;
 
@@ -1220,6 +1222,7 @@ std::unique_ptr<client::Forest> load_trees(client::Scene& scene, const StreamedG
         log::info(trees_log, "none in {}", flora_directory);
         return nullptr;
     }
+    scene.set_tree_coarseness(tree_coarseness);
     scene.set_tree_reach(tree_near, tree_far);
     return std::make_unique<client::Forest>(ground.grid, jobs, std::move(planting),
                                             ground.planet.body.seed, tree_reach);

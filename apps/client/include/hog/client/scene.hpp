@@ -145,6 +145,8 @@ public:
     }
     // Metres from the eye trees are drawn as meshes to, and as impostors from there to `far`.
     void set_tree_reach(double near, double far) noexcept { trees_->set_reach(near, far); }
+    // How much sooner trees' pieces drop out than the tree lab chose.
+    void set_tree_coarseness(double coarseness) noexcept { trees_->set_coarseness(coarseness); }
     // The trees drawn from now on, in place of any shown before.
     void show_trees(std::vector<render::TreeDraw> trees) {
         trees_shown_ = !trees.empty();

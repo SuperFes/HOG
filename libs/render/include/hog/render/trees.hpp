@@ -67,6 +67,10 @@ public:
         far_ = far;
     }
 
+    // How much sooner pieces drop out than the tree lab chose: each drawn as if a pixel spanned
+    // this many times the metres it does.
+    void set_coarseness(double coarseness) noexcept { coarseness_ = coarseness; }
+
     // The trees drawn from now on, in place of those shown before.
     void show(std::vector<TreeDraw> trees);
 
@@ -177,6 +181,7 @@ private:
     std::vector<std::pair<std::uint64_t, Buffer>> retiring_;
     std::uint64_t draws_ = 0;
     double near_ = 120.0;
+    double coarseness_ = 1.0;
     double far_ = 1000.0;
     Drawn drawn_;
 };

@@ -207,6 +207,15 @@ Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
                   own_light(unorm8x4(records[at + 6u])));
 }
 
+// What the sky gives a surface facing `facing_up` (its normal's cosine with up): the sky over it,
+// and facing down, the sky's light thrown back off the ground and the leaves round it; a leaf
+// lets through some of what falls on its other side.
+float3 ambient_of(float3 sky, float facing_up, float translucency) {
+    static const float bounced = 0.35;
+    const float over = lerp(bounced, 1.0, (0.5 * facing_up) + 0.5);
+    return sky * (over + (translucency * 0.5 * max(-facing_up, 0.0)));
+}
+
 // Lit by sunlight through the air and the cloud, let through the tree's own leaves, and the sky's
 // light; through a leaf from behind; seen through the air between and tone mapped.
 [shader("fragment")]
@@ -237,7 +246,7 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float3 base = surface.colour * texel.rgb * cavity;
     const float3 lit = (sunlight * max(facing, 0.0)) +
                        (sunlight * through * float3(1.25, 1.35, 0.6)) +
-                       (sky * (0.5 + (0.5 * dot(normal, up))));
+                       ambient_of(sky, dot(normal, up), translucency);
     const float3 radiance = base * lit / pi;
 
     const float4 clip = mul(frame.clip_from_eye, float4(surface.from_eye, 1.0));
@@ -315,7 +324,12 @@ Seen vertex_impostor(uint index : SV_VertexID, uint instance : SV_InstanceID) {
     const float3 look = centre / max(length(centre), 1e-3);
     const float3 right = normalize(cross(look, normalize(seen.y)));
     const float3 up = cross(right, look);
-    seen.from_eye = centre + (((right * corners[index].x) + (up * corners[index].y)) * radius);
+    // At the front of the ball holding the tree, grown to still cover it, so every leaf lies
+    // behind the square and its depth only moves away: the depth test can then cull before shading.
+    const float before = max(length(centre) - radius, 0.5 * length(centre));
+    const float grow = before / max(length(centre), 1e-3);
+    seen.from_eye = (look * before) +
+                    (((right * corners[index].x) + (up * corners[index].y)) * radius * grow);
     seen.position = mul(frame.clip_from_eye, float4(seen.from_eye, 1.0));
     // Within mesh range or past impostor range, nothing.
     if (away < far.radii_reach.z || away > far.radii_reach.w) {
@@ -419,19 +433,10 @@ float highlight(float nh, float agree, float s) {
     return pow(max(nh, 0.0), ft * s) * (1.0 + (ft * s)) / (1.0 + s);
 }
 
-// An ordered threshold, 0 to 1, for a pixel: a 4 by 4 Bayer matrix shifted by each tree's own
-// hash, so neighbours' doors don't line up and a tree behind shows through one before.
-float dither(float2 pixel, float hash) {
-    static const float bayer[16] = {0.0,  8.0,  2.0,  10.0, 12.0, 4.0,  14.0, 6.0,
-                                    3.0,  11.0, 1.0,  9.0,  15.0, 7.0,  13.0, 5.0};
-    const uint shift = uint(hash * 16.0);
-    const uint2 at = (uint2(pixel) + uint2(shift, shift >> 2u)) & 3u;
-    return (bayer[(at.y * 4u) + at.x] + 0.5) / 16.0;
-}
-
 struct Lit {
     float4 colour : SV_Target;
-    float depth : SV_Depth;
+    // Depth is reversed, so further is less.
+    float depth : SV_DepthLessEqual;
 };
 
 [shader("fragment")]
@@ -467,8 +472,7 @@ Lit fragment_impostor(Seen seen) {
         }
     }
     const float coverage = covered / max(weights, 1e-4);
-    // Each tree's coverage as its own screen door, so trees behind show through those before.
-    if (coverage <= dither(seen.position.xy, seen.hash)) {
+    if (coverage < far.views_cutoff.y) {
         discard;
     }
     hit /= max(covered, 1e-4);
@@ -500,7 +504,8 @@ Lit fragment_impostor(Seen seen) {
         const float2 lit = leaf_light(mean_n, m, view.yz, sun_own);
         const float through = 0.55 * view.normal.a * lit.y * toward_sun;
         const float own = saturate(view.sun.x + dot(view.sun.yzw - 0.5, sun_own));
-        const float3 ambient = sky * lerp(0.5, (normal.y * 0.5) + 0.5, agree);
+        const float3 ambient =
+            ambient_of(sky, lerp(0.0, normal.y, agree), 0.55 * view.normal.a);
         const float3 h = normalize(sun_own + to_eye_own);
         const float3 dark = base * ambient / pi;
         const float3 sunny = dark + (base * sunlight * lit.x / pi) +

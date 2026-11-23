@@ -425,7 +425,8 @@ void Trees::place(VkExtent2D extent, const TreeView& view) {
         placed_.push_back(
             {.variant = &variant,
              .species = &species,
-             .axes = {vec4(foot, pixel_metres(distance, camera.vertical_fov, extent.height)),
+             .axes = {vec4(foot, coarseness_ *
+                                     pixel_metres(distance, camera.vertical_fov, extent.height)),
                       vec4(x * scale, static_cast<double>(tree.tree.tint)),
                       vec4(leaning * scale, 0.0), vec4(z * scale, 0.0)}});
     }
