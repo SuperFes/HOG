@@ -209,6 +209,8 @@ struct Woods {
     using Value = Stand;
     static constexpr int tolerance = 13;
     static constexpr std::uint8_t format = 1;
+    // Metres across the finest woods nodes hold at least; single trees stand within them.
+    static constexpr double finest = 16.0;
 
     [[nodiscard]] static Value summary(const std::array<Value, 8>& children) noexcept;
     [[nodiscard]] static std::optional<Value> merged(const std::array<Value, 8>& children,

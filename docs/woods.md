@@ -80,4 +80,9 @@ What a tree there lives with, read from the formed world at the ground's own hei
 5. After the tree lab: single trees hash-pinned on the field at the finest nodes, each kind's
    species chosen within it, standing on the ground surface from the pages. The trees come baked
    from the lab as `.flora` files ([flora assets](flora-assets.md)): seeds at ages per species,
-   each with its thinning meshes, leaves, branch cards and impostor.
+   each with its thinning meshes, leaves, branch cards and impostor. Placing done
+   (`flora::spots`/`plant`, `client::trees_in`): a jittered spot per ~7 m cell over each 16 m
+   node's shadow down up, kept by the cover's dice (so thinner woods keep a subset of the same
+   trees), a kind by its shares, then species and variant; each stands where the line down up
+   through its spot meets the held ground within the node, so stacked nodes plant once; none on
+   ground steeper than ~53°. Drawing them is next.

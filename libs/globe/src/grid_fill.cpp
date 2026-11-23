@@ -27,9 +27,6 @@ constexpr double half_diagonal = 0.866'025'403'784'438'6;
 constexpr double clear = 1.5 * half_diagonal;
 // Leaves whose middle lies within this many sides of the surface can have finer detail to come.
 constexpr double near = 2.0;
-// Metres across the finest nodes woods are held in: stands are hundreds of metres across, and a
-// tree is placed within a node by its own hash.
-constexpr double woods_finest = 16.0;
 static_assert(grid::Stand::kinds == flora::kinds, "the pages hold every kind of tree");
 
 // What the generator gives at a node's middle.
@@ -104,13 +101,13 @@ public:
     }
 
     // The woods on the ground through a node, sampled at its middle with detail no finer than it,
-    // down to nodes woods_finest across.
+    // down to nodes grid::Woods::finest across.
     grid::Tree<grid::Woods>::Decided woods(std::uint8_t depth, std::uint32_t x, std::uint32_t y,
                                            std::uint32_t z) const {
         const grid::Key key = absolute(depth, x, y, z);
         const Probe& here = probes_.at(grid::code(key));
         // Open by size alone, ground or none, so stands merge across the air beside them.
-        const bool finer = here.size / 2.0 >= woods_finest && key.depth < grid_->depth();
+        const bool finer = here.size / 2.0 >= grid::Woods::finest && key.depth < grid_->depth();
         if (!here.splits && !here.surface.value().crosses()) {
             return {.value = {}, .open = finer, .split = false};
         }

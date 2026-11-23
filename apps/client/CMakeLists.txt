@@ -35,7 +35,8 @@ add_library(hog_client
     src/transvoxel_tables.cpp
     src/sonar.cpp
     src/session.cpp
-    src/tides.cpp)
+    src/tides.cpp
+    src/tree_stands.cpp)
 add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -78,7 +79,8 @@ hog_add_tests(hog_client
     tests/sonar_tests.cpp
     tests/session_tests.cpp
     tests/streaming_tests.cpp
-    tests/tides_tests.cpp)
+    tests/tides_tests.cpp
+    tests/tree_stands_tests.cpp)
 if(TARGET hog_client_tests)
     # The server, for players to meet through.
     target_link_libraries(hog_client_tests PRIVATE hog::flow hog::app hog::planet hog::render_testing
