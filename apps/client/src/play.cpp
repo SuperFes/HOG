@@ -1185,6 +1185,7 @@ void take_decoded(Connection& connection, StreamedGround& ground) {
 constexpr std::string_view flora_directory = "var/flora";
 constexpr std::uint32_t tree_variants = 4;
 constexpr double tree_coarseness = 1.5;
+constexpr double leaf_coarseness = 3.0;
 constexpr std::array<double, 4> tree_levels{25.0, 60.0, 130.0, 280.0};
 constexpr double tree_far = 1000.0;
 constexpr double tree_reach = tree_far * 1.25;
@@ -1222,7 +1223,7 @@ std::unique_ptr<client::Forest> load_trees(client::Scene& scene, const StreamedG
         log::info(trees_log, "none in {}", flora_directory);
         return nullptr;
     }
-    scene.set_tree_coarseness(tree_coarseness);
+    scene.set_tree_coarseness(tree_coarseness, leaf_coarseness);
     scene.set_tree_reach({tree_levels.begin(), tree_levels.end()}, tree_far);
     return std::make_unique<client::Forest>(ground.grid, jobs, std::move(planting),
                                             ground.planet.body.seed, tree_reach);

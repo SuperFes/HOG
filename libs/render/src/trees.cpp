@@ -639,11 +639,13 @@ void Trees::draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uin
             continue;
         }
         const Leaves& leaves = placed.variant->leaves.value();
-        const std::uint32_t kept = kept_of(leaves.drops, placed.axes[0].w);
+        Vec4 foot_pixel = placed.axes[0];
+        foot_pixel.w *= static_cast<float>(leaf_coarseness_);
+        const std::uint32_t kept = kept_of(leaves.drops, foot_pixel.w);
         if (kept == 0) {
             continue;
         }
-        const Push push{.foot_pixel = placed.axes[0],
+        const Push push{.foot_pixel = foot_pixel,
                         .x_tint = placed.axes[1],
                         .y_translucency = Vec4{Vec3{placed.axes[2]}, leaves.translucency},
                         .z_cutoff = Vec4{Vec3{placed.axes[3]}, leaves.cutoff},

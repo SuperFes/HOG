@@ -50,9 +50,9 @@ struct Drawn {
 // From two metres over the ground of an Earth-sized planet, looking level east at the tree
 // lab's test tree `away` metres off, lit by the sun `sun_elevation` degrees up behind the eye;
 // drawn as its meshes to `near` metres, its cards to `cards`, and its impostor from there to a
-// kilometre.
+// kilometre; its leaves dropping `leaves` times sooner than the lab chose.
 Drawn look(hog::render::Device& device, double away, double sun_elevation, double near = 500.0,
-           double cards = 0.0) {
+           double cards = 0.0, double leaves = 1.0) {
     const auto bytes = fixture();
     const auto species = hog::flora::parse_species(bytes);
     REQUIRE(species.has_value());
@@ -66,6 +66,7 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation, doubl
     INFO((added ? std::string{} : added.error().message));
     REQUIRE(added);
     trees->set_reach({near, std::max(near, cards)}, 1000.0);
+    trees->set_coarseness(1.0, leaves);
     const WorldPosition eye{up * (earth + 2.0)};
     const double elevation = sun_elevation * std::numbers::pi / 180.0;
     const DVec3 sun = (-east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -167,6 +168,15 @@ TEST_CASE("a tree is drawn where it stands, thinner far off", "[render][gpu][tre
     const Drawn behind = look(*device, -15.0, 30.0);
     CHECK(behind.counts.trees == 0);
     CHECK(covered(behind.pixels).count == 0);
+}
+
+TEST_CASE("leaves can drop out sooner than the wood", "[render][gpu][trees]") {
+    const auto device = test_device();
+    const Drawn as_baked = look(*device, 4.0, 30.0);
+    const Drawn coarser = look(*device, 4.0, 30.0, 500.0, 0.0, 2.0);
+    CHECK(coarser.counts.leaves > 0);
+    CHECK(coarser.counts.leaves < as_baked.counts.leaves);
+    CHECK(coarser.counts.triangles == as_baked.counts.triangles);
 }
 
 TEST_CASE("a tree is lit by day and dark by night", "[render][gpu][trees]") {

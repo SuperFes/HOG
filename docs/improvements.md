@@ -183,19 +183,24 @@ rule files in `prototypes/trees/species/`; a fix that's data belongs there, not 
   leaves. Merge or drop the finest twigs (they're under a pixel past a few metres), weld
   shared vertices, and block-compress textures (BC7 colour, BC5 normals; ~4x on 257 MB of
   card atlases and impostors per species).
-- **Trees in the client, cost** (`libs/render/src/trees.cpp`): on the 860M at 1600x900 a
-  wooded hillside's 33 mesh trees within 40 m took 43 ms (1.8M triangles, 2.8M leaves), 14 ms
-  at coarseness 3 (twigs then swell into stubs up close); its 20k impostors to 1 km take
-  ~22 ms, each square at the front of its tree with a conservative depth so early depth can
-  cull. Still:
-  - impostors: three depth steps and four views (28 fetches) a pixel; one step and fewer
-    views past a few hundred metres, or a far canopy tier sooner;
-  - branch cards ("leaf sheets", `cards.py`) between ~25 m and impostor range; meshes only
-    up close; the coarseness knob drops pieces sooner meanwhile;
+- **Trees in the client, cost** (`libs/render/src/trees.cpp`): on the 860M at 1600x900, in a
+  dense young birch wood (eye in the crowns, 1.3k trees within 280 m, 60k impostors to 1 km) the
+  trees took ~92 ms; each part is now its own timed pass. Leaves were most of it: 3.7M leaves
+  57 ms as a 12-vertex instance each, 42 ms indexed per tree, 15 ms at leaf coarseness 3
+  (0.74M leaves); whole meshes 9 ms (4M triangles), cards ~3.5 ms, impostors under 1 ms, so
+  ~28 ms in all. Half the resolution with the same geometry halved it: the leaves' cost goes
+  with pixels (tiny alpha-tested triangles, overdraw), not their lighting (stubbing the air
+  path saved 4 ms). Coarser wood swells twigs into stubs. Still:
+  - leaves: 4 triangles each; a 2-triangle quad past a few metres, or leaves only within
+    ~10 m and level-1 cards from there;
+  - whole meshes: twig mesh is most of the 4M triangles; thin twigs into the cards' sooner;
   - occlusion: in woods most trees past the first rows are hidden; a Hi-Z test of each
     tree's bounds against last frame's depth could draw hidden ones as impostors or not at all;
-  - impostors are alpha-tested at 0.5: minified crowns lose their see-through gaps;
-  - instance the near meshes too (one draw per variant and level), not one draw per tree.
+  - impostors: three depth steps and four views (28 fetches) a pixel; cheap here, but
+    alpha-tested at 0.5, so minified crowns lose their see-through gaps;
+  - instance the near meshes too (one draw per variant), not one draw per tree;
+  - loading the four species (1.9 GB) takes ~140 s in a debug client: BC-compress the
+    textures and load variants lazily.
 - **Clouds' cost**: the cloud march is a large share of the frame on the 860M; profile it
   against the trees and look for cheaper steps (coarser march past a distance, temporal
   reuse) to free room.

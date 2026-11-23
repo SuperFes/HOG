@@ -148,8 +148,10 @@ public:
     void set_tree_reach(std::vector<double> levels, double far) {
         trees_->set_reach(std::move(levels), far);
     }
-    // How much sooner trees' pieces drop out than the tree lab chose.
-    void set_tree_coarseness(double coarseness) noexcept { trees_->set_coarseness(coarseness); }
+    // How much sooner trees' pieces drop out than the tree lab chose, and leaves sooner again.
+    void set_tree_coarseness(double coarseness, double leaves) noexcept {
+        trees_->set_coarseness(coarseness, leaves);
+    }
     // The trees drawn from now on, in place of any shown before.
     void show_trees(std::vector<render::TreeDraw> trees) {
         trees_shown_ = !trees.empty();

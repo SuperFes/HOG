@@ -70,8 +70,12 @@ public:
     }
 
     // How much sooner pieces drop out than the tree lab chose: each drawn as if a pixel spanned
-    // this many times the metres it does.
-    void set_coarseness(double coarseness) noexcept { coarseness_ = coarseness; }
+    // this many times the metres it does; leaves `leaves` times sooner again, being most of what's
+    // drawn near.
+    void set_coarseness(double coarseness, double leaves = 1.0) noexcept {
+        coarseness_ = coarseness;
+        leaf_coarseness_ = leaves;
+    }
 
     // The trees drawn from now on, in place of those shown before.
     void show(std::vector<TreeDraw> trees);
@@ -222,6 +226,7 @@ private:
     // Per frame in flight, the trees drawn together this frame.
     std::vector<Buffer> drawn_trees_;
     double coarseness_ = 1.0;
+    double leaf_coarseness_ = 1.0;
     double far_ = 1000.0;
     Drawn drawn_;
 };
