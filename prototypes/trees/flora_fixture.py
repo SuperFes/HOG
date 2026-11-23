@@ -37,6 +37,37 @@ def leaf_mesh(P):
     return mesh, lod, order
 
 
+def card_chunks(w, lo, hi):
+    """Branch cards as the exporter writes them after the meshes: a limb that never thins, and
+    three crossed squares 8 m across round the crown, their texels half covered."""
+    def quad(corners, normal):
+        P = np.array(corners, float)
+        N = np.tile(normal, (4, 1))
+        C = np.full((4, 3), 0.5)
+        UV = np.array([(0, 0), (1, 0), (1, 1), (0, 1)], float)
+        A = np.concatenate([C, np.zeros((4, 1))], 1)
+        return P, N, C, UV, A
+    c = np.array([0.0, 10.0, 0.0])
+    quads = [quad([c + (-4, -4, 0), c + (4, -4, 0), c + (4, 4, 0), c + (-4, 4, 0)], (0, 0, 1)),
+             quad([c + (0, -4, -4), c + (0, -4, 4), c + (0, 4, 4), c + (0, 4, -4)], (1, 0, 0)),
+             quad([c + (-4, 0, -4), c + (4, 0, -4), c + (4, 0, 4), c + (-4, 0, 4)], (0, 1, 0))]
+    P, N, C, UV, A = (np.concatenate([q[k] for q in quads]).astype("f4") for k in range(5))
+    idx = np.concatenate([np.array([(0, 1, 2), (0, 2, 3)]) + 4 * k for k in range(3)])
+    cover = np.zeros((8, 8, 4))
+    cover[..., :3] = (0.2, 0.4, 0.1)
+    cover[::2, :, 3] = 1.0
+    normals = np.broadcast_to(np.array((0.5, 1.0, 0.5, 1.0)), (8, 8, 4)).copy()
+    albedo = w.texture([cover], ex.RGBA8_SRGB)
+    normal = w.texture([normals], ex.RGBA8)
+    cards = ex.mesh_chunk(ex.CARD, (P, N, C, idx.astype("u4"), UV, A), Material(cutoff=0.5), None,
+                          lo, hi, None, (albedo, normal))
+    lP, lN, lC, lUV, lA = quad([(-0.2, 0, 0), (0.2, 0, 0), (0.2, 10, 0), (-0.2, 10, 0)], (0, 0, 1))
+    limb = ex.mesh_chunk(ex.WOOD, (lP.astype("f4"), lN.astype("f4"), lC.astype("f4"),
+                                   np.array([(0, 1, 2), (0, 2, 3)], "u4"), lUV, None),
+                         Material(), None, lo, hi, None, (-1, -1))
+    return limb + cards
+
+
 def impostor_chunk(w, lo, hi, views=2, cell=4):
     """An impostor of a crown filling its square from every view: leaves facing up, all lit."""
     size = views * cell
@@ -65,12 +96,13 @@ def build():
     leaves, template = ex.leaves_chunk(lmesh, Material(translucency=0.5), llod, lo, hi, None,
                                        (tex, -1))
     mesh = ex.mesh_chunk(ex.WOOD, wmesh, Material(), wlod, lo, hi, None, (tex, -1))
+    carded = card_chunks(w, lo, hi)
     impostor = impostor_chunk(w, lo, hi)
     textures = w.parts
     data = (ex.MAGIC + struct.pack("<I", ex.VERSION) + bytes(4)
             + ex.species_head("fixture", 1, template) + b"".join(textures)
             + ex.chunk(b"VARI", struct.pack("<2I 3f 3f", 7, 30, *lo, *hi)) + mesh + leaves
-            + impostor)
+            + carded + impostor)
     m = ex.read_mesh(mesh[16:])
     drops = m["pieces"]["drop"].astype(np.float64)
     counts = []

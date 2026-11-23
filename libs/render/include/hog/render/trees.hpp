@@ -49,8 +49,8 @@ struct TreeView {
 [[nodiscard]] std::uint32_t kept_of(std::span<const float> drops, float metres_per_pixel);
 
 // The trees the tree lab bakes: near, their meshes and leaves, thinned with distance as each
-// part's pieces drop out; past that, the impostors baked of them, relit; all lit through the air
-// as the ground is.
+// part's pieces drop out; past that, their branch cards (crossed squares of leaves on mesh limbs);
+// then the impostors baked of them, relit; all lit through the air as the ground is.
 class Trees {
 public:
     [[nodiscard]] static Result<Trees> create(Device& device, VkFormat colour_format,
@@ -61,9 +61,11 @@ public:
     [[nodiscard]] Result<> add(const flora::Species& from, std::uint32_t most_variants);
     [[nodiscard]] std::size_t species() const noexcept { return species_.size(); }
 
-    // Metres from the eye trees are drawn as meshes to, and as impostors from there to `far`.
-    void set_reach(double near, double far) noexcept {
+    // Metres from the eye trees are drawn as meshes to, then as branch cards to `cards`, then as
+    // impostors to `far`.
+    void set_reach(double near, double cards, double far) noexcept {
         near_ = near;
+        cards_ = cards;
         far_ = far;
     }
 
@@ -84,6 +86,7 @@ public:
         std::size_t trees = 0;
         std::size_t triangles = 0;
         std::size_t leaves = 0;
+        std::size_t carded = 0; // of the trees, those drawn as their cards
         std::size_t impostors = 0;
     };
     [[nodiscard]] const Drawn& drawn() const noexcept { return drawn_; }
@@ -98,6 +101,7 @@ private:
         float translucency = 0.0F;
         float cutoff = 0.0F;
         bool bark = false;
+        std::int32_t second = -1; // cards: their normals and leafiness
         Vec2 uv_scale{1.0F};
         std::int32_t albedo = -1;
         Buffer records;
@@ -124,6 +128,7 @@ private:
         Vec3 lo{0.0F};
         Vec3 hi{0.0F};
         std::vector<Part> meshes;
+        std::vector<Part> cards;
         std::optional<Leaves> leaves;
         std::optional<Impostor> impostor;
     };
@@ -141,12 +146,19 @@ private:
         std::uint32_t count = 0;
     };
     // One tree as drawn this frame.
+    // One tree at one level as drawn this frame; within a hand-over it's drawn at both, each
+    // keeping the pixels the other gives up.
     struct Placed {
         const Variant* variant = nullptr;
         const Species* species = nullptr;
+        bool carded = false;
+        float handed = 0.0F;        // of its pixels, the share given up to the next level
+        bool incoming = false;      // drawn as the next level, keeping the share given up
         std::array<Vec4, 4> axes{}; // foot and metres a pixel, then x, y and z with the tint
     };
 
+    [[nodiscard]] Result<Part> upload_part(Species& species, const flora::Species& from,
+                                           const flora::MeshPart& mesh);
     [[nodiscard]] Result<Variant> upload_variant(Species& species, const flora::Species& from,
                                                  const flora::Variant& variant);
     [[nodiscard]] Result<> upload_texture(Species& species, const flora::Species& from,
@@ -180,7 +192,8 @@ private:
     // Instances let go, by the draw they were let go at, kept while a frame may read them.
     std::vector<std::pair<std::uint64_t, Buffer>> retiring_;
     std::uint64_t draws_ = 0;
-    double near_ = 120.0;
+    double near_ = 40.0;
+    double cards_ = 100.0;
     double coarseness_ = 1.0;
     double far_ = 1000.0;
     Drawn drawn_;

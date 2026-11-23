@@ -49,8 +49,10 @@ struct Drawn {
 
 // From two metres over the ground of an Earth-sized planet, looking level east at the tree
 // lab's test tree `away` metres off, lit by the sun `sun_elevation` degrees up behind the eye;
-// drawn as its meshes to `near` metres, and as its impostor from there to a kilometre.
-Drawn look(hog::render::Device& device, double away, double sun_elevation, double near = 500.0) {
+// drawn as its meshes to `near` metres, its cards to `cards`, and its impostor from there to a
+// kilometre.
+Drawn look(hog::render::Device& device, double away, double sun_elevation, double near = 500.0,
+           double cards = 0.0) {
     const auto bytes = fixture();
     const auto species = hog::flora::parse_species(bytes);
     REQUIRE(species.has_value());
@@ -63,7 +65,7 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation, doubl
     const auto added = trees->add(species.value(), 4);
     INFO((added ? std::string{} : added.error().message));
     REQUIRE(added);
-    trees->set_reach(near, 1000.0);
+    trees->set_reach(near, std::max(near, cards), 1000.0);
     const WorldPosition eye{up * (earth + 2.0)};
     const double elevation = sun_elevation * std::numbers::pi / 180.0;
     const DVec3 sun = (-east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -187,4 +189,34 @@ TEST_CASE("past mesh range a tree is drawn as its impostor, and past that not at
     CHECK(covered(beyond.pixels).count == 0);
     const Drawn near = look(*device, 60.0, 30.0, 120.0);
     CHECK(near.counts.trees == 1);
+}
+
+TEST_CASE("between meshes and impostors a tree is drawn as its branch cards",
+          "[render][gpu][trees]") {
+    const auto device = test_device();
+    const Drawn carded = look(*device, 60.0, 30.0, 40.0, 100.0);
+    CHECK(carded.counts.trees == 1);
+    CHECK(carded.counts.carded == 1);
+    CHECK(carded.counts.leaves == 0);
+    CHECK(carded.counts.triangles == 8); // three squares and the limb
+    const Covered seen = covered(carded.pixels);
+    CHECK(seen.count > 20);
+    CHECK(std::abs(seen.x - 128.0) < 32.0);
+    const Drawn whole = look(*device, 30.0, 30.0, 40.0, 100.0);
+    CHECK(whole.counts.carded == 0);
+    const Drawn far = look(*device, 300.0, 30.0, 40.0, 100.0);
+    CHECK(far.counts.trees == 0);
+}
+
+TEST_CASE("within a hand-over a tree is drawn at both levels, each taking a share of its pixels",
+          "[render][gpu][trees]") {
+    const auto device = test_device();
+    const Drawn handing = look(*device, 40.0, 30.0, 40.0, 100.0);
+    CHECK(handing.counts.trees == 1);
+    CHECK(handing.counts.carded == 1);
+    CHECK(handing.counts.triangles > 8); // the meshes' and the cards'
+    CHECK(covered(handing.pixels).count > 20);
+    const Drawn past = look(*device, 45.0, 30.0, 40.0, 100.0);
+    CHECK(past.counts.carded == 1);
+    CHECK(past.counts.triangles == 8);
 }

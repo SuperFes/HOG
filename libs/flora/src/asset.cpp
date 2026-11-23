@@ -355,6 +355,22 @@ Result<SpeciesFile> load_species(const std::filesystem::path& path) {
     return out;
 }
 
+std::size_t first_card_mesh(const Variant& variant) noexcept {
+    std::size_t first = variant.meshes.size();
+    bool any_card = false;
+    while (first > 0) {
+        const MeshPart& mesh = variant.meshes[first - 1];
+        const bool card = mesh.role == MeshRole::Card;
+        const bool limb = mesh.role == MeshRole::Wood && mesh.dims == 0;
+        if (!card && !limb) {
+            break;
+        }
+        any_card = any_card || card;
+        --first;
+    }
+    return any_card ? first : variant.meshes.size();
+}
+
 Leaf leaf_at(const Variant& variant, const LeafPart& part, std::size_t index) {
     const auto bytes = part.leaves.subspan(index * leaf_size, leaf_size);
     const Vec3 unit{static_cast<float>(u16_at(bytes, 0)), static_cast<float>(u16_at(bytes, 2)),

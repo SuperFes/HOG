@@ -20,9 +20,12 @@ struct Push {
     // a piece's area grows with its size (0 never thins).
     float4 lo_target;
     float4 hi_dims;
-    // xy the uvs' scale; z 1 where pieces are calmed toward their neighbours' means; w 1 where
-    // the albedo's alpha is bark's height.
+    // xy the uvs' scale; z 1 where pieces are calmed toward their neighbours' means; w how its
+    // textures are read: 0 leaves, 1 bark (the albedo's alpha its height), 2 branch cards (the
+    // second texture their normals and leafiness).
     float4 uv_calm;
+    // x the share of its pixels handed between levels; y 1 drawn as the level taking them.
+    float4 handing;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
@@ -53,6 +56,7 @@ struct Template {
 [[vk::binding(7, 0)]] StructuredBuffer<uint> pieces;
 [[vk::binding(8, 0)]] Sampler2D albedo;
 [[vk::binding(9, 0)]] ConstantBuffer<Template> leaf_shape;
+[[vk::binding(16, 0)]] Sampler2D second_map;
 
 struct Surface {
     float4 position : SV_Position;
@@ -207,6 +211,23 @@ Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
                   own_light(unorm8x4(records[at + 6u])));
 }
 
+// A threshold, 0 to 1, for a pixel: interleaved gradient noise (Jimenez 2014), even enough that
+// a share of a tree's pixels handed between levels reads as a fade rather than a pattern.
+float handing_noise(float2 pixel) {
+    return frac(52.9829189 * frac(dot(floor(pixel), float2(0.06711056, 0.00583715))));
+}
+
+// Whether a pixel stays with this level: of the share `handed` to the next level, those under
+// the threshold go, and the next level keeps just those.
+bool kept(float2 pixel, float handed, bool incoming) {
+    return (handing_noise(pixel) < handed) == incoming;
+}
+
+// As hog::render::Trees' handed_at: the share handed over `away` metres off, at `at`.
+float handed_at(float away, float at) {
+    return smoothstep(0.9 * at, 1.1 * at, away);
+}
+
 // What the sky gives a surface facing `facing_up` (its normal's cosine with up): the sky over it,
 // and facing down, the sky's light thrown back off the ground and the leaves round it; a leaf
 // lets through some of what falls on its other side.
@@ -220,13 +241,25 @@ float3 ambient_of(float3 sky, float facing_up, float translucency) {
 // light; through a leaf from behind; seen through the air between and tone mapped.
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
+    if (!kept(surface.position.xy, push.handing.x, push.handing.y > 0.5)) {
+        discard;
+    }
     const float4 texel = albedo.Sample(surface.uv);
-    const float translucency = push.y_translucency.w;
-    const bool bark = push.uv_calm.w > 0.0;
+    const bool bark = push.uv_calm.w > 0.5 && push.uv_calm.w < 1.5;
+    const bool card = push.uv_calm.w > 1.5;
     if (!bark && texel.a < push.z_cutoff.w) {
         discard;
     }
+    float translucency = push.y_translucency.w;
     float3 normal = normalize(surface.normal);
+    if (card) {
+        // Each texel's leaves' own way, in the tree's frame, and how leafy it is.
+        const float4 baked = second_map.Sample(surface.uv);
+        const float3 own = (baked.rgb * 2.0) - 1.0;
+        normal = normalize((push.x_tint.xyz * own.x) + (push.y_translucency.xyz * own.y) +
+                           (push.z_cutoff.xyz * own.z));
+        translucency *= baked.a;
+    }
     const float3 to_eye = -normalize(surface.from_eye);
     if (translucency > 0.0 && dot(normal, to_eye) < 0.0) {
         normal = -normal;
@@ -298,8 +331,10 @@ struct Seen {
     nointerpolation float3 y;
     nointerpolation float3 z;
     nointerpolation float3 foot;
-    nointerpolation float hash;
     nointerpolation float tint;
+    // Of its pixels, the share taken from the cards, and the share given up to nothing far off.
+    nointerpolation float taken;
+    nointerpolation float given;
 };
 
 [shader("vertex")]
@@ -313,7 +348,6 @@ Seen vertex_impostor(uint index : SV_VertexID, uint instance : SV_InstanceID) {
     seen.x = tree.x_hash.xyz;
     seen.y = tree.y.xyz;
     seen.z = cross(seen.x, seen.y) / length(seen.x);
-    seen.hash = tree.x_hash.w;
     seen.tint = tree.foot_tint.w;
     const float scale = length(seen.x);
     const float3 local = far.centre_radius.xyz;
@@ -331,8 +365,10 @@ Seen vertex_impostor(uint index : SV_VertexID, uint instance : SV_InstanceID) {
     seen.from_eye = (look * before) +
                     (((right * corners[index].x) + (up * corners[index].y)) * radius * grow);
     seen.position = mul(frame.clip_from_eye, float4(seen.from_eye, 1.0));
-    // Within mesh range or past impostor range, nothing.
-    if (away < far.radii_reach.z || away > far.radii_reach.w) {
+    seen.taken = handed_at(away, far.radii_reach.z);
+    seen.given = handed_at(away, far.radii_reach.w);
+    // Wholly the cards' or wholly gone, nothing.
+    if (seen.taken <= 0.0 || seen.given >= 1.0) {
         seen.position = float4(0.0, 0.0, -1.0, 1.0);
     }
     return seen;
@@ -441,6 +477,9 @@ struct Lit {
 
 [shader("fragment")]
 Lit fragment_impostor(Seen seen) {
+    if (!kept(seen.position.xy, seen.taken, true) || !kept(seen.position.xy, seen.given, false)) {
+        discard;
+    }
     const float scale = length(seen.x);
     const float3 x = seen.x / scale;
     const float3 y = seen.y / scale;

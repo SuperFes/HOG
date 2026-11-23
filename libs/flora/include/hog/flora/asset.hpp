@@ -117,6 +117,11 @@ struct SpeciesFile {
 };
 [[nodiscard]] Result<SpeciesFile> load_species(const std::filesystem::path& path);
 
+// Where a variant's branch cards begin among its meshes: the exporter writes them, and the limbs
+// that carry them (which never thin), after all the meshes drawn whole. As many as its meshes
+// where it has none.
+[[nodiscard]] std::size_t first_card_mesh(const Variant& variant) noexcept;
+
 // One leaf as stored, decoded.
 struct Leaf {
     Vec3 base{0.0F};
