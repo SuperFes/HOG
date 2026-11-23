@@ -39,6 +39,8 @@ Sheets land in `out/`.
 | `test_far.py` | `.venv/bin/python -m unittest test_far`: hash, stand maths, mips, leaf lighting, crown fit |
 | `cards.py` | branch cards: crossed planes per leaf cluster, leaves on the plane they lie along |
 | `card_sheet.py` | one tree at true size: mesh, thinned, cards, impostor against the truth |
+| `export.py` | bakes species into `.flora` files for the engine (docs/flora-assets.md) |
+| `flora_fixture.py` | regenerates the engine reader's test fixture from the exporter |
 | `test_cards.py` | `.venv/bin/python -m unittest test_cards`: every leaf on one card parallel to it |
 
 Self-organising species calibrate once (tens of seconds each); results cache in
