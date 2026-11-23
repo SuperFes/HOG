@@ -49,7 +49,10 @@ TEST_CASE("a species baked by the tree lab parses", "[flora][asset]") {
     REQUIRE(variant.meshes.size() == 3);
     CHECK(variant.meshes[0].role == MeshRole::Wood);
     CHECK(variant.meshes[2].role == MeshRole::Card);
-    CHECK(hog::flora::first_card_mesh(variant) == 1);
+    CHECK(hog::flora::mesh_level(variant, 0) == 0);
+    CHECK(hog::flora::mesh_level(variant, 1) == 1);
+    CHECK(hog::flora::mesh_level(variant, 2) == 1);
+    CHECK(hog::flora::card_levels(variant) == 1);
     CHECK(variant.meshes[0].vertices.size() == variant.meshes[0].vertex_count * 32);
     REQUIRE(variant.leaves.has_value());
     CHECK(variant.leaves.value().count == 12);
@@ -105,4 +108,27 @@ TEST_CASE("half floats decode", "[flora][asset]") {
     CHECK(hog::flora::half_to_float(0xC000) == -2.0F);
     CHECK(hog::flora::half_to_float(0x7BFF) == 65504.0F);
     CHECK(hog::flora::half_to_float(0x0001) == Approx(5.96046e-8));
+}
+
+TEST_CASE("files from before levels were stored take their cards as one level", "[flora][asset]") {
+    hog::flora::Variant variant;
+    const auto mesh = [](MeshRole role, std::uint32_t dims, std::uint32_t level) {
+        hog::flora::MeshPart part;
+        part.role = role;
+        part.dims = dims;
+        part.level = level;
+        return part;
+    };
+    variant.meshes = {mesh(MeshRole::Wood, 1, 0), mesh(MeshRole::Wood, 0, 0),
+                      mesh(MeshRole::Wood, 0, 0), mesh(MeshRole::Card, 0, 0)};
+    CHECK(hog::flora::mesh_level(variant, 0) == 0);
+    CHECK(hog::flora::mesh_level(variant, 1) == 1);
+    CHECK(hog::flora::mesh_level(variant, 3) == 1);
+    variant.meshes = {mesh(MeshRole::Wood, 1, 0), mesh(MeshRole::Card, 0, 1),
+                      mesh(MeshRole::Wood, 0, 2), mesh(MeshRole::Card, 0, 2)};
+    CHECK(hog::flora::mesh_level(variant, 1) == 1);
+    CHECK(hog::flora::mesh_level(variant, 2) == 2);
+    CHECK(hog::flora::card_levels(variant) == 2);
+    variant.meshes = {mesh(MeshRole::Wood, 1, 0)};
+    CHECK(hog::flora::card_levels(variant) == 0);
 }

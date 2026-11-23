@@ -96,7 +96,7 @@ Result<MeshPart> parse_mesh(std::span<const std::byte> payload) {
     MeshPart mesh;
     const auto role = in.integer<std::uint32_t>();
     mesh.dims = in.integer<std::uint32_t>();
-    (void)in.integer<std::uint32_t>();
+    mesh.level = in.integer<std::uint32_t>();
     mesh.target = in.single();
     mesh.albedo = static_cast<std::int32_t>(in.integer<std::uint32_t>());
     mesh.second = static_cast<std::int32_t>(in.integer<std::uint32_t>());
@@ -355,6 +355,8 @@ Result<SpeciesFile> load_species(const std::filesystem::path& path) {
     return out;
 }
 
+namespace {
+
 std::size_t first_card_mesh(const Variant& variant) noexcept {
     std::size_t first = variant.meshes.size();
     bool any_card = false;
@@ -369,6 +371,25 @@ std::size_t first_card_mesh(const Variant& variant) noexcept {
         --first;
     }
     return any_card ? first : variant.meshes.size();
+}
+
+} // namespace
+
+std::uint32_t mesh_level(const Variant& variant, std::size_t mesh) noexcept {
+    const bool stored =
+        std::ranges::any_of(variant.meshes, [](const MeshPart& part) { return part.level > 0; });
+    if (stored) {
+        return variant.meshes[mesh].level;
+    }
+    return mesh >= first_card_mesh(variant) ? 1 : 0;
+}
+
+std::uint32_t card_levels(const Variant& variant) noexcept {
+    std::uint32_t most = 0;
+    for (std::size_t i = 0; i < variant.meshes.size(); ++i) {
+        most = std::max(most, mesh_level(variant, i));
+    }
+    return most;
 }
 
 Leaf leaf_at(const Variant& variant, const LeafPart& part, std::size_t index) {

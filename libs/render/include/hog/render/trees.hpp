@@ -61,11 +61,11 @@ public:
     [[nodiscard]] Result<> add(const flora::Species& from, std::uint32_t most_variants);
     [[nodiscard]] std::size_t species() const noexcept { return species_.size(); }
 
-    // Metres from the eye trees are drawn as meshes to, then as branch cards to `cards`, then as
-    // impostors to `far`.
-    void set_reach(double near, double cards, double far) noexcept {
-        near_ = near;
-        cards_ = cards;
+    // Metres from the eye trees are drawn to at each level: whole, then each level of branch
+    // cards; past the last, as impostors to `far`. A variant with fewer levels draws its last
+    // further.
+    void set_reach(std::vector<double> levels, double far) {
+        reaches_ = std::move(levels);
         far_ = far;
     }
 
@@ -86,7 +86,7 @@ public:
         std::size_t trees = 0;
         std::size_t triangles = 0;
         std::size_t leaves = 0;
-        std::size_t carded = 0; // of the trees, those drawn as their cards
+        std::size_t carded = 0; // of the trees, those drawn as cards, fading in or out too
         std::size_t impostors = 0;
     };
     [[nodiscard]] const Drawn& drawn() const noexcept { return drawn_; }
@@ -127,8 +127,7 @@ private:
     struct Variant {
         Vec3 lo{0.0F};
         Vec3 hi{0.0F};
-        std::vector<Part> meshes;
-        std::vector<Part> cards;
+        std::vector<std::vector<Part>> levels; // whole, then each level of cards
         std::optional<Leaves> leaves;
         std::optional<Impostor> impostor;
     };
@@ -151,7 +150,7 @@ private:
     struct Placed {
         const Variant* variant = nullptr;
         const Species* species = nullptr;
-        bool carded = false;
+        std::uint32_t level = 0;    // 0 whole, then each level of cards
         float handed = 0.0F;        // of its pixels, the share given up to the next level
         bool incoming = false;      // drawn as the next level, keeping the share given up
         std::array<Vec4, 4> axes{}; // foot and metres a pixel, then x, y and z with the tint
@@ -167,6 +166,12 @@ private:
     // Into placed_, the trees in mesh reach and in view, as drawn.
     void place(VkExtent2D extent, const TreeView& view);
     void draw_meshes(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
+    // The trees drawn as cards, a draw for each variant's level, their trees written for the frame.
+    [[nodiscard]] Result<> draw_cards(VkCommandBuffer commands, const TreeView& view,
+                                      std::uint32_t frame);
+    void draw_part(VkCommandBuffer commands, const Species& species, const Variant& variant,
+                   const Part& part, std::uint32_t count, const Placed* tree, std::uint32_t first,
+                   std::uint32_t trees);
     void draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
     // The shown trees' impostor instances, by run, from where the first shown stands.
     [[nodiscard]] Result<> build_instances();
@@ -192,8 +197,9 @@ private:
     // Instances let go, by the draw they were let go at, kept while a frame may read them.
     std::vector<std::pair<std::uint64_t, Buffer>> retiring_;
     std::uint64_t draws_ = 0;
-    double near_ = 40.0;
-    double cards_ = 100.0;
+    std::vector<double> reaches_{25.0, 60.0, 130.0, 280.0};
+    // Per frame in flight, the trees drawn together this frame.
+    std::vector<Buffer> drawn_trees_;
     double coarseness_ = 1.0;
     double far_ = 1000.0;
     Drawn drawn_;

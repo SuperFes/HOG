@@ -42,8 +42,9 @@ enum class MeshRole : std::uint8_t {
 // sorted to follow them, so every level of detail is a prefix of the indices.
 struct MeshPart {
     MeshRole role = MeshRole::Wood;
-    std::uint32_t dims = 0; // how a piece's area grows with its size; 0: never thins
-    float target = 0.0F;    // pixels a piece is kept at, at least
+    std::uint32_t dims = 0;  // how a piece's area grows with its size; 0: never thins
+    std::uint32_t level = 0; // 0 the whole tree; 1, 2, ... its branch cards, coarser each step
+    float target = 0.0F;     // pixels a piece is kept at, at least
     std::int32_t albedo = -1;
     std::int32_t second = -1; // cards: their normal map
     float translucency = 0.0F;
@@ -117,10 +118,12 @@ struct SpeciesFile {
 };
 [[nodiscard]] Result<SpeciesFile> load_species(const std::filesystem::path& path);
 
-// Where a variant's branch cards begin among its meshes: the exporter writes them, and the limbs
-// that carry them (which never thin), after all the meshes drawn whole. As many as its meshes
-// where it has none.
-[[nodiscard]] std::size_t first_card_mesh(const Variant& variant) noexcept;
+// The level a variant's mesh is drawn at: as stored, or in files written before levels were,
+// which hold 0 for all, 1 for the cards and the limbs carrying them (which never thin), written
+// after the meshes of the whole tree.
+[[nodiscard]] std::uint32_t mesh_level(const Variant& variant, std::size_t mesh) noexcept;
+// The variant's levels of branch cards.
+[[nodiscard]] std::uint32_t card_levels(const Variant& variant) noexcept;
 
 // One leaf as stored, decoded.
 struct Leaf {

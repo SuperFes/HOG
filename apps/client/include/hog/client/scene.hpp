@@ -143,10 +143,10 @@ public:
     Result<> add_species(const flora::Species& species, std::uint32_t most_variants) {
         return trees_->add(species, most_variants);
     }
-    // Metres from the eye trees are drawn as meshes to, then as branch cards to `cards`, then as
+    // Metres from the eye trees are drawn to whole, then at each level of branch cards; then as
     // impostors to `far`.
-    void set_tree_reach(double near, double cards, double far) noexcept {
-        trees_->set_reach(near, cards, far);
+    void set_tree_reach(std::vector<double> levels, double far) {
+        trees_->set_reach(std::move(levels), far);
     }
     // How much sooner trees' pieces drop out than the tree lab chose.
     void set_tree_coarseness(double coarseness) noexcept { trees_->set_coarseness(coarseness); }

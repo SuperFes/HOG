@@ -21,7 +21,10 @@ follow their pieces, so a level of detail is one prefix: find how many pieces ha
 piece grows about its pivot by `max(1, px * target / size)` (`lod.kept`), and its normal, colour and autumn colour are pulled toward its neighbourhood's means
 by `sqrt(share)` so fewer, larger pieces keep a pixel's variance (`lod._calmed`).
 
-Then: branch cards (from ~60 m), the impostor (from a few hundred metres), the far forest.
+Then: branch cards in coarser and coarser levels (clusters 1, 2 and 4 m across, each about a
+quarter of the cards of the last, their limbs thinning with them), the impostor (from a few
+hundred metres), the far forest. Files written before levels were stored hold 0 for every mesh;
+their cards are the meshes after the whole tree's, one level.
 
 ## Layout
 
@@ -41,7 +44,8 @@ of a first-order fit) is unorm8 as (c0, c1 + 0.5).
   first, each padded to 16. Formats: 1 RGBA8 sRGB (alpha linear), 2 RGBA8, 3 RG16, 4 R8,
   5 RGBA16. Textures are shared between variants (same content, same id).
 - **VARI**: u32 seed, u32 age, f32 lo[3], hi[3] (the bounds positions are quantized over).
-- **MESH**: u32 role (1 wood, 2 foliage, 3 card), u32 dims (0: never thins), u32 0, f32 target
+- **MESH**: u32 role (1 wood, 2 foliage, 3 card), u32 dims (0: never thins), u32 level (0 the
+  whole tree; 1, 2, ... its branch cards, coarser each step, with the limbs carrying them), f32 target
   (pixels a piece is kept at), i32 albedo texture, i32 second texture (card normals, -1), f32
   translucency, cutoff, relief, f32 uv scale[2], u32 vertices, pieces, indices; padded to 64.
   Then:

@@ -98,6 +98,14 @@ constexpr std::array descriptors{
     binding(14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(16, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(17, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+};
+
+struct DrawnTree {
+    Vec4 foot_pixel;
+    Vec4 x_tint;
+    Vec4 y_handed;
+    Vec4 z_incoming;
 };
 
 // Of a hand-over from one level to the next at `at` metres, the share handed over `distance`
@@ -235,6 +243,7 @@ Result<Trees> Trees::create(Device& device, VkFormat colour_format, VkFormat dep
             return std::unexpected(std::move(buffer).error());
         }
         trees.frames_.push_back(std::move(buffer).value());
+        trees.drawn_trees_.emplace_back();
     }
     return trees;
 }
@@ -326,11 +335,10 @@ Result<Trees::Variant> Trees::upload_variant(Species& species, const flora::Spec
                                              const flora::Variant& variant) {
     Variant out{.lo = variant.lo,
                 .hi = variant.hi,
-                .meshes = {},
-                .cards = {},
+                .levels = {},
                 .leaves = std::nullopt,
                 .impostor = std::nullopt};
-    const std::size_t first_card = flora::first_card_mesh(variant);
+    out.levels.resize(std::size_t{flora::card_levels(variant)} + 1);
     for (std::size_t i = 0; i < variant.meshes.size(); ++i) {
         const flora::MeshPart& mesh = variant.meshes[i];
         if (mesh.index_count == 0) {
@@ -340,7 +348,7 @@ Result<Trees::Variant> Trees::upload_variant(Species& species, const flora::Spec
         if (!part) {
             return std::unexpected(std::move(part).error());
         }
-        (i < first_card ? out.meshes : out.cards).push_back(std::move(part).value());
+        out.levels.at(flora::mesh_level(variant, i)).push_back(std::move(part).value());
     }
     if (variant.leaves && variant.leaves->count > 0) {
         const flora::LeafPart& leaves = *variant.leaves;
@@ -428,6 +436,9 @@ void Trees::place(VkExtent2D extent, const TreeView& view) {
     const Camera& camera = view.camera;
     const BlockView culling{.camera = camera, .sun = view.sun, .bend = view.bend};
     placed_.clear();
+    if (reaches_.empty()) {
+        return;
+    }
     for (const TreeDraw& tree : shown_) {
         if (tree.tree.species >= species_.size()) {
             continue;
@@ -439,7 +450,7 @@ void Trees::place(VkExtent2D extent, const TreeView& view) {
         const Variant& variant = species.variants[tree.tree.variant % species.variants.size()];
         const DVec3 from_eye = tree.foot - camera.eye;
         const double distance = glm::length(from_eye);
-        if (distance > cards_ * 1.1) {
+        if (distance > reaches_.back() * 1.1) {
             continue;
         }
         const DVec3 up = glm::normalize(tree.foot.metres());
@@ -460,71 +471,138 @@ void Trees::place(VkExtent2D extent, const TreeView& view) {
         const Placed placed{
             .variant = &variant,
             .species = &species,
-            .carded = false,
+            .level = 0,
             .handed = 0.0F,
             .incoming = false,
             .axes = {vec4(foot,
                           coarseness_ * pixel_metres(distance, camera.vertical_fov, extent.height)),
                      vec4(x * scale, static_cast<double>(tree.tree.tint)),
                      vec4(leaning * scale, 0.0), vec4(z * scale, 0.0)}};
-        // As the impostors' shader has it, from where the foot's drawn.
+        // As the impostors' shader has it, from where the foot's drawn. Each level is drawn from
+        // where the one before begins handing over to it till it's handed all to the next.
         const double drawn_at = glm::length(foot);
-        const auto to_cards = static_cast<float>(handed_at(drawn_at, near_));
-        const auto to_impostor = static_cast<float>(handed_at(drawn_at, cards_));
-        if (to_cards < 1.0F) {
-            Placed whole = placed;
-            whole.handed = to_cards;
-            placed_.push_back(whole);
-        }
-        if (to_cards > 0.0F && to_impostor < 1.0F) {
-            Placed carded = placed;
-            carded.carded = true;
-            // Taking from the meshes what they give up, giving up its own to the impostor.
-            carded.handed = to_cards < 1.0F ? to_cards : to_impostor;
-            carded.incoming = to_cards < 1.0F;
-            placed_.push_back(carded);
+        for (std::uint32_t level = 0; level < reaches_.size(); ++level) {
+            const auto taken =
+                level == 0 ? 1.0F : static_cast<float>(handed_at(drawn_at, reaches_[level - 1]));
+            const auto given = static_cast<float>(handed_at(drawn_at, reaches_[level]));
+            if (taken <= 0.0F || given >= 1.0F) {
+                continue;
+            }
+            Placed at = placed;
+            at.level = level;
+            at.incoming = taken < 1.0F;
+            at.handed = at.incoming ? taken : given;
+            placed_.push_back(at);
         }
     }
+}
+
+void Trees::draw_part(VkCommandBuffer commands, const Species& species, const Variant& variant,
+                      const Part& part, std::uint32_t count, const Placed* tree,
+                      std::uint32_t first, std::uint32_t trees) {
+    const Placed alone = tree != nullptr ? *tree : Placed{};
+    const Push push{.foot_pixel = alone.axes[0],
+                    .x_tint = alone.axes[1],
+                    .y_translucency = Vec4{Vec3{alone.axes[2]}, part.translucency},
+                    .z_cutoff = Vec4{Vec3{alone.axes[3]}, part.cutoff},
+                    .lo_target = Vec4{variant.lo, part.target},
+                    .hi_dims = Vec4{variant.hi, static_cast<float>(part.dims)},
+                    .uv_calm =
+                        Vec4{part.uv_scale, part.role == flora::MeshRole::Foliage ? 1.0F : 0.0F,
+                             static_cast<float>(look_of(part))},
+                    .handing = Vec4{alone.handed, alone.incoming ? 1.0F : 0.0F,
+                                    static_cast<float>(first), tree != nullptr ? 0.0F : 1.0F}};
+    push_storage_buffer(commands, meshes_, 6, part.records.handle());
+    push_storage_buffer(commands, meshes_, 7, part.pieces.handle());
+    push_sampled_image(commands, meshes_, 8, texture(species, part.albedo), sampler_.handle());
+    push_uniform_buffer(commands, meshes_, 9, species.leaf_shape.handle());
+    push_sampled_image(commands, meshes_, 16, texture(species, part.second), sampler_.handle());
+    vkCmdBindIndexBuffer(commands, part.indices.handle(), 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(commands, meshes_.layout(), both, 0, sizeof(Push), &push);
+    vkCmdDrawIndexed(commands, count, trees, 0, 0, 0);
+    drawn_.triangles += std::size_t{count / 3} * trees;
 }
 
 void Trees::draw_meshes(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame) {
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, meshes_.handle());
     push_air(commands, meshes_, view, frame);
+    push_storage_buffer(commands, meshes_, 17, drawn_trees_.at(frame).handle());
     for (const Placed& placed : placed_) {
-        const Species& species = *placed.species;
+        if (placed.level != 0) {
+            continue;
+        }
         const float px = placed.axes[0].w;
-        drawn_.carded += placed.carded ? 1 : 0;
-        for (const Part& part : placed.carded ? placed.variant->cards : placed.variant->meshes) {
+        for (const Part& part : placed.variant->levels.front()) {
             const std::uint32_t kept = part.dims == 0
                                            ? static_cast<std::uint32_t>(part.drops.size())
                                            : kept_of(part.drops, px);
             const std::uint32_t count = kept > 0 ? part.index_ends[kept - 1] : 0;
-            if (count == 0) {
-                continue;
+            if (count > 0) {
+                draw_part(commands, *placed.species, *placed.variant, part, count, &placed, 0, 1);
             }
-            const Push push{
-                .foot_pixel = placed.axes[0],
-                .x_tint = placed.axes[1],
-                .y_translucency = Vec4{Vec3{placed.axes[2]}, part.translucency},
-                .z_cutoff = Vec4{Vec3{placed.axes[3]}, part.cutoff},
-                .lo_target = Vec4{placed.variant->lo, part.target},
-                .hi_dims = Vec4{placed.variant->hi, static_cast<float>(part.dims)},
-                .uv_calm = Vec4{part.uv_scale, part.role == flora::MeshRole::Foliage ? 1.0F : 0.0F,
-                                static_cast<float>(look_of(part))},
-                .handing = Vec4{placed.handed, placed.incoming ? 1.0F : 0.0F, 0.0F, 0.0F}};
-            push_storage_buffer(commands, meshes_, 6, part.records.handle());
-            push_storage_buffer(commands, meshes_, 7, part.pieces.handle());
-            push_sampled_image(commands, meshes_, 8, texture(species, part.albedo),
-                               sampler_.handle());
-            push_uniform_buffer(commands, meshes_, 9, species.leaf_shape.handle());
-            push_sampled_image(commands, meshes_, 16, texture(species, part.second),
-                               sampler_.handle());
-            vkCmdBindIndexBuffer(commands, part.indices.handle(), 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(commands, meshes_.layout(), both, 0, sizeof(Push), &push);
-            vkCmdDrawIndexed(commands, count, 1, 0, 0, 0);
-            drawn_.triangles += count / 3;
         }
     }
+}
+
+Result<> Trees::draw_cards(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame) {
+    // By variant and level, each drawn at once.
+    std::vector<const Placed*> carded;
+    for (const Placed& placed : placed_) {
+        if (placed.level > 0) {
+            carded.push_back(&placed);
+        }
+    }
+    drawn_.carded = carded.size();
+    const auto level_of = [](const Placed* placed) {
+        return std::min<std::size_t>(placed->level, placed->variant->levels.size() - 1);
+    };
+    std::ranges::stable_sort(carded, {}, [&](const Placed* placed) {
+        return std::pair{placed->variant, level_of(placed)};
+    });
+    std::vector<DrawnTree> trees;
+    trees.reserve(std::max<std::size_t>(carded.size(), 1));
+    for (const Placed* placed : carded) {
+        trees.push_back(
+            {.foot_pixel = placed->axes[0],
+             .x_tint = placed->axes[1],
+             .y_handed = Vec4{Vec3{placed->axes[2]}, placed->handed},
+             .z_incoming = Vec4{Vec3{placed->axes[3]}, placed->incoming ? 1.0F : 0.0F}});
+    }
+    if (trees.empty()) {
+        trees.push_back({});
+    }
+    Buffer& buffer = drawn_trees_.at(frame);
+    const std::size_t bytes = trees.size() * sizeof(DrawnTree);
+    if (buffer.size() < bytes) {
+        auto made =
+            make_buffer(*device_, bytes * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, Memory::Upload);
+        if (!made) {
+            return std::unexpected(std::move(made).error());
+        }
+        buffer = std::move(made).value();
+    }
+    std::memcpy(buffer.mapped().data(), trees.data(), bytes);
+    if (Result<> flushed = buffer.flush(); !flushed) {
+        return flushed;
+    }
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, meshes_.handle());
+    push_air(commands, meshes_, view, frame);
+    push_storage_buffer(commands, meshes_, 17, buffer.handle());
+    for (std::size_t first = 0; first < carded.size();) {
+        std::size_t end = first + 1;
+        while (end < carded.size() && carded[end]->variant == carded[first]->variant &&
+               level_of(carded[end]) == level_of(carded[first])) {
+            ++end;
+        }
+        const Placed& one = *carded[first];
+        for (const Part& part : one.variant->levels[level_of(&one)]) {
+            draw_part(commands, *one.species, *one.variant, part,
+                      part.index_ends.empty() ? 0 : part.index_ends.back(), nullptr,
+                      static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(end - first));
+        }
+        first = end;
+    }
+    return {};
 }
 
 void Trees::draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame) {
@@ -532,7 +610,7 @@ void Trees::draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uin
     push_air(commands, leaves_, view, frame);
     for (const Placed& placed : placed_) {
         const Species& species = *placed.species;
-        if (placed.carded || !placed.variant->leaves.has_value()) {
+        if (placed.level != 0 || !placed.variant->leaves.has_value()) {
             continue;
         }
         const Leaves& leaves = placed.variant->leaves.value();
@@ -554,6 +632,7 @@ void Trees::draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uin
                            sampler_.handle());
         push_uniform_buffer(commands, leaves_, 9, species.leaf_shape.handle());
         push_sampled_image(commands, leaves_, 16, white_.view(), sampler_.handle());
+        push_storage_buffer(commands, leaves_, 17, drawn_trees_.at(frame).handle());
         vkCmdPushConstants(commands, leaves_.layout(), both, 0, sizeof(Push), &push);
         vkCmdDraw(commands, 12, kept, 0, 0);
         drawn_.leaves += kept;
@@ -640,14 +719,15 @@ void Trees::draw_impostors(VkCommandBuffer commands, const TreeView& view, std::
             push_sampled_image(commands, impostors_, 11 + i,
                                texture(species, impostor.textures.at(i)), atlas_sampler_.handle());
         }
-        const FarPush push{.origin_first = vec4(origin, static_cast<double>(run.first)),
-                           .up_height = vec4(view.bend.up, view.bend.eye_height),
-                           .radii_reach = Vec4{static_cast<float>(view.bend.radius),
-                                               static_cast<float>(view.bend.faked),
-                                               static_cast<float>(near_), static_cast<float>(far_)},
-                           .centre_radius = Vec4{impostor.centre, impostor.radius},
-                           .views_cutoff =
-                               Vec4{static_cast<float>(impostor.views), 0.5F, 0.0F, 0.0F}};
+        const FarPush push{
+            .origin_first = vec4(origin, static_cast<double>(run.first)),
+            .up_height = vec4(view.bend.up, view.bend.eye_height),
+            .radii_reach =
+                Vec4{static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                     static_cast<float>(reaches_.empty() ? 0.0 : reaches_.back()),
+                     static_cast<float>(far_)},
+            .centre_radius = Vec4{impostor.centre, impostor.radius},
+            .views_cutoff = Vec4{static_cast<float>(impostor.views), 0.5F, 0.0F, 0.0F}};
         vkCmdPushConstants(commands, impostors_.layout(), both, 0, sizeof(FarPush), &push);
         vkCmdDraw(commands, 6, run.count, 0, 0);
         drawn_.impostors += run.count;
@@ -677,6 +757,9 @@ Result<> Trees::draw(VkCommandBuffer commands, VkExtent2D extent, const TreeView
     std::memcpy(frames_.at(frame).mapped().data(), &constants, sizeof(Frame));
     if (Result<> flushed = frames_.at(frame).flush(); !flushed) {
         return flushed;
+    }
+    if (Result<> carded = draw_cards(commands, view, frame); !carded) {
+        return carded;
     }
     draw_meshes(commands, view, frame);
     draw_leaves(commands, view, frame);

@@ -26,6 +26,10 @@ RGBA8_SRGB, RGBA8, RG16, R8, RGBA16 = 1, 2, 3, 4, 5
 WOOD, FOLIAGE, CARD = 1, 2, 3
 FALLEN = 1  # leaf flag: lying on the ground, unfolded
 CARD_TEXEL = 0.04  # metres
+# Branch cards at coarser and coarser levels, each built of clusters this many metres across,
+# with limbs as mesh only where at least as wide as cards.LIMB times it, and texels as much
+# coarser: about a quarter of the cards each step.
+CARD_LEVELS = (1.0, 2.0, 4.0)
 
 
 # --- packing -------------------------------------------------------------------------------
@@ -211,7 +215,7 @@ class Writer:
         return MAGIC + struct.pack("<I", VERSION) + bytes(4) + head + b"".join(self.parts)
 
 
-def mesh_chunk(role, mesh, mat, lod, lo, hi, sunvis, textures):
+def mesh_chunk(role, mesh, mat, lod, lo, hi, sunvis, textures, level=0):
     """A mesh with its pieces in drop order and its triangles sorted to match, so every level
     of detail is a prefix of its indices."""
     p, n, c, idx, uv, autumn = mesh
@@ -280,7 +284,7 @@ def mesh_chunk(role, mesh, mat, lod, lo, hi, sunvis, textures):
     pc["mean_normal"] = snorm8(oct_encode(mnn))
     pc["index_end"] = index_end
     albedo, normal_tex = textures
-    head = struct.pack("<3I f 2i 3f 2f 3I", role, dims, 0, target, albedo, normal_tex,
+    head = struct.pack("<3I f 2i 3f 2f 3I", role, dims, level, target, albedo, normal_tex,
                        mat.translucency, mat.cutoff, mat.relief, *uv_scale, nv, len(order),
                        idx.size)
     return chunk(b"MESH", head + bytes((-len(head)) % 16) + v.tobytes() + pc.tobytes()
@@ -395,16 +399,17 @@ def variant_chunks(w, name, sp, seed, age, impostor):
             out.append(c)
         else:
             out.append(mesh_chunk(FOLIAGE if leafy else WOOD, mesh, mat, lod, lo, hi, s, tex))
-    # Cards take over at ~60 m, where a pixel spans ~6 cm.
-    carded, _n = cards.carded(scene, across=1.0, texel=CARD_TEXEL)
-    for (mesh, mat), lod in zip(carded.parts, carded.lod):
-        if mat.normal_map is not None:
-            alb = w.texture(mat.levels[0], RGBA8_SRGB)
-            nrm = w.texture(mat.levels[1], RGBA8)
-            out.append(mesh_chunk(CARD, mesh, mat, None, lo, hi, None, (alb, nrm)))
-        else:
-            out.append(mesh_chunk(WOOD, mesh, mat, None, lo, hi, None,
-                                  material_textures(w, mat, False)))
+    for level, across in enumerate(CARD_LEVELS, 1):
+        carded, _n = cards.carded(scene, across=across, texel=CARD_TEXEL * across,
+                                  limb=cards.LIMB * across)
+        for (mesh, mat), lod in zip(carded.parts, carded.lod):
+            if mat.normal_map is not None:
+                alb = w.texture(mat.levels[0], RGBA8_SRGB)
+                nrm = w.texture(mat.levels[1], RGBA8)
+                out.append(mesh_chunk(CARD, mesh, mat, None, lo, hi, None, (alb, nrm), level))
+            else:
+                out.append(mesh_chunk(WOOD, mesh, mat, None, lo, hi, None,
+                                      material_textures(w, mat, False), level))
     if impostor:
         out.append(impostor_chunk(w, scene, name))
     return out, template
@@ -464,14 +469,14 @@ def read(path):
 
 def read_mesh(payload):
     head = struct.unpack_from("<3I f 2i 3f 2f 3I", payload)
-    role, dims, _, target, albedo, normal, trans, cutoff, relief, us, vs, nv, npc, ni = head
+    role, dims, level, target, albedo, normal, trans, cutoff, relief, us, vs, nv, npc, ni = head
     off = 64
     v = np.frombuffer(payload, VERTEX, nv, off)
     off += nv * VERTEX.itemsize
     pc = np.frombuffer(payload, PIECE, npc, off)
     off += npc * PIECE.itemsize
     idx = np.frombuffer(payload, "<u4", ni, off).reshape(-1, 3)
-    return dict(role=role, dims=dims, target=target, textures=(albedo, normal),
+    return dict(role=role, dims=dims, level=level, target=target, textures=(albedo, normal),
                 translucency=trans, cutoff=cutoff, relief=relief, uv_scale=(us, vs),
                 vertices=v, pieces=pc, indices=idx)
 

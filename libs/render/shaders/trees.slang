@@ -24,7 +24,9 @@ struct Push {
     // textures are read: 0 leaves, 1 bark (the albedo's alpha its height), 2 branch cards (the
     // second texture their normals and leafiness).
     float4 uv_calm;
-    // x the share of its pixels handed between levels; y 1 drawn as the level taking them.
+    // x the share of its pixels handed between levels; y 1 drawn as the level taking them; z
+    // the first of the trees drawn; w 1 where the trees are read from those drawn together,
+    // not from these.
     float4 handing;
 };
 
@@ -58,6 +60,29 @@ struct Template {
 [[vk::binding(9, 0)]] ConstantBuffer<Template> leaf_shape;
 [[vk::binding(16, 0)]] Sampler2D second_map;
 
+// One tree, as hog::render::Trees' Drawn has it: its foot from the eye and metres a pixel spans
+// there, its own axes scaled by its size, its tint, and the share of its pixels handed between
+// levels and whether it's drawn as the level taking them.
+struct Tree {
+    float4 foot_pixel;
+    float4 x_tint;
+    float4 y_handed;
+    float4 z_incoming;
+};
+[[vk::binding(17, 0)]] StructuredBuffer<Tree> drawn_trees;
+
+Tree tree_of(uint instance) {
+    if (push.handing.w > 0.5) {
+        return drawn_trees[uint(push.handing.z) + instance];
+    }
+    Tree tree;
+    tree.foot_pixel = push.foot_pixel;
+    tree.x_tint = push.x_tint;
+    tree.y_handed = float4(push.y_translucency.xyz, push.handing.x);
+    tree.z_incoming = float4(push.z_cutoff.xyz, push.handing.y);
+    return tree;
+}
+
 struct Surface {
     float4 position : SV_Position;
     float3 from_eye;
@@ -66,6 +91,11 @@ struct Surface {
     float2 uv;
     // Of the sun, how much the tree's own leaves let through to here.
     float lit;
+    // The tree's own axes, scaled by its size; w: the share handed between levels, whether
+    // drawn as the level taking them.
+    nointerpolation float3 x;
+    nointerpolation float4 y_handed;
+    nointerpolation float4 z_incoming;
 };
 
 float2 unorm16x2(uint word) {
@@ -117,35 +147,39 @@ float3 dequantized(uint2 words) {
 }
 
 // The sun as the tree's own frame has it, for its baked visibility.
-float own_light(float4 stored) {
-    const float3 sun = normalize(float3(dot(push.x_tint.xyz, frame.sun.xyz),
-                                        dot(push.y_translucency.xyz, frame.sun.xyz),
-                                        dot(push.z_cutoff.xyz, frame.sun.xyz)));
+float own_light(Tree tree, float4 stored) {
+    const float3 sun = normalize(float3(dot(tree.x_tint.xyz, frame.sun.xyz),
+                                        dot(tree.y_handed.xyz, frame.sun.xyz),
+                                        dot(tree.z_incoming.xyz, frame.sun.xyz)));
     return saturate(stored.x + dot(stored.yzw - 0.5, sun));
 }
 
-Surface placed(float3 local, float3 normal, float3 colour, float2 uv, float lit) {
-    const float3 x = push.x_tint.xyz;
-    const float3 y = push.y_translucency.xyz;
-    const float3 z = push.z_cutoff.xyz;
+Surface placed(Tree tree, float3 local, float3 normal, float3 colour, float2 uv, float lit) {
+    const float3 x = tree.x_tint.xyz;
+    const float3 y = tree.y_handed.xyz;
+    const float3 z = tree.z_incoming.xyz;
     Surface surface;
-    surface.from_eye = push.foot_pixel.xyz + (x * local.x) + (y * local.y) + (z * local.z);
+    surface.from_eye = tree.foot_pixel.xyz + (x * local.x) + (y * local.y) + (z * local.z);
     surface.normal = (x * normal.x) + (y * normal.y) + (z * normal.z);
-    surface.colour = colour * (1.0 + (0.12 * push.x_tint.w));
+    surface.colour = colour * (1.0 + (0.12 * tree.x_tint.w));
     surface.uv = uv;
     surface.lit = lit;
+    surface.x = x;
+    surface.y_handed = tree.y_handed;
+    surface.z_incoming = tree.z_incoming;
     surface.position = mul(frame.clip_from_eye, float4(surface.from_eye, 1.0));
     return surface;
 }
 
 // A kept piece grows about its pivot to hold its share of the crown's area (lod.kept).
-float grown(float size) {
+float grown(Tree tree, float size) {
     const float dims = push.hi_dims.w;
-    return dims > 0.0 ? max(1.0, push.foot_pixel.w * push.lo_target.w / size) : 1.0;
+    return dims > 0.0 ? max(1.0, tree.foot_pixel.w * push.lo_target.w / size) : 1.0;
 }
 
 [shader("vertex")]
-Surface vertex_mesh(uint index : SV_VertexID) {
+Surface vertex_mesh(uint index : SV_VertexID, uint instance : SV_InstanceID) {
+    const Tree tree = tree_of(instance);
     const uint at = index * 8u;
     const float3 position = dequantized(uint2(records[at], records[at + 1u]));
     float3 normal = oct_decode(snorm16x2(records[at + 2u]));
@@ -155,7 +189,7 @@ Surface vertex_mesh(uint index : SV_VertexID) {
     const uint piece = records[at + 7u] * 8u;
     const float3 pivot = dequantized(uint2(pieces[piece], pieces[piece + 1u]));
     const float size = from_half(pieces[piece + 2u] & 0xffffu);
-    const float scale = grown(size);
+    const float scale = grown(tree, size);
     if (push.uv_calm.z > 0.0 && scale > 1.0) {
         // Fewer, larger pieces hold more of the differences in a pixel (lod._calmed).
         const float calm = sqrt(pow(scale, -push.hi_dims.w));
@@ -166,7 +200,8 @@ Surface vertex_mesh(uint index : SV_VertexID) {
         colour = mean_colour + ((colour - mean_colour) * calm);
         normal = normalize(towards + ((normal - towards) * calm));
     }
-    return placed(pivot + ((position - pivot) * scale), normal, colour, uv, own_light(sun));
+    return placed(tree, pivot + ((position - pivot) * scale), normal, colour, uv,
+                  own_light(tree, sun));
 }
 
 float4 quaternion(uint word) {
@@ -182,6 +217,8 @@ float3 rotated(float4 q, float3 v) {
 
 [shader("vertex")]
 Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
+    // Leaves are drawn a tree at a time, the tree from the push.
+    const Tree tree = tree_of(0u);
     const uint at = leaf * 10u;
     const uint corner = leaf_shape.indices[index / 4u][index % 4u];
     const float3 base = dequantized(uint2(records[at], records[at + 1u]));
@@ -192,7 +229,7 @@ Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
     if ((flags & 1u) != 0u) {
         offset.z = 0.0;
     }
-    const float scale = grown(length);
+    const float scale = grown(tree, length);
     float3 normal = oct_decode(float2(snorm8((records[at + 3u] >> 16u) & 0xffu),
                                       snorm8(records[at + 3u] >> 24u)));
     float3 colour = colour_of(float4(unorm8x4(records[at + 4u]).rgb, 1.0));
@@ -207,8 +244,8 @@ Surface vertex_leaf(uint index : SV_VertexID, uint leaf : SV_InstanceID) {
     }
     const float4 uvs = leaf_shape.uvs[corner / 2u];
     const float2 uv = (corner % 2u) == 0u ? uvs.xy : uvs.zw;
-    return placed(base + rotated(rotation, offset * length * scale), normal, colour, uv,
-                  own_light(unorm8x4(records[at + 6u])));
+    return placed(tree, base + rotated(rotation, offset * length * scale), normal, colour, uv,
+                  own_light(tree, unorm8x4(records[at + 6u])));
 }
 
 // A threshold, 0 to 1, for a pixel: interleaved gradient noise (Jimenez 2014), even enough that
@@ -241,7 +278,7 @@ float3 ambient_of(float3 sky, float facing_up, float translucency) {
 // light; through a leaf from behind; seen through the air between and tone mapped.
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
-    if (!kept(surface.position.xy, push.handing.x, push.handing.y > 0.5)) {
+    if (!kept(surface.position.xy, surface.y_handed.w, surface.z_incoming.w > 0.5)) {
         discard;
     }
     const float4 texel = albedo.Sample(surface.uv);
@@ -256,15 +293,15 @@ float4 fragment_main(Surface surface) : SV_Target {
         // Each texel's leaves' own way, in the tree's frame, and how leafy it is.
         const float4 baked = second_map.Sample(surface.uv);
         const float3 own = (baked.rgb * 2.0) - 1.0;
-        normal = normalize((push.x_tint.xyz * own.x) + (push.y_translucency.xyz * own.y) +
-                           (push.z_cutoff.xyz * own.z));
+        normal = normalize((surface.x * own.x) + (surface.y_handed.xyz * own.y) +
+                           (surface.z_incoming.xyz * own.z));
         translucency *= baked.a;
     }
     const float3 to_eye = -normalize(surface.from_eye);
     if (translucency > 0.0 && dot(normal, to_eye) < 0.0) {
         normal = -normal;
     }
-    const float3 up = normalize(push.y_translucency.xyz);
+    const float3 up = normalize(surface.y_handed.xyz);
     const float3 sun = frame.sun.xyz;
     const float scale = lighting.sky_scale.w;
     const float3 clear = transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));

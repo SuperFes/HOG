@@ -65,7 +65,7 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation, doubl
     const auto added = trees->add(species.value(), 4);
     INFO((added ? std::string{} : added.error().message));
     REQUIRE(added);
-    trees->set_reach(near, std::max(near, cards), 1000.0);
+    trees->set_reach({near, std::max(near, cards)}, 1000.0);
     const WorldPosition eye{up * (earth + 2.0)};
     const double elevation = sun_elevation * std::numbers::pi / 180.0;
     const DVec3 sun = (-east * std::cos(elevation)) + (up * std::sin(elevation));

@@ -60,11 +60,11 @@ def card_chunks(w, lo, hi):
     albedo = w.texture([cover], ex.RGBA8_SRGB)
     normal = w.texture([normals], ex.RGBA8)
     cards = ex.mesh_chunk(ex.CARD, (P, N, C, idx.astype("u4"), UV, A), Material(cutoff=0.5), None,
-                          lo, hi, None, (albedo, normal))
+                          lo, hi, None, (albedo, normal), level=1)
     lP, lN, lC, lUV, lA = quad([(-0.2, 0, 0), (0.2, 0, 0), (0.2, 10, 0), (-0.2, 10, 0)], (0, 0, 1))
     limb = ex.mesh_chunk(ex.WOOD, (lP.astype("f4"), lN.astype("f4"), lC.astype("f4"),
                                    np.array([(0, 1, 2), (0, 2, 3)], "u4"), lUV, None),
-                         Material(), None, lo, hi, None, (-1, -1))
+                         Material(), None, lo, hi, None, (-1, -1), level=1)
     return limb + cards
 
 
