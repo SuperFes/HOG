@@ -542,14 +542,14 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     probing_ = take_probe(graph, frame, shot, sky, through_air,
                           cloudy ? std::optional{clouds_view()} : std::nullopt);
     add_ground(graph, frame, shot, sea, through_air, drawn);
-    if (!trees_shown_.empty()) {
+    if (trees_shown_) {
         graph.add(
             {.name = "trees", .uses = through_air, .targets = drawn},
             [&](VkCommandBuffer commands) {
                 return trees_->draw(
                     commands, frame.extent,
                     {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
-                    trees_shown_, frame.slot);
+                    frame.slot);
             });
     }
     if (!shot.others.empty()) {

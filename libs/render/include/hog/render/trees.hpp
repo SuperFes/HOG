@@ -48,31 +48,39 @@ struct TreeView {
 // at `metres_per_pixel`.
 [[nodiscard]] std::uint32_t kept_of(std::span<const float> drops, float metres_per_pixel);
 
-// The trees the tree lab bakes, their meshes and leaves drawn whole near, thinned with distance
-// as each part's pieces drop out, lit through the air as the ground is.
+// The trees the tree lab bakes: near, their meshes and leaves, thinned with distance as each
+// part's pieces drop out; past that, the impostors baked of them, relit; all lit through the air
+// as the ground is.
 class Trees {
 public:
     [[nodiscard]] static Result<Trees> create(Device& device, VkFormat colour_format,
                                               VkFormat depth_format, std::uint32_t frames = 1);
 
-    // Uploads the first `most_variants` of the species' variants, its meshes and leaves; species
-    // are numbered in the order added.
+    // Uploads the first `most_variants` of the species' variants, their meshes, leaves and
+    // impostors; species are numbered in the order added.
     [[nodiscard]] Result<> add(const flora::Species& from, std::uint32_t most_variants);
     [[nodiscard]] std::size_t species() const noexcept { return species_.size(); }
 
-    // Metres from the eye trees are drawn to.
-    void set_reach(double reach) noexcept { reach_ = reach; }
+    // Metres from the eye trees are drawn as meshes to, and as impostors from there to `far`.
+    void set_reach(double near, double far) noexcept {
+        near_ = near;
+        far_ = far;
+    }
 
-    // Records drawing those of `trees` within reach and in view into the colour and depth images
-    // being rendered to, of `extent`. The frame's last submit must have finished.
+    // The trees drawn from now on, in place of those shown before.
+    void show(std::vector<TreeDraw> trees);
+
+    // Records drawing those shown within reach and in view into the colour and depth images being
+    // rendered to, of `extent`. The frame's last submit must have finished.
     [[nodiscard]] Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const TreeView& view,
-                                std::span<const TreeDraw> trees, std::uint32_t frame);
+                                std::uint32_t frame);
 
     // How many trees, triangles and leaves the last draw drew.
     struct Drawn {
         std::size_t trees = 0;
         std::size_t triangles = 0;
         std::size_t leaves = 0;
+        std::size_t impostors = 0;
     };
     [[nodiscard]] const Drawn& drawn() const noexcept { return drawn_; }
 
@@ -102,17 +110,31 @@ private:
         Buffer records;
         std::vector<float> drops;
     };
+    struct Impostor {
+        std::uint32_t views = 0;
+        Vec3 centre{0.0F};
+        float radius = 0.0F;
+        std::array<std::int32_t, 5> textures{};
+    };
     struct Variant {
         Vec3 lo{0.0F};
         Vec3 hi{0.0F};
         std::vector<Part> meshes;
         std::optional<Leaves> leaves;
+        std::optional<Impostor> impostor;
     };
     struct Species {
         float colour_range = 1.0F;
         Buffer leaf_shape;
         std::vector<std::optional<Image>> textures;
         std::vector<Variant> variants;
+    };
+    // Of the impostors' instances, a run drawn with one variant's impostor.
+    struct Run {
+        std::uint32_t species = 0;
+        std::uint32_t variant = 0;
+        std::uint32_t first = 0;
+        std::uint32_t count = 0;
     };
     // One tree as drawn this frame.
     struct Placed {
@@ -126,22 +148,36 @@ private:
     [[nodiscard]] Result<> upload_texture(Species& species, const flora::Species& from,
                                           std::int32_t id);
     [[nodiscard]] VkImageView texture(const Species& species, std::int32_t id) const;
-    // Into placed_, the trees in reach and in view, as drawn.
-    void place(VkExtent2D extent, const TreeView& view, std::span<const TreeDraw> trees);
+    // Into placed_, the trees in mesh reach and in view, as drawn.
+    void place(VkExtent2D extent, const TreeView& view);
     void draw_meshes(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
     void draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
+    // The shown trees' impostor instances, by run, from where the first shown stands.
+    [[nodiscard]] Result<> build_instances();
+    void draw_impostors(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame);
     void push_air(VkCommandBuffer commands, const Pipeline& pipeline, const TreeView& view,
                   std::uint32_t frame) const;
 
     Device* device_ = nullptr;
     Pipeline meshes_;
     Pipeline leaves_;
+    Pipeline impostors_;
+    Sampler atlas_sampler_;
     Image white_;
     Sampler sampler_;
     std::vector<Buffer> frames_;
     std::vector<Species> species_;
     std::vector<Placed> placed_;
-    double reach_ = 250.0;
+    std::vector<TreeDraw> shown_;
+    bool shown_changed_ = false;
+    WorldPosition origin_;
+    Buffer instances_;
+    std::vector<Run> runs_;
+    // Instances let go, by the draw they were let go at, kept while a frame may read them.
+    std::vector<std::pair<std::uint64_t, Buffer>> retiring_;
+    std::uint64_t draws_ = 0;
+    double near_ = 120.0;
+    double far_ = 1000.0;
     Drawn drawn_;
 };
 

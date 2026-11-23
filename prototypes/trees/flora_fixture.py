@@ -37,6 +37,23 @@ def leaf_mesh(P):
     return mesh, lod, order
 
 
+def impostor_chunk(w, lo, hi, views=2, cell=4):
+    """An impostor of a crown filling its square from every view: leaves facing up, all lit."""
+    size = views * cell
+    def flat(*value):
+        return [np.broadcast_to(np.array(value, float), (size, size, len(value))).copy()]
+    ids = [w.texture(flat(0.2, 0.4, 0.1, 1.0), ex.RGBA8_SRGB),
+           w.texture(flat(0.5, 1.0, 0.5, 1.0), ex.RGBA8),
+           w.texture(flat(0.5, 0.5), ex.RG16),
+           w.texture(flat(1.0, 0.5, 0.5, 0.5), ex.RGBA8),
+           w.texture(flat(1 / 3, 1 / 3, 0.5, 0.5), ex.RGBA16)]
+    centre = (lo + hi) / 2
+    radius = float(np.linalg.norm(hi - lo) / 2)
+    head = struct.pack("<2I 4f 3f 2f f 5i", views, cell, *centre, radius, *centre,
+                       radius / 2, radius / 2, 1.0, *ids)
+    return ex.chunk(b"IMPO", head)
+
+
 def build():
     P = folded_leaves(12, seed=11)
     lmesh, llod, order = leaf_mesh(P)
@@ -48,10 +65,12 @@ def build():
     leaves, template = ex.leaves_chunk(lmesh, Material(translucency=0.5), llod, lo, hi, None,
                                        (tex, -1))
     mesh = ex.mesh_chunk(ex.WOOD, wmesh, Material(), wlod, lo, hi, None, (tex, -1))
+    impostor = impostor_chunk(w, lo, hi)
     textures = w.parts
     data = (ex.MAGIC + struct.pack("<I", ex.VERSION) + bytes(4)
             + ex.species_head("fixture", 1, template) + b"".join(textures)
-            + ex.chunk(b"VARI", struct.pack("<2I 3f 3f", 7, 30, *lo, *hi)) + mesh + leaves)
+            + ex.chunk(b"VARI", struct.pack("<2I 3f 3f", 7, 30, *lo, *hi)) + mesh + leaves
+            + impostor)
     m = ex.read_mesh(mesh[16:])
     drops = m["pieces"]["drop"].astype(np.float64)
     counts = []

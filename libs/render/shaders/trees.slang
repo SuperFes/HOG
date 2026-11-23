@@ -1,4 +1,5 @@
 import atmosphere;
+import bend;
 import shadow;
 import tone;
 
@@ -244,4 +245,275 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float4 between =
         aerial_perspective(aerial_volume, uv, length(surface.from_eye) * scale, lighting.reach.x);
     return float4(tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w), 1.0);
+}
+
+// Far trees as the impostors they were baked as (prototypes/trees/impostor.py): each a square
+// facing the eye, through which the four views nearest the eye's way are stepped to where their
+// depth puts the leaves, and lit as the leaves under each texel would be.
+
+// As hog::render::Trees' Instance: the foot from the trees' origin, and the tree's own x and y
+// (up) axes scaled by its size; w: its tint, its hash.
+struct Instance {
+    float4 foot_tint;
+    float4 x_hash;
+    float4 y;
+};
+
+// As hog::render::Trees' FarPush.
+struct FarPush {
+    // xyz the trees' origin from the eye; w the first instance drawn.
+    float4 origin_first;
+    float4 up_height; // the bend's
+    // The bend's radii; metres from the eye impostors are drawn from and to.
+    float4 radii_reach;
+    // The impostor's middle and radius, in the tree's own frame.
+    float4 centre_radius;
+    // x views a side; y the leaves' cutoff.
+    float4 views_cutoff;
+};
+
+[[vk::push_constant]] ConstantBuffer<FarPush> far;
+
+[[vk::binding(10, 0)]] StructuredBuffer<Instance> instances;
+[[vk::binding(11, 0)]] Sampler2D atlas_albedo;
+[[vk::binding(12, 0)]] Sampler2D atlas_normal;
+[[vk::binding(13, 0)]] Sampler2D atlas_depth;
+[[vk::binding(14, 0)]] Sampler2D atlas_sunvis;
+[[vk::binding(15, 0)]] Sampler2D atlas_moment;
+
+struct Seen {
+    float4 position : SV_Position;
+    float3 from_eye;
+    // The tree's own axes, x, y and z, scaled by its size, and its foot, from the eye.
+    nointerpolation float3 x;
+    nointerpolation float3 y;
+    nointerpolation float3 z;
+    nointerpolation float3 foot;
+    nointerpolation float hash;
+    nointerpolation float tint;
+};
+
+[shader("vertex")]
+Seen vertex_impostor(uint index : SV_VertexID, uint instance : SV_InstanceID) {
+    static const float2 corners[6] = {float2(-1.0, -1.0), float2(1.0, -1.0), float2(1.0, 1.0),
+                                      float2(-1.0, -1.0), float2(1.0, 1.0), float2(-1.0, 1.0)};
+    const Instance tree = instances[uint(far.origin_first.w) + instance];
+    const float3 unbent = far.origin_first.xyz + tree.foot_tint.xyz;
+    Seen seen;
+    seen.foot = bent(unbent, far.up_height, far.radii_reach.xy);
+    seen.x = tree.x_hash.xyz;
+    seen.y = tree.y.xyz;
+    seen.z = cross(seen.x, seen.y) / length(seen.x);
+    seen.hash = tree.x_hash.w;
+    seen.tint = tree.foot_tint.w;
+    const float scale = length(seen.x);
+    const float3 local = far.centre_radius.xyz;
+    const float3 centre =
+        seen.foot + (seen.x * local.x) + (seen.y * local.y) + (seen.z * local.z);
+    const float away = length(seen.foot);
+    const float radius = far.centre_radius.w * scale;
+    const float3 look = centre / max(length(centre), 1e-3);
+    const float3 right = normalize(cross(look, normalize(seen.y)));
+    const float3 up = cross(right, look);
+    seen.from_eye = centre + (((right * corners[index].x) + (up * corners[index].y)) * radius);
+    seen.position = mul(frame.clip_from_eye, float4(seen.from_eye, 1.0));
+    // Within mesh range or past impostor range, nothing.
+    if (away < far.radii_reach.z || away > far.radii_reach.w) {
+        seen.position = float4(0.0, 0.0, -1.0, 1.0);
+    }
+    return seen;
+}
+
+uint views() {
+    return uint(far.views_cutoff.x);
+}
+
+float3 decode_view(float2 g) {
+    const float2 uv = (((g + 0.5) / float(views())) * 2.0) - 1.0;
+    const float2 p = float2(uv.x + uv.y, uv.x - uv.y) * 0.5;
+    return normalize(float3(p.x, 1.0 - abs(p.x) - abs(p.y), p.y));
+}
+
+float2 encode_view(float3 d) {
+    d.y = max(d.y, 0.0);
+    d /= abs(d.x) + abs(d.y) + abs(d.z);
+    const float2 uv = float2(d.x + d.z, d.x - d.z);
+    return (((uv * 0.5) + 0.5) * float(views())) - 0.5;
+}
+
+struct View {
+    float4 albedo;
+    float4 normal;
+    float4 sun;
+    float4 moment;
+    float yz;
+    float3 hit;
+};
+
+// One baked view where the ray from `ro` along `rd`, in the tree's own frame, meets the tree as
+// that view saw it: stepping to the height its depth gives, so the views agree where each branch
+// is instead of ghosting it.
+View sample_view(float2 g, float3 ro, float3 rd) {
+    const float3 d = decode_view(g);
+    const float3 a = abs(d.y) < 0.99 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    const float3 r = normalize(cross(a, d));
+    const float3 u = cross(d, r);
+    const float3 centre = far.centre_radius.xyz;
+    const float radius = far.centre_radius.w;
+    float across = dot(rd, d);
+    across = abs(across) < 0.05 ? (across < 0.0 ? -0.05 : 0.05) : across;
+    float h = 0.0;
+    float2 cell = float2(0.0);
+    View view;
+    for (int step = 0; step < 3; ++step) {
+        view.hit = ro + (rd * ((h - dot(ro - centre, d)) / across));
+        const float2 st =
+            (float2(dot(view.hit - centre, r), dot(view.hit - centre, u)) / radius * 0.5) + 0.5;
+        cell = (g + clamp(st, 0.002, 0.998)) / float(views());
+        h = radius - (atlas_depth.Sample(cell).r * 2.0 * radius);
+    }
+    view.hit = ro + (rd * ((h - dot(ro - centre, d)) / across));
+    view.albedo = atlas_albedo.Sample(cell);
+    view.normal = atlas_normal.Sample(cell);
+    view.sun = atlas_sunvis.Sample(cell);
+    view.moment = atlas_moment.Sample(cell);
+    view.yz = atlas_depth.Sample(cell).g - 0.5;
+    return view;
+}
+
+// Abramowitz & Stegun 7.1.26, within 1.5e-7.
+float erf_approx(float x) {
+    const float t = 1.0 / (1.0 + (0.3275911 * abs(x)));
+    const float y =
+        1.0 - (t * (0.254829592 +
+                    (t * (-0.284496736 + (t * (1.421413741 + (t * (-1.453152027 +
+                                                                  (t * 1.061405429))))))))) *
+                  exp(-x * x);
+    return sign(x) * y;
+}
+
+// The mean of max(t, 0) for t with mean mu and spread sd, taken as normal.
+float clamped_mean(float mu, float sd) {
+    const float z = mu / sd;
+    return (mu * 0.5 * (1.0 + erf_approx(z * 0.70710678))) +
+           (sd * 0.39894228 * exp(-0.5 * z * z));
+}
+
+// A texel's leaves' mean sunlit and lit-from-behind shares, from their mean normal and mean
+// n n^T, which average linearly so any mip lights as the leaves under it do.
+float2 leaf_light(float3 mean_n, float4 m, float yz, float3 l) {
+    const float zz = 1.0 - m.x - m.y;
+    const float lml = (m.x * l.x * l.x) + (m.y * l.y * l.y) + (zz * l.z * l.z) +
+                      (2.0 * ((m.z * l.x * l.y) + (m.w * l.x * l.z) + (yz * l.y * l.z)));
+    const float mu = dot(mean_n, l);
+    const float even = 0.25 + (0.15625 * ((3.0 * lml) - 1.0));
+    const float sd = sqrt(max(lml - (mu * mu), 1e-8));
+    const float narrow = pow(saturate(length(mean_n)), 8.0);
+    return float2(lerp(max(even + (0.5 * mu), 0.0), clamped_mean(mu, sd), narrow),
+                  lerp(max(even - (0.5 * mu), 0.0), clamped_mean(-mu, sd), narrow));
+}
+
+// A highlight of sharpness s averaged over a texel's leaves, widened and dimmed by their spread.
+float highlight(float nh, float agree, float s) {
+    const float ft = agree / max(agree + (s * (1.0 - agree)), 1e-4);
+    return pow(max(nh, 0.0), ft * s) * (1.0 + (ft * s)) / (1.0 + s);
+}
+
+// An ordered threshold, 0 to 1, for a pixel: a 4 by 4 Bayer matrix shifted by each tree's own
+// hash, so neighbours' doors don't line up and a tree behind shows through one before.
+float dither(float2 pixel, float hash) {
+    static const float bayer[16] = {0.0,  8.0,  2.0,  10.0, 12.0, 4.0,  14.0, 6.0,
+                                    3.0,  11.0, 1.0,  9.0,  15.0, 7.0,  13.0, 5.0};
+    const uint shift = uint(hash * 16.0);
+    const uint2 at = (uint2(pixel) + uint2(shift, shift >> 2u)) & 3u;
+    return (bayer[(at.y * 4u) + at.x] + 0.5) / 16.0;
+}
+
+struct Lit {
+    float4 colour : SV_Target;
+    float depth : SV_Depth;
+};
+
+[shader("fragment")]
+Lit fragment_impostor(Seen seen) {
+    const float scale = length(seen.x);
+    const float3 x = seen.x / scale;
+    const float3 y = seen.y / scale;
+    const float3 z = seen.z / scale;
+    const float3x3 to_own = float3x3(x, y, z);
+    // The eye and the ray in the tree's own frame.
+    const float3 ro = mul(to_own, -seen.foot) / scale;
+    const float3 rd = normalize(mul(to_own, seen.from_eye - seen.foot) / scale - ro);
+    const float3 sun_own = normalize(mul(to_own, frame.sun.xyz));
+    const float3 look = normalize(ro - far.centre_radius.xyz);
+    const float2 g = encode_view(look);
+    const float last = float(views()) - 1.0;
+    const float2 g0 = clamp(floor(g), 0.0, last);
+    const float2 f = saturate(g - g0);
+    View seen_views[4];
+    float shares[4];
+    float covered = 0.0;
+    float weights = 0.0;
+    float3 hit = float3(0.0);
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            const int k = (j * 2) + i;
+            const float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+            seen_views[k] = sample_view(min(g0 + float2(i, j), last), ro, rd);
+            shares[k] = w * seen_views[k].albedo.a;
+            covered += shares[k];
+            hit += seen_views[k].hit * shares[k];
+            weights += w;
+        }
+    }
+    const float coverage = covered / max(weights, 1e-4);
+    // Each tree's coverage as its own screen door, so trees behind show through those before.
+    if (coverage <= dither(seen.position.xy, seen.hash)) {
+        discard;
+    }
+    hit /= max(covered, 1e-4);
+    const float3 world = seen.foot + (seen.x * hit.x) + (seen.y * hit.y) + (seen.z * hit.z);
+
+    const float3 up = y;
+    const float sky_scale = lighting.sky_scale.w;
+    const float3 sun = frame.sun.xyz;
+    const float3 clear = transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));
+    const Shade shade = shade_at(lighting, cloud_shadow, world);
+    const float3 sunlight = through_cloud(shade, clear);
+    const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
+    const float3 to_eye = -normalize(world);
+    const float3 to_eye_own = normalize(mul(to_own, to_eye));
+    const float toward_sun = 0.4 + (0.6 * pow(max(dot(-to_eye, sun), 0.0), 3.0));
+    const float4 clip = mul(frame.clip_from_eye, float4(world, 1.0));
+    const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
+    const float4 between =
+        aerial_perspective(aerial_volume, uv, length(world) * sky_scale, lighting.reach.x);
+    const float exposure = lighting.sun_exposure.w;
+    float3 colour = float3(0.0);
+    for (int k = 0; k < 4; ++k) {
+        const View view = seen_views[k];
+        const float3 base = view.albedo.rgb * (1.0 + (0.12 * seen.tint));
+        const float3 mean_n = (view.normal.rgb * 2.0) - 1.0;
+        const float agree = saturate(length(mean_n));
+        const float3 normal = mean_n / max(length(mean_n), 1e-4);
+        const float4 m = float4(view.moment.xy, view.moment.zw - 0.5);
+        const float2 lit = leaf_light(mean_n, m, view.yz, sun_own);
+        const float through = 0.55 * view.normal.a * lit.y * toward_sun;
+        const float own = saturate(view.sun.x + dot(view.sun.yzw - 0.5, sun_own));
+        const float3 ambient = sky * lerp(0.5, (normal.y * 0.5) + 0.5, agree);
+        const float3 h = normalize(sun_own + to_eye_own);
+        const float3 dark = base * ambient / pi;
+        const float3 sunny = dark + (base * sunlight * lit.x / pi) +
+                             (base * float3(1.25, 1.35, 0.6) * sunlight * through / pi) +
+                             (sunlight * 0.04 * highlight(dot(normal, h), agree, 24.0) / pi);
+        // A texel stands for many leaves, a share in sun and the rest in shade: each is toned on
+        // its own, as a pixel showing them would be.
+        colour += ((tone_mapped((sunny * between.a) + between.rgb, exposure) * own) +
+                   (tone_mapped((dark * between.a) + between.rgb, exposure) * (1.0 - own))) *
+                  shares[k];
+    }
+    Lit out;
+    out.colour = float4(colour / max(covered, 1e-4), 1.0);
+    out.depth = clip.z / clip.w;
+    return out;
 }

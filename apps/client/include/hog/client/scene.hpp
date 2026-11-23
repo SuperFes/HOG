@@ -143,8 +143,13 @@ public:
     Result<> add_species(const flora::Species& species, std::uint32_t most_variants) {
         return trees_->add(species, most_variants);
     }
+    // Metres from the eye trees are drawn as meshes to, and as impostors from there to `far`.
+    void set_tree_reach(double near, double far) noexcept { trees_->set_reach(near, far); }
     // The trees drawn from now on, in place of any shown before.
-    void show_trees(std::vector<render::TreeDraw> trees) { trees_shown_ = std::move(trees); }
+    void show_trees(std::vector<render::TreeDraw> trees) {
+        trees_shown_ = !trees.empty();
+        trees_->show(std::move(trees));
+    }
     // How many trees, triangles and leaves the last frame drew.
     [[nodiscard]] const render::Trees::Drawn& trees_drawn() const noexcept {
         return trees_->drawn();
@@ -201,7 +206,7 @@ private:
     render::TransientImages transients_;
     render::Capsules others_;
     std::optional<render::Trees> trees_;
-    std::vector<render::TreeDraw> trees_shown_;
+    bool trees_shown_ = false;
     std::optional<render::Billboard> companion_;
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;

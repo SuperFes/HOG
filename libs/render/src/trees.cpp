@@ -34,6 +34,31 @@ struct Frame {
     Vec4 sun;
 };
 
+struct FarPush {
+    Vec4 origin_first;
+    Vec4 up_height;
+    Vec4 radii_reach;
+    Vec4 centre_radius;
+    Vec4 views_cutoff;
+};
+static_assert(sizeof(FarPush) <= 128);
+
+struct Instance {
+    Vec4 foot_tint;
+    Vec4 x_hash;
+    Vec4 y;
+};
+
+// A tree's own axes, x and y up, unscaled, where it stands, turned and leaning as it does.
+std::pair<DVec3, DVec3> axes_of(DVec3 up, const flora::Planted& tree) {
+    const flora::Across across = flora::across_of(up);
+    const double turn = static_cast<double>(tree.turn) * 2.0 * std::numbers::pi;
+    const DVec3 leaning = glm::normalize(up + (across.east * static_cast<double>(tree.lean.x)) +
+                                         (across.north * static_cast<double>(tree.lean.y)));
+    const DVec3 facing = (across.east * std::cos(turn)) + (across.north * std::sin(turn));
+    return {glm::normalize(facing - (leaning * glm::dot(facing, leaning))), leaning};
+}
+
 struct Template {
     std::array<Vec4, 6> corners;
     std::array<Vec4, 3> uvs;
@@ -65,6 +90,12 @@ constexpr std::array descriptors{
     binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
     binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(9, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    binding(10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+    binding(11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(15, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
 };
 
 struct Format {
@@ -148,6 +179,22 @@ Result<Trees> Trees::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(leaves).error());
     }
     trees.leaves_ = std::move(leaves).value();
+    auto impostors = make_pipeline(device, {.spirv = shaders::trees,
+                                            .vertex_entry = "vertex_impostor",
+                                            .fragment_entry = "fragment_impostor",
+                                            .colour_format = colour_format,
+                                            .depth_format = depth_format,
+                                            .push_constant_bytes = sizeof(FarPush),
+                                            .descriptors = descriptors});
+    if (!impostors) {
+        return std::unexpected(std::move(impostors).error());
+    }
+    trees.impostors_ = std::move(impostors).value();
+    auto atlas_sampler = make_blurring_sampler(device);
+    if (!atlas_sampler) {
+        return std::unexpected(std::move(atlas_sampler).error());
+    }
+    trees.atlas_sampler_ = std::move(atlas_sampler).value();
     constexpr std::array<std::byte, 4> white{std::byte{255}, std::byte{255}, std::byte{255},
                                              std::byte{255}};
     auto image = make_filled_image(device, {.format = VK_FORMAT_R8G8B8A8_UNORM}, white);
@@ -219,7 +266,11 @@ VkImageView Trees::texture(const Species& species, std::int32_t id) const {
 
 Result<Trees::Variant> Trees::upload_variant(Species& species, const flora::Species& from,
                                              const flora::Variant& variant) {
-    Variant out{.lo = variant.lo, .hi = variant.hi, .meshes = {}, .leaves = std::nullopt};
+    Variant out{.lo = variant.lo,
+                .hi = variant.hi,
+                .meshes = {},
+                .leaves = std::nullopt,
+                .impostor = std::nullopt};
     for (const flora::MeshPart& mesh : variant.meshes) {
         if (mesh.role == flora::MeshRole::Card || mesh.index_count == 0) {
             continue;
@@ -278,6 +329,18 @@ Result<Trees::Variant> Trees::upload_variant(Species& species, const flora::Spec
         }
         out.leaves = std::move(part);
     }
+    if (variant.impostor) {
+        const flora::ImpostorPart& impostor = *variant.impostor;
+        for (const std::int32_t id : impostor.textures) {
+            if (auto uploaded = upload_texture(species, from, id); !uploaded) {
+                return std::unexpected(std::move(uploaded).error());
+            }
+        }
+        out.impostor = Impostor{.views = impostor.views,
+                                .centre = impostor.centre,
+                                .radius = impostor.radius,
+                                .textures = impostor.textures};
+    }
     return out;
 }
 
@@ -325,12 +388,12 @@ void Trees::push_air(VkCommandBuffer commands, const Pipeline& pipeline, const T
     push_uniform_buffer(commands, pipeline, 5, frames_.at(frame).handle());
 }
 
-void Trees::place(VkExtent2D extent, const TreeView& view, std::span<const TreeDraw> trees) {
+void Trees::place(VkExtent2D extent, const TreeView& view) {
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const Camera& camera = view.camera;
     const BlockView culling{.camera = camera, .sun = view.sun, .bend = view.bend};
     placed_.clear();
-    for (const TreeDraw& tree : trees) {
+    for (const TreeDraw& tree : shown_) {
         if (tree.tree.species >= species_.size()) {
             continue;
         }
@@ -341,7 +404,7 @@ void Trees::place(VkExtent2D extent, const TreeView& view, std::span<const TreeD
         const Variant& variant = species.variants[tree.tree.variant % species.variants.size()];
         const DVec3 from_eye = tree.foot - camera.eye;
         const double distance = glm::length(from_eye);
-        if (distance > reach_) {
+        if (distance > near_) {
             continue;
         }
         const DVec3 up = glm::normalize(tree.foot.metres());
@@ -357,13 +420,7 @@ void Trees::place(VkExtent2D extent, const TreeView& view, std::span<const TreeD
         const DVec3 foot = terrain::bent(view.bend, from_eye);
         const DVec3 bent_up =
             glm::normalize(terrain::bent(view.bend, from_eye + (up * 10.0)) - foot);
-        const flora::Across across = flora::across_of(up);
-        const double turn = static_cast<double>(tree.tree.turn) * 2.0 * std::numbers::pi;
-        const DVec3 leaning =
-            glm::normalize(bent_up + (across.east * static_cast<double>(tree.tree.lean.x)) +
-                           (across.north * static_cast<double>(tree.tree.lean.y)));
-        const DVec3 facing = (across.east * std::cos(turn)) + (across.north * std::sin(turn));
-        const DVec3 x = glm::normalize(facing - (leaning * glm::dot(facing, leaning)));
+        const auto [x, leaning] = axes_of(bent_up, tree.tree);
         const DVec3 z = glm::cross(x, leaning);
         placed_.push_back(
             {.variant = &variant,
@@ -441,18 +498,117 @@ void Trees::draw_leaves(VkCommandBuffer commands, const TreeView& view, std::uin
     }
 }
 
+void Trees::show(std::vector<TreeDraw> trees) {
+    shown_ = std::move(trees);
+    shown_changed_ = true;
+}
+
+Result<> Trees::build_instances() {
+    shown_changed_ = false;
+    runs_.clear();
+    if (instances_.size() > 0) {
+        retiring_.emplace_back(draws_, std::move(instances_));
+        instances_ = {};
+    }
+    if (shown_.empty()) {
+        return {};
+    }
+    origin_ = shown_.front().foot;
+    // By species and impostor, each run drawn at once.
+    std::vector<std::pair<std::pair<std::uint32_t, std::uint32_t>, Instance>> keyed;
+    keyed.reserve(shown_.size());
+    for (const TreeDraw& tree : shown_) {
+        if (tree.tree.species >= species_.size()) {
+            continue;
+        }
+        const Species& species = species_[tree.tree.species];
+        std::uint32_t impostors = 0;
+        while (impostors < species.variants.size() && species.variants[impostors].impostor) {
+            ++impostors;
+        }
+        if (impostors == 0) {
+            continue;
+        }
+        const auto [x, y] = axes_of(glm::normalize(tree.foot.metres()), tree.tree);
+        const auto scale = static_cast<double>(tree.tree.scale);
+        keyed.push_back(
+            {{tree.tree.species, tree.tree.variant % impostors},
+             {.foot_tint = vec4(tree.foot - origin_, static_cast<double>(tree.tree.tint)),
+              .x_hash = vec4(x * scale, static_cast<double>(tree.tree.season) * 0x1p-32),
+              .y = vec4(y * scale, 0.0)}});
+    }
+    std::ranges::stable_sort(keyed, {}, [](const auto& entry) { return entry.first; });
+    std::vector<Instance> instances;
+    instances.reserve(keyed.size());
+    for (const auto& [key, instance] : keyed) {
+        if (runs_.empty() || runs_.back().species != key.first ||
+            runs_.back().variant != key.second) {
+            runs_.push_back({.species = key.first,
+                             .variant = key.second,
+                             .first = static_cast<std::uint32_t>(instances.size()),
+                             .count = 0});
+        }
+        ++runs_.back().count;
+        instances.push_back(instance);
+    }
+    if (instances.empty()) {
+        return {};
+    }
+    auto buffer = make_filled_buffer(*device_, std::as_bytes(std::span{instances}),
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    if (!buffer) {
+        return std::unexpected(std::move(buffer).error());
+    }
+    instances_ = std::move(buffer).value();
+    return {};
+}
+
+void Trees::draw_impostors(VkCommandBuffer commands, const TreeView& view, std::uint32_t frame) {
+    if (runs_.empty()) {
+        return;
+    }
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, impostors_.handle());
+    push_air(commands, impostors_, view, frame);
+    push_storage_buffer(commands, impostors_, 10, instances_.handle());
+    const DVec3 origin = origin_ - view.camera.eye;
+    for (const Run& run : runs_) {
+        const Species& species = species_.at(run.species);
+        const Impostor& impostor = species.variants.at(run.variant).impostor.value();
+        for (std::uint32_t i = 0; i < 5; ++i) {
+            push_sampled_image(commands, impostors_, 11 + i,
+                               texture(species, impostor.textures.at(i)), atlas_sampler_.handle());
+        }
+        const FarPush push{.origin_first = vec4(origin, static_cast<double>(run.first)),
+                           .up_height = vec4(view.bend.up, view.bend.eye_height),
+                           .radii_reach = Vec4{static_cast<float>(view.bend.radius),
+                                               static_cast<float>(view.bend.faked),
+                                               static_cast<float>(near_), static_cast<float>(far_)},
+                           .centre_radius = Vec4{impostor.centre, impostor.radius},
+                           .views_cutoff =
+                               Vec4{static_cast<float>(impostor.views), 0.5F, 0.0F, 0.0F}};
+        vkCmdPushConstants(commands, impostors_.layout(), both, 0, sizeof(FarPush), &push);
+        vkCmdDraw(commands, 6, run.count, 0, 0);
+        drawn_.impostors += run.count;
+    }
+}
+
 Result<> Trees::draw(VkCommandBuffer commands, VkExtent2D extent, const TreeView& view,
-                     std::span<const TreeDraw> trees, std::uint32_t frame) {
+                     std::uint32_t frame) {
+    ++draws_;
+    std::erase_if(retiring_,
+                  [&](const auto& retired) { return draws_ - retired.first > frames_.size(); });
     drawn_ = {};
     placed_.clear();
-    if (extent.width == 0 || extent.height == 0 || trees.empty() || species_.empty()) {
+    if (shown_changed_) {
+        if (Result<> built = build_instances(); !built) {
+            return built;
+        }
+    }
+    if (extent.width == 0 || extent.height == 0 || shown_.empty() || species_.empty()) {
         return {};
     }
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing trees without the air");
-    place(extent, view, trees);
-    if (placed_.empty()) {
-        return {};
-    }
+    place(extent, view);
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const Frame constants{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
                           .sun = Vec4{Vec3{view.sun}, 0.0F}};
@@ -462,6 +618,7 @@ Result<> Trees::draw(VkCommandBuffer commands, VkExtent2D extent, const TreeView
     }
     draw_meshes(commands, view, frame);
     draw_leaves(commands, view, frame);
+    draw_impostors(commands, view, frame);
     drawn_.trees = placed_.size();
     return {};
 }

@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -47,8 +48,9 @@ struct Drawn {
 };
 
 // From two metres over the ground of an Earth-sized planet, looking level east at the tree
-// lab's test tree `away` metres off, lit by the sun `sun_elevation` degrees up behind the eye.
-Drawn look(hog::render::Device& device, double away, double sun_elevation) {
+// lab's test tree `away` metres off, lit by the sun `sun_elevation` degrees up behind the eye;
+// drawn as its meshes to `near` metres, and as its impostor from there to a kilometre.
+Drawn look(hog::render::Device& device, double away, double sun_elevation, double near = 500.0) {
     const auto bytes = fixture();
     const auto species = hog::flora::parse_species(bytes);
     REQUIRE(species.has_value());
@@ -58,7 +60,10 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation) {
     REQUIRE(sky);
     auto trees = hog::render::Trees::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(trees);
-    REQUIRE(trees->add(species.value(), 4));
+    const auto added = trees->add(species.value(), 4);
+    INFO((added ? std::string{} : added.error().message));
+    REQUIRE(added);
+    trees->set_reach(near, 1000.0);
     const WorldPosition eye{up * (earth + 2.0)};
     const double elevation = sun_elevation * std::numbers::pi / 180.0;
     const DVec3 sun = (-east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -70,6 +75,7 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation) {
     const std::vector<TreeDraw> drawn{
         {.foot = WorldPosition{(up * earth) + (east * away)},
          .tree = {.species = 0, .variant = 0, .turn = 0.0F, .scale = 1.0F}}};
+    trees->show(drawn);
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -91,7 +97,7 @@ Drawn look(hog::render::Device& device, double away, double sun_elevation) {
         hog::render::begin_rendering(commands, target->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
-        CHECK(trees->draw(commands, extent, view, drawn, 0));
+        CHECK(trees->draw(commands, extent, view, 0));
         vkCmdEndRendering(commands);
     }));
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
@@ -166,4 +172,19 @@ TEST_CASE("a tree is lit by day and dark by night", "[render][gpu][trees]") {
     const Covered day = covered(look(*device, 15.0, 30.0).pixels);
     const Covered night = covered(look(*device, 15.0, -30.0).pixels);
     CHECK(day.brightness > 3 * night.brightness);
+}
+
+TEST_CASE("past mesh range a tree is drawn as its impostor, and past that not at all",
+          "[render][gpu][trees]") {
+    const auto device = test_device();
+    const Drawn mid = look(*device, 300.0, 30.0, 120.0);
+    CHECK(mid.counts.trees == 0);
+    CHECK(mid.counts.impostors == 1);
+    const Covered seen = covered(mid.pixels);
+    CHECK(seen.count > 20);
+    CHECK(std::abs(seen.x - 128.0) < 32.0);
+    const Drawn beyond = look(*device, 1500.0, 30.0, 120.0);
+    CHECK(covered(beyond.pixels).count == 0);
+    const Drawn near = look(*device, 60.0, 30.0, 120.0);
+    CHECK(near.counts.trees == 1);
 }

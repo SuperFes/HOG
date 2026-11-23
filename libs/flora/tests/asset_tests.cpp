@@ -37,7 +37,8 @@ TEST_CASE("a species baked by the tree lab parses", "[flora][asset]") {
     CHECK(species->name == "fixture");
     CHECK(species->colour_range == Approx(2.0));
     CHECK(species->leaf.corners == 6);
-    REQUIRE(species->textures.size() == 1);
+    REQUIRE(species->textures.size() ==
+            6); // the leaves and wood share one, and the impostor's five
     CHECK(species->textures[0].levels.size() == 2);
     CHECK(species->textures[0].levels[1].size() == 2 * 2 * 4);
     REQUIRE(species->variants.size() == 1);
@@ -49,7 +50,9 @@ TEST_CASE("a species baked by the tree lab parses", "[flora][asset]") {
     CHECK(variant.meshes[0].vertices.size() == variant.meshes[0].vertex_count * 32);
     REQUIRE(variant.leaves.has_value());
     CHECK(variant.leaves.value().count == 12);
-    CHECK_FALSE(variant.impostor.has_value());
+    REQUIRE(variant.impostor.has_value());
+    CHECK(variant.impostor.value().views == 2);
+    CHECK(variant.impostor.value().cell == 4);
 }
 
 TEST_CASE("leaves rebuild where the tree lab made them", "[flora][asset]") {

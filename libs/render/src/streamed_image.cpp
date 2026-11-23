@@ -16,14 +16,18 @@ std::optional<std::uint32_t> texel_bytes(VkFormat format) noexcept {
     case VK_FORMAT_B8G8R8A8_UNORM:
     case VK_FORMAT_B8G8R8A8_SRGB:
     case VK_FORMAT_R32_SFLOAT:
+    case VK_FORMAT_R16G16_UNORM:
         return 4;
     case VK_FORMAT_R16G16B16A16_SFLOAT:
+    case VK_FORMAT_R16G16B16A16_UNORM:
         return 8;
     case VK_FORMAT_R32G32B32A32_SFLOAT:
         return 16;
     case VK_FORMAT_R16_SFLOAT:
     case VK_FORMAT_R8G8_UNORM:
         return 2;
+    case VK_FORMAT_R8_UNORM:
+        return 1;
     default:
         return std::nullopt;
     }
